@@ -6,14 +6,14 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | Stage | Goal | Status |
 |---|---|---|
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
-| 1 | Phone: map, location, search, routes with traffic, guidance | In progress |
+| 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
 | 2 | Android Auto: car screen on the navigation template | Planned |
 | 3 | Signed release build and Google Play internal testing | Planned |
 | 4 | Smart camera: automatic overview and following | Planned |
-| 5 | Junction view in the car's routing card (variant A) | Planned |
-| 6 | Guidance tones instead of voice | Planned |
-| 7 | Split screen with a live maneuver view (variant B) | Planned |
-| 8 | 3D navigation and visual polish | Planned; the owner sets its place in the order |
+| 5 | 3D navigation and visual polish | Planned |
+| 6 | Junction view in the car's routing card (variant A) | Planned |
+| 7 | Guidance tones instead of voice | Planned |
+| 8 | Split screen with a live maneuver view (variant B) | Planned |
 
 ## Stage 0: skeleton (done)
 
@@ -26,7 +26,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 Owner checks: install the APK from Actions, paste the token, see it masked in Settings with the
 build number.
 
-## Stage 1: phone (in progress)
+## Stage 1: phone (done)
 
 - [x] Domain logic: miles and feet, durations, arrival time; trip session log; guidance state machine
   (a trip session starts only on Start and is stopped before routes are cleared).
@@ -38,6 +38,13 @@ build number.
 - [x] Debug section: trip session starts this month; simulated drive for testing at home.
 - [x] Detailed debug log: every route with its roads, every second of guidance, searches and errors;
   shared from Settings as text files, for example to Google Drive.
+- [x] Review fixes: one trip session per drive, End Navigation in the trip notification, precise
+  location for routes, a message when Mapbox refuses the token, backups limited to the settings and
+  the trip log, no search history, portrait phone screen, and the Mapbox logo in a fixed place.
+
+Owner checks: install the APK from Actions over the old one, allow precise location, search, pick a
+route, run a simulated drive (Settings → Debug), end it from the app and once from the notification,
+see one trip per drive in Settings → Debug, and share the debug log to Google Drive.
 
 ## Stage 2: Android Auto (planned)
 
@@ -60,14 +67,15 @@ build number.
 - Signed release app bundle, versioning, keys from a local file or environment variables.
 - Google Play Console: app, internal testing track, install from Play (required for Android Auto in a real car).
 
-## Stages 4 to 7 (planned)
+## Stage 4: smart camera (planned)
 
-- **4. Smart camera:** overview by default, following before maneuvers (distance threshold from speed, hysteresis, manual touch pauses automation for 20 s), the same on phone and car, settings on the phone, scenario tests.
-- **5. Junction view (variant A):** snapshot image of the next complex maneuver in the routing card, highlighted lanes, distance countdown bar.
-- **6. Tones:** short own tones at the moments of Mapbox voice instructions, audio focus with ducking; tones, voice or silent.
-- **7. Split screen (variant B):** live zoomed maneuver view next to the main map before complex maneuvers; falls back to variant A on small screens.
+- Overview by default, following before maneuvers (distance threshold from speed, hysteresis, manual
+  touch pauses automation for 20 s), the same on phone and car, settings on the phone, scenario tests.
 
-## Stage 8: 3D navigation and visual polish (planned)
+## Stage 5: 3D navigation and visual polish (planned)
+
+Queued right after the smart camera, once guidance is smoother; it builds on that camera work and is
+checked on the car screen from stage 2.
 
 The goal is guidance as beautiful and smooth as possible, on the phone and in the car, with lanes that are
 impossible to miss. Mapbox's own "3D Live Navigation" and "Magic Carpet" (a glowing path on the lane to
@@ -91,6 +99,12 @@ what the public SDK allows:
 
 Mapbox logo and attribution rules apply in every view.
 
+## Stages 6 to 8 (planned)
+
+- **6. Junction view (variant A):** snapshot image of the next complex maneuver in the routing card, highlighted lanes, distance countdown bar.
+- **7. Tones:** short own tones at the moments of Mapbox voice instructions, audio focus with ducking; tones, voice or silent.
+- **8. Split screen (variant B):** live zoomed maneuver view next to the main map before complex maneuvers; falls back to variant A on small screens.
+
 ## Future (not scheduled; the owner decides when)
 
 - **Route preferences:** fastest, eco, fewer stops and traffic lights in the city (to save fuel),
@@ -105,7 +119,7 @@ Mapbox logo and attribution rules apply in every view.
 ## Watch list
 
 - **Lane-level magic carpet:** Mapbox 3D Lanes (lane geometry, in private preview since January 2026)
-  is promised for mobile apps in 2027. With it, the stage 8 ribbon can move onto the exact lane. Mapbox's
+  is promised for mobile apps in 2027. With it, the stage 5 ribbon can move onto the exact lane. Mapbox's
   detailed lane markings in the map (Standard "lane details") are switched off by Navigation SDK 3.34
   for apps like this one; to be checked with each SDK upgrade.
 

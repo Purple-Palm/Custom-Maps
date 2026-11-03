@@ -3,9 +3,10 @@
 A personal navigation app for Android Auto, built on Mapbox. The phone app uses Jetpack Compose;
 the car app uses the Android for Cars App Library with the navigation template.
 
-**Status: stage 1, navigation on the phone.** The phone app shows a night map with your location,
-finds addresses and places, offers routes with traffic and alternatives, and guides turn by turn
-with lanes and arrival time. The car screen arrives in stage 2.
+**Status: stage 1 done, navigation on the phone.** The phone app shows a night map with your
+location, finds addresses and places, offers routes with traffic and alternatives, and guides turn
+by turn with lanes and arrival time. The car screen arrives in stage 2; the plan is in
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Modules
 
