@@ -85,6 +85,9 @@ internal class MapboxNavigationEngine(
     /** True from the moment this engine starts a trip session until it stops it. */
     private var tripSessionRunning = false
 
+    /** Counts route requests; only the latest one may open a preview. */
+    private var routeRequestCount = 0
+
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
 
@@ -168,8 +171,14 @@ internal class MapboxNavigationEngine(
                 "alternatives" to options.alternatives(),
             ),
         )
+        val request = ++routeRequestCount
         // Billed per request (Directions API); no trip session is involved.
-        return when (val response = navigation.requestRoutesAwait(options)) {
+        val response = navigation.requestRoutesAwait(options)
+        if (request != routeRequestCount || _guidanceState.value == GuidanceState.ACTIVE) {
+            debugLog.log("route_response_dropped", mapOf("reason" to if (request != routeRequestCount) "newer request" else "guidance running"))
+            return RouteRequestResult.Superseded
+        }
+        return when (response) {
             is RouteResponse.Failure -> {
                 debugLog.log("route_failure", mapOf("message" to response.message, "reasons" to response.reasons))
                 RouteRequestResult.Failed(response.message)

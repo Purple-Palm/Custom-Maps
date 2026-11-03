@@ -44,4 +44,7 @@ sealed interface RouteRequestResult {
     data object NoRoute : RouteRequestResult
 
     data class Failed(val message: String) : RouteRequestResult
+
+    /** A newer request or guidance came first, so this response was dropped and nothing changed. */
+    data object Superseded : RouteRequestResult
 }

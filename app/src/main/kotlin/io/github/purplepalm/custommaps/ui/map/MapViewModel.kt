@@ -157,7 +157,7 @@ class MapViewModel(
         local.update { it.copy(busy = true) }
         viewModelScope.launch {
             val message = when (val result = navigation.previewRoutes(place)) {
-                RouteRequestResult.Success -> null
+                RouteRequestResult.Success, RouteRequestResult.Superseded -> null
                 RouteRequestResult.NoLocation -> UserMessage.NO_LOCATION
                 RouteRequestResult.NoRoute -> UserMessage.NO_ROUTE
                 is RouteRequestResult.Failed -> UserMessage.ROUTE_FAILED
