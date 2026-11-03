@@ -15,6 +15,12 @@ sealed interface GuidanceEvent {
 
     data class StartRequested(val simulated: Boolean) : GuidanceEvent
 
+    /** The navigator took the routes handed over by [GuidanceCommand.CommitRoutes]. */
+    data class RoutesCommitted(val simulated: Boolean) : GuidanceEvent
+
+    /** The navigator rejected the routes handed over by [GuidanceCommand.CommitRoutes]. */
+    data object CommitFailed : GuidanceEvent
+
     data object Arrived : GuidanceEvent
 
     data class Stopped(val reason: StopReason) : GuidanceEvent
@@ -24,8 +30,11 @@ sealed interface GuidanceEvent {
 
 /** Side effects the engine performs, in list order. */
 sealed interface GuidanceCommand {
-    /** Hands the previewed routes to the navigator. */
-    data object CommitRoutes : GuidanceCommand
+    /**
+     * Hands the previewed routes to the navigator. The engine reports [GuidanceEvent.RoutesCommitted]
+     * (or [GuidanceEvent.CommitFailed]) once the navigator has them.
+     */
+    data class CommitRoutes(val simulated: Boolean) : GuidanceCommand
 
     data class StartTripSession(val simulated: Boolean) : GuidanceCommand
 
@@ -41,8 +50,9 @@ data class GuidanceTransition(val state: GuidanceState, val commands: List<Guida
 
 /**
  * Rules that keep Mapbox costs down: a trip session starts only when the driver starts guidance,
- * and it is always stopped before routes are cleared, because clearing routes while a session
- * runs switches it to (billed) free drive. Events that do not fit the current state are ignored.
+ * and only once the navigator has the routes, because a session that starts without routes begins
+ * as (billed) free drive. It is always stopped before routes are cleared, for the same reason.
+ * Events that do not fit the current state are ignored.
  */
 object GuidanceStateMachine {
 
@@ -58,13 +68,18 @@ object GuidanceStateMachine {
             is GuidanceEvent.RoutesReady ->
                 if (event.count > 0) stay(state) else GuidanceTransition(GuidanceState.IDLE, listOf(GuidanceCommand.ClearPreview))
             GuidanceEvent.PreviewCleared -> GuidanceTransition(GuidanceState.IDLE, listOf(GuidanceCommand.ClearPreview))
-            is GuidanceEvent.StartRequested -> GuidanceTransition(
-                GuidanceState.ACTIVE,
-                listOf(GuidanceCommand.CommitRoutes, GuidanceCommand.StartTripSession(event.simulated)),
-            )
+            is GuidanceEvent.StartRequested ->
+                GuidanceTransition(GuidanceState.ACTIVE, listOf(GuidanceCommand.CommitRoutes(event.simulated)))
             else -> stay(state)
         }
         GuidanceState.ACTIVE -> when (event) {
+            is GuidanceEvent.RoutesCommitted ->
+                GuidanceTransition(GuidanceState.ACTIVE, listOf(GuidanceCommand.StartTripSession(event.simulated)))
+            // No session has started; back to the routes so the driver can try again.
+            GuidanceEvent.CommitFailed -> GuidanceTransition(
+                GuidanceState.PREVIEW,
+                listOf(GuidanceCommand.StopTripSession, GuidanceCommand.ClearRoutes),
+            )
             GuidanceEvent.Arrived -> GuidanceTransition(GuidanceState.ARRIVED, stopSequence)
             is GuidanceEvent.Stopped -> GuidanceTransition(GuidanceState.IDLE, stopSequence)
             else -> stay(state)

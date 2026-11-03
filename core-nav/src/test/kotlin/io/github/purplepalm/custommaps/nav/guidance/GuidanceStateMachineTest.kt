@@ -22,6 +22,9 @@ class GuidanceStateMachineTest {
         GuidanceEvent.PreviewCleared,
         GuidanceEvent.StartRequested(simulated = false),
         GuidanceEvent.StartRequested(simulated = true),
+        GuidanceEvent.RoutesCommitted(simulated = false),
+        GuidanceEvent.RoutesCommitted(simulated = true),
+        GuidanceEvent.CommitFailed,
         GuidanceEvent.Arrived,
         GuidanceEvent.Stopped(StopReason.USER_CANCELLED),
         GuidanceEvent.Stopped(StopReason.CAR_DISCONNECTED),
@@ -36,11 +39,32 @@ class GuidanceStateMachineTest {
     }
 
     @Test
-    fun `starting from the preview commits routes and then starts the session`() {
+    fun `starting from the preview hands the routes to the navigator first`() {
         assertEquals(
-            GuidanceTransition(ACTIVE, listOf(CommitRoutes, StartTripSession(simulated = true))),
+            GuidanceTransition(ACTIVE, listOf(CommitRoutes(simulated = true))),
             reduce(PREVIEW, GuidanceEvent.StartRequested(simulated = true)),
         )
+    }
+
+    @Test
+    fun `the session starts once the navigator has the routes`() {
+        assertEquals(
+            GuidanceTransition(ACTIVE, listOf(StartTripSession(simulated = true))),
+            reduce(ACTIVE, GuidanceEvent.RoutesCommitted(simulated = true)),
+        )
+    }
+
+    @Test
+    fun `routes the navigator rejects go back to the preview`() {
+        assertEquals(
+            GuidanceTransition(PREVIEW, listOf(StopTripSession, ClearRoutes)),
+            reduce(ACTIVE, GuidanceEvent.CommitFailed),
+        )
+    }
+
+    @Test
+    fun `routes committed after the driver ended guidance start nothing`() {
+        assertEquals(GuidanceTransition(IDLE, emptyList()), reduce(IDLE, GuidanceEvent.RoutesCommitted(simulated = false)))
     }
 
     @Test
@@ -76,12 +100,23 @@ class GuidanceStateMachineTest {
     }
 
     @Test
-    fun `a trip session starts only when the driver starts guidance from the preview`() {
+    fun `a trip session starts only during guidance and once the routes are in the navigator`() {
         for (state in GuidanceState.entries) {
             for (event in allEvents) {
                 val starts = reduce(state, event).commands.any { it is StartTripSession }
-                val allowed = state == PREVIEW && event is GuidanceEvent.StartRequested
+                val allowed = state == ACTIVE && event is GuidanceEvent.RoutesCommitted
                 assertEquals(allowed, starts, "$state + $event")
+            }
+        }
+    }
+
+    @Test
+    fun `routes reach the navigator only when the driver starts guidance from the preview`() {
+        for (state in GuidanceState.entries) {
+            for (event in allEvents) {
+                val commits = reduce(state, event).commands.any { it is CommitRoutes }
+                val allowed = state == PREVIEW && event is GuidanceEvent.StartRequested
+                assertEquals(allowed, commits, "$state + $event")
             }
         }
     }

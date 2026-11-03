@@ -255,6 +255,7 @@ private fun UserMessage.textRes(): Int = when (this) {
     UserMessage.ROUTE_FAILED -> R.string.message_route_failed
     UserMessage.SEARCH_FAILED -> R.string.message_search_failed
     UserMessage.PLACE_NOT_FOUND -> R.string.message_place_not_found
+    UserMessage.START_FAILED -> R.string.message_start_failed
 }
 
 private fun Context.hasLocationPermission(): Boolean =

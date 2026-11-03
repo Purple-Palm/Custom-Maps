@@ -135,6 +135,28 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a start the navigator refuses is reported`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        navigation.guidanceState.value = GuidanceState.PREVIEW
+        runCurrent()
+        viewModel.onStart()
+        runCurrent()
+        navigation.guidanceState.value = GuidanceState.PREVIEW
+        runCurrent()
+        assertEquals(UserMessage.START_FAILED, viewModel.state.value.message)
+    }
+
+    @Test
+    fun `closing the preview is not reported as a failed start`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        navigation.guidanceState.value = GuidanceState.PREVIEW
+        runCurrent()
+        viewModel.onCancelPreview()
+        runCurrent()
+        assertNull(viewModel.state.value.message)
+    }
+
+    @Test
     fun `ending guidance is a user cancel and clears the search`() = runTest(dispatcher) {
         val viewModel = viewModel()
         viewModel.onSuggestionPicked(suggestion)

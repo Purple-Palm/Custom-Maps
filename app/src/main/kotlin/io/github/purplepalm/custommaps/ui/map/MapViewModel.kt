@@ -33,6 +33,7 @@ enum class UserMessage {
     ROUTE_FAILED,
     SEARCH_FAILED,
     PLACE_NOT_FOUND,
+    START_FAILED,
 }
 
 data class MapUiState(
@@ -94,6 +95,16 @@ class MapViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MapUiState())
 
     init {
+        viewModelScope.launch {
+            var previous = navigation.guidanceState.value
+            navigation.guidanceState.collect { current ->
+                // Guidance goes back to the routes only when the navigator refused them at Start.
+                if (previous == GuidanceState.ACTIVE && current == GuidanceState.PREVIEW) {
+                    local.update { it.copy(message = UserMessage.START_FAILED) }
+                }
+                previous = current
+            }
+        }
         viewModelScope.launch {
             query.debounce(SEARCH_DEBOUNCE_MS).distinctUntilChanged().collectLatest { text ->
                 if (text.length < MIN_QUERY_LENGTH) {

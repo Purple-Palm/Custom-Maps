@@ -79,6 +79,9 @@ internal class MapboxNavigationEngine(
     private var replaying = false
     private var lastSessionId: String? = null
 
+    /** Counts route commits; a commit that finishes after a newer one or after a stop is ignored. */
+    private var commitCount = 0
+
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
 
@@ -239,17 +242,38 @@ internal class MapboxNavigationEngine(
                 "commands" to transition.commands.map { it.toString() },
             ),
         )
-        transition.commands.forEach(::execute)
+        // The state changes first, so SDK callbacks that fire while the commands run already see it.
         _guidanceState.value = transition.state
         if (transition.state == GuidanceState.IDLE) _destination.value = null
+        transition.commands.forEach(::execute)
     }
 
     private fun execute(command: GuidanceCommand) {
         val navigation = navigation
         when (command) {
-            GuidanceCommand.CommitRoutes -> navigation?.setNavigationRoutes(_previewRoutes.value)
-            is GuidanceCommand.StartTripSession -> {
+            is GuidanceCommand.CommitRoutes -> {
+                // Keeps the navigator alive for the drive, even without a screen.
                 MapboxNavigationApp.attach(guidanceLifecycle)
+                val commit = ++commitCount
+                // The session starts only once the navigator has the routes; started earlier, it
+                // would begin as a separate free drive session.
+                navigation?.setNavigationRoutes(_previewRoutes.value) { result ->
+                    if (commit != commitCount) {
+                        debugLog.log("routes_committed", mapOf("ignored" to "guidance ended before the routes were set"))
+                        return@setNavigationRoutes
+                    }
+                    val error = result.error
+                    if (error == null) {
+                        debugLog.log("routes_committed", mapOf("ignoredAlternatives" to result.value?.ignoredAlternatives?.keys))
+                        dispatch(GuidanceEvent.RoutesCommitted(command.simulated))
+                    } else {
+                        Log.e(TAG, "Navigator rejected the routes: ${error.message}")
+                        debugLog.log("routes_rejected", mapOf("message" to error.message))
+                        dispatch(GuidanceEvent.CommitFailed)
+                    }
+                }
+            }
+            is GuidanceCommand.StartTripSession -> {
                 if (command.simulated) {
                     replaying = true
                     navigation?.let(replay::onAttached)
@@ -264,6 +288,7 @@ internal class MapboxNavigationEngine(
                 }
             }
             GuidanceCommand.StopTripSession -> {
+                commitCount++
                 if (replaying) {
                     navigation?.let(replay::onDetached)
                     replaying = false

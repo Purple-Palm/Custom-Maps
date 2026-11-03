@@ -50,6 +50,7 @@
     <string name="message_route_failed">Could not get routes. Check the connection and try again.</string>
     <string name="message_search_failed">Search is not available right now. Check the connection.</string>
     <string name="message_place_not_found">Could not find details for this place.</string>
+    <string name="message_start_failed">Guidance could not start on this route. Try again.</string>
 
     <string name="debug_title">Debug</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
