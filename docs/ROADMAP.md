@@ -70,7 +70,8 @@ build number.
 
 - **Route preferences:** fastest, eco, fewer stops and traffic lights in the city (to save fuel),
   avoid highways, tolls or ferries, and similar fine-tuning.
-- **Standalone phone navigation polish:** using the app as a full navigator without the car.
+- **Standalone phone navigation polish:** using the app as a full navigator without the car,
+  including a landscape layout for a phone in a mount (the phone screen is portrait-only for now).
 - **Speed cameras:** open data of California cities (AB 645) and OpenStreetMap via Overpass, with ODbL attribution.
 - **Favorites:** home and work.
 - **Voice input** for the destination.
