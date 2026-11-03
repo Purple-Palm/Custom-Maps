@@ -241,7 +241,9 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPanelsBottom)
                 .onGloballyPositioned { bottomPanelTop = it.boundsInRoot().top.toInt() },
         ) {
-            if (state.guidance == GuidanceState.IDLE && locationAccess != LocationAccess.NONE) {
+            // While suggestions are open the driver is choosing a place; nothing else sits over the list.
+            val choosing = state.suggestions.isNotEmpty()
+            if (state.guidance == GuidanceState.IDLE && locationAccess != LocationAccess.NONE && !choosing) {
                 MyLocationButton(
                     onClick = { phoneMap.setCameraMode(CameraMode.FOLLOWING) },
                     modifier = Modifier
@@ -266,6 +268,7 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                     },
                     onEnd = viewModel::onEnd,
                 )
+                choosing -> Unit
                 state.guidance == GuidanceState.ARRIVED -> ArrivedCard(
                     destination = state.destination,
                     onDone = viewModel::onDismissArrival,
