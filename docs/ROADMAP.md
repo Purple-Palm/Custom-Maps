@@ -49,24 +49,35 @@ see one trip per drive in Settings → Debug, and share the debug log to Google 
 ## Stage 2: Android Auto (in progress)
 
 - Car app service (navigation category) and screens on the navigation template, on Car App Library
-  1.7.0 (the latest stable release).
+  1.8.0-rc01: 1.7.0 lets any app on the phone that holds the template-renderer permission pose as
+  Android Auto. Move to 1.8.0 when it is released.
 - Map drawn on the car surface, camera padding from the visible and stable areas.
 - Maneuver card with distance and lanes, ETA, action strips.
-- Light map by day and dark map at night, following the car (`isDarkMode`).
+- A bright, colourful map by day and the dark map at night, following the car (`isDarkMode`).
 - Turn-by-turn notifications on the car screen while another app is in front.
 - Mapbox logo and © attribution visible on the car map.
 - Start a route on the phone and continue in the car: with the car connected, the phone is the
   search input and the route appears in the car.
 - One drive across phone and car: when the car disconnects mid-drive, guidance continues on the
   phone; when the car connects again, it continues on the car screen. Arrival or End in either
-  place ends the drive.
+  place ends the drive. If another navigation app starts guiding in the car, this app keeps
+  guiding too.
+- Location "Allow all the time", asked for after precise location, so Start works from the car with
+  the phone locked and the car map shows the position before Start (Google Play needs a declaration
+  for it in stage 3).
+- If the app stops mid-drive (crash or system kill), the phone and the car offer to resume to the
+  same destination.
 - Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
   share menu and as the default app for those links (Android settings: **Open by default → Add
   links**). The link becomes a place, and routes to it are offered on the phone and in the car.
+  Coordinates in the link are used as they are; a link with only a name and address is searched
+  with Mapbox near the place hint it carries. A link that arrives during a drive offers to go there
+  now, which changes the destination of the running drive.
   Short links (`maps.app.goo.gl`, `maps.apple/p`) are expanded with one request to Google's or
   Apple's link server; Waze short links decode on the phone.
 - Debug log upload: each trip's log goes to a private GitHub repository when the trip ends, with a
-  token the owner pastes on the phone (stored only there). The public code repository never gets logs.
+  fine-grained token (one repository, 366 days, reminder before it expires) that the owner pastes
+  on the phone and that stays only there. The public code repository never gets logs.
 - Desktop Head Unit profiles for 800×480 and 1280×720 head units.
 
 ## Stage 3: release and Google Play (planned)
