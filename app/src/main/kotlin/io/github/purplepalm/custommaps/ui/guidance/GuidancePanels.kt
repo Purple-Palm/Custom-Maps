@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.ui.guidance
 
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.model.Distance
@@ -129,13 +132,19 @@ fun LanesRow(lanes: LaneInfo, modifier: Modifier = Modifier) {
     }
 }
 
+/** Leaves the arrival time more room than the default button padding would. */
+private val COMPACT_BUTTON_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+
 /** A lane's width at full size, including the gap around its arrows. */
 private val LANE_SLOT = 44.dp
 
 /** Share of a lane's width left empty on each side. */
 private const val LANE_GAP_SHARE = 4f / 44f
 
-/** Arrival time, time and distance left, and the controls to change view or end guidance. */
+/**
+ * Arrival time, time and distance left, and the controls to change view or end guidance. The texts
+ * stay on one line and shrink if they have to, so the arrival time is never split.
+ */
 @Composable
 fun GuidanceBar(
     progress: RouteProgressSnapshot?,
@@ -152,19 +161,25 @@ fun GuidanceBar(
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 if (progress != null) {
+                    val arrivalStyle = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = TABULAR_DIGITS)
                     Text(
                         text = ImperialFormat.arrivalTime(ZonedDateTime.now(), progress.durationRemaining),
-                        style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = TABULAR_DIGITS),
+                        style = arrivalStyle,
                         color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        autoSize = TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = arrivalStyle.fontSize),
                     )
+                    val remainingStyle = MaterialTheme.typography.bodyMedium
                     Text(
                         text = stringResource(
                             R.string.guidance_remaining,
                             ImperialFormat.duration(progress.durationRemaining),
                             ImperialFormat.distance(progress.distanceRemaining).toString(),
                         ),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = remainingStyle,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = remainingStyle.fontSize),
                     )
                 } else {
                     Text(
@@ -174,12 +189,14 @@ fun GuidanceBar(
                     )
                 }
             }
-            OutlinedButton(onClick = onToggleOverview) {
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = onToggleOverview, contentPadding = COMPACT_BUTTON_PADDING) {
                 Text(stringResource(if (following) R.string.guidance_overview else R.string.guidance_recenter))
             }
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = onEnd,
+                contentPadding = COMPACT_BUTTON_PADDING,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError,
