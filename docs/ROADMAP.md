@@ -35,6 +35,8 @@ build number.
 - [x] Routes with alternatives and traffic colours; tap to pick an alternative.
 - [x] Guidance: maneuver card with large distance, lanes, ETA; stop on arrival and on cancel.
 - [x] Debug section: trip session starts this month; simulated drive for testing at home.
+- [x] Detailed debug log: every route with its roads, every second of guidance, searches and errors;
+  shared from Settings as text files, for example to Google Drive.
 
 ## Stage 2: Android Auto (planned)
 
@@ -45,6 +47,11 @@ build number.
 - Start a route on the phone and continue in the car: with the car connected, the phone is the
   search input and the route appears in the car.
 - Trip session stops when the car disconnects.
+- Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
+  share menu and as the default app for those links (Android settings: **Open by default → Add
+  links**). The link becomes a place, and routes to it are offered on the phone and in the car.
+  To decide at the start of the stage: short links (`maps.app.goo.gl`, `maps.apple/p`) can only be
+  expanded with one request to Google's or Apple's link server; Waze short links decode on the phone.
 - Desktop Head Unit profiles for 800×480 and 1280×720 head units.
 
 ## Stage 3: release and Google Play (planned)
@@ -61,8 +68,6 @@ build number.
 
 ## Future (not scheduled; the owner decides when)
 
-- **Share links into the app:** share an address, a place or a map link from any app (browser,
-  messages) to Custom Maps; it finds the place and offers routes, on the phone and with the car connected.
 - **Route preferences:** fastest, eco, fewer stops and traffic lights in the city (to save fuel),
   avoid highways, tolls or ferries, and similar fine-tuning.
 - **Standalone phone navigation polish:** using the app as a full navigator without the car.
