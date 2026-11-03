@@ -16,6 +16,7 @@ import io.github.purplepalm.custommaps.settings.AppSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -69,6 +70,10 @@ class MapViewModel(
     )
 
     private val local = MutableStateFlow(Local())
+
+    /** The place lookup and route request in flight; cancelled when the driver moves on. */
+    private var resolveJob: Job? = null
+    private var directionsJob: Job? = null
 
     /** What is sent to the search engine; separate from the text shown, so picking a suggestion does not search again. */
     private val query = MutableStateFlow("")
@@ -125,15 +130,17 @@ class MapViewModel(
     }
 
     fun onSearchTextChange(text: String) {
-        local.update { it.copy(searchText = text, selectedPlace = null) }
+        cancelLookups()
+        local.update { it.copy(searchText = text, selectedPlace = null, busy = false) }
         query.value = text.trim()
     }
 
     fun onSuggestionPicked(suggestion: PlaceSuggestion) {
         debugLog.log("ui_pick", mapOf("name" to suggestion.name, "description" to suggestion.description))
-        local.update { it.copy(searchText = suggestion.name, suggestions = emptyList(), busy = true) }
+        cancelLookups()
+        local.update { it.copy(searchText = suggestion.name, suggestions = emptyList(), selectedPlace = null, busy = true) }
         query.value = ""
-        viewModelScope.launch {
+        resolveJob = viewModelScope.launch {
             val place = try {
                 search.resolve(suggestion)
             } catch (e: CancellationException) {
@@ -154,8 +161,9 @@ class MapViewModel(
     fun onDirections() {
         val place = local.value.selectedPlace ?: return
         debugLog.log("ui_directions", mapOf("name" to place.name))
+        directionsJob?.cancel()
         local.update { it.copy(busy = true) }
-        viewModelScope.launch {
+        directionsJob = viewModelScope.launch {
             val message = when (val result = navigation.previewRoutes(place)) {
                 RouteRequestResult.Success, RouteRequestResult.Superseded -> null
                 RouteRequestResult.NoLocation -> UserMessage.NO_LOCATION
@@ -193,8 +201,14 @@ class MapViewModel(
     }
 
     fun clearSearch() {
+        cancelLookups()
         query.value = ""
         local.update { Local() }
+    }
+
+    private fun cancelLookups() {
+        resolveJob?.cancel()
+        directionsJob?.cancel()
     }
 
     fun onLocationAccessChanged(granted: Boolean, precise: Boolean) {

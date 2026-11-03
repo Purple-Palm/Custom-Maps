@@ -12,6 +12,7 @@ import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.settings.AppSettings
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -135,6 +136,53 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a place found after the driver cleared the search is not shown`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        search.resolveGate = CompletableDeferred()
+        viewModel.onSuggestionPicked(suggestion)
+        runCurrent()
+        viewModel.clearSearch()
+        search.resolveGate?.complete(Unit)
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.selectedPlace)
+        assertEquals(false, viewModel.state.value.busy)
+        assertNull(viewModel.state.value.message)
+    }
+
+    @Test
+    fun `only the latest pick is kept`() = runTest(dispatcher) {
+        val other = Place("Sightglass Coffee", "270 7th St, San Francisco, CA", GeoPoint(37.7770, -122.4085))
+        val viewModel = viewModel()
+        search.resolveGate = CompletableDeferred()
+        viewModel.onSuggestionPicked(suggestion)
+        runCurrent()
+        val slowGate = search.resolveGate
+        search.resolveGate = null
+        search.place = other
+        viewModel.onSuggestionPicked(PlaceSuggestion("s2", "Sightglass Coffee", "7th St", null))
+        runCurrent()
+        search.place = place
+        slowGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(other, viewModel.state.value.selectedPlace)
+    }
+
+    @Test
+    fun `routes that arrive after the place was closed do not open the preview`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        navigation.previewGate = CompletableDeferred()
+        viewModel.onDirections()
+        runCurrent()
+        viewModel.clearSearch()
+        navigation.previewGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(GuidanceState.IDLE, viewModel.state.value.guidance)
+        assertEquals(false, viewModel.state.value.busy)
+    }
+
+    @Test
     fun `a start the navigator refuses is reported`() = runTest(dispatcher) {
         val viewModel = viewModel()
         navigation.guidanceState.value = GuidanceState.PREVIEW
@@ -175,12 +223,14 @@ class MapViewModelTest {
         override val destination = MutableStateFlow<Place?>(null)
 
         var previewResult: RouteRequestResult = RouteRequestResult.Success
+        var previewGate: CompletableDeferred<Unit>? = null
         val previewed = mutableListOf<Place>()
         var startedSimulated: Boolean? = null
         val stops = mutableListOf<StopReason>()
 
         override suspend fun previewRoutes(destination: Place): RouteRequestResult {
             previewed += destination
+            previewGate?.await()
             if (previewResult == RouteRequestResult.Success) {
                 guidanceState.value = GuidanceState.PREVIEW
                 this.destination.value = destination
@@ -211,16 +261,21 @@ class MapViewModelTest {
 
     private class FakeSearchProvider(
         private val suggestions: List<PlaceSuggestion>,
-        private val place: Place?,
+        var place: Place?,
     ) : SearchProvider {
         val queries = mutableListOf<String>()
+        var resolveGate: CompletableDeferred<Unit>? = null
 
         override suspend fun suggest(query: String): List<PlaceSuggestion> {
             queries += query
             return suggestions
         }
 
-        override suspend fun resolve(suggestion: PlaceSuggestion): Place? = place
+        override suspend fun resolve(suggestion: PlaceSuggestion): Place? {
+            val result = place
+            resolveGate?.await()
+            return result
+        }
     }
 
     private class FakeSettings(simulate: Boolean) : AppSettings {
