@@ -17,6 +17,7 @@
     <string name="token_saved_as">Saved on this phone: %1$s</string>
     <string name="token_not_set">Not set</string>
     <string name="token_storage_note">The token is stored only on this phone. It is never built into the app and is excluded from backups and device transfers.</string>
+    <string name="token_locked_during_guidance">End guidance to change the token.</string>
     <string name="token_error_empty">Paste a token first.</string>
     <string name="token_error_secret">This is a secret token (sk.). Use a public token that starts with pk.</string>
     <string name="token_error_not_public">Mapbox public tokens start with pk.</string>
@@ -49,6 +50,19 @@
     <string name="message_search_failed">Search is not available right now. Check the connection.</string>
     <string name="message_place_not_found">Could not find details for this place.</string>
 
+    <string name="debug_title">Debug</string>
+    <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
+    <string name="debug_trips_note">Counted on this phone each time guidance starts, simulated drives included. It is an estimate: Mapbox bills by its own count.</string>
+    <string name="debug_open_statistics">Open Mapbox statistics</string>
+    <string name="debug_recent_title">Recent trip sessions</string>
+    <string name="debug_recent_empty">None yet.</string>
+    <string name="debug_trip_guidance">Guidance</string>
+    <string name="debug_trip_free_drive">Free drive</string>
+    <string name="debug_trip_simulated">simulated</string>
+    <string name="debug_simulate_drive">Simulate drive</string>
+    <string name="debug_simulate_drive_note">Start replays the route instead of following GPS, for testing without driving. Each run counts as a trip.</string>
+
     <string name="about_title">About</string>
     <string name="about_version">Version %1$s, build %2$s</string>
+    <string name="about_map_data">Maps, routes and search by Mapbox. Map data © Mapbox © OpenStreetMap contributors.</string>
 </resources>

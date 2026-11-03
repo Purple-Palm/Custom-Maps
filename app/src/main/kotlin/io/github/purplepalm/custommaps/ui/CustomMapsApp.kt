@@ -15,8 +15,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.AppGraph
 import io.github.purplepalm.custommaps.MapsAccess
+import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.ui.map.MapScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
+import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
 import io.github.purplepalm.custommaps.ui.token.TokenSetupScreen
 import io.github.purplepalm.custommaps.ui.token.TokenViewModel
 
@@ -50,11 +52,17 @@ fun CustomMapsApp(graph: AppGraph) {
 
         if (showSettings) {
             BackHandler { showSettings = false }
+            val settingsViewModel = viewModel { SettingsViewModel(graph.tripLogStore, graph.settings) }
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()
+            val debug by settingsViewModel.debug.collectAsStateWithLifecycle()
+            val guidance by graph.engine.navigation.guidanceState.collectAsStateWithLifecycle()
             SettingsScreen(
                 tokenState = tokenState,
+                tokenEditable = guidance != GuidanceState.ACTIVE,
+                debug = debug,
                 onSaveToken = tokenViewModel::save,
                 onClearToken = tokenViewModel::clear,
+                onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onBack = { showSettings = false },
             )
         }

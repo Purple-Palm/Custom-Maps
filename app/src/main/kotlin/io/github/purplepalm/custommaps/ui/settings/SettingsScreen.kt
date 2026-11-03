@@ -1,9 +1,11 @@
 package io.github.purplepalm.custommaps.ui.settings
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -15,26 +17,42 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
+import io.github.purplepalm.custommaps.nav.trip.TripKind
+import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import io.github.purplepalm.custommaps.ui.token.TokenEditor
 import io.github.purplepalm.custommaps.ui.token.TokenState
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+/** Usage of billable products per month, in the Mapbox console. */
+private const val MAPBOX_STATISTICS_URL = "https://console.mapbox.com/account/statistics/"
+
+private val TRIP_TIME = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.US)
 
 @Composable
 fun SettingsScreen(
     tokenState: TokenState,
+    tokenEditable: Boolean,
+    debug: DebugState,
     onSaveToken: (String) -> AccessTokenCheck,
     onClearToken: () -> Unit,
+    onSimulateDriveChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -63,47 +81,12 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(24.dp))
 
-            Text(
-                text = stringResource(R.string.token_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = when (tokenState) {
-                    is TokenState.Present -> stringResource(R.string.token_saved_as, tokenState.masked)
-                    else -> stringResource(R.string.token_not_set)
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(16.dp))
-            TokenEditor(
-                saveLabel = if (tokenState is TokenState.Present) R.string.token_replace else R.string.token_save,
-                onSave = onSaveToken,
-            )
-            if (tokenState is TokenState.Present) {
-                Spacer(Modifier.height(4.dp))
-                TextButton(onClick = onClearToken) {
-                    Text(stringResource(R.string.token_remove))
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.token_storage_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(24.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(Modifier.height(24.dp))
+            TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
+            SectionDivider()
+            DebugSection(debug, onSimulateDriveChange)
+            SectionDivider()
 
-            Text(
-                text = stringResource(R.string.about_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Spacer(Modifier.height(8.dp))
+            SectionTitle(R.string.about_title)
             Text(
                 text = stringResource(
                     R.string.about_version,
@@ -113,8 +96,144 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                text = stringResource(R.string.about_map_data),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
+}
+
+@Composable
+private fun TokenSection(
+    tokenState: TokenState,
+    editable: Boolean,
+    onSaveToken: (String) -> AccessTokenCheck,
+    onClearToken: () -> Unit,
+) {
+    SectionTitle(R.string.token_title)
+    Text(
+        text = when (tokenState) {
+            is TokenState.Present -> stringResource(R.string.token_saved_as, tokenState.masked)
+            else -> stringResource(R.string.token_not_set)
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(16.dp))
+    if (editable) {
+        TokenEditor(
+            saveLabel = if (tokenState is TokenState.Present) R.string.token_replace else R.string.token_save,
+            onSave = onSaveToken,
+        )
+        if (tokenState is TokenState.Present) {
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onClearToken) {
+                Text(stringResource(R.string.token_remove))
+            }
+        }
+    } else {
+        // Replacing the token restarts the map and the navigator, which would end the drive.
+        Text(
+            text = stringResource(R.string.token_locked_during_guidance),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.token_storage_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** Trip sessions are what Mapbox bills for navigation, so their count is kept in sight. */
+@Composable
+private fun DebugSection(debug: DebugState, onSimulateDriveChange: (Boolean) -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    SectionTitle(R.string.debug_title)
+    Text(
+        text = stringResource(R.string.debug_trips_this_month, debug.tripsThisMonth),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = stringResource(R.string.debug_trips_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    TextButton(onClick = { uriHandler.openUri(MAPBOX_STATISTICS_URL) }) {
+        Text(stringResource(R.string.debug_open_statistics))
+    }
+
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.debug_recent_title),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    if (debug.recentTrips.isEmpty()) {
+        Text(
+            text = stringResource(R.string.debug_recent_empty),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    debug.recentTrips.forEach { trip ->
+        Text(
+            text = listOfNotNull(
+                TRIP_TIME.format(trip.startedAt.atZone(ZoneId.systemDefault())),
+                stringResource(trip.kind.labelRes()),
+                if (trip.simulated) stringResource(R.string.debug_trip_simulated) else null,
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.debug_simulate_drive),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.debug_simulate_drive_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        Switch(checked = debug.simulateDrive, onCheckedChange = onSimulateDriveChange)
+    }
+}
+
+@Composable
+private fun SectionTitle(@StringRes text: Int) {
+    Text(
+        text = stringResource(text),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+}
+
+@Composable
+private fun SectionDivider() {
+    Spacer(Modifier.height(24.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Spacer(Modifier.height(24.dp))
+}
+
+@StringRes
+private fun TripKind.labelRes(): Int = when (this) {
+    TripKind.ACTIVE_GUIDANCE -> R.string.debug_trip_guidance
+    TripKind.FREE_DRIVE -> R.string.debug_trip_free_drive
 }
 
 @Preview
@@ -123,8 +242,18 @@ private fun SettingsScreenPreview() {
     CustomMapsTheme {
         SettingsScreen(
             tokenState = TokenState.Present("pk.abcd…wxyz"),
+            tokenEditable = true,
+            debug = DebugState(
+                tripsThisMonth = 3,
+                recentTrips = listOf(
+                    TripSessionStart(Instant.parse("2026-11-03T17:05:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = true),
+                    TripSessionStart(Instant.parse("2026-11-01T02:40:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false),
+                ),
+                simulateDrive = true,
+            ),
             onSaveToken = { AccessTokenCheck.VALID },
             onClearToken = {},
+            onSimulateDriveChange = {},
             onBack = {},
         )
     }
