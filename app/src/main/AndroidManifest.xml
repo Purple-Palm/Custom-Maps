@@ -15,8 +15,9 @@
 
         <!--
             Portrait only: the panels are laid out for a tall screen, and in landscape they would
-            cover Start and the Mapbox logo. Resizing (multi-window, foldables) is handled by
-            Compose, so the map is not rebuilt for it. The keyboard resizes the content, so the
+            cover Start and the Mapbox logo. Phones keep this; from Android 16 large screens ignore
+            it, which the logo's capped margin covers. Resizing (multi-window, foldables) is handled
+            by Compose, so the map is not rebuilt for it. The keyboard resizes the content, so the
             panels and the logo move above it.
         -->
         <activity
@@ -25,7 +26,7 @@
             android:exported="true"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
-            tools:ignore="LockedOrientationActivity">
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
