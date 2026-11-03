@@ -65,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
+import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
@@ -166,7 +167,18 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     }
     val mapAccessDenied by phoneMap.accessDenied.collectAsStateWithLifecycle()
 
-    // Keep the route and the puck clear of the panels, and the Mapbox logo above the bottom one.
+    // The Mapbox logo and attribution keep a fixed strip at the bottom left, just above the navigation
+    // bar or the keyboard, and every panel stays above that strip. The floor keeps the logo clear of
+    // rounded screen corners when the navigation bar takes no room.
+    val ornamentInset = maxOf(
+        WindowInsets.navigationBars.union(WindowInsets.ime).getBottom(density),
+        with(density) { MIN_ORNAMENT_INSET.roundToPx() },
+    )
+    LaunchedEffect(ornamentInset) { phoneMap.setOrnamentBottomInset(ornamentInset) }
+    val ornamentStrip = PhoneMap.ORNAMENT_STRIP_DP.dp
+    val bottomPanelsBottom = with(density) { ornamentInset.toDp() } + ornamentStrip
+
+    // Keep the route and the puck clear of the panels.
     var screenHeight by remember { mutableIntStateOf(0) }
     var topPanelBottom by remember { mutableIntStateOf(0) }
     var bottomPanelTop by remember { mutableIntStateOf(0) }
@@ -190,8 +202,9 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                // Keeps the suggestions above the keyboard.
+                // Keeps the suggestions above the keyboard and the Mapbox logo on top of it.
                 .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom))
+                .padding(bottom = ornamentStrip)
                 .padding(12.dp)
                 .onGloballyPositioned { topPanelBottom = it.boundsInRoot().bottom.toInt() },
         ) {
@@ -225,9 +238,7 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                // Above the keyboard too, and the Mapbox logo with it.
-                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
-                .padding(12.dp)
+                .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPanelsBottom)
                 .onGloballyPositioned { bottomPanelTop = it.boundsInRoot().top.toInt() },
         ) {
             if (state.guidance == GuidanceState.IDLE && locationAccess != LocationAccess.NONE) {
@@ -318,6 +329,9 @@ private fun UserMessage.textRes(): Int = when (this) {
     UserMessage.START_FAILED -> R.string.message_start_failed
     UserMessage.TOKEN_REJECTED -> R.string.message_token_rejected
 }
+
+/** Lowest bottom inset for the Mapbox logo, so a rounded screen corner never clips it. */
+private val MIN_ORNAMENT_INSET = 16.dp
 
 private enum class LocationAccess { NONE, APPROXIMATE, PRECISE }
 

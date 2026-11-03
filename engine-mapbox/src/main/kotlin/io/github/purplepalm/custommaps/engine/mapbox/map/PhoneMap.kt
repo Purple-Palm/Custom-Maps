@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
 import android.content.Context
+import android.view.Gravity
 import android.view.View
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
@@ -232,14 +233,28 @@ class PhoneMap internal constructor(
         viewportDataSource.followingPadding = insets
         viewportDataSource.overviewPadding = insets
         viewportDataSource.evaluate()
-        // The Mapbox logo and attribution must stay visible above whatever covers the bottom of the
-        // map, and never be pushed past its top edge when the panels leave little room.
-        val ornamentMargin = ORNAMENT_MARGIN_DP * density
-        val highest = if (mapView.height > 0) mapView.height - padding.top - ORNAMENT_ROOM_DP * density else Float.MAX_VALUE
-        val ornamentBottom = minOf(padding.bottom + ornamentMargin, highest).coerceAtLeast(ornamentMargin)
-        mapView.logo.updateSettings { marginBottom = ornamentBottom }
-        mapView.attribution.updateSettings { marginBottom = ornamentBottom }
-        mapView.compass.updateSettings { marginTop = padding.top + ornamentMargin }
+        mapView.compass.updateSettings { marginTop = padding.top + ORNAMENT_MARGIN_DP * density }
+    }
+
+    /**
+     * Puts the Mapbox logo and the attribution button in a fixed strip at the bottom left of the map,
+     * just above [bottomInset] pixels of navigation bar or keyboard. The screen keeps that strip free
+     * of panels ([ORNAMENT_STRIP_DP]), so the logo is never covered and does not move with the panels.
+     * Mapbox lets apps move the logo but not resize or fade it.
+     */
+    fun setOrnamentBottomInset(bottomInset: Int) {
+        val bottom = bottomInset + ORNAMENT_MARGIN_DP * density
+        val left = ORNAMENT_SIDE_DP * density
+        mapView.logo.updateSettings {
+            position = Gravity.BOTTOM or Gravity.START
+            marginLeft = left
+            marginBottom = bottom
+        }
+        mapView.attribution.updateSettings {
+            position = Gravity.BOTTOM or Gravity.START
+            marginLeft = left + (LOGO_WIDTH_DP + ORNAMENT_GAP_DP) * density
+            marginBottom = bottom
+        }
     }
 
     /**
@@ -371,17 +386,23 @@ class PhoneMap internal constructor(
         NavigationCameraState.IDLE -> CameraMode.IDLE
     }
 
-    private companion object {
-        /** Standard style slot above roads and below 3D buildings and labels. */
-        const val ROUTE_SLOT = "middle"
-        const val ROUTE_TAP_RADIUS_DP = 30f
-        const val ORNAMENT_MARGIN_DP = 6f
+    companion object {
+        /** Margin around the logo and attribution; the logo itself is 85 by 21 dp in this SDK. */
+        private const val ORNAMENT_MARGIN_DP = 6f
+        private const val ORNAMENT_SIDE_DP = 12f
+        private const val ORNAMENT_GAP_DP = 4f
+        private const val LOGO_WIDTH_DP = 85f
+        private const val LOGO_HEIGHT_DP = 21f
 
-        /** Height the logo needs above its bottom margin. */
-        const val ORNAMENT_ROOM_DP = 32f
-        const val FADE_IN_MS = 250L
-        const val CAMERA_EASE_MS = 800L
-        const val BROWSE_ZOOM = 15.5
-        const val BROWSE_PITCH = 40.0
+        /** Height of the strip above the bottom inset that the logo and attribution need; panels stay above it. */
+        const val ORNAMENT_STRIP_DP = ORNAMENT_MARGIN_DP + LOGO_HEIGHT_DP + ORNAMENT_MARGIN_DP
+
+        /** Standard style slot above roads and below 3D buildings and labels. */
+        private const val ROUTE_SLOT = "middle"
+        private const val ROUTE_TAP_RADIUS_DP = 30f
+        private const val FADE_IN_MS = 250L
+        private const val CAMERA_EASE_MS = 800L
+        private const val BROWSE_ZOOM = 15.5
+        private const val BROWSE_PITCH = 40.0
     }
 }
