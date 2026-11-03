@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.ui.map
 
+import io.github.purplepalm.custommaps.nav.AccessDeniedException
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.SearchProvider
@@ -162,6 +163,30 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a refused token is reported as such for routes`() = runTest(dispatcher) {
+        navigation.previewResult = RouteRequestResult.AccessDenied
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        viewModel.onDirections()
+        advanceUntilIdle()
+        assertEquals(UserMessage.TOKEN_REJECTED, viewModel.state.value.message)
+    }
+
+    @Test
+    fun `a refused token is reported as such for search`() = runTest(dispatcher) {
+        search.refuseToken = true
+        val viewModel = viewModel()
+        viewModel.onSearchTextChange("blue")
+        advanceUntilIdle()
+        assertEquals(UserMessage.TOKEN_REJECTED, viewModel.state.value.message)
+        viewModel.onMessageShown()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        assertEquals(UserMessage.TOKEN_REJECTED, viewModel.state.value.message)
+    }
+
+    @Test
     fun `start follows the simulated drive setting`() = runTest(dispatcher) {
         settings.simulateDrive.value = true
         val viewModel = viewModel()
@@ -312,10 +337,12 @@ class MapViewModelTest {
         var resolveGate: CompletableDeferred<Unit>? = null
         var suggestGate: CompletableDeferred<Unit>? = null
         var failNext = false
+        var refuseToken = false
 
         override suspend fun suggest(query: String): List<PlaceSuggestion> {
             queries += query
             suggestGate?.await()
+            if (refuseToken) throw AccessDeniedException("Unauthorized")
             if (failNext) {
                 failNext = false
                 throw IOException("Network is unreachable")
@@ -324,6 +351,7 @@ class MapViewModelTest {
         }
 
         override suspend fun resolve(suggestion: PlaceSuggestion): Place? {
+            if (refuseToken) throw AccessDeniedException("Unauthorized")
             val result = place
             resolveGate?.await()
             return result

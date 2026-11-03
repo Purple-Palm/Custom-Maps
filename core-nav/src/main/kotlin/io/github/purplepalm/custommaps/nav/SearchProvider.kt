@@ -5,9 +5,15 @@ import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 
 /** Search for addresses and places, ranked near the current position when it is known. */
 interface SearchProvider {
-    /** Suggestions while the driver types. */
+    /** Suggestions while the driver types. Throws [AccessDeniedException] when the token is refused. */
     suspend fun suggest(query: String): List<PlaceSuggestion>
 
-    /** Coordinates and details of a suggestion the driver picked, or null if it cannot be resolved. */
+    /**
+     * Coordinates and details of a suggestion the driver picked, or null if it cannot be resolved.
+     * Throws [AccessDeniedException] when the token is refused.
+     */
     suspend fun resolve(suggestion: PlaceSuggestion): Place?
 }
+
+/** The map data provider refused the access token, for example because it was mistyped or revoked. */
+class AccessDeniedException(message: String) : Exception(message)

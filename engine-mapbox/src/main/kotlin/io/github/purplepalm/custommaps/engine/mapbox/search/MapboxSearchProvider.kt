@@ -11,10 +11,13 @@ import com.mapbox.search.SearchSuggestionsCallback
 import com.mapbox.search.SelectOptions
 import com.mapbox.search.ServiceProvider
 import com.mapbox.search.common.CompletionCallback
+import com.mapbox.search.common.SearchRequestException
 import com.mapbox.search.common.IsoCountryCode
 import com.mapbox.search.common.IsoLanguageCode
 import com.mapbox.search.result.SearchResult
 import com.mapbox.search.result.SearchSuggestion
+import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
+import io.github.purplepalm.custommaps.nav.AccessDeniedException
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.Distance
@@ -57,7 +60,7 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
 
                     override fun onError(e: Exception) {
                         debugLog.log("search_error", mapOf("stage" to "suggest", "query" to query, "error" to e.toString()))
-                        if (continuation.isActive) continuation.resumeWithException(e)
+                        if (continuation.isActive) continuation.resumeWithException(e.withAccessDenied())
                     }
                 },
             )
@@ -119,7 +122,7 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
 
                     override fun onError(e: Exception) {
                         debugLog.log("search_error", mapOf("stage" to "resolve", "name" to original.name, "error" to e.toString()))
-                        if (continuation.isActive) continuation.resumeWithException(e)
+                        if (continuation.isActive) continuation.resumeWithException(e.withAccessDenied())
                     }
                 },
             )
@@ -161,6 +164,10 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
             },
         )
     }
+
+    /** A refused token becomes [AccessDeniedException], so the screen can say what to fix. */
+    private fun Exception.withAccessDenied(): Exception =
+        if (this is SearchRequestException && AccessErrors.isAccessDenied(code)) AccessDeniedException(message) else this
 
     private fun SearchResult.toPlace() = Place(
         name = name,

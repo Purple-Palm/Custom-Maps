@@ -259,9 +259,9 @@ fun RouteSheet(
     }
 }
 
-/** Asks for location access, which the map and route planning need, or points to where to turn it on. */
+/** Explains what the map needs, such as location access or a working token, with the action that fixes it. */
 @Composable
-fun LocationPrompt(text: String, action: String, onAction: () -> Unit, modifier: Modifier = Modifier) {
+fun ActionPrompt(text: String, action: String, onAction: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),

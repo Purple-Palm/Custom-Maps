@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.ui.map
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.purplepalm.custommaps.nav.AccessDeniedException
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.SearchProvider
@@ -35,6 +36,7 @@ enum class UserMessage {
     SEARCH_FAILED,
     PLACE_NOT_FOUND,
     START_FAILED,
+    TOKEN_REJECTED,
 }
 
 data class MapUiState(
@@ -138,7 +140,8 @@ class MapViewModel(
             throw e
         } catch (e: Exception) {
             failedSearches += 1
-            local.update { it.copy(searching = false, message = UserMessage.SEARCH_FAILED) }
+            val message = if (e is AccessDeniedException) UserMessage.TOKEN_REJECTED else UserMessage.SEARCH_FAILED
+            local.update { it.copy(searching = false, message = message) }
         }
     }
 
@@ -156,10 +159,14 @@ class MapViewModel(
         local.update { it.copy(searchText = suggestion.name, suggestions = emptyList(), selectedPlace = null, busy = true) }
         query.value = Query("")
         resolveJob = viewModelScope.launch {
+            var failure = UserMessage.PLACE_NOT_FOUND
             val place = try {
                 search.resolve(suggestion)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: AccessDeniedException) {
+                failure = UserMessage.TOKEN_REJECTED
+                null
             } catch (e: Exception) {
                 null
             }
@@ -167,7 +174,7 @@ class MapViewModel(
                 it.copy(
                     busy = false,
                     selectedPlace = place,
-                    message = if (place == null) UserMessage.PLACE_NOT_FOUND else it.message,
+                    message = if (place == null) failure else it.message,
                 )
             }
         }
@@ -184,6 +191,7 @@ class MapViewModel(
                 RouteRequestResult.NoLocation -> UserMessage.NO_LOCATION
                 RouteRequestResult.NoRoute -> UserMessage.NO_ROUTE
                 is RouteRequestResult.Failed -> UserMessage.ROUTE_FAILED
+                RouteRequestResult.AccessDenied -> UserMessage.TOKEN_REJECTED
             }
             // The place stays selected, so closing the preview goes back to it.
             local.update { it.copy(busy = false, message = message ?: it.message) }

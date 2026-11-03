@@ -13,6 +13,7 @@ import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
+import com.mapbox.navigation.base.route.RouterFailureType
 import com.mapbox.navigation.base.trip.model.RouteLegProgress
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.core.MapboxNavigation
@@ -182,7 +183,7 @@ internal class MapboxNavigationEngine(
         return when (response) {
             is RouteResponse.Failure -> {
                 debugLog.log("route_failure", mapOf("message" to response.message, "reasons" to response.reasons))
-                RouteRequestResult.Failed(response.message)
+                if (response.accessDenied) RouteRequestResult.AccessDenied else RouteRequestResult.Failed(response.message)
             }
             is RouteResponse.Routes -> {
                 debugLog.log("route_response", mapOf("count" to response.routes.size, "routes" to response.routes.map { it.debugFields() }))
@@ -426,7 +427,8 @@ internal class MapboxNavigationEngine(
 
                     override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
                         val message = reasons.firstOrNull()?.message ?: "Route request failed"
-                        val failure = RouteResponse.Failure(message, reasons.map { it.debugFields() })
+                        val accessDenied = reasons.any { it.type == RouterFailureType.AUTHENTICATION_ERROR }
+                        val failure = RouteResponse.Failure(message, reasons.map { it.debugFields() }, accessDenied)
                         if (continuation.isActive) continuation.resume(failure)
                     }
 
@@ -441,7 +443,11 @@ internal class MapboxNavigationEngine(
     private sealed interface RouteResponse {
         data class Routes(val routes: List<NavigationRoute>) : RouteResponse
 
-        data class Failure(val message: String, val reasons: List<Map<String, Any?>>) : RouteResponse
+        data class Failure(
+            val message: String,
+            val reasons: List<Map<String, Any?>>,
+            val accessDenied: Boolean = false,
+        ) : RouteResponse
     }
 
     private companion object {

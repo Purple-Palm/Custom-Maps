@@ -45,6 +45,7 @@ import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
 import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
+import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
@@ -123,6 +124,14 @@ class PhoneMap internal constructor(
     private val _cameraMode = MutableStateFlow(CameraMode.IDLE)
     override val cameraMode: StateFlow<CameraMode> = _cameraMode.asStateFlow()
 
+    private val _accessDenied = MutableStateFlow(false)
+
+    /**
+     * True once Mapbox refused the access token for the style or tiles. The map then stays empty;
+     * a new token recreates the screen, and this map with it.
+     */
+    val accessDenied: StateFlow<Boolean> = _accessDenied.asStateFlow()
+
     private val puckPositionListener = OnIndicatorPositionChangedListener { point -> onPuckMoved(point) }
     private val puckBearingListener = OnIndicatorBearingChangedListener { bearing -> lastBearing = bearing }
 
@@ -164,9 +173,10 @@ class PhoneMap internal constructor(
         }
     }
 
-    /** Tile and style failures, such as a rejected token, go to the debug log. */
+    /** Tile and style failures go to the debug log; a refused token is also shown on screen. */
     private val mapErrors = mapboxMap.subscribeMapLoadingError { error ->
         debugLog.log("map_error", mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId))
+        if (AccessErrors.isAccessDenied(error.message)) _accessDenied.value = true
     }
 
     init {

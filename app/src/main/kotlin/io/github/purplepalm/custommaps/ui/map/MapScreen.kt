@@ -31,8 +31,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -147,12 +149,21 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     val snackbar = remember { SnackbarHostState() }
     val message = state.message
     val messageText = message?.let { stringResource(it.textRes()) }
+    val settingsLabel = stringResource(R.string.settings_title)
     LaunchedEffect(message) {
         if (messageText != null) {
-            snackbar.showSnackbar(messageText)
+            // A refused token can only be fixed in Settings, so that message links there.
+            val toSettings = message == UserMessage.TOKEN_REJECTED
+            val result = snackbar.showSnackbar(
+                message = messageText,
+                actionLabel = if (toSettings) settingsLabel else null,
+                duration = if (toSettings) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
             viewModel.onMessageShown()
+            if (result == SnackbarResult.ActionPerformed) onOpenSettings()
         }
     }
+    val mapAccessDenied by phoneMap.accessDenied.collectAsStateWithLifecycle()
 
     // Keep the route and the puck clear of the panels, and the Mapbox logo above the bottom one.
     var screenHeight by remember { mutableIntStateOf(0) }
@@ -255,7 +266,12 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                     },
                     onClose = viewModel::clearSearch,
                 )
-                !precise -> LocationPrompt(
+                mapAccessDenied -> ActionPrompt(
+                    text = stringResource(R.string.token_rejected_prompt),
+                    action = settingsLabel,
+                    onAction = onOpenSettings,
+                )
+                !precise -> ActionPrompt(
                     text = stringResource(
                         when {
                             locationBlocked -> R.string.location_prompt_blocked
@@ -299,6 +315,7 @@ private fun UserMessage.textRes(): Int = when (this) {
     UserMessage.SEARCH_FAILED -> R.string.message_search_failed
     UserMessage.PLACE_NOT_FOUND -> R.string.message_place_not_found
     UserMessage.START_FAILED -> R.string.message_start_failed
+    UserMessage.TOKEN_REJECTED -> R.string.message_token_rejected
 }
 
 private enum class LocationAccess { NONE, APPROXIMATE, PRECISE }

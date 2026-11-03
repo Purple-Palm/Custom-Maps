@@ -45,6 +45,9 @@ sealed interface RouteRequestResult {
 
     data class Failed(val message: String) : RouteRequestResult
 
+    /** The routing service refused the access token. */
+    data object AccessDenied : RouteRequestResult
+
     /** A newer request or guidance came first, so this response was dropped and nothing changed. */
     data object Superseded : RouteRequestResult
 }
