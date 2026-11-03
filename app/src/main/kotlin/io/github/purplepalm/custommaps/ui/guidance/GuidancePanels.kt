@@ -1,6 +1,6 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -105,25 +105,34 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
     }
 }
 
-/** Lanes from left to right; the ones to use are amber, the others dim. */
+/**
+ * Lanes from left to right; the ones to use are amber, the others dim. Every lane is shown: when
+ * there are more than fit, all of them get narrower, since the lane to take is often the last one.
+ */
 @Composable
 fun LanesRow(lanes: LaneInfo, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        lanes.lanes.forEach { lane ->
-            LaneGlyph(
-                lane = lane,
-                highlight = MaterialTheme.colorScheme.primary,
-                dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                modifier = Modifier
-                    .padding(horizontal = 4.dp)
-                    .size(36.dp),
-            )
+    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val slot = minOf(LANE_SLOT, maxWidth / lanes.lanes.size)
+        Row {
+            lanes.lanes.forEach { lane ->
+                LaneGlyph(
+                    lane = lane,
+                    highlight = MaterialTheme.colorScheme.primary,
+                    dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier
+                        .size(slot)
+                        .padding(slot * LANE_GAP_SHARE),
+                )
+            }
         }
     }
 }
+
+/** A lane's width at full size, including the gap around its arrows. */
+private val LANE_SLOT = 44.dp
+
+/** Share of a lane's width left empty on each side. */
+private const val LANE_GAP_SHARE = 4f / 44f
 
 /** Arrival time, time and distance left, and the controls to change view or end guidance. */
 @Composable
