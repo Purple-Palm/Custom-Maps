@@ -1,6 +1,5 @@
 package io.github.purplepalm.custommaps.ui.settings
 
-import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -37,6 +35,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
+import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
@@ -232,7 +231,6 @@ private fun DebugSection(
 
 @Composable
 private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: () -> Unit) {
-    val context = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
     Text(
         text = stringResource(R.string.debug_log_title),
@@ -243,7 +241,7 @@ private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: (
         text = when {
             logBytes == null -> stringResource(R.string.debug_log_measuring)
             logBytes == 0L -> stringResource(R.string.debug_log_empty)
-            else -> stringResource(R.string.debug_log_size, Formatter.formatShortFileSize(context, logBytes))
+            else -> stringResource(R.string.debug_log_size, SizeFormat.bytes(logBytes))
         },
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurface,
