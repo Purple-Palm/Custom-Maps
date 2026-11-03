@@ -15,7 +15,8 @@ phone and shows it in Settings. Maps, routing and the car screen arrive in the n
 | `:app` | The phone app: Compose UI, settings and the wiring of all modules. The car app service will live here too. |
 | `:car` (stage 2) | Car screens built on the navigation template. |
 
-Design decisions and their alternatives are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
+Progress by stage is tracked in [docs/ROADMAP.md](docs/ROADMAP.md); design decisions and their
+alternatives are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Requirements
 
