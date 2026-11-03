@@ -82,6 +82,9 @@ internal class MapboxNavigationEngine(
     /** Counts route commits; a commit that finishes after a newer one or after a stop is ignored. */
     private var commitCount = 0
 
+    /** True from the moment this engine starts a trip session until it stops it. */
+    private var tripSessionRunning = false
+
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
 
@@ -284,11 +287,14 @@ internal class MapboxNavigationEngine(
                         // Checked in startGuidance; only reachable if access was revoked in between.
                         Log.e(TAG, "Trip session could not start", e)
                         debugLog.error("startTripSession", e)
+                        return
                     }
                 }
+                tripSessionRunning = true
             }
             GuidanceCommand.StopTripSession -> {
                 commitCount++
+                tripSessionRunning = false
                 if (replaying) {
                     navigation?.let(replay::onDetached)
                     replaying = false
@@ -361,13 +367,30 @@ internal class MapboxNavigationEngine(
         val kind = when (state) {
             is NavigationSessionState.ActiveGuidance -> TripKind.ACTIVE_GUIDANCE
             is NavigationSessionState.FreeDrive -> TripKind.FREE_DRIVE
-            else -> return@NavigationSessionStateObserver
+            is NavigationSessionState.Idle -> {
+                if (tripSessionRunning) onTripSessionStoppedOutsideApp()
+                return@NavigationSessionStateObserver
+            }
         }
         if (state.sessionId == lastSessionId) return@NavigationSessionStateObserver
         lastSessionId = state.sessionId
         val start = TripSessionStart(Instant.now(), kind, simulated = replaying)
         Log.i(TAG, "Trip session started: $kind${if (start.simulated) " (simulated)" else ""}")
         scope.launch { tripLog.record(start) }
+    }
+
+    /**
+     * The SDK's trip notification has an End Navigation button that stops the session directly.
+     * Guidance then ends the usual way, which also clears the routes and lets the navigator go.
+     * It runs after the SDK has finished its own stop.
+     */
+    private fun onTripSessionStoppedOutsideApp() {
+        tripSessionRunning = false
+        scope.launch {
+            if (_guidanceState.value != GuidanceState.ACTIVE) return@launch
+            Log.i(TAG, "Trip session stopped outside the app")
+            dispatch(GuidanceEvent.Stopped(StopReason.STOPPED_OUTSIDE_APP))
+        }
     }
 
     private suspend fun MapboxNavigation.requestRoutesAwait(options: RouteOptions): RouteResponse =

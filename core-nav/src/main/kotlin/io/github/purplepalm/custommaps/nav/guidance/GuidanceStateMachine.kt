@@ -6,6 +6,9 @@ enum class StopReason {
     USER_CANCELLED,
     CAR_DISCONNECTED,
     CAR_HOST_REQUEST,
+
+    /** The trip session was stopped outside the app, from the End Navigation button of its notification. */
+    STOPPED_OUTSIDE_APP,
 }
 
 sealed interface GuidanceEvent {
