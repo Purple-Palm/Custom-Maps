@@ -1,15 +1,13 @@
 package io.github.purplepalm.custommaps.nav
 
-import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 
-/** Address search. */
+/** Search for addresses and places, ranked near the current position when it is known. */
 interface SearchProvider {
-    /** Results for [query], ranked closer to [proximity] when it is known. */
-    suspend fun search(query: String, proximity: GeoPoint?): List<SearchResult>
-}
+    /** Suggestions while the driver types. */
+    suspend fun suggest(query: String): List<PlaceSuggestion>
 
-data class SearchResult(
-    val name: String,
-    val address: String?,
-    val point: GeoPoint,
-)
+    /** Coordinates and details of a suggestion the driver picked, or null if it cannot be resolved. */
+    suspend fun resolve(suggestion: PlaceSuggestion): Place?
+}
