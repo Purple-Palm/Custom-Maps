@@ -70,6 +70,7 @@ class PhoneMap internal constructor(
     private val engine: MapboxNavigationEngine,
 ) : MapRenderer {
 
+    private val appContext = context.applicationContext
     private val mapView = MapView(context, MapInitOptions(context, styleUri = null))
     private val mapboxMap = mapView.mapboxMap
     private val scope = MainScope()
@@ -84,7 +85,7 @@ class PhoneMap internal constructor(
     private var lastBearing: Double? = null
     private var centeredOnFirstFix = false
 
-    private val defaultLocationProvider = DefaultLocationProvider(context)
+    private var defaultLocationProvider = DefaultLocationProvider(appContext)
     private val navigationLocationProvider = NavigationLocationProvider()
 
     private val routeLineApi = MapboxRouteLineApi(
@@ -213,6 +214,15 @@ class PhoneMap internal constructor(
         mapView.logo.updateSettings { marginBottom = padding.bottom + ornamentMargin }
         mapView.attribution.updateSettings { marginBottom = padding.bottom + ornamentMargin }
         mapView.compass.updateSettings { marginTop = padding.top + ornamentMargin }
+    }
+
+    /**
+     * Shows the puck right after the driver grants location access. Without this the platform
+     * provider notices the new permission only at its next check, which can take a few seconds.
+     */
+    fun onLocationPermissionGranted() {
+        defaultLocationProvider = DefaultLocationProvider(appContext)
+        if (guidanceState != GuidanceState.ACTIVE) mapView.location.setLocationProvider(defaultLocationProvider)
     }
 
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
