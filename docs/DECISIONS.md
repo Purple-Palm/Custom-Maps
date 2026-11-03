@@ -202,3 +202,77 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The top left corner, below the search bar or the maneuver card. It still jumps whenever lanes or suggestions appear.
   - A smaller or semi-transparent logo. Mapbox does not allow it: "You may adjust the position of the Mapbox wordmark and attribution notice, but they must stay visible on the map ... You may not otherwise alter the Mapbox wordmark" (Maps SDK for Android guide), and "You may not style the Mapbox logo" (Mapbox attribution guide). The SDK has no setting for it either.
 - **Cost:** the bottom panels sit about 21 dp higher than before.
+
+## 26. Camera styles chosen in Settings
+
+- **Chosen (owner):** Settings offers three camera styles, applied at once, also mid-drive, and on the car screen from stage 2:
+  - **Mapbox standard:** today's NavigationCamera, unchanged, kept for comparison.
+  - **Mapbox tuned:** the same camera with calmer settings: one camera update per navigator update instead of two, a gradual tilt before turns, more zoom at turns and a puck that glides 1.1 s per update.
+  - **Smooth follow:** the per-frame camera of decision 27, the default.
+- The debug log records the active style, so drives can be compared.
+- **Alternative:** a single camera. Comparing styles on the same roads is the quickest way to tune them.
+
+## 27. A per-frame follow camera
+
+- **Chosen:** a camera controller that runs once per display frame (Choreographer) and sets the camera with critically damped springs. While following, it glides after the drawn puck; the once-a-second navigator data only moves its targets (zoom, bearing and the tilt schedule from the Navigation SDK's viewport data source). Details in [CAMERA.md](CAMERA.md).
+- **Alternatives:**
+  - Tune NavigationCamera. It restarts its animations on every update, so once-a-second updates can never look continuous.
+  - The Maps viewport plugin's follow-puck state. It moves every frame but bolts the camera to the puck, the opposite of what the owner asked for.
+- **Why:** it is the only design whose motion is continuous by construction, it does not depend on the system animation setting, and the same controller drives the car map.
+- **Cost:** the app owns the camera: every other camera change during guidance hands the camera back to the driver or goes through the controller. Re-check the Navigation SDK's framing behaviour on every SDK upgrade.
+
+## 28. Routes end at the stop point, not the display point
+
+- **Chosen:** a place keeps two points: where it is shown, and where a car stops (Mapbox Search's routable point, usually the entrance). Routes go to the stop point; the display point is passed as the arrival target, so the instruction names the right side.
+- **Alternatives:** the display point only, which the Directions API snaps to the nearest road, sometimes the service road behind a building; or always arriving curbside, which can add a loop around the block.
+- **Why:** the first drive ended behind a big-box store whose address point lies in the middle of the building.
+
+## 29. Diagnostics survive a crash
+
+- **Chosen:** the debug log gets a synchronous write path. An uncaught-exception handler writes the crash with its stack before handing it to Android, and every start logs Android's record of earlier exits (crash, ANR, low memory, the user) on Android 11 and newer. The log also records device state, one camera line a second with the frame rate, connectivity, and repeated map errors as one line a minute.
+- **Alternatives:** logcat only, which is lost and needs a computer; a crash reporting service, which sends data to a third party.
+- **Why:** the app restarted once on the first drive and the log could not say why.
+
+## 30. Car App Library 1.8.0-rc01
+
+- **Chosen (owner):** androidx.car.app 1.8.0-rc01 now, 1.8.0 when it is released.
+- **Alternative:** the stable 1.7.0. Its host check accepts any app on the phone that holds the template-renderer permission, even with an allow-list, and such an app would see the map, the destination and could press Start.
+- **Why:** 1.8.0-rc01 differs from 1.8.0-beta01 only by that fix and its API is frozen.
+
+## 31. The car map uses Mapbox's map surface only
+
+- **Chosen:** maps-androidauto (MapboxCarMap) for the car surface, with the app's own camera, route line, puck, maneuver images and notifications on the domain models, as on the phone.
+- **Alternative:** Mapbox's android-auto-components. They assume free drive, clear routes without stopping the session (which bills free drive), register Mapbox voice guidance, and pull in the navigation umbrella, Search, Glide and AppCompat.
+- **Why:** the billing rules of decision 13 and the module boundaries of decision 12 hold on the car too.
+
+## 32. A drive outlives both screens
+
+- **Chosen (owner):**
+  - When the car disconnects mid-drive, guidance continues on the phone; when it connects again, guidance continues on the car screen.
+  - If another navigation app starts guiding in the car, this app keeps guiding too.
+  - After a crash or a system kill mid-drive, the phone and the car offer to resume to the same destination, which is a new billed trip.
+- **How:** the drive belongs to the engine's state machine, not to a screen. Car sessions only keep the navigator alive while connected; the guidance lifecycle owner keeps it alive for the drive.
+- **Cost:** the trip session runs until arrival or End, whichever screen is gone.
+
+## 33. Location "Allow all the time"
+
+- **Chosen (owner):** after precise location, the app asks for location all the time.
+- **Why:** Android 14 and 15 treat an app shown only on the car screen as in the background. Without background location, Start pressed in the car with the phone locked may be refused, and the car map has no position before Start.
+- **Cost:** Google Play asks for a background-location declaration, a video and a review (stage 3). A start guard still checks before every trip start, and a refused start goes back to the route preview instead of crashing.
+
+## 34. Shared links and Google place pages
+
+- **Chosen (owner):** coordinates in a link are used as they are. A Google Maps link without coordinates, which is what the Google Maps phone app shares, has its place page loaded once to read the exact coordinates; on by default, with a switch in Settings. The fallback is a Mapbox search near the place hint the link carries. A link that arrives during a drive offers to go there now.
+- **Cost:** Google's terms do not allow reading its pages this way, and the page format can change at any time; the fallback keeps links working.
+
+## 35. Trip logs go to a private GitHub repository
+
+- **Chosen (owner):** each trip's debug log is uploaded when the trip ends, as one gzip-compressed JSON-lines file, to a private repository, with a fine-grained token that reaches only that repository (366 days, a reminder two weeks before it expires). Uploads run through WorkManager, so they survive network loss and process death; Settings has Upload now.
+- **Guards:** the app refuses a public repository and classic tokens, never logs the token, and masks GitHub tokens in every log line.
+- **Why:** the code repository is public, and the logs hold location history.
+
+## 36. A bright day map in the car
+
+- **Chosen (owner):** a bright, colourful day map by day and the existing dark map at night, following the car's day and night setting. The route stays amber.
+- **Alternative:** a pale or faded day theme, which the owner rejected.
+
