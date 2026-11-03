@@ -3,8 +3,9 @@
 A personal navigation app for Android Auto, built on Mapbox. The phone app uses Jetpack Compose;
 the car app uses the Android for Cars App Library with the navigation template.
 
-**Status: stage 0, project skeleton.** The app builds and runs, keeps the Mapbox token on the
-phone and shows it in Settings. Maps, routing and the car screen arrive in the next stages.
+**Status: stage 1, navigation on the phone.** The phone app shows a night map with your location,
+finds addresses and places, offers routes with traffic and alternatives, and guides turn by turn
+with lanes and arrival time. The car screen arrives in stage 2.
 
 ## Modules
 
@@ -53,6 +54,25 @@ Install newer builds over the installed one; do not uninstall first. Uninstallin
 token, and every new installation counts as one more monthly active user at Mapbox. Updating in
 place only works when all builds are signed with the same key, see the next section.
 **Settings → About** shows the version and the commit of the installed build.
+
+## Using the app
+
+1. On first launch, paste the Mapbox token, then allow location access. The map centers on you.
+2. Type an address or a place name in the search field and pick a suggestion.
+3. Tap **Directions**. Up to three routes appear: the chosen one in amber, turning orange and red
+   where traffic is heavy, the alternatives in grey. Tap a route, on the map or in the list, to
+   choose it.
+4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
+   notification. The maneuver card shows the next turn, its distance and the lanes; the bottom bar
+   shows the arrival time, what is left, **Overview**/**Recenter** and **End**.
+5. Guidance stops at the destination (**Done**) or with **End**. Both stop the trip session.
+
+### Simulated drive
+
+To test guidance without driving, turn on **Settings → Debug → Simulate drive**. **Start** then
+becomes **Start simulation**: the position moves along the chosen route by itself, with the same
+maneuver card, lanes and arrival. Each simulated drive is a trip session and is billed like a real
+one; the debug section counts them with the rest.
 
 ## Shared debug signing key
 
@@ -184,9 +204,10 @@ builds also include x86_64 for the emulator. The steps themselves live in
 
 - Mapbox bills navigation by monthly active users and trips, with a free tier (see
   [mapbox.com/pricing](https://www.mapbox.com/pricing)). Free drive counts as a trip too.
-- The app starts a trip session only when you start navigation, and stops it on arrival, on cancel
-  and when the car disconnects (from stage 1). Every start is logged, and the count for the month
-  is shown in the debug section of Settings.
+- The app starts a trip session only when you press Start, and stops it on arrival and on End;
+  from stage 2 also when the car disconnects. Every start is logged, and **Settings → Debug** shows
+  the count for the month, the latest starts and a link to the
+  [Mapbox statistics page](https://console.mapbox.com/account/statistics/), which has the billed numbers.
 - Route and search requests made outside a trip session are billed per request.
 - Every installation counts as a user: install updates over the app instead of reinstalling it.
 
