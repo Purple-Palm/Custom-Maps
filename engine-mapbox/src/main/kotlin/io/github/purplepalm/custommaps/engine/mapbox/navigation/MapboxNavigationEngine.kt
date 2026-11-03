@@ -212,19 +212,24 @@ internal class MapboxNavigationEngine(
             debugLog.log("start_refused", mapOf("reason" to if (navigation == null) "navigator not attached" else "no routes"))
             return
         }
-        // The UI asks for location access first; without it a trip session cannot run.
-        if (!hasLocationPermission()) {
-            Log.w(TAG, "Guidance not started: location permission missing")
-            debugLog.log("start_refused", mapOf("reason" to "location permission missing"))
+        // The UI asks for location access first. Approximate positions are too coarse to follow a
+        // route, so guidance on GPS needs precise location; a replayed drive needs none of it.
+        val precise = isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
+        val missing = when {
+            !simulated && !precise -> "precise location missing"
+            !precise && !isGranted(Manifest.permission.ACCESS_COARSE_LOCATION) -> "location permission missing"
+            else -> null
+        }
+        if (missing != null) {
+            Log.w(TAG, "Guidance not started: $missing")
+            debugLog.log("start_refused", mapOf("reason" to missing))
             return
         }
         dispatch(GuidanceEvent.StartRequested(simulated))
     }
 
-    private fun hasLocationPermission(): Boolean =
-        listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).any {
-            ContextCompat.checkSelfPermission(appContext, it) == PackageManager.PERMISSION_GRANTED
-        }
+    private fun isGranted(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
 
     override fun stopGuidance(reason: StopReason) {
         dispatch(GuidanceEvent.Stopped(reason))

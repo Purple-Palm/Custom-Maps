@@ -2,9 +2,13 @@ package io.github.purplepalm.custommaps.ui.map
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -31,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +49,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -64,6 +70,7 @@ import io.github.purplepalm.custommaps.ui.guidance.ManeuverCard
 @Composable
 fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
+    val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
@@ -80,33 +87,50 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
     val cameraMode by phoneMap.cameraMode.collectAsStateWithLifecycle()
 
-    var hasLocation by remember { mutableStateOf(context.hasLocationPermission()) }
+    var locationAccess by remember { mutableStateOf(context.locationAccess()) }
+    // Routes and guidance need precise location; approximate is only good for the puck.
+    val precise = locationAccess == LocationAccess.PRECISE
+    var askedForLocation by rememberSaveable { mutableStateOf(false) }
+    // The system stopped showing the permission dialog, so access has to be turned on in its settings.
+    var locationBlocked by rememberSaveable { mutableStateOf(false) }
     val refreshLocationAccess = {
-        val granted = context.hasLocationPermission()
-        if (granted && !hasLocation) phoneMap.onLocationPermissionGranted()
-        if (granted != hasLocation) viewModel.onLocationAccessChanged(granted, context.hasPreciseLocationPermission())
-        hasLocation = granted
+        val access = context.locationAccess()
+        if (access != LocationAccess.NONE && locationAccess == LocationAccess.NONE) phoneMap.onLocationPermissionGranted()
+        if (access != locationAccess) {
+            viewModel.onLocationAccessChanged(access != LocationAccess.NONE, access == LocationAccess.PRECISE)
+        }
+        locationAccess = access
+        if (access == LocationAccess.PRECISE) locationBlocked = false
     }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshLocationAccess()
+        // After a second denial Android answers at once without asking; it never does on the first request.
+        locationBlocked = locationAccess != LocationAccess.PRECISE && askedForLocation && activity != null &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.ACCESS_FINE_LOCATION)
+        askedForLocation = true
     }
     // Guidance starts whatever the answer: the trip notification is helpful but not required.
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         viewModel.onStart()
     }
+    // On Android 12 and later, asking again offers to switch approximate location to precise.
     val requestLocation = {
-        locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        if (locationBlocked) {
+            context.openAppSettings()
+        } else {
+            locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
     }
     val startGuidance = {
         when {
-            !hasLocation -> requestLocation()
+            !precise -> requestLocation()
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !context.hasNotificationPermission() ->
                 notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             else -> viewModel.onStart()
         }
     }
     LaunchedEffect(Unit) {
-        if (!hasLocation) requestLocation()
+        if (locationAccess == LocationAccess.NONE) requestLocation()
     }
     // Access may also be granted in system settings while the app is in the background.
     LifecycleResumeEffect(Unit) {
@@ -185,7 +209,7 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 .padding(12.dp)
                 .onGloballyPositioned { bottomPanelTop = it.boundsInRoot().top.toInt() },
         ) {
-            if (state.guidance == GuidanceState.IDLE && hasLocation) {
+            if (state.guidance == GuidanceState.IDLE && locationAccess != LocationAccess.NONE) {
                 MyLocationButton(
                     onClick = { phoneMap.setCameraMode(CameraMode.FOLLOWING) },
                     modifier = Modifier
@@ -218,11 +242,21 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                     place = requireNotNull(state.selectedPlace),
                     busy = state.busy,
                     onDirections = {
-                        if (hasLocation) viewModel.onDirections() else requestLocation()
+                        if (precise) viewModel.onDirections() else requestLocation()
                     },
                     onClose = viewModel::clearSearch,
                 )
-                !hasLocation -> LocationPrompt(onAllow = requestLocation)
+                !precise -> LocationPrompt(
+                    text = stringResource(
+                        when {
+                            locationBlocked -> R.string.location_prompt_blocked
+                            locationAccess == LocationAccess.APPROXIMATE -> R.string.location_prompt_precise
+                            else -> R.string.location_prompt
+                        },
+                    ),
+                    action = stringResource(if (locationBlocked) R.string.location_open_settings else R.string.location_allow),
+                    onAction = requestLocation,
+                )
             }
         }
 
@@ -258,14 +292,21 @@ private fun UserMessage.textRes(): Int = when (this) {
     UserMessage.START_FAILED -> R.string.message_start_failed
 }
 
-private fun Context.hasLocationPermission(): Boolean =
-    listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).any {
-        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-    }
+private enum class LocationAccess { NONE, APPROXIMATE, PRECISE }
 
-private fun Context.hasPreciseLocationPermission(): Boolean =
-    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+private fun Context.locationAccess(): LocationAccess = when {
+    isGranted(Manifest.permission.ACCESS_FINE_LOCATION) -> LocationAccess.PRECISE
+    isGranted(Manifest.permission.ACCESS_COARSE_LOCATION) -> LocationAccess.APPROXIMATE
+    else -> LocationAccess.NONE
+}
+
+private fun Context.isGranted(permission: String): Boolean =
+    ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+/** This app's page in the system settings, where blocked permissions are turned back on. */
+private fun Context.openAppSettings() {
+    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+}
 
 private fun Context.hasNotificationPermission(): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-        ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || isGranted(Manifest.permission.POST_NOTIFICATIONS)

@@ -256,9 +256,9 @@ fun RouteSheet(
     }
 }
 
-/** Asks for location access, which the map and route planning need. */
+/** Asks for location access, which the map and route planning need, or points to where to turn it on. */
 @Composable
-fun LocationPrompt(onAllow: () -> Unit, modifier: Modifier = Modifier) {
+fun LocationPrompt(text: String, action: String, onAction: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -266,13 +266,13 @@ fun LocationPrompt(onAllow: () -> Unit, modifier: Modifier = Modifier) {
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = stringResource(R.string.location_prompt),
+                text = text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(12.dp))
-            Button(onClick = onAllow) { Text(stringResource(R.string.location_allow)) }
+            Button(onClick = onAction) { Text(action) }
         }
     }
 }

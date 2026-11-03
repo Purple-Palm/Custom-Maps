@@ -29,7 +29,10 @@
     <string name="place_directions">Directions</string>
     <string name="map_my_location">My location</string>
     <string name="location_prompt">Allow location access to see where you are and to plan routes.</string>
+    <string name="location_prompt_precise">Routes and turn-by-turn guidance need your precise location.</string>
+    <string name="location_prompt_blocked">Location access is off for Custom Maps. Turn on precise location in its settings.</string>
     <string name="location_allow">Allow</string>
+    <string name="location_open_settings">Open settings</string>
 
     <string name="route_via">via %1$s</string>
     <string name="route_start">Start</string>
