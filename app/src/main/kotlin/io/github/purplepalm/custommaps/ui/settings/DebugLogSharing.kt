@@ -6,9 +6,6 @@ import androidx.core.content.FileProvider
 import io.github.purplepalm.custommaps.R
 import java.io.File
 
-/** Where exported log files are put for sharing. Must match res/xml/debug_log_paths.xml. */
-const val DEBUG_LOG_EXPORT_DIRECTORY = "debug-log-export"
-
 /** Opens the share sheet for exported debug log files, for example to save them to Google Drive. */
 fun Context.shareDebugLog(files: List<File>) {
     val authority = "$packageName.debuglog"

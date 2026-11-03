@@ -23,12 +23,10 @@ import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.ui.map.MapScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
-import io.github.purplepalm.custommaps.ui.settings.DEBUG_LOG_EXPORT_DIRECTORY
 import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
 import io.github.purplepalm.custommaps.ui.settings.shareDebugLog
 import io.github.purplepalm.custommaps.ui.token.TokenSetupScreen
 import io.github.purplepalm.custommaps.ui.token.TokenViewModel
-import java.io.File
 import kotlinx.coroutines.launch
 
 /**
@@ -78,7 +76,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onShareLog = {
                     scope.launch {
-                        val files = settingsViewModel.exportLog(File(context.cacheDir, DEBUG_LOG_EXPORT_DIRECTORY), graph.debugLogHeader())
+                        val files = settingsViewModel.exportLog(graph.debugLogHeader())
                         if (files.isEmpty()) {
                             Toast.makeText(context, R.string.debug_log_share_failed, Toast.LENGTH_LONG).show()
                         } else {

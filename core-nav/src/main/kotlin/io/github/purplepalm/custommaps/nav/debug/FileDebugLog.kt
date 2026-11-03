@@ -20,10 +20,12 @@ import kotlinx.coroutines.withContext
 /**
  * The debug log in [directory]: one JSON-lines file per local day, written by a single background
  * coroutine so [log] never blocks the caller. Once all files together pass [maxBytes], the oldest
- * days are deleted; the file being written is always kept.
+ * days are deleted; the file being written is always kept. Copies for sharing go to
+ * [exportDirectory], and [clear] deletes them along with the log.
  */
 class FileDebugLog(
     private val directory: File,
+    private val exportDirectory: File,
     scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val clock: Clock = Clock.systemDefaultZone(),
@@ -59,14 +61,14 @@ class FileDebugLog(
         files.withLock { logFiles().sumOf { it.length() } }
     }
 
-    override suspend fun export(target: File, header: Map<String, Any?>): List<File> = withContext(io) {
+    override suspend fun export(header: Map<String, Any?>): List<File> = withContext(io) {
         files.withLock {
             writer?.flush()
-            target.mkdirs()
-            target.listFiles { file -> file.name.startsWith(EXPORT_PREFIX) }?.forEach { it.delete() }
+            exportDirectory.mkdirs()
+            deleteExports()
             val headerLine = JsonLines.event(clock.instant(), "export", header)
             logFiles().map { source ->
-                File(target, "$EXPORT_PREFIX${source.nameWithoutExtension}.txt").also { exported ->
+                File(exportDirectory, "$EXPORT_PREFIX${source.nameWithoutExtension}.txt").also { exported ->
                     exported.bufferedWriter().use { out ->
                         out.write(headerLine)
                         out.write("\n")
@@ -81,7 +83,12 @@ class FileDebugLog(
         files.withLock {
             closeWriter()
             logFiles().forEach { it.delete() }
+            deleteExports()
         }
+    }
+
+    private fun deleteExports() {
+        exportDirectory.listFiles { file -> file.name.startsWith(EXPORT_PREFIX) }?.forEach { it.delete() }
     }
 
     private fun write(entry: Entry) {

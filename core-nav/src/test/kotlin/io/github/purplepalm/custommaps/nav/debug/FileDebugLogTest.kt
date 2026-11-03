@@ -28,7 +28,7 @@ class FileDebugLogTest {
     private val clock = MutableClock(Instant.parse("2026-11-03T07:59:00Z"), ZoneId.of("America/Los_Angeles"))
 
     private fun TestScope.newLog(maxBytes: Long = FileDebugLog.DEFAULT_MAX_BYTES) =
-        FileDebugLog(logDirectory, backgroundScope, StandardTestDispatcher(testScheduler), clock, maxBytes)
+        FileDebugLog(logDirectory, exportDirectory, backgroundScope, StandardTestDispatcher(testScheduler), clock, maxBytes)
 
     @Test
     fun `writes one line per event into the file of the local day`() = runTest {
@@ -56,7 +56,7 @@ class FileDebugLogTest {
         log.log("second")
         runCurrent()
 
-        val files = log.export(exportDirectory, mapOf("app" to "0.1.0"))
+        val files = log.export(mapOf("app" to "0.1.0"))
 
         assertEquals(listOf("custom-maps-debug-2026-11-02.txt", "custom-maps-debug-2026-11-03.txt"), files.map { it.name })
         val lines = files.last().readLines()
@@ -73,9 +73,22 @@ class FileDebugLogTest {
         log.log("event")
         runCurrent()
 
-        log.export(exportDirectory, emptyMap())
+        log.export(emptyMap())
 
         assertFalse(stale.exists())
+    }
+
+    @Test
+    fun `clear also deletes the copies made for sharing`() = runTest {
+        val log = newLog()
+        log.log("event")
+        runCurrent()
+        val exported = log.export(emptyMap())
+
+        log.clear()
+
+        assertTrue(exported.isNotEmpty())
+        assertTrue(exported.none { it.exists() })
     }
 
     @Test

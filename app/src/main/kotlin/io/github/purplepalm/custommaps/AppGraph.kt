@@ -42,7 +42,12 @@ class AppGraph(private val application: Application) {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Every route, road and second of guidance, for the owner to share from Settings. */
-    val debugLog = FileDebugLog(File(application.filesDir, DEBUG_LOG_DIRECTORY), applicationScope, Dispatchers.IO)
+    val debugLog = FileDebugLog(
+        directory = File(application.filesDir, DEBUG_LOG_DIRECTORY),
+        exportDirectory = File(application.cacheDir, DEBUG_LOG_EXPORT_DIRECTORY),
+        scope = applicationScope,
+        io = Dispatchers.IO,
+    )
 
     val tokenStore: TokenStore = DataStoreTokenStore(preferences(DataStoreTokenStore.FILE_NAME))
 
@@ -94,7 +99,10 @@ class AppGraph(private val application: Application) {
     }
 
     companion object {
-        /** Under the app's files directory. Must match the paths excluded in res/xml backup rules. */
+        /** Under the app's files directory; the backup rules never include it. */
         const val DEBUG_LOG_DIRECTORY = "debug-log"
+
+        /** Under the app's cache directory. Must match res/xml/debug_log_paths.xml, which shares it. */
+        const val DEBUG_LOG_EXPORT_DIRECTORY = "debug-log-export"
     }
 }

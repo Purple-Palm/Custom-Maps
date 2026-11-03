@@ -64,8 +64,8 @@ class SettingsViewModelTest {
 
         override suspend fun sizeBytes(): Long = bytes
 
-        override suspend fun export(target: File, header: Map<String, Any?>): List<File> =
-            if (bytes == 0L) emptyList() else listOf(File(target, "custom-maps-debug-2026-11-03.txt"))
+        override suspend fun export(header: Map<String, Any?>): List<File> =
+            if (bytes == 0L) emptyList() else listOf(File("custom-maps-debug-2026-11-03.txt"))
 
         override suspend fun clear() {
             cleared = true

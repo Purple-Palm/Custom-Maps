@@ -41,10 +41,11 @@ interface DebugLogArchive : DebugLog {
     suspend fun sizeBytes(): Long
 
     /**
-     * Copies the log into [target] as plain text files, one per day, oldest first, each opened by
-     * a line with [header]. Earlier exports in [target] are replaced.
+     * Copies the log into plain text files for sharing, one per day, oldest first, each opened by
+     * a line with [header]. Earlier copies are replaced.
      */
-    suspend fun export(target: File, header: Map<String, Any?>): List<File>
+    suspend fun export(header: Map<String, Any?>): List<File>
 
+    /** Deletes the log and every copy made for sharing. */
     suspend fun clear()
 }

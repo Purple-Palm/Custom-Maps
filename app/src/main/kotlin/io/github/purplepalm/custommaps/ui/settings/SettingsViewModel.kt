@@ -63,11 +63,12 @@ class SettingsViewModel(
         viewModelScope.launch { logBytes.value = debugLog.sizeBytes() }
     }
 
-    /** Copies the debug log into [target] for sharing. Empty when there is nothing to share or the copy failed. */
-    suspend fun exportLog(target: File, header: Map<String, Any?>): List<File> =
+    /** Copies the debug log for sharing. Empty when there is nothing to share or the copy failed. */
+    suspend fun exportLog(header: Map<String, Any?>): List<File> =
         try {
-            debugLog.export(target, header)
+            debugLog.export(header)
         } catch (e: IOException) {
+            debugLog.error("debugLog.export", e)
             emptyList()
         }
 
