@@ -74,6 +74,22 @@ becomes **Start simulation**: the position moves along the chosen route by itsel
 maneuver card, lanes and arrival. Each simulated drive is a trip session and is billed like a real
 one; the debug section counts them with the rest.
 
+### Debug log
+
+The app records a detailed log on the phone, so a drive can be examined afterwards:
+
+- every route request and answer, with each step: road, maneuver, lanes, distance, time and traffic;
+- the route you picked, Start, End and arrival;
+- every second of guidance: position, speed, the road you are on, the speed limit, the next
+  maneuver and what is left;
+- off-route moments and reroutes, searches, trip sessions and errors.
+
+To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
+for example Google Drive. Each day becomes one text file, `custom-maps-debug-<date>.txt`, with one
+JSON event per line. The log never leaves the phone otherwise: it is kept out of backups and device
+transfers, the oldest days are deleted once it passes 50 MB, and **Clear** deletes it. It never
+contains the Mapbox token; token-shaped text is masked in every line as a last safeguard.
+
 ## Shared debug signing key
 
 Android installs an update over an existing app only if both are signed with the same key. Without
