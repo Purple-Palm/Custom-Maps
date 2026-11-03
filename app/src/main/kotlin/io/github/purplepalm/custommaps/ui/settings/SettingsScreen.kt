@@ -96,6 +96,23 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                text = stringResource(R.string.about_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(
+                    R.string.about_version,
+                    stringResource(R.string.app_version),
+                    stringResource(R.string.build_revision),
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

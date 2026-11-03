@@ -20,4 +20,7 @@
     <string name="token_error_secret">This is a secret token (sk.). Use a public token that starts with pk.</string>
     <string name="token_error_not_public">Mapbox public tokens start with pk.</string>
     <string name="token_error_malformed">This does not look like a complete Mapbox token.</string>
+
+    <string name="about_title">About</string>
+    <string name="about_version">Version %1$s, build %2$s</string>
 </resources>

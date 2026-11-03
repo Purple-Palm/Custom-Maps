@@ -3,6 +3,9 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Commit the build was made from, shown in Settings: the short SHA on CI, "local" otherwise.
+val buildRevision: String = providers.environmentVariable("GITHUB_SHA").map { it.take(7) }.getOrElse("local")
+
 android {
     namespace = "io.github.purplepalm.custommaps"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -13,6 +16,9 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
+
+        resValue("string", "app_version", versionName ?: "")
+        resValue("string", "build_revision", buildRevision)
 
         ndk {
             // Phones run arm64; x86_64 keeps the emulator working. Smaller APKs to download and install.
@@ -35,6 +41,7 @@ android {
 
     buildFeatures {
         compose = true
+        resValues = true
     }
 
     lint {
