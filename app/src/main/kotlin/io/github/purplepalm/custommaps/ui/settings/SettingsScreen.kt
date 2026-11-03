@@ -122,7 +122,7 @@ fun SettingsScreen(
 private fun SettingsScreenPreview() {
     CustomMapsTheme {
         SettingsScreen(
-            tokenState = TokenState.Present("pk.eyJ1…a1b2"),
+            tokenState = TokenState.Present("pk.abcd…wxyz"),
             onSaveToken = { AccessTokenCheck.VALID },
             onClearToken = {},
             onBack = {},

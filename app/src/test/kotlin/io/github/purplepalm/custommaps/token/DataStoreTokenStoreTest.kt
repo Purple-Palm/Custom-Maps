@@ -24,8 +24,8 @@ class DataStoreTokenStoreTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var store: DataStoreTokenStore
 
-    // Shaped like a real token, but not one.
-    private val publicToken = "pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJ0ZXN0In0.c2lnbmF0dXJlX29ubHlfZm9yX3Rlc3Rz"
+    // Shaped like a Mapbox token but clearly fake, so secret scanners do not flag it.
+    private val publicToken = "pk.dGVzdC1wYXlsb2Fk.dGVzdC1zaWduYXR1cmU"
 
     @BeforeEach
     fun createStore() {
@@ -70,7 +70,7 @@ class DataStoreTokenStoreTest {
 
     @Test
     fun `refuses a secret token and keeps nothing`() = runBlocking {
-        assertThrows<IllegalArgumentException> { runBlocking { store.save("sk.eyJ1IjoiZXhhbXBsZSJ9.c2VjcmV0") } }
+        assertThrows<IllegalArgumentException> { runBlocking { store.save("sk.dGVzdA.c2VjcmV0") } }
         assertNull(store.token.first())
     }
 }

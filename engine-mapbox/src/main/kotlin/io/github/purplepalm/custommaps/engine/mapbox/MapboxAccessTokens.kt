@@ -38,7 +38,7 @@ object MapboxAccessTokens {
         }
     }
 
-    /** Short form for display, for example `pk.eyJ1…a1b2`. Never shows the whole token. */
+    /** Short form for display, for example `pk.abcd…wxyz`. Never shows the whole token. */
     fun mask(token: String): String {
         val trimmed = token.trim()
         if (trimmed.length <= MASK_HEAD + MASK_TAIL) return trimmed.take(PUBLIC_PREFIX.length) + "…"
