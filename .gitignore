@@ -1,0 +1,31 @@
+# Gradle
+.gradle/
+build/
+
+# Kotlin compiler session data
+.kotlin/
+
+# Machine-specific configuration and secrets (see local.properties.example)
+local.properties
+keystore.properties
+
+# Signing keys
+*.jks
+*.keystore
+*.p12
+
+# Build outputs copied outside build/
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+
+# OS
+.DS_Store
+Thumbs.db
