@@ -16,3 +16,8 @@ fi
 
 ./gradlew assembleDebug testDebugUnitTest :core-nav:test :app:lintDebug --stacktrace
 scripts/check-16kb-alignment.sh app/build/outputs/apk/debug/app-debug.apk
+
+# The APK is published as is (not zipped); its name says which run and commit it comes from.
+revision="${GITHUB_SHA:-local}"
+mkdir -p build/ci
+cp app/build/outputs/apk/debug/app-debug.apk "build/ci/custommaps-debug-${GITHUB_RUN_NUMBER:-local}-${revision:0:7}.apk"
