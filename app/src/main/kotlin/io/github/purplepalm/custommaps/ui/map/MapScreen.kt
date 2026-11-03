@@ -1,0 +1,265 @@
+package io.github.purplepalm.custommaps.ui.map
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
+import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.settings.AppSettings
+import io.github.purplepalm.custommaps.ui.guidance.ArrivedCard
+import io.github.purplepalm.custommaps.ui.guidance.GuidanceBar
+import io.github.purplepalm.custommaps.ui.guidance.ManeuverCard
+
+/** The main screen: the map with search, route choice and guidance drawn over it. */
+@Composable
+fun MapScreen(engine: MapboxEngine, settings: AppSettings, onOpenSettings: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val viewModel = viewModel { MapViewModel(engine.navigation, engine.search, settings) }
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // The navigator lives while this screen does (and for the length of any drive).
+    DisposableEffect(lifecycleOwner) {
+        engine.attachHost(lifecycleOwner)
+        onDispose { engine.detachHost(lifecycleOwner) }
+    }
+
+    val phoneMap = remember { engine.createPhoneMap(context) }
+    DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
+    val cameraMode by phoneMap.cameraMode.collectAsStateWithLifecycle()
+
+    var hasLocation by remember { mutableStateOf(context.hasLocationPermission()) }
+    val refreshLocationAccess = {
+        val granted = context.hasLocationPermission()
+        if (granted && !hasLocation) phoneMap.onLocationPermissionGranted()
+        hasLocation = granted
+    }
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshLocationAccess()
+    }
+    // Guidance starts whatever the answer: the trip notification is helpful but not required.
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        viewModel.onStart()
+    }
+    val requestLocation = {
+        locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+    val startGuidance = {
+        when {
+            !hasLocation -> requestLocation()
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !context.hasNotificationPermission() ->
+                notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            else -> viewModel.onStart()
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (!hasLocation) requestLocation()
+    }
+    // Access may also be granted in system settings while the app is in the background.
+    LifecycleResumeEffect(Unit) {
+        refreshLocationAccess()
+        onPauseOrDispose { }
+    }
+
+    val snackbar = remember { SnackbarHostState() }
+    val message = state.message
+    val messageText = message?.let { stringResource(it.textRes()) }
+    LaunchedEffect(message) {
+        if (messageText != null) {
+            snackbar.showSnackbar(messageText)
+            viewModel.onMessageShown()
+        }
+    }
+
+    // Keep the route and the puck clear of the panels, and the Mapbox logo above the bottom one.
+    var screenHeight by remember { mutableIntStateOf(0) }
+    var topPanelBottom by remember { mutableIntStateOf(0) }
+    var bottomPanelTop by remember { mutableIntStateOf(0) }
+    LaunchedEffect(screenHeight, topPanelBottom, bottomPanelTop) {
+        val margin = with(density) { 16.dp.roundToPx() }
+        val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
+        phoneMap.setViewportPadding(ViewportPadding(margin, topPanelBottom + margin, margin, bottom + margin))
+    }
+
+    BackHandler(enabled = state.guidance == GuidanceState.PREVIEW) { viewModel.onCancelPreview() }
+    BackHandler(enabled = state.guidance == GuidanceState.IDLE && state.searchText.isNotEmpty()) { viewModel.clearSearch() }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onSizeChanged { screenHeight = it.height },
+    ) {
+        AndroidView(factory = { phoneMap.view }, modifier = Modifier.fillMaxSize())
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(12.dp)
+                .onGloballyPositioned { topPanelBottom = it.boundsInRoot().bottom.toInt() },
+        ) {
+            when (state.guidance) {
+                GuidanceState.ACTIVE -> state.progress?.let { ManeuverCard(it) }
+                GuidanceState.IDLE, GuidanceState.ARRIVED -> {
+                    SearchBar(
+                        text = state.searchText,
+                        // Also while a picked suggestion is being looked up.
+                        searching = state.searching || (state.busy && state.selectedPlace == null),
+                        onTextChange = viewModel::onSearchTextChange,
+                        onClear = viewModel::clearSearch,
+                        onOpenSettings = onOpenSettings,
+                    )
+                    if (state.suggestions.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        SuggestionList(
+                            suggestions = state.suggestions,
+                            onPick = { suggestion ->
+                                focusManager.clearFocus()
+                                viewModel.onSuggestionPicked(suggestion)
+                            },
+                        )
+                    }
+                }
+                GuidanceState.PREVIEW -> Unit
+            }
+        }
+
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(12.dp)
+                .onGloballyPositioned { bottomPanelTop = it.boundsInRoot().top.toInt() },
+        ) {
+            if (state.guidance == GuidanceState.IDLE && hasLocation) {
+                MyLocationButton(
+                    onClick = { phoneMap.setCameraMode(CameraMode.FOLLOWING) },
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(bottom = 8.dp),
+                )
+            }
+            when {
+                state.guidance == GuidanceState.PREVIEW -> RouteSheet(
+                    destination = state.destination,
+                    routes = state.routes,
+                    simulateDrive = state.simulateDrive,
+                    onSelect = viewModel::onRouteSelected,
+                    onStart = startGuidance,
+                    onClose = viewModel::onCancelPreview,
+                )
+                state.guidance == GuidanceState.ACTIVE -> GuidanceBar(
+                    progress = state.progress,
+                    following = cameraMode == CameraMode.FOLLOWING,
+                    onToggleOverview = {
+                        phoneMap.setCameraMode(if (cameraMode == CameraMode.FOLLOWING) CameraMode.OVERVIEW else CameraMode.FOLLOWING)
+                    },
+                    onEnd = viewModel::onEnd,
+                )
+                state.guidance == GuidanceState.ARRIVED -> ArrivedCard(
+                    destination = state.destination,
+                    onDone = viewModel::onDismissArrival,
+                )
+                state.selectedPlace != null -> PlaceCard(
+                    place = requireNotNull(state.selectedPlace),
+                    busy = state.busy,
+                    onDirections = {
+                        if (hasLocation) viewModel.onDirections() else requestLocation()
+                    },
+                    onClose = viewModel::clearSearch,
+                )
+                !hasLocation -> LocationPrompt(onAllow = requestLocation)
+            }
+        }
+
+        SnackbarHost(
+            hostState = snackbar,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(24.dp),
+        )
+    }
+}
+
+@Composable
+private fun MyLocationButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(modifier = modifier, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainer) {
+        IconButton(onClick = onClick) {
+            Icon(
+                painterResource(R.drawable.ic_my_location),
+                contentDescription = stringResource(R.string.map_my_location),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@StringRes
+private fun UserMessage.textRes(): Int = when (this) {
+    UserMessage.NO_LOCATION -> R.string.message_no_location
+    UserMessage.NO_ROUTE -> R.string.message_no_route
+    UserMessage.ROUTE_FAILED -> R.string.message_route_failed
+    UserMessage.SEARCH_FAILED -> R.string.message_search_failed
+    UserMessage.PLACE_NOT_FOUND -> R.string.message_place_not_found
+}
+
+private fun Context.hasLocationPermission(): Boolean =
+    listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).any {
+        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+private fun Context.hasNotificationPermission(): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED

@@ -1,4 +1,4 @@
-package io.github.purplepalm.custommaps.ui.home
+package io.github.purplepalm.custommaps.ui.token
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,12 +21,10 @@ import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
-import io.github.purplepalm.custommaps.ui.token.TokenEditor
-import io.github.purplepalm.custommaps.ui.token.TokenState
 
+/** First launch: no map can be shown until the driver pastes a Mapbox public token. */
 @Composable
-fun HomeScreen(
-    tokenState: TokenState,
+fun TokenSetupScreen(
     onSaveToken: (String) -> AccessTokenCheck,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -53,29 +51,19 @@ fun HomeScreen(
             )
             Spacer(Modifier.height(32.dp))
 
-            when (tokenState) {
-                TokenState.Loading -> Unit
-                TokenState.Missing -> {
-                    Text(
-                        text = stringResource(R.string.token_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.token_missing_explainer),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    TokenEditor(saveLabel = R.string.token_save, onSave = onSaveToken)
-                }
-                is TokenState.Present -> Text(
-                    text = stringResource(R.string.token_saved_as, tokenState.masked),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = stringResource(R.string.token_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.token_missing_explainer),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            TokenEditor(saveLabel = R.string.token_save, onSave = onSaveToken)
 
             Spacer(Modifier.height(32.dp))
             OutlinedButton(onClick = onOpenSettings) {
@@ -87,8 +75,8 @@ fun HomeScreen(
 
 @Preview
 @Composable
-private fun HomeScreenMissingTokenPreview() {
+private fun TokenSetupScreenPreview() {
     CustomMapsTheme {
-        HomeScreen(tokenState = TokenState.Missing, onSaveToken = { AccessTokenCheck.VALID }, onOpenSettings = {})
+        TokenSetupScreen(onSaveToken = { AccessTokenCheck.VALID }, onOpenSettings = {})
     }
 }
