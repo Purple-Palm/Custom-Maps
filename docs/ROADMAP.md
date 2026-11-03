@@ -70,8 +70,11 @@ see one trip per drive in Settings → Debug, and share the debug log to Google 
 - Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
   share menu and as the default app for those links (Android settings: **Open by default → Add
   links**). The link becomes a place, and routes to it are offered on the phone and in the car.
-  Coordinates in the link are used as they are; a link with only a name and address is searched
-  with Mapbox near the place hint it carries. A link that arrives during a drive offers to go there
+  Coordinates in the link are used as they are. A Google Maps link with only a name and address
+  (what the Google Maps phone app shares) has its place page loaded once to read the exact
+  coordinates; this is the owner's choice, on by default and switchable in Settings, and Google's
+  terms do not allow it, so it may stop working. The fallback is a Mapbox search near the place
+  hint the link carries. A link that arrives during a drive offers to go there
   now, which changes the destination of the running drive.
   Short links (`maps.app.goo.gl`, `maps.apple/p`) are expanded with one request to Google's or
   Apple's link server; Waze short links decode on the phone.
