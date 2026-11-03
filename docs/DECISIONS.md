@@ -149,3 +149,16 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Maneuver text and lanes come from the Navigation SDK's maneuver API.
   - Distances and times are formatted in US units by `:core-nav`.
 - **Alternative:** the Mapbox UI components for maneuvers and lanes. They bring their own look and are harder to fit into the graphite and amber palette.
+
+## 20. Debug log on the phone, shared by hand
+
+- **Chosen:**
+  - Events are written as JSON lines, one file per day, in the app's private files: routes with every step, guidance once a second, searches, trip sessions and errors.
+  - Logging never blocks the main thread: a single background writer drains a bounded queue.
+  - The oldest days are deleted past 50 MB. The log is excluded from backups and device transfers.
+  - The owner shares it from Settings through the share sheet as plain text files, for example to Google Drive, where it can be read for diagnosis.
+  - Every line passes a filter that masks Mapbox tokens and `access_token` parameters.
+- **Alternatives:**
+  - Automatic upload: needs a server or a sign-in inside the app.
+  - Logcat only: lost on restart and needs a computer with ADB.
+  - A crash reporting service: sends data to a third party all the time.
