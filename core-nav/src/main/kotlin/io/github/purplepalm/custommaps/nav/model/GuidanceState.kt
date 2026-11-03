@@ -9,4 +9,7 @@ enum class GuidanceState {
 
     /** Turn-by-turn guidance with a running trip session. */
     ACTIVE,
+
+    /** The destination was reached; the trip session is already stopped. */
+    ARRIVED,
 }
