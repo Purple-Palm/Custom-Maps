@@ -13,11 +13,17 @@
         android:theme="@style/Theme.CustomMaps"
         tools:targetApi="31">
 
-        <!-- Rotation and resizing are handled by Compose, so the map is not rebuilt for them. -->
+        <!--
+            Portrait only: the panels are laid out for a tall screen, and in landscape they would
+            cover Start and the Mapbox logo. Resizing (multi-window, foldables) is handled by
+            Compose, so the map is not rebuilt for it.
+        -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="portrait"
+            tools:ignore="LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

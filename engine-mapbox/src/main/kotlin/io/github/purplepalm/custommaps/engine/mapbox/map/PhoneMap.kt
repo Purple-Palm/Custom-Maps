@@ -222,10 +222,13 @@ class PhoneMap internal constructor(
         viewportDataSource.followingPadding = insets
         viewportDataSource.overviewPadding = insets
         viewportDataSource.evaluate()
-        // The Mapbox logo and attribution must stay visible above whatever covers the bottom of the map.
+        // The Mapbox logo and attribution must stay visible above whatever covers the bottom of the
+        // map, and never be pushed past its top edge when the panels leave little room.
         val ornamentMargin = ORNAMENT_MARGIN_DP * density
-        mapView.logo.updateSettings { marginBottom = padding.bottom + ornamentMargin }
-        mapView.attribution.updateSettings { marginBottom = padding.bottom + ornamentMargin }
+        val highest = if (mapView.height > 0) mapView.height - padding.top - ORNAMENT_ROOM_DP * density else Float.MAX_VALUE
+        val ornamentBottom = minOf(padding.bottom + ornamentMargin, highest).coerceAtLeast(ornamentMargin)
+        mapView.logo.updateSettings { marginBottom = ornamentBottom }
+        mapView.attribution.updateSettings { marginBottom = ornamentBottom }
         mapView.compass.updateSettings { marginTop = padding.top + ornamentMargin }
     }
 
@@ -363,6 +366,9 @@ class PhoneMap internal constructor(
         const val ROUTE_SLOT = "middle"
         const val ROUTE_TAP_RADIUS_DP = 30f
         const val ORNAMENT_MARGIN_DP = 6f
+
+        /** Height the logo needs above its bottom margin. */
+        const val ORNAMENT_ROOM_DP = 32f
         const val FADE_IN_MS = 250L
         const val CAMERA_EASE_MS = 800L
         const val BROWSE_ZOOM = 15.5
