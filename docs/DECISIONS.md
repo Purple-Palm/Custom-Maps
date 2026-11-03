@@ -177,7 +177,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 22. The phone screen stays in portrait
 
-- **Chosen:** the main activity is locked to portrait. The Mapbox logo's margin is also capped, so it stays inside the map whatever the panels cover.
+- **Chosen:** the main activity is locked to portrait. The Mapbox logo has a fixed place at the bottom (see 25), so no layout can push it off the map.
 - **Alternative:** a landscape layout with the panels at the sides. It belongs with phone-only use, which the roadmap keeps for later.
 - **Why:** the panels are laid out for a tall screen; in landscape the route sheet covered Start and pushed the logo off the map.
 - **Cost:** from Android 16, large screens such as tablets ignore the lock. Phones keep it.
@@ -193,3 +193,12 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen:** a refused token is recognised by the router's authentication failure, by HTTP 401 or 403 from search, and by the status code or wording in map loading errors. The screen then says that Mapbox did not accept the token and offers Settings.
 - **Alternative:** check the token with a request when it is entered. That is one more request, and a token can still be revoked later.
 - **Cost:** map errors carry no status code, so the map check reads the error message.
+
+## 25. A fixed place for the Mapbox logo
+
+- **Chosen:** the Mapbox logo and the attribution button sit in a fixed strip at the bottom left of the map, just above the navigation bar or the keyboard. Every panel stays above that strip, so nothing covers them and they do not move when the panels change.
+- **Alternatives:**
+  - Lift the logo above whatever panel covers the bottom of the map. With the route sheet open it floated around the middle of the screen, and during guidance it sat next to the car.
+  - The top left corner, below the search bar or the maneuver card. It still jumps whenever lanes or suggestions appear.
+  - A smaller or semi-transparent logo. Mapbox does not allow it: "You may adjust the position of the Mapbox wordmark and attribution notice, but they must stay visible on the map ... You may not otherwise alter the Mapbox wordmark" (Maps SDK for Android guide), and "You may not style the Mapbox logo" (Mapbox attribution guide). The SDK has no setting for it either.
+- **Cost:** the bottom panels sit about 21 dp higher than before.

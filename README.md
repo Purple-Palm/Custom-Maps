@@ -244,5 +244,8 @@ builds also include x86_64 for the emulator. The steps themselves live in
 
 ## Attribution
 
-Maps from Mapbox must show the Mapbox logo and the © Mapbox © OpenStreetMap attribution. The app
-keeps both visible, on the phone and in the car.
+Maps from Mapbox must show the Mapbox logo and the © Mapbox © OpenStreetMap attribution, behind the
+(i) button. This applies to every map made with Mapbox, free or paid, commercial or not. Mapbox
+allows moving the logo but not resizing, recolouring or fading it. On the phone the logo and the (i)
+button keep a fixed strip at the bottom left, above the navigation bar or the keyboard, and the
+panels stay above it; the car screen gets the same rule in stage 2.
