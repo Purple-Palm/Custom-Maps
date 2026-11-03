@@ -18,13 +18,22 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** The maneuver drawn as a single bold arrow, in the app's own style. */
+/**
+ * The maneuver drawn as a single bold arrow, in the app's own style. At a roundabout the exit is
+ * drawn where [roundaboutExitDegrees] puts it, falling back to the turn when that is unknown.
+ */
 @Composable
-fun ManeuverGlyph(type: ManeuverType, turn: TurnModifier?, color: Color, modifier: Modifier = Modifier) {
+fun ManeuverGlyph(
+    type: ManeuverType,
+    turn: TurnModifier?,
+    color: Color,
+    modifier: Modifier = Modifier,
+    roundaboutExitDegrees: Double? = null,
+) {
     Canvas(modifier) {
         when {
             type == ManeuverType.ARRIVE -> drawDestination(color)
-            type in ROUNDABOUTS -> drawRoundabout(turn.angle(), color)
+            type in ROUNDABOUTS -> drawRoundabout(roundaboutArmAngle(roundaboutExitDegrees, turn), color)
             turn == TurnModifier.U_TURN -> drawUTurn(color)
             else -> drawTurn(turn.angle(), color)
         }
@@ -49,6 +58,22 @@ private val ROUNDABOUTS = setOf(
     ManeuverType.ROTARY,
     ManeuverType.EXIT_ROTARY,
 )
+
+/**
+ * Direction of a roundabout's exit arm, in the same terms as [angle]. Traffic goes round
+ * counter-clockwise, as on the right-hand side of the road, so the exit at 90 degrees is on the
+ * right. An exit back the way the driver came is drawn just beside the entry rather than over it.
+ */
+internal fun roundaboutArmAngle(exitDegrees: Double?, turn: TurnModifier?): Float {
+    val angle = when {
+        exitDegrees != null -> 180f - exitDegrees.toFloat()
+        turn == TurnModifier.U_TURN -> -180f
+        else -> turn.angle()
+    }
+    return angle.coerceIn(-MAX_ARM_ANGLE, MAX_ARM_ANGLE)
+}
+
+private const val MAX_ARM_ANGLE = 160f
 
 /** Direction of travel in degrees, 0 is straight ahead and positive turns right. */
 private fun TurnModifier?.angle(): Float = when (this) {

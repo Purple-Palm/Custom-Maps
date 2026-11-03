@@ -57,6 +57,7 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
                     turn = maneuver.modifier,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(72.dp),
+                    roundaboutExitDegrees = maneuver.roundaboutExitDegrees,
                 )
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {

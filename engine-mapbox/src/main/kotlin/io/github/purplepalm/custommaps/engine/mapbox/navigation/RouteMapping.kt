@@ -29,13 +29,15 @@ internal fun MapboxLane.toLaneInfo(): LaneInfo? = allLanes
 /** Snapshot for the UI: the upcoming maneuver from the maneuver API plus the trip totals. */
 internal fun RouteProgress.toSnapshot(next: MapboxManeuver): RouteProgressSnapshot {
     val type = ManeuverMapping.type(next.primary.type)
-    val exit = if (ManeuverMapping.isRoundabout(type)) currentLegProgress?.upcomingStep?.maneuver()?.exit() else null
+    val roundabout = ManeuverMapping.isRoundabout(type)
+    val exit = if (roundabout) currentLegProgress?.upcomingStep?.maneuver()?.exit() else null
     val maneuver = Maneuver(
         type = type,
         modifier = ManeuverMapping.modifier(next.primary.modifier),
         primaryText = next.primary.text,
         secondaryText = next.secondary?.text?.takeIf { it.isNotBlank() },
         roundaboutExitNumber = exit?.takeIf { it > 0 },
+        roundaboutExitDegrees = if (roundabout) next.primary.degrees else null,
     )
     val toManeuver = next.stepDistance.distanceRemaining ?: next.stepDistance.totalDistance
     return RouteProgressSnapshot(

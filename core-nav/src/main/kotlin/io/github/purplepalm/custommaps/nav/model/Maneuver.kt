@@ -42,6 +42,11 @@ data class Maneuver(
     val secondaryText: String? = null,
     /** Exit to take at a roundabout or rotary, counted from 1. */
     val roundaboutExitNumber: Int? = null,
+    /**
+     * Where that exit is, in degrees around the roundabout from where the driver enters it:
+     * 90 is a right turn, 180 straight on, 270 a left turn, 360 back the way they came.
+     */
+    val roundaboutExitDegrees: Double? = null,
 ) {
     init {
         require(roundaboutExitNumber == null || roundaboutExitNumber > 0) {
