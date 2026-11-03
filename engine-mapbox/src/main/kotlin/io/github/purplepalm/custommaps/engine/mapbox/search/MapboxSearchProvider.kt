@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.engine.mapbox.search
 
+import com.mapbox.common.MapboxOptions
 import com.mapbox.search.ApiType
 import com.mapbox.search.ResponseInfo
 import com.mapbox.search.SearchEngine
@@ -26,9 +27,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  */
 internal class MapboxSearchProvider : SearchProvider {
 
-    private val engine: SearchEngine by lazy {
-        SearchEngine.createSearchEngineWithBuiltInDataProviders(ApiType.SEARCH_BOX, SearchEngineSettings())
-    }
+    private var engine: SearchEngine? = null
+    private var engineToken: String? = null
 
     /** Suggestions of the latest query, so a picked one can be resolved by id. */
     private val latest = mutableMapOf<String, SearchSuggestion>()
@@ -41,7 +41,7 @@ internal class MapboxSearchProvider : SearchProvider {
             limit = SUGGESTION_LIMIT,
         )
         val suggestions = suspendCancellableCoroutine { continuation ->
-            val task = engine.search(
+            val task = engine().search(
                 query,
                 options,
                 object : SearchSuggestionsCallback {
@@ -71,7 +71,7 @@ internal class MapboxSearchProvider : SearchProvider {
     override suspend fun resolve(suggestion: PlaceSuggestion): Place? {
         val original = latest[suggestion.id] ?: return null
         return suspendCancellableCoroutine { continuation ->
-            val task = engine.select(
+            val task = engine().select(
                 original,
                 object : SearchSelectionCallback {
                     override fun onResult(suggestion: SearchSuggestion, result: SearchResult, responseInfo: ResponseInfo) {
@@ -97,6 +97,16 @@ internal class MapboxSearchProvider : SearchProvider {
                 },
             )
             continuation.invokeOnCancellation { task.cancel() }
+        }
+    }
+
+    /** The search engine for the current access token; a replaced token gets a fresh engine. */
+    private fun engine(): SearchEngine {
+        val token = MapboxOptions.accessToken
+        engine?.takeIf { engineToken == token }?.let { return it }
+        return SearchEngine.createSearchEngineWithBuiltInDataProviders(ApiType.SEARCH_BOX, SearchEngineSettings()).also {
+            engine = it
+            engineToken = token
         }
     }
 
