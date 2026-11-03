@@ -21,6 +21,13 @@ dependencies {
 
     // Mapbox stays an implementation detail: no Mapbox type is visible to other modules.
     implementation(libs.mapbox.navigation)
+    implementation(libs.mapbox.navigation.ui.maps)
+    implementation(libs.mapbox.navigation.tripdata)
+    implementation(libs.mapbox.search)
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime)
+    implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
