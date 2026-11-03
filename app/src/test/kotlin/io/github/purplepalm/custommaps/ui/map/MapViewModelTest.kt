@@ -12,6 +12,7 @@ import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.settings.AppSettings
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -76,6 +77,40 @@ class MapViewModelTest {
         viewModel.onSearchTextChange("b")
         advanceUntilIdle()
         assertEquals(emptyList<String>(), search.queries)
+    }
+
+    @Test
+    fun `the same text searches again after a failed search`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        search.failNext = true
+        viewModel.onSearchTextChange("blue")
+        advanceTimeBy(301)
+        runCurrent()
+        assertEquals(UserMessage.SEARCH_FAILED, viewModel.state.value.message)
+        viewModel.onMessageShown()
+
+        viewModel.onSearchTextChange("blu")
+        viewModel.onSearchTextChange("blue")
+        advanceTimeBy(301)
+        runCurrent()
+
+        assertEquals(listOf("blue", "blue"), search.queries)
+        assertEquals(listOf(suggestion), viewModel.state.value.suggestions)
+    }
+
+    @Test
+    fun `clearing the search cancels a search still running`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        search.suggestGate = CompletableDeferred()
+        viewModel.onSearchTextChange("blue")
+        advanceTimeBy(301)
+        runCurrent()
+        viewModel.clearSearch()
+        runCurrent()
+        search.suggestGate?.complete(Unit)
+        runCurrent()
+        assertEquals(emptyList<PlaceSuggestion>(), viewModel.state.value.suggestions)
+        assertEquals(false, viewModel.state.value.searching)
     }
 
     @Test
@@ -275,9 +310,16 @@ class MapViewModelTest {
     ) : SearchProvider {
         val queries = mutableListOf<String>()
         var resolveGate: CompletableDeferred<Unit>? = null
+        var suggestGate: CompletableDeferred<Unit>? = null
+        var failNext = false
 
         override suspend fun suggest(query: String): List<PlaceSuggestion> {
             queries += query
+            suggestGate?.await()
+            if (failNext) {
+                failNext = false
+                throw IOException("Network is unreachable")
+            }
             return suggestions
         }
 

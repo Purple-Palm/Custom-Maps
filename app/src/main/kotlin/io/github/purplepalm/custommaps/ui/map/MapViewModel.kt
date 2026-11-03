@@ -75,8 +75,14 @@ class MapViewModel(
     private var resolveJob: Job? = null
     private var directionsJob: Job? = null
 
-    /** What is sent to the search engine; separate from the text shown, so picking a suggestion does not search again. */
-    private val query = MutableStateFlow("")
+    /**
+     * What is sent to the search engine; separate from the text shown, so picking a suggestion does
+     * not search again. [attempt] lets the same text run again after a search failed.
+     */
+    private data class Query(val text: String, val attempt: Int = 0)
+
+    private val query = MutableStateFlow(Query(""))
+    private var failedSearches = 0
 
     private val engineState = combine(
         navigation.guidanceState,
@@ -111,28 +117,35 @@ class MapViewModel(
             }
         }
         viewModelScope.launch {
-            query.debounce(SEARCH_DEBOUNCE_MS).distinctUntilChanged().collectLatest { text ->
-                if (text.length < MIN_QUERY_LENGTH) {
-                    local.update { it.copy(suggestions = emptyList(), searching = false) }
-                    return@collectLatest
-                }
-                local.update { it.copy(searching = true) }
-                try {
-                    val suggestions = search.suggest(text)
-                    local.update { it.copy(suggestions = suggestions, searching = false) }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    local.update { it.copy(searching = false, message = UserMessage.SEARCH_FAILED) }
-                }
-            }
+            query
+                // Clearing goes through at once, which also cancels a search still running.
+                .debounce { if (it.text.length < MIN_QUERY_LENGTH) 0L else SEARCH_DEBOUNCE_MS }
+                .distinctUntilChanged()
+                .collectLatest { (text) -> runSearch(text) }
+        }
+    }
+
+    private suspend fun runSearch(text: String) {
+        if (text.length < MIN_QUERY_LENGTH) {
+            local.update { it.copy(suggestions = emptyList(), searching = false) }
+            return
+        }
+        local.update { it.copy(searching = true) }
+        try {
+            val suggestions = search.suggest(text)
+            local.update { it.copy(suggestions = suggestions, searching = false) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failedSearches += 1
+            local.update { it.copy(searching = false, message = UserMessage.SEARCH_FAILED) }
         }
     }
 
     fun onSearchTextChange(text: String) {
         cancelLookups()
         local.update { it.copy(searchText = text, selectedPlace = null, busy = false) }
-        query.value = text.trim()
+        query.value = Query(text.trim(), failedSearches)
     }
 
     fun onSuggestionPicked(suggestion: PlaceSuggestion) {
@@ -141,7 +154,7 @@ class MapViewModel(
         if (navigation.guidanceState.value == GuidanceState.ARRIVED) navigation.dismissArrival()
         cancelLookups()
         local.update { it.copy(searchText = suggestion.name, suggestions = emptyList(), selectedPlace = null, busy = true) }
-        query.value = ""
+        query.value = Query("")
         resolveJob = viewModelScope.launch {
             val place = try {
                 search.resolve(suggestion)
@@ -204,7 +217,7 @@ class MapViewModel(
 
     fun clearSearch() {
         cancelLookups()
-        query.value = ""
+        query.value = Query("")
         local.update { Local() }
     }
 
