@@ -7,7 +7,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 |---|---|---|
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
-| 2 | Android Auto: car screen on the navigation template | Planned |
+| 2 | Android Auto: car screen on the navigation template | In progress |
 | 3 | Signed release build and Google Play internal testing | Planned |
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
@@ -46,20 +46,27 @@ Owner checks: install the APK from Actions over the old one, allow precise locat
 route, run a simulated drive (Settings → Debug), end it from the app and once from the notification,
 see one trip per drive in Settings → Debug, and share the debug log to Google Drive.
 
-## Stage 2: Android Auto (planned)
+## Stage 2: Android Auto (in progress)
 
-- Car app service (navigation category) and screens on the navigation template.
+- Car app service (navigation category) and screens on the navigation template, on Car App Library
+  1.7.0 (the latest stable release).
 - Map drawn on the car surface, camera padding from the visible and stable areas.
-- Maneuver card with distance and lanes, ETA, action strips, day and night by `isDarkMode`.
+- Maneuver card with distance and lanes, ETA, action strips.
+- Light map by day and dark map at night, following the car (`isDarkMode`).
+- Turn-by-turn notifications on the car screen while another app is in front.
 - Mapbox logo and © attribution visible on the car map.
 - Start a route on the phone and continue in the car: with the car connected, the phone is the
   search input and the route appears in the car.
-- Trip session stops when the car disconnects.
+- One drive across phone and car: when the car disconnects mid-drive, guidance continues on the
+  phone; when the car connects again, it continues on the car screen. Arrival or End in either
+  place ends the drive.
 - Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
   share menu and as the default app for those links (Android settings: **Open by default → Add
   links**). The link becomes a place, and routes to it are offered on the phone and in the car.
-  To decide at the start of the stage: short links (`maps.app.goo.gl`, `maps.apple/p`) can only be
-  expanded with one request to Google's or Apple's link server; Waze short links decode on the phone.
+  Short links (`maps.app.goo.gl`, `maps.apple/p`) are expanded with one request to Google's or
+  Apple's link server; Waze short links decode on the phone.
+- Debug log upload: each trip's log goes to a private GitHub repository when the trip ends, with a
+  token the owner pastes on the phone (stored only there). The public code repository never gets logs.
 - Desktop Head Unit profiles for 800×480 and 1280×720 head units.
 
 ## Stage 3: release and Google Play (planned)
@@ -71,11 +78,13 @@ see one trip per drive in Settings → Debug, and share the debug log to Google 
 
 - Overview by default, following before maneuvers (distance threshold from speed, hysteresis, manual
   touch pauses automation for 20 s), the same on phone and car, settings on the phone, scenario tests.
+- A strong zoom into the junction before each maneuver, so the lanes fill the screen.
 
 ## Stage 5: 3D navigation and visual polish (planned)
 
 Queued right after the smart camera, once guidance is smoother; it builds on that camera work and is
-checked on the car screen from stage 2.
+checked on the car screen from stage 2. The bar is Google Maps' immersive navigation: smoother motion,
+a cleaner night look and larger, clearer lanes, as far as the public Mapbox SDK allows.
 
 The goal is guidance as beautiful and smooth as possible, on the phone and in the car, with lanes that are
 impossible to miss. Mapbox's own "3D Live Navigation" and "Magic Carpet" (a glowing path on the lane to
@@ -113,7 +122,7 @@ Mapbox logo and attribution rules apply in every view.
   including a landscape layout for a phone in a mount (the phone screen is portrait-only for now).
 - **Speed cameras:** open data of California cities (AB 645) and OpenStreetMap via Overpass, with ODbL attribution.
 - **Favorites:** home and work.
-- **Voice input** for the destination.
+- **Voice input** for the destination, including "Hey Google, navigate to …" in the car.
 - **Offline regions.**
 
 ## Watch list
