@@ -29,12 +29,12 @@ build number.
 
 - [x] Domain logic: miles and feet, durations, arrival time; trip session log; guidance state machine
   (a trip session starts only on Start and is stopped before routes are cleared).
-- [ ] Map in a night Mapbox Standard style with 3D buildings and the graphite and amber palette.
-- [ ] Current location without starting a trip session.
-- [ ] Search for addresses and places (Search Box), English.
-- [ ] Routes with alternatives and traffic colours; tap to pick an alternative.
-- [ ] Guidance: maneuver card with large distance, lanes, ETA; stop on arrival and on cancel.
-- [ ] Debug section: trip session starts this month; simulated drive for testing at home.
+- [x] Map in a night Mapbox Standard style with 3D buildings and the graphite and amber palette.
+- [x] Current location without starting a trip session.
+- [x] Search for addresses and places (Search Box), English.
+- [x] Routes with alternatives and traffic colours; tap to pick an alternative.
+- [x] Guidance: maneuver card with large distance, lanes, ETA; stop on arrival and on cancel.
+- [x] Debug section: trip session starts this month; simulated drive for testing at home.
 
 ## Stage 2: Android Auto (planned)
 
