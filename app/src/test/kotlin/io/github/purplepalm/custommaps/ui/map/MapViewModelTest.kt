@@ -183,6 +183,16 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a place picked right after arriving is shown`() = runTest(dispatcher) {
+        navigation.guidanceState.value = GuidanceState.ARRIVED
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        assertEquals(GuidanceState.IDLE, viewModel.state.value.guidance)
+        assertEquals(place, viewModel.state.value.selectedPlace)
+    }
+
+    @Test
     fun `a start the navigator refuses is reported`() = runTest(dispatcher) {
         val viewModel = viewModel()
         navigation.guidanceState.value = GuidanceState.PREVIEW

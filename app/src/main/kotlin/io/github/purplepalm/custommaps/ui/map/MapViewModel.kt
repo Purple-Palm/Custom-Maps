@@ -137,6 +137,8 @@ class MapViewModel(
 
     fun onSuggestionPicked(suggestion: PlaceSuggestion) {
         debugLog.log("ui_pick", mapOf("name" to suggestion.name, "description" to suggestion.description))
+        // The next stop, searched for right after arriving: the arrival card makes way for its place card.
+        if (navigation.guidanceState.value == GuidanceState.ARRIVED) navigation.dismissArrival()
         cancelLookups()
         local.update { it.copy(searchText = suggestion.name, suggestions = emptyList(), selectedPlace = null, busy = true) }
         query.value = ""
