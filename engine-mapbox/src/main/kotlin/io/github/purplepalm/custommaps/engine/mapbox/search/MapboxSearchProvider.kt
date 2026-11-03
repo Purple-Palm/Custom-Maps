@@ -8,6 +8,9 @@ import com.mapbox.search.SearchEngineSettings
 import com.mapbox.search.SearchOptions
 import com.mapbox.search.SearchSelectionCallback
 import com.mapbox.search.SearchSuggestionsCallback
+import com.mapbox.search.SelectOptions
+import com.mapbox.search.ServiceProvider
+import com.mapbox.search.common.CompletionCallback
 import com.mapbox.search.common.IsoCountryCode
 import com.mapbox.search.common.IsoLanguageCode
 import com.mapbox.search.result.SearchResult
@@ -25,6 +28,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /**
  * Addresses and places through the Mapbox Search Box API, in English and within the US.
  * Results are ranked near the device position, which the search engine reads itself.
+ * No search history is kept: picked places would otherwise pile up in the SDK's history file.
  */
 internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProvider {
 
@@ -94,6 +98,7 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
         val place = suspendCancellableCoroutine { continuation ->
             val task = engine().select(
                 original,
+                SelectOptions(addResultToHistory = false),
                 object : SearchSelectionCallback {
                     override fun onResult(suggestion: SearchSuggestion, result: SearchResult, responseInfo: ResponseInfo) {
                         if (continuation.isActive) continuation.resume(result.toPlace())
@@ -131,14 +136,30 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
         return place
     }
 
-    /** The search engine for the current access token; a replaced token gets a fresh engine. */
+    /**
+     * The search engine for the current access token; a replaced token gets a fresh engine.
+     * It has no local history or favorites to search.
+     */
     private fun engine(): SearchEngine {
         val token = MapboxOptions.accessToken
         engine?.takeIf { engineToken == token }?.let { return it }
-        return SearchEngine.createSearchEngineWithBuiltInDataProviders(ApiType.SEARCH_BOX, SearchEngineSettings()).also {
-            engine = it
-            engineToken = token
-        }
+        val created = SearchEngine.createSearchEngine(ApiType.SEARCH_BOX, SearchEngineSettings())
+        if (engine == null) clearHistory()
+        engine = created
+        engineToken = token
+        return created
+    }
+
+    /** Removes places that earlier builds left in the SDK's history file. Once per process. */
+    private fun clearHistory() {
+        ServiceProvider.INSTANCE.historyDataProvider().clear(
+            object : CompletionCallback<Unit> {
+                override fun onComplete(result: Unit) = debugLog.log("search_history_cleared")
+
+                override fun onError(e: Exception) =
+                    debugLog.log("search_error", mapOf("stage" to "clear history", "error" to e.toString()))
+            },
+        )
     }
 
     private fun SearchResult.toPlace() = Place(
