@@ -46,6 +46,7 @@ fun CustomMapsApp(graph: AppGraph) {
             is MapsAccess.Ready -> MapScreen(
                 engine = graph.engine,
                 settings = graph.settings,
+                debugLog = graph.debugLog,
                 onOpenSettings = { showSettings = true },
             )
         }

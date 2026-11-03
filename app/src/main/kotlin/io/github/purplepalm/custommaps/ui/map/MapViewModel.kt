@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.SearchProvider
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
@@ -54,6 +55,7 @@ class MapViewModel(
     private val navigation: NavigationEngine,
     private val search: SearchProvider,
     settings: AppSettings,
+    private val debugLog: DebugLog,
 ) : ViewModel() {
 
     private data class Local(
@@ -117,6 +119,7 @@ class MapViewModel(
     }
 
     fun onSuggestionPicked(suggestion: PlaceSuggestion) {
+        debugLog.log("ui_pick", mapOf("name" to suggestion.name, "description" to suggestion.description))
         local.update { it.copy(searchText = suggestion.name, suggestions = emptyList(), busy = true) }
         query.value = ""
         viewModelScope.launch {
@@ -139,6 +142,7 @@ class MapViewModel(
 
     fun onDirections() {
         val place = local.value.selectedPlace ?: return
+        debugLog.log("ui_directions", mapOf("name" to place.name))
         local.update { it.copy(busy = true) }
         viewModelScope.launch {
             val message = when (val result = navigation.previewRoutes(place)) {
@@ -155,16 +159,24 @@ class MapViewModel(
     fun onRouteSelected(routeId: String) = navigation.selectRoute(routeId)
 
     /** Starts guidance; simulated when the debug setting is on. */
-    fun onStart() = navigation.startGuidance(simulated = state.value.simulateDrive)
+    fun onStart() {
+        debugLog.log("ui_start", mapOf("simulated" to state.value.simulateDrive))
+        navigation.startGuidance(simulated = state.value.simulateDrive)
+    }
 
     fun onEnd() {
+        debugLog.log("ui_end")
         navigation.stopGuidance(StopReason.USER_CANCELLED)
         clearSearch()
     }
 
-    fun onCancelPreview() = navigation.clearPreview()
+    fun onCancelPreview() {
+        debugLog.log("ui_close_preview")
+        navigation.clearPreview()
+    }
 
     fun onDismissArrival() {
+        debugLog.log("ui_arrival_done")
         navigation.dismissArrival()
         clearSearch()
     }
@@ -174,7 +186,12 @@ class MapViewModel(
         local.update { Local() }
     }
 
+    fun onLocationAccessChanged(granted: Boolean, precise: Boolean) {
+        debugLog.log("location_access", mapOf("granted" to granted, "precise" to precise))
+    }
+
     fun onMessageShown() {
+        local.value.message?.let { debugLog.log("ui_message", mapOf("message" to it)) }
         local.update { it.copy(message = null) }
     }
 

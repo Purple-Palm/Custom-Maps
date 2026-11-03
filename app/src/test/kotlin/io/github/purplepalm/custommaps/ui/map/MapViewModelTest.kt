@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.map
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.SearchProvider
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -52,7 +53,7 @@ class MapViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun TestScope.viewModel() = MapViewModel(navigation, search, settings).also { runCurrent() }
+    private fun TestScope.viewModel() = MapViewModel(navigation, search, settings, DebugLog.NONE).also { runCurrent() }
 
     @Test
     fun `typing searches once after a short pause`() = runTest(dispatcher) {

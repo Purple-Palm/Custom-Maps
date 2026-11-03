@@ -52,6 +52,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.settings.AppSettings
@@ -61,12 +62,12 @@ import io.github.purplepalm.custommaps.ui.guidance.ManeuverCard
 
 /** The main screen: the map with search, route choice and guidance drawn over it. */
 @Composable
-fun MapScreen(engine: MapboxEngine, settings: AppSettings, onOpenSettings: () -> Unit) {
+fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
-    val viewModel = viewModel { MapViewModel(engine.navigation, engine.search, settings) }
+    val viewModel = viewModel { MapViewModel(engine.navigation, engine.search, settings, debugLog) }
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     // The navigator lives while this screen does (and for the length of any drive).
@@ -83,6 +84,7 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, onOpenSettings: () ->
     val refreshLocationAccess = {
         val granted = context.hasLocationPermission()
         if (granted && !hasLocation) phoneMap.onLocationPermissionGranted()
+        if (granted != hasLocation) viewModel.onLocationAccessChanged(granted, context.hasPreciseLocationPermission())
         hasLocation = granted
     }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -259,6 +261,9 @@ private fun Context.hasLocationPermission(): Boolean =
     listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).any {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
     }
+
+private fun Context.hasPreciseLocationPermission(): Boolean =
+    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 private fun Context.hasNotificationPermission(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
