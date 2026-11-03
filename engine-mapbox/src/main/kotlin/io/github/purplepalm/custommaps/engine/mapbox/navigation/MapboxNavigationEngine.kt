@@ -17,17 +17,24 @@ import com.mapbox.navigation.base.trip.model.RouteLegProgress
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.arrival.ArrivalObserver
+import com.mapbox.navigation.core.directions.session.RoutesExtra
+import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.navigation.core.formatter.MapboxDistanceFormatter
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
 import com.mapbox.navigation.core.replay.route.ReplayRouteSession
+import com.mapbox.navigation.core.trip.session.LocationMatcherResult
+import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.NavigationSessionState
 import com.mapbox.navigation.core.trip.session.NavigationSessionStateObserver
+import com.mapbox.navigation.core.trip.session.OffRouteObserver
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.tripdata.maneuver.api.MapboxManeuverApi
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
@@ -40,6 +47,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import java.time.Instant
+import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +65,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 internal class MapboxNavigationEngine(
     context: Context,
     private val tripLog: TripLogStore,
+    private val debugLog: DebugLog,
 ) : NavigationEngine, MapboxNavigationObserver {
 
     private val appContext = context.applicationContext
@@ -69,6 +78,9 @@ internal class MapboxNavigationEngine(
     private var navigation: MapboxNavigation? = null
     private var replaying = false
     private var lastSessionId: String? = null
+
+    /** The navigator's latest map-matched position, recorded with each progress update. */
+    private var lastMatch: LocationMatcherResult? = null
 
     private val _guidanceState = MutableStateFlow(GuidanceState.IDLE)
     override val guidanceState: StateFlow<GuidanceState> = _guidanceState.asStateFlow()
@@ -99,19 +111,36 @@ internal class MapboxNavigationEngine(
         mapboxNavigation.registerRouteProgressObserver(routeProgressObserver)
         mapboxNavigation.registerArrivalObserver(arrivalObserver)
         mapboxNavigation.registerNavigationSessionStateObserver(sessionStateObserver)
+        mapboxNavigation.registerLocationObserver(locationObserver)
+        mapboxNavigation.registerOffRouteObserver(offRouteObserver)
+        mapboxNavigation.registerRoutesObserver(routesObserver)
+        debugLog.log("navigator_attached")
     }
 
     override fun onDetached(mapboxNavigation: MapboxNavigation) {
         mapboxNavigation.unregisterRouteProgressObserver(routeProgressObserver)
         mapboxNavigation.unregisterArrivalObserver(arrivalObserver)
         mapboxNavigation.unregisterNavigationSessionStateObserver(sessionStateObserver)
+        mapboxNavigation.unregisterLocationObserver(locationObserver)
+        mapboxNavigation.unregisterOffRouteObserver(offRouteObserver)
+        mapboxNavigation.unregisterRoutesObserver(routesObserver)
         navigation = null
+        lastMatch = null
+        debugLog.log("navigator_detached")
     }
 
     override suspend fun previewRoutes(destination: Place): RouteRequestResult {
-        val navigation = navigation ?: return RouteRequestResult.Failed("Navigation is not ready yet")
-        if (_guidanceState.value == GuidanceState.ACTIVE) return RouteRequestResult.Failed("Guidance is running")
-        val origin = deviceLocation.lastKnown() ?: lastPuckPosition ?: return RouteRequestResult.NoLocation
+        val navigation = navigation ?: return RouteRequestResult.Failed("Navigation is not ready yet").also {
+            debugLog.log("route_request_refused", mapOf("reason" to "navigator not attached"))
+        }
+        if (_guidanceState.value == GuidanceState.ACTIVE) {
+            debugLog.log("route_request_refused", mapOf("reason" to "guidance running"))
+            return RouteRequestResult.Failed("Guidance is running")
+        }
+        val deviceFix = deviceLocation.lastKnown()
+        val origin = deviceFix ?: lastPuckPosition ?: return RouteRequestResult.NoLocation.also {
+            debugLog.log("route_request_refused", mapOf("reason" to "no location"))
+        }
         val options = RouteOptions.builder()
             .applyDefaultNavigationOptions()
             .coordinatesList(listOf(origin, destination.point.toPoint()))
@@ -119,10 +148,28 @@ internal class MapboxNavigationEngine(
             .language(LANGUAGE)
             .voiceUnits(DirectionsCriteria.IMPERIAL)
             .build()
+        debugLog.log(
+            "route_request",
+            mapOf(
+                "origin" to origin.debugFields(),
+                "originSource" to if (deviceFix != null) "device" else "map puck",
+                "destination" to mapOf(
+                    "name" to destination.name,
+                    "address" to destination.address,
+                    "at" to listOf(destination.point.latitude, destination.point.longitude),
+                ),
+                "profile" to options.profile(),
+                "alternatives" to options.alternatives(),
+            ),
+        )
         // Billed per request (Directions API); no trip session is involved.
         return when (val response = navigation.requestRoutesAwait(options)) {
-            is RouteResponse.Failure -> RouteRequestResult.Failed(response.message)
+            is RouteResponse.Failure -> {
+                debugLog.log("route_failure", mapOf("message" to response.message, "reasons" to response.reasons))
+                RouteRequestResult.Failed(response.message)
+            }
             is RouteResponse.Routes -> {
+                debugLog.log("route_response", mapOf("count" to response.routes.size, "routes" to response.routes.map { it.debugFields() }))
                 if (response.routes.isEmpty()) {
                     RouteRequestResult.NoRoute
                 } else {
@@ -140,14 +187,19 @@ internal class MapboxNavigationEngine(
         val routes = _previewRoutes.value
         val selected = routes.firstOrNull { it.id == routeId } ?: return
         if (routes.first() == selected) return
+        debugLog.log("route_selected", mapOf("id" to routeId, "listIndex" to routes.indexOf(selected)))
         showPreview(listOf(selected) + routes.filter { it.id != routeId })
     }
 
     override fun startGuidance(simulated: Boolean) {
-        if (navigation == null || _previewRoutes.value.isEmpty()) return
+        if (navigation == null || _previewRoutes.value.isEmpty()) {
+            debugLog.log("start_refused", mapOf("reason" to if (navigation == null) "navigator not attached" else "no routes"))
+            return
+        }
         // The UI asks for location access first; without it a trip session cannot run.
         if (!hasLocationPermission()) {
             Log.w(TAG, "Guidance not started: location permission missing")
+            debugLog.log("start_refused", mapOf("reason" to "location permission missing"))
             return
         }
         dispatch(GuidanceEvent.StartRequested(simulated))
@@ -176,7 +228,17 @@ internal class MapboxNavigationEngine(
     }
 
     private fun dispatch(event: GuidanceEvent) {
-        val transition = GuidanceStateMachine.reduce(_guidanceState.value, event)
+        val from = _guidanceState.value
+        val transition = GuidanceStateMachine.reduce(from, event)
+        debugLog.log(
+            "guidance",
+            mapOf(
+                "event" to event.toString(),
+                "from" to from,
+                "to" to transition.state,
+                "commands" to transition.commands.map { it.toString() },
+            ),
+        )
         transition.commands.forEach(::execute)
         _guidanceState.value = transition.state
         if (transition.state == GuidanceState.IDLE) _destination.value = null
@@ -197,6 +259,7 @@ internal class MapboxNavigationEngine(
                     } catch (e: SecurityException) {
                         // Checked in startGuidance; only reachable if access was revoked in between.
                         Log.e(TAG, "Trip session could not start", e)
+                        debugLog.error("startTripSession", e)
                     }
                 }
             }
@@ -220,23 +283,56 @@ internal class MapboxNavigationEngine(
     }
 
     private val routeProgressObserver = RouteProgressObserver { progress ->
+        debugLog.log("progress", progress.debugFields() + ("match" to lastMatch?.debugFields()))
         if (_guidanceState.value != GuidanceState.ACTIVE) return@RouteProgressObserver
         val next = maneuverApi.getManeuvers(progress).value?.firstOrNull() ?: return@RouteProgressObserver
         _routeProgress.value = progress.toSnapshot(next)
     }
 
-    private val arrivalObserver = object : ArrivalObserver {
-        override fun onWaypointArrival(routeProgress: RouteProgress) = Unit
+    private val locationObserver = object : LocationObserver {
+        override fun onNewRawLocation(rawLocation: MapboxLocation) = Unit
 
-        override fun onNextRouteLegStart(routeLegProgress: RouteLegProgress) = Unit
+        override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
+            lastMatch = locationMatcherResult
+        }
+    }
+
+    private val offRouteObserver = OffRouteObserver { offRoute ->
+        debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to lastMatch?.debugFields()))
+    }
+
+    /** Route changes inside the navigator: the committed route, reroutes, refreshes and the final clean-up. */
+    private val routesObserver = RoutesObserver { result ->
+        val routes = result.navigationRoutes
+        debugLog.log(
+            "routes_updated",
+            mapOf(
+                "reason" to result.reason,
+                "ids" to routes.map { it.id },
+                // The new route in full after a reroute; refreshes only update traffic and times.
+                "primary" to routes.firstOrNull()?.takeIf { result.reason != RoutesExtra.ROUTES_UPDATE_REASON_REFRESH }?.debugFields(),
+            ),
+        )
+    }
+
+    private val arrivalObserver = object : ArrivalObserver {
+        override fun onWaypointArrival(routeProgress: RouteProgress) {
+            debugLog.log("waypoint_arrival", mapOf("leg" to routeProgress.currentLegProgress?.legIndex))
+        }
+
+        override fun onNextRouteLegStart(routeLegProgress: RouteLegProgress) {
+            debugLog.log("next_leg", mapOf("leg" to routeLegProgress.legIndex))
+        }
 
         override fun onFinalDestinationArrival(routeProgress: RouteProgress) {
+            debugLog.log("arrival", mapOf("match" to lastMatch?.debugFields()))
             dispatch(GuidanceEvent.Arrived)
         }
     }
 
     /** Logs every trip session the SDK enters; this is what Mapbox bills. */
     private val sessionStateObserver = NavigationSessionStateObserver { state ->
+        debugLog.log("session_state", mapOf("state" to state.javaClass.simpleName, "sessionId" to state.sessionId, "simulated" to replaying))
         val kind = when (state) {
             is NavigationSessionState.ActiveGuidance -> TripKind.ACTIVE_GUIDANCE
             is NavigationSessionState.FreeDrive -> TripKind.FREE_DRIVE
@@ -260,11 +356,12 @@ internal class MapboxNavigationEngine(
 
                     override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
                         val message = reasons.firstOrNull()?.message ?: "Route request failed"
-                        if (continuation.isActive) continuation.resume(RouteResponse.Failure(message))
+                        val failure = RouteResponse.Failure(message, reasons.map { it.debugFields() })
+                        if (continuation.isActive) continuation.resume(failure)
                     }
 
                     override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
-                        if (continuation.isActive) continuation.resume(RouteResponse.Failure("Route request cancelled"))
+                        if (continuation.isActive) continuation.resume(RouteResponse.Failure("Route request cancelled", emptyList()))
                     }
                 },
             )
@@ -274,7 +371,7 @@ internal class MapboxNavigationEngine(
     private sealed interface RouteResponse {
         data class Routes(val routes: List<NavigationRoute>) : RouteResponse
 
-        data class Failure(val message: String) : RouteResponse
+        data class Failure(val message: String, val reasons: List<Map<String, Any?>>) : RouteResponse
     }
 
     private companion object {

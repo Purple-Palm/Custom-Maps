@@ -12,6 +12,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigation
 import io.github.purplepalm.custommaps.engine.mapbox.search.MapboxSearchProvider
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.SearchProvider
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import java.util.Locale
 
@@ -19,13 +20,17 @@ import java.util.Locale
  * Entry point of the Mapbox implementation; create one per process in Application.onCreate.
  * Creating it starts no trip session: that happens only when the driver starts guidance.
  */
-class MapboxEngine private constructor(application: Application, tripLog: TripLogStore) {
+class MapboxEngine private constructor(
+    application: Application,
+    tripLog: TripLogStore,
+    private val debugLog: DebugLog,
+) {
 
-    private val navigationEngine = MapboxNavigationEngine(application, tripLog)
+    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog)
 
     val navigation: NavigationEngine get() = navigationEngine
 
-    val search: SearchProvider = MapboxSearchProvider()
+    val search: SearchProvider = MapboxSearchProvider(debugLog)
 
     /**
      * Keeps the navigator alive while [owner] is at least created. Attach a screen only after a
@@ -40,11 +45,11 @@ class MapboxEngine private constructor(application: Application, tripLog: TripLo
     }
 
     /** A map for the phone screen. Call [PhoneMap.release] when its view leaves the screen. */
-    fun createPhoneMap(context: Context): PhoneMap = PhoneMap(context, navigationEngine)
+    fun createPhoneMap(context: Context): PhoneMap = PhoneMap(context, navigationEngine, debugLog)
 
     companion object {
 
-        fun create(application: Application, tripLog: TripLogStore): MapboxEngine {
+        fun create(application: Application, tripLog: TripLogStore, debugLog: DebugLog): MapboxEngine {
             if (!MapboxNavigationApp.isSetup()) {
                 MapboxNavigationApp.setup(
                     NavigationOptions.Builder(application)
@@ -53,7 +58,7 @@ class MapboxEngine private constructor(application: Application, tripLog: TripLo
                         .build(),
                 )
             }
-            return MapboxEngine(application, tripLog)
+            return MapboxEngine(application, tripLog, debugLog)
         }
 
         internal fun distanceFormatterOptions(context: Context): DistanceFormatterOptions =

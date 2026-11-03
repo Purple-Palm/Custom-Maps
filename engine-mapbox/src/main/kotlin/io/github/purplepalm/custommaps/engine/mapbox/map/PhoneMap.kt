@@ -47,6 +47,7 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import kotlinx.coroutines.MainScope
@@ -68,6 +69,7 @@ import kotlinx.coroutines.launch
 class PhoneMap internal constructor(
     context: Context,
     private val engine: MapboxNavigationEngine,
+    private val debugLog: DebugLog,
 ) : MapRenderer {
 
     private val appContext = context.applicationContext
@@ -157,6 +159,11 @@ class PhoneMap internal constructor(
         }
     }
 
+    /** Tile and style failures, such as a rejected token, go to the debug log. */
+    private val mapErrors = mapboxMap.subscribeMapLoadingError { error ->
+        debugLog.log("map_error", mapOf("type" to error.type.name, "message" to error.message, "source" to error.sourceId))
+    }
+
     init {
         mapView.alpha = 0f
         mapView.scalebar.enabled = false
@@ -164,6 +171,7 @@ class PhoneMap internal constructor(
             if (event.type == StyleDataLoadedType.STYLE) MapPalette.applyNight(mapboxMap)
         }
         mapboxMap.loadStyle(Style.STANDARD) { loaded ->
+            debugLog.log("map_style_loaded")
             style = loaded
             mapView.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             render(guidanceState)
@@ -180,7 +188,10 @@ class PhoneMap internal constructor(
         mapView.location.addOnIndicatorBearingChangedListener(puckBearingListener)
 
         mapView.camera.addCameraAnimationsLifecycleListener(NavigationBasicGesturesHandler(navigationCamera))
-        navigationCamera.registerNavigationCameraStateChangeObserver { state -> _cameraMode.value = state.toCameraMode() }
+        navigationCamera.registerNavigationCameraStateChangeObserver { state ->
+            _cameraMode.value = state.toCameraMode()
+            debugLog.log("camera_state", mapOf("state" to state.name))
+        }
         mapView.gestures.addOnMapClickListener(mapClickListener)
 
         MapboxNavigationApp.registerObserver(navigationObserver)
@@ -228,6 +239,7 @@ class PhoneMap internal constructor(
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {
         scope.cancel()
+        mapErrors.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
         mapView.location.removeOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.removeOnIndicatorBearingChangedListener(puckBearingListener)

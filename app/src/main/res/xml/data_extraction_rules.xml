@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+: the Mapbox token stays on this phone, out of cloud backups and device transfers. -->
+<!-- Android 12+: the Mapbox token and the debug log stay on this phone, out of cloud backups and device transfers. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="datastore/mapbox_credentials.preferences_pb" />
+        <exclude domain="file" path="debug-log" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="datastore/mapbox_credentials.preferences_pb" />
+        <exclude domain="file" path="debug-log" />
     </device-transfer>
 </data-extraction-rules>
