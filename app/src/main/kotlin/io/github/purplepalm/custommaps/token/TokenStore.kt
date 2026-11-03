@@ -8,10 +8,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import java.io.IOException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 
 /**
  * The Mapbox public token entered on this phone. No build contains a token; this store is the
@@ -29,8 +30,14 @@ interface TokenStore {
 
 class DataStoreTokenStore(private val dataStore: DataStore<Preferences>) : TokenStore {
 
+    /** A read error counts as no token for the moment; reading is tried again, so a token is not lost for good. */
     override val token: Flow<String?> = dataStore.data
-        .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
+        .retryWhen { error, attempt ->
+            if (error !is IOException) return@retryWhen false
+            emit(emptyPreferences())
+            delay(READ_RETRY_MS * (attempt + 1).coerceAtMost(MAX_RETRY_STEPS))
+            true
+        }
         .map { preferences -> preferences[TOKEN_KEY] }
         .distinctUntilChanged()
 
@@ -52,5 +59,7 @@ class DataStoreTokenStore(private val dataStore: DataStore<Preferences>) : Token
         const val RELATIVE_PATH = "datastore/$FILE_NAME.preferences_pb"
 
         private val TOKEN_KEY = stringPreferencesKey("mapbox_access_token")
+        private const val READ_RETRY_MS = 1_000L
+        private const val MAX_RETRY_STEPS = 30L
     }
 }

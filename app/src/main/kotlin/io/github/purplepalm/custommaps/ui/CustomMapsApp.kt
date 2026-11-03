@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun CustomMapsApp(graph: AppGraph) {
     val access by graph.mapsAccess.collectAsStateWithLifecycle()
-    val tokenViewModel = viewModel { TokenViewModel(graph.tokenStore) }
+    val tokenViewModel = viewModel { TokenViewModel(graph.tokenStore, graph.debugLog) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

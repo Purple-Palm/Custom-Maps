@@ -2,7 +2,11 @@ package io.github.purplepalm.custommaps
 
 import android.app.Application
 import android.os.Build
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
@@ -40,23 +44,11 @@ class AppGraph(private val application: Application) {
     /** Every route, road and second of guidance, for the owner to share from Settings. */
     val debugLog = FileDebugLog(File(application.filesDir, DEBUG_LOG_DIRECTORY), applicationScope, Dispatchers.IO)
 
-    val tokenStore: TokenStore = DataStoreTokenStore(
-        PreferenceDataStoreFactory.create(
-            produceFile = { application.preferencesDataStoreFile(DataStoreTokenStore.FILE_NAME) },
-        ),
-    )
+    val tokenStore: TokenStore = DataStoreTokenStore(preferences(DataStoreTokenStore.FILE_NAME))
 
-    val tripLogStore = DataStoreTripLogStore(
-        PreferenceDataStoreFactory.create(
-            produceFile = { application.preferencesDataStoreFile(DataStoreTripLogStore.FILE_NAME) },
-        ),
-    )
+    val tripLogStore = DataStoreTripLogStore(preferences(DataStoreTripLogStore.FILE_NAME))
 
-    val settings: AppSettings = DataStoreAppSettings(
-        PreferenceDataStoreFactory.create(
-            produceFile = { application.preferencesDataStoreFile(DataStoreAppSettings.FILE_NAME) },
-        ),
-    )
+    val settings: AppSettings = DataStoreAppSettings(preferences(DataStoreAppSettings.FILE_NAME))
 
     /** Sets up the navigator; starts no trip session. */
     val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog)
@@ -71,6 +63,15 @@ class AppGraph(private val application: Application) {
         "device" to "${Build.MANUFACTURER} ${Build.MODEL}",
         "android" to Build.VERSION.RELEASE,
         "sdk" to Build.VERSION.SDK_INT,
+    )
+
+    /** A file that cannot be read any more starts over empty instead of failing every read and write. */
+    private fun preferences(name: String): DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        corruptionHandler = ReplaceFileCorruptionHandler { error ->
+            debugLog.log("settings_file_replaced", mapOf("file" to name, "error" to error.toString()))
+            emptyPreferences()
+        },
+        produceFile = { application.preferencesDataStoreFile(name) },
     )
 
     fun start() {

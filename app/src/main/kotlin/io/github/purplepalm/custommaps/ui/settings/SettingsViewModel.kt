@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
+import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
@@ -47,7 +48,14 @@ class SettingsViewModel(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
 
     fun setSimulateDrive(enabled: Boolean) {
-        viewModelScope.launch { settings.setSimulateDrive(enabled) }
+        viewModelScope.launch {
+            try {
+                settings.setSimulateDrive(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value.
+                debugLog.error("settings.setSimulateDrive", e)
+            }
+        }
     }
 
     /** Measures the debug log again; called whenever Settings opens. */

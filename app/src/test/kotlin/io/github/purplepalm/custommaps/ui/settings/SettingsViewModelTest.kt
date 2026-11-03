@@ -6,6 +6,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
 import java.io.File
+import java.io.IOException
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -42,9 +44,11 @@ class SettingsViewModelTest {
 
     private val settings = object : AppSettings {
         val simulate = MutableStateFlow(false)
+        var storageFull = false
         override val simulateDrive = simulate
 
         override suspend fun setSimulateDrive(enabled: Boolean) {
+            if (storageFull) throw IOException("No space left on device")
             simulate.value = enabled
         }
     }
@@ -52,6 +56,11 @@ class SettingsViewModelTest {
     private val archive = object : DebugLogArchive {
         var bytes = 1_234L
         var cleared = false
+        val logged = mutableListOf<String>()
+
+        override fun log(type: String, fields: Map<String, Any?>) {
+            logged += type
+        }
 
         override suspend fun sizeBytes(): Long = bytes
 
@@ -123,6 +132,16 @@ class SettingsViewModelTest {
         runCurrent()
         assertTrue(archive.cleared)
         assertEquals(0L, viewModel.debug.value.logBytes)
+    }
+
+    @Test
+    fun `a switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setSimulateDrive(true)
+        runCurrent()
+        assertFalse(viewModel.debug.value.simulateDrive)
+        assertEquals(listOf("error"), archive.logged)
     }
 
     @Test

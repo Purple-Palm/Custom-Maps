@@ -46,6 +46,7 @@ import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
+import java.io.IOException
 import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
@@ -385,7 +386,14 @@ internal class MapboxNavigationEngine(
         lastSessionId = state.sessionId
         val start = TripSessionStart(Instant.now(), kind, simulated = replaying)
         Log.i(TAG, "Trip session started: $kind${if (start.simulated) " (simulated)" else ""}")
-        scope.launch { tripLog.record(start) }
+        scope.launch {
+            try {
+                tripLog.record(start)
+            } catch (e: IOException) {
+                // Storage full or unreadable: the drive goes on, only this entry is lost.
+                debugLog.error("tripLog.record", e)
+            }
+        }
     }
 
     /**

@@ -28,7 +28,7 @@ class FileDebugLog(
     private val io: CoroutineDispatcher,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val maxBytes: Long = DEFAULT_MAX_BYTES,
-) : DebugLog, DebugLogArchive {
+) : DebugLogArchive {
 
     private class Entry(val day: LocalDate, val line: String)
 

@@ -36,7 +36,7 @@ fun DebugLog.error(where: String, error: Throwable) {
 private const val STACK_FRAMES = 12
 
 /** The stored log, as Settings shows, shares and clears it. */
-interface DebugLogArchive {
+interface DebugLogArchive : DebugLog {
 
     suspend fun sizeBytes(): Long
 

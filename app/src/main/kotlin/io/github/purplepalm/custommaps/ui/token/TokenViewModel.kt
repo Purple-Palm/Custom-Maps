@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.token.TokenStore
+import java.io.IOException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -20,7 +23,7 @@ sealed interface TokenState {
     data class Present(val masked: String) : TokenState
 }
 
-class TokenViewModel(private val store: TokenStore) : ViewModel() {
+class TokenViewModel(private val store: TokenStore, private val debugLog: DebugLog) : ViewModel() {
 
     val state: StateFlow<TokenState> = store.token
         .map { token -> if (token == null) TokenState.Missing else TokenState.Present(MapboxAccessTokens.mask(token)) }
@@ -30,12 +33,21 @@ class TokenViewModel(private val store: TokenStore) : ViewModel() {
     fun save(input: String): AccessTokenCheck {
         val check = MapboxAccessTokens.check(input)
         if (check == AccessTokenCheck.VALID) {
-            viewModelScope.launch { store.save(input) }
+            viewModelScope.launch { write("tokenStore.save") { store.save(input) } }
         }
         return check
     }
 
     fun clear() {
-        viewModelScope.launch { store.clear() }
+        viewModelScope.launch { write("tokenStore.clear") { store.clear() } }
+    }
+
+    /** A failed write leaves the stored token as it was, which the screen keeps showing. */
+    private suspend fun write(where: String, block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: IOException) {
+            debugLog.error(where, e)
+        }
     }
 }
