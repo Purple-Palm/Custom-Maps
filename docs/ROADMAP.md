@@ -61,8 +61,11 @@ The first two drives showed what to fix before the car screen; see [DRIVES.md](D
 - More zoom at turns, so the junction and its lanes are larger (the full junction zoom is stage 4).
 - A **Then** chip that slides out under the maneuver card on the approach, with the arrow of the
   maneuver after the next one.
-- Routes end at the place's entrance: Mapbox Search's stop point is the route's end, the place
-  itself the arrival target. No more routes that end behind a building.
+- Routes end where a car stops for the place: Mapbox Search's stop point for cars is the route's
+  end, and the place itself is the arrival target, so the arrival names the right side. No more
+  routes that end behind a building when Search knows the stop point.
+- Start checks how old the routes are and how far the car has moved since they were planned, and
+  refreshes them when needed (whether Start waits for the refresh is an open question).
 - Diagnostics in the debug log: crashes and earlier exit reasons, device state (screen, power
   saving, heat, network), one camera line a second with the frame rate, repeated map errors folded
   into one line a minute, stop points of search results and GPS fix age.
@@ -168,8 +171,10 @@ Mapbox logo and attribution rules apply in every view.
 
 - **Lane-level magic carpet:** Mapbox 3D Lanes (lane geometry, in private preview since January 2026)
   is promised for mobile apps in 2027. With it, the stage 5 ribbon can move onto the exact lane. Mapbox's
-  detailed lane markings in the map (Standard "lane details") are switched off by Navigation SDK 3.34
-  for apps like this one; to be checked with each SDK upgrade.
+  detailed lane markings in the map (Standard "lane details", HD roads) are off by default and cover
+  about 70 major cities; on top of that, Navigation SDK 3.34's camera data source switches them off
+  on every style load unless Mapbox's non-public coordination module is attached. To be checked
+  with each SDK upgrade.
 
 - **Sideloading:** Android developer verification will require apps installed outside Google Play to be
   registered to a verified developer. Enforcement starts outside the US in 2026 and worldwide in 2027;

@@ -218,12 +218,12 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Alternatives:**
   - Tune NavigationCamera. It restarts its animations on every update, so once-a-second updates can never look continuous.
   - The Maps viewport plugin's follow-puck state. It moves every frame but bolts the camera to the puck, the opposite of what the owner asked for.
-- **Why:** it is the only design whose motion is continuous by construction, it does not depend on the system animation setting, and the same controller drives the car map.
+- **Why:** it is the only design whose motion is continuous by construction; the camera itself does not depend on the system animation setting (the drawn car's glide still does, see CAMERA.md); and the same controller drives the car map.
 - **Cost:** the app owns the camera: every other camera change during guidance hands the camera back to the driver or goes through the controller. Re-check the Navigation SDK's framing behaviour on every SDK upgrade.
 
 ## 28. Routes end at the stop point, not the display point
 
-- **Chosen:** a place keeps two points: where it is shown, and where a car stops (Mapbox Search's routable point, usually the entrance). Routes go to the stop point; the display point is passed as the arrival target, so the instruction names the right side.
+- **Chosen:** a place keeps two points: where it is shown, and where a car stops (the routable point Mapbox Search gives for cars; points marked as a building entrance are for people on foot and are skipped). Routes go to the stop point; the display point is passed as the arrival target, so the instruction names the right side.
 - **Alternatives:** the display point only, which the Directions API snaps to the nearest road, sometimes the service road behind a building; or always arriving curbside, which can add a loop around the block.
 - **Why:** the first drive ended behind a big-box store whose address point lies in the middle of the building.
 
