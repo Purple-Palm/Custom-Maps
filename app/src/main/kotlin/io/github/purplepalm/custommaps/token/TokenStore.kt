@@ -45,7 +45,7 @@ class DataStoreTokenStore(private val dataStore: DataStore<Preferences>) : Token
     }
 
     companion object {
-        /** DataStore name. Must match the paths excluded in res/xml/backup_rules.xml and data_extraction_rules.xml. */
+        /** DataStore name. Must never be among the files res/xml/backup_rules.xml and data_extraction_rules.xml include. */
         const val FILE_NAME = "mapbox_credentials"
 
         /** Location of the file relative to the app's files directory. */

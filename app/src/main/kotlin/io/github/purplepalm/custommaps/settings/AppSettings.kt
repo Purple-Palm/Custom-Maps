@@ -30,6 +30,9 @@ class DataStoreAppSettings(private val dataStore: DataStore<Preferences>) : AppS
 
     companion object {
         const val FILE_NAME = "app_settings"
+
+        /** Location of the file relative to the app's files directory, as the backup rules name it. */
+        const val RELATIVE_PATH = "datastore/$FILE_NAME.preferences_pb"
         private val SIMULATE_DRIVE = booleanPreferencesKey("simulate_drive")
     }
 }

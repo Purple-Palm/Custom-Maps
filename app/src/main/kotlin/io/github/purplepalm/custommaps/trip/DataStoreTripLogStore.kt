@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
-/** The trip session log in its own DataStore file; it may be backed up like other settings. */
+/** The trip session log in its own DataStore file; it is backed up like the settings. */
 class DataStoreTripLogStore(private val dataStore: DataStore<Preferences>) : TripLogStore {
 
     override val entries: Flow<List<TripSessionStart>> = dataStore.data
@@ -29,6 +29,9 @@ class DataStoreTripLogStore(private val dataStore: DataStore<Preferences>) : Tri
 
     companion object {
         const val FILE_NAME = "trip_log"
+
+        /** Location of the file relative to the app's files directory, as the backup rules name it. */
+        const val RELATIVE_PATH = "datastore/$FILE_NAME.preferences_pb"
         private val LOG_KEY = stringPreferencesKey("trip_session_starts")
     }
 }
