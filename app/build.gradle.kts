@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,24 @@ plugins {
 
 // Commit the build was made from, shown in Settings: the short SHA on CI, "local" otherwise.
 val buildRevision: String = providers.environmentVariable("GITHUB_SHA").map { it.take(7) }.getOrElse("local")
+
+// Optional shared key for debug builds, so a newer build (from CI or Android Studio) installs over the
+// installed one. Values come from environment variables (CI secrets) or local.properties.
+val localProperties = Properties().apply {
+    providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+        .asText.orNull?.let { load(it.reader()) }
+}
+val debugSigning: Map<String, String?> =
+    listOf("DEBUG_KEYSTORE_FILE", "DEBUG_KEYSTORE_PASSWORD", "DEBUG_KEY_ALIAS", "DEBUG_KEY_PASSWORD")
+        .associateWith { name ->
+            providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
+                ?: localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+        }
+val missingDebugSigning = debugSigning.filterValues { it == null }.keys
+check(missingDebugSigning.isEmpty() || missingDebugSigning.size == debugSigning.size) {
+    "Shared debug signing key is only partly configured; missing: ${missingDebugSigning.joinToString()}"
+}
+val useSharedDebugKey = missingDebugSigning.isEmpty()
 
 android {
     namespace = "io.github.purplepalm.custommaps"
@@ -26,11 +46,25 @@ android {
         }
     }
 
+    signingConfigs {
+        if (useSharedDebugKey) {
+            create("sharedDebug") {
+                storeFile = file(debugSigning.getValue("DEBUG_KEYSTORE_FILE")!!)
+                storePassword = debugSigning.getValue("DEBUG_KEYSTORE_PASSWORD")
+                keyAlias = debugSigning.getValue("DEBUG_KEY_ALIAS")
+                keyPassword = debugSigning.getValue("DEBUG_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // Lets a debug build live next to the Play build, so neither has to be uninstalled.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            if (useSharedDebugKey) {
+                signingConfig = signingConfigs.getByName("sharedDebug")
+            }
         }
     }
 

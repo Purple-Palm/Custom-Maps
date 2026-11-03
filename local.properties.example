@@ -1,0 +1,15 @@
+# Template for local.properties, which is git-ignored. Copy the lines you need; never commit real values.
+#
+# Android Studio writes the SDK location itself:
+# sdk.dir=/path/to/Android/sdk
+#
+# The Mapbox access token is NOT configured here. It is entered in the app (Settings) and
+# stays on the phone. Mapbox SDK downloads need no token at all.
+#
+# Optional shared key for debug builds (README, "Shared debug signing key"). Use the same values
+# as the GitHub secrets so local and CI builds install over each other. Set all four or none.
+# Use an absolute path with forward slashes, also on Windows (C:/Users/me/keys/custommaps-debug.p12).
+DEBUG_KEYSTORE_FILE=
+DEBUG_KEYSTORE_PASSWORD=
+DEBUG_KEY_ALIAS=
+DEBUG_KEY_PASSWORD=
