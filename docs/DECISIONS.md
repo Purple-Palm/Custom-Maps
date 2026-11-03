@@ -52,7 +52,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen:**
   - No build contains a token: debug, CI or Play.
   - The driver pastes a public token on first launch or in Settings; Settings shows it only masked. The typed value never enters saved instance state.
-  - It is stored in a dedicated DataStore file. That file is excluded from cloud backup and device transfer, and a unit test keeps the backup rules in sync with the file path.
+  - It is stored in a dedicated DataStore file. The backup rules include only the settings and the trip log (see 21), so that file is never backed up or transferred; a unit test keeps the rules in sync with the file paths.
   - The token reaches the SDKs at runtime through `MapboxOptions.accessToken`. Secret tokens are refused.
 - **Alternatives:** `resValue` from `local.properties`, or a GitHub secret built into CI APKs.
 - **Why:** this repository is public, so anyone with a GitHub account can download its CI artifacts. A token inside them would be public too.
@@ -102,7 +102,9 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Chosen:** a pure state machine in `:core-nav` (`GuidanceStateMachine`) turns driver actions and SDK events into engine commands, and it alone starts and stops trip sessions.
   - Preview routes stay in the engine and reach the navigator only when the driver presses Start.
+  - The session starts only once the navigator has accepted the routes. Started earlier, it begins as a separate free drive session and becomes active guidance a moment later. If the navigator rejects the routes, guidance goes back to the preview.
   - End and arrival stop the trip session first and clear the routes after that. Clearing routes while a session runs would switch it to free drive, which Mapbox bills.
+  - A session stopped outside the app, by End Navigation in the SDK's trip notification, ends guidance the usual way.
   - A dedicated lifecycle owner keeps the navigator alive only for the length of a drive. When the app goes to the background mid-drive, guidance carries on with the trip notification.
 - **Alternatives:** Mapbox's ready-made navigation UI, or free drive just to show the location. Both start billed sessions on their own.
 - **Why:** trip sessions are what Mapbox bills for navigation, and the rules are testable on the JVM this way.
@@ -122,7 +124,8 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Chosen:**
   - The map stays composed for the whole life of the activity. Settings opens on top of it.
-  - The activity handles rotation and resizing itself, so the map is not rebuilt when the phone turns.
+  - The activity handles configuration changes such as resizing itself, so the map is not rebuilt for them.
+  - A map created during a drive, after the app was reopened, draws the navigator's current route at once.
   - Replacing or removing the token recreates the activity, so a new map and navigator use the new token. Replacing it is blocked during guidance.
 - **Why:** the Maps SDK releases a map only when its activity is destroyed, and rebuilding the navigator mid-drive would end the drive.
 
@@ -130,8 +133,9 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Chosen:**
   - Search Box API, which covers addresses and places (businesses, points of interest), limited to the US and English.
-  - Requests start 300 ms after typing stops, from two characters on; at most 8 suggestions.
+  - Requests start 300 ms after typing stops, from two characters on; at most 8 suggestions. Clearing the field cancels a request at once, and after a failure the same text can be searched again.
   - The search engine is recreated when the token changes.
+  - No search history: the engine has no local history or favorites, picked places are not added to history, and history left by earlier builds is cleared.
 - **Alternative:** the Geocoding API, which covers addresses only.
 
 ## 18. Simulated drive and the trip session log
@@ -155,10 +159,37 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen:**
   - Events are written as JSON lines, one file per day, in the app's private files: routes with every step, guidance once a second, searches, trip sessions and errors.
   - Logging never blocks the main thread: a single background writer drains a bounded queue.
-  - The oldest days are deleted past 50 MB. The log is excluded from backups and device transfers.
+  - The oldest days are deleted past 50 MB. The log is never backed up or transferred. Clear deletes it together with the copies made for sharing.
   - The owner shares it from Settings through the share sheet as plain text files, for example to Google Drive, where it can be read for diagnosis.
   - Every line passes a filter that masks Mapbox tokens and `access_token` parameters.
 - **Alternatives:**
   - Automatic upload: needs a server or a sign-in inside the app.
   - Logcat only: lost on restart and needs a computer with ADB.
   - A crash reporting service: sends data to a third party all the time.
+
+## 21. Backups include only the settings and the trip log
+
+- **Chosen:** the backup rules (Android 8 to 11) and data extraction rules (Android 12+) list the two files worth keeping: the settings and the trip session log. With an include list, nothing else is backed up or transferred.
+- **Alternatives:**
+  - An exclude list. It left in whatever the Mapbox SDKs write to the app's files, such as search history and map and routing caches.
+  - No backups at all. The settings and the trip count would not survive a new phone.
+- **Why:** files that SDKs add later stay on the phone without anyone having to notice them.
+
+## 22. The phone screen stays in portrait
+
+- **Chosen:** the main activity is locked to portrait. The Mapbox logo's margin is also capped, so it stays inside the map whatever the panels cover.
+- **Alternative:** a landscape layout with the panels at the sides. It belongs with phone-only use, which the roadmap keeps for later.
+- **Why:** the panels are laid out for a tall screen; in landscape the route sheet covered Start and pushed the logo off the map.
+- **Cost:** from Android 16, large screens such as tablets ignore the lock. Phones keep it.
+
+## 23. Routes and guidance need precise location
+
+- **Chosen:** Directions and Start need precise location. With approximate location the prompt offers to switch, and once Android stops showing the permission dialog it opens the app's system settings. The engine also refuses to start guidance on GPS without precise location; a simulated drive needs none.
+- **Alternative:** accept approximate location.
+- **Why:** approximate positions can be kilometres off and update rarely. Routes would start from the wrong place, and a billed trip session could not follow the route.
+
+## 24. A refused token is named as such
+
+- **Chosen:** a refused token is recognised by the router's authentication failure, by HTTP 401 or 403 from search, and by the status code or wording in map loading errors. The screen then says that Mapbox did not accept the token and offers Settings.
+- **Alternative:** check the token with a request when it is entered. That is one more request, and a token can still be revoked later.
+- **Cost:** map errors carry no status code, so the map check reads the error message.
