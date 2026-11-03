@@ -13,6 +13,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 5 | Junction view in the car's routing card (variant A) | Planned |
 | 6 | Guidance tones instead of voice | Planned |
 | 7 | Split screen with a live maneuver view (variant B) | Planned |
+| 8 | 3D navigation and visual polish | Planned; the owner sets its place in the order |
 
 ## Stage 0: skeleton (done)
 
@@ -66,6 +67,30 @@ build number.
 - **6. Tones:** short own tones at the moments of Mapbox voice instructions, audio focus with ducking; tones, voice or silent.
 - **7. Split screen (variant B):** live zoomed maneuver view next to the main map before complex maneuvers; falls back to variant A on small screens.
 
+## Stage 8: 3D navigation and visual polish (planned)
+
+The goal is guidance as beautiful and smooth as possible, on the phone and in the car, with lanes that are
+impossible to miss. Mapbox's own "3D Live Navigation" and "Magic Carpet" (a glowing path on the lane to
+take) are products for car makers, in private preview and in production only in BMW cars; they need
+lane geometry and the car's own cameras, and are not in the public SDK this app uses. This stage builds
+what the public SDK allows:
+
+- **3D following view:** a steeper tilt while following, 3D buildings, landmarks and landmark icons
+  (trees and building facades behind a detail switch), a 3D car in place of the arrow, a glowing route
+  line with traffic colours, and camera, car and route line moving smoothly together.
+- **Route visible behind buildings:** the hidden part of the route shows through tall buildings, or the
+  buildings over the route fade out.
+- **Magic carpet, road level:** a glowing ribbon along the road ahead that brightens before a maneuver.
+  It follows the road, not a lane: the public route data says which lanes to use at each junction but
+  not where each lane is on the map.
+- **Lanes as clear as possible:** larger, high-contrast lane arrows in the maneuver card and in the car's
+  routing card, with the lanes to use standing out from a distance.
+- **Smoothness and heat:** frame-rate caps, detail stepping down when the phone gets hot, frame times in
+  the debug log, and a 3D switch in Settings with today's flat view as the fallback.
+- **The car screen:** the same 3D view on Android Auto, measured on the Desktop Head Unit and in the car.
+
+Mapbox logo and attribution rules apply in every view.
+
 ## Future (not scheduled; the owner decides when)
 
 - **Route preferences:** fastest, eco, fewer stops and traffic lights in the city (to save fuel),
@@ -78,6 +103,11 @@ build number.
 - **Offline regions.**
 
 ## Watch list
+
+- **Lane-level magic carpet:** Mapbox 3D Lanes (lane geometry, in private preview since January 2026)
+  is promised for mobile apps in 2027. With it, the stage 8 ribbon can move onto the exact lane. Mapbox's
+  detailed lane markings in the map (Standard "lane details") are switched off by Navigation SDK 3.34
+  for apps like this one; to be checked with each SDK upgrade.
 
 - **Sideloading:** Android developer verification will require apps installed outside Google Play to be
   registered to a verified developer. Enforcement starts outside the US in 2026 and worldwide in 2027;
