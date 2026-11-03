@@ -41,9 +41,10 @@ Design decisions and their alternatives are recorded in [docs/DECISIONS.md](docs
 
 Every push to `main` builds a debug APK.
 
-1. On GitHub, open **Actions → CI** and the latest successful run.
-2. Under **Artifacts**, download `custommaps-debug-<run number>`. It is a zip with `app-debug.apk` inside.
-3. Copy the APK to the phone (or download it on the phone), open it and allow installing apps from
+1. On GitHub, open **Actions → CI** and the latest successful run. Downloads need a signed-in
+   GitHub account.
+2. Under **Artifacts**, download `custommaps-debug-<run>-<commit>.apk`. It is the APK itself, not a zip.
+3. Open the APK on the phone (download it there, or copy it over), and allow installing apps from
    that source when Android asks.
 4. Launch Custom Maps and paste your Mapbox token.
 
@@ -174,7 +175,7 @@ stage 3 sets up an internal testing track for that.
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on demand.
 It builds the debug APK, runs the unit tests and lint, checks 16 KB page alignment and uploads the
-APK as an artifact that is kept for 30 days. The steps themselves live in
+APK, unzipped, as an artifact that is kept for 30 days. The steps themselves live in
 [`scripts/ci.sh`](scripts/ci.sh). CI needs no Mapbox token, and the debug signing secrets are optional.
 
 ## Mapbox usage
