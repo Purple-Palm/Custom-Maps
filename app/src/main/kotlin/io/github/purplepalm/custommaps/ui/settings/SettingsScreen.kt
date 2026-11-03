@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.ui.settings
 
+import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,8 +23,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -53,6 +60,8 @@ fun SettingsScreen(
     onSaveToken: (String) -> AccessTokenCheck,
     onClearToken: () -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
+    onShareLog: () -> Unit,
+    onClearLog: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -83,7 +92,7 @@ fun SettingsScreen(
 
             TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
             SectionDivider()
-            DebugSection(debug, onSimulateDriveChange)
+            DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog)
             SectionDivider()
 
             SectionTitle(R.string.about_title)
@@ -152,7 +161,12 @@ private fun TokenSection(
 
 /** Trip sessions are what Mapbox bills for navigation, so their count is kept in sight. */
 @Composable
-private fun DebugSection(debug: DebugState, onSimulateDriveChange: (Boolean) -> Unit) {
+private fun DebugSection(
+    debug: DebugState,
+    onSimulateDriveChange: (Boolean) -> Unit,
+    onShareLog: () -> Unit,
+    onClearLog: () -> Unit,
+) {
     val uriHandler = LocalUriHandler.current
     SectionTitle(R.string.debug_title)
     Text(
@@ -211,6 +225,58 @@ private fun DebugSection(debug: DebugState, onSimulateDriveChange: (Boolean) -> 
         Spacer(Modifier.width(16.dp))
         Switch(checked = debug.simulateDrive, onCheckedChange = onSimulateDriveChange)
     }
+
+    Spacer(Modifier.height(16.dp))
+    DebugLogBlock(debug.logBytes, onShareLog, onClearLog)
+}
+
+@Composable
+private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: () -> Unit) {
+    val context = LocalContext.current
+    var confirmClear by remember { mutableStateOf(false) }
+    Text(
+        text = stringResource(R.string.debug_log_title),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = when {
+            logBytes == null -> stringResource(R.string.debug_log_measuring)
+            logBytes == 0L -> stringResource(R.string.debug_log_empty)
+            else -> stringResource(R.string.debug_log_size, Formatter.formatShortFileSize(context, logBytes))
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = stringResource(R.string.debug_log_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val hasLog = (logBytes ?: 0L) > 0L
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onShareLog, enabled = hasLog) { Text(stringResource(R.string.debug_log_share)) }
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = { confirmClear = true }, enabled = hasLog) { Text(stringResource(R.string.debug_log_clear)) }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text(stringResource(R.string.debug_log_clear_title)) },
+            text = { Text(stringResource(R.string.debug_log_clear_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClear = false
+                        onClearLog()
+                    },
+                ) { Text(stringResource(R.string.debug_log_clear)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+    }
 }
 
 @Composable
@@ -250,10 +316,13 @@ private fun SettingsScreenPreview() {
                     TripSessionStart(Instant.parse("2026-11-01T02:40:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false),
                 ),
                 simulateDrive = true,
+                logBytes = 2_400_000,
             ),
             onSaveToken = { AccessTokenCheck.VALID },
             onClearToken = {},
             onSimulateDriveChange = {},
+            onShareLog = {},
+            onClearLog = {},
             onBack = {},
         )
     }

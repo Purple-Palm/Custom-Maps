@@ -1,9 +1,11 @@
 package io.github.purplepalm.custommaps.ui.settings
 
+import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
+import java.io.File
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +49,21 @@ class SettingsViewModelTest {
         }
     }
 
+    private val archive = object : DebugLogArchive {
+        var bytes = 1_234L
+        var cleared = false
+
+        override suspend fun sizeBytes(): Long = bytes
+
+        override suspend fun export(target: File, header: Map<String, Any?>): List<File> =
+            if (bytes == 0L) emptyList() else listOf(File(target, "custom-maps-debug-2026-11-03.txt"))
+
+        override suspend fun clear() {
+            cleared = true
+            bytes = 0
+        }
+    }
+
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -60,7 +77,7 @@ class SettingsViewModelTest {
     private fun trip(daysAgo: Long, simulated: Boolean = false) =
         TripSessionStart(now.minusDays(daysAgo).toInstant(), TripKind.ACTIVE_GUIDANCE, simulated)
 
-    private fun TestScope.viewModel() = SettingsViewModel(tripLog, settings) { now }.also {
+    private fun TestScope.viewModel() = SettingsViewModel(tripLog, settings, archive) { now }.also {
         it.debug.launchIn(backgroundScope)
         runCurrent()
     }
@@ -89,6 +106,23 @@ class SettingsViewModelTest {
         tripLog.record(trip(daysAgo = 0))
         runCurrent()
         assertEquals(1, viewModel.debug.value.tripsThisMonth)
+    }
+
+    @Test
+    fun `the debug log size is measured when settings opens`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.refreshLogSize()
+        runCurrent()
+        assertEquals(1_234L, viewModel.debug.value.logBytes)
+    }
+
+    @Test
+    fun `clearing the debug log shows it as empty`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.clearLog()
+        runCurrent()
+        assertTrue(archive.cleared)
+        assertEquals(0L, viewModel.debug.value.logBytes)
     }
 
     @Test

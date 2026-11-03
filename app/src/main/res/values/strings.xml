@@ -6,6 +6,7 @@
     <string name="settings_title">Settings</string>
     <string name="navigate_back">Back</string>
     <string name="action_close">Close</string>
+    <string name="action_cancel">Cancel</string>
 
     <string name="token_title">Mapbox access token</string>
     <string name="token_missing_explainer">Maps, routes and search need your Mapbox public token. Create one at console.mapbox.com under Tokens and paste it here.</string>
@@ -59,6 +60,17 @@
     <string name="debug_trip_guidance">Guidance</string>
     <string name="debug_trip_free_drive">Free drive</string>
     <string name="debug_trip_simulated">simulated</string>
+    <string name="debug_log_title">Debug log</string>
+    <string name="debug_log_note">Every route with its roads and maneuvers, every second of guidance, searches and errors. It stays on this phone until you share it, for example to Google Drive. The Mapbox token is never in it.</string>
+    <string name="debug_log_size">%1$s on this phone</string>
+    <string name="debug_log_measuring">Measuring…</string>
+    <string name="debug_log_empty">Nothing recorded yet.</string>
+    <string name="debug_log_share">Share debug log</string>
+    <string name="debug_log_share_subject">Custom Maps debug log</string>
+    <string name="debug_log_share_failed">The debug log could not be prepared for sharing.</string>
+    <string name="debug_log_clear">Clear</string>
+    <string name="debug_log_clear_title">Clear the debug log?</string>
+    <string name="debug_log_clear_message">All routes, drives and searches recorded on this phone are deleted.</string>
     <string name="debug_simulate_drive">Simulate drive</string>
     <string name="debug_simulate_drive_note">Start replays the route instead of following GPS, for testing without driving. Each run counts as a trip.</string>
 
