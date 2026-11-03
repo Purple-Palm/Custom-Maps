@@ -237,7 +237,8 @@ builds also include x86_64 for the emulator. The steps themselves live in
   [mapbox.com/pricing](https://www.mapbox.com/pricing)). Free drive counts as a trip too.
 - The app starts a trip session only when you press Start, once the navigator has the route, so a
   drive is one active guidance session and never a free drive first. It stops the session on
-  arrival and on End; from stage 2 also when the car disconnects. Every start is logged, and **Settings → Debug** shows
+  arrival and on End. From stage 2, when the car disconnects mid-drive, guidance continues on the
+  phone, so the session keeps running until arrival or End. Every start is logged, and **Settings → Debug** shows
   the count for the month, the latest starts and a link to the
   [Mapbox statistics page](https://console.mapbox.com/account/statistics/), which has the billed numbers.
 - Route and search requests made outside a trip session are billed per request.
