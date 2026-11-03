@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,15 +19,24 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.token.TokenEditor
+import io.github.purplepalm.custommaps.ui.token.TokenState
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    tokenState: TokenState,
+    onSaveToken: (String) -> AccessTokenCheck,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             verticalArrangement = Arrangement.Center,
         ) {
@@ -39,12 +51,44 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(32.dp))
+
+            when (tokenState) {
+                TokenState.Loading -> Unit
+                TokenState.Missing -> {
+                    Text(
+                        text = stringResource(R.string.token_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.token_missing_explainer),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    TokenEditor(saveLabel = R.string.token_save, onSave = onSaveToken)
+                }
+                is TokenState.Present -> Text(
+                    text = stringResource(R.string.token_saved_as, tokenState.masked),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Spacer(Modifier.height(32.dp))
+            OutlinedButton(onClick = onOpenSettings) {
+                Text(stringResource(R.string.settings_title))
+            }
         }
     }
 }
 
 @Preview
 @Composable
-private fun HomeScreenPreview() {
-    CustomMapsTheme { HomeScreen() }
+private fun HomeScreenMissingTokenPreview() {
+    CustomMapsTheme {
+        HomeScreen(tokenState = TokenState.Missing, onSaveToken = { AccessTokenCheck.VALID }, onOpenSettings = {})
+    }
 }

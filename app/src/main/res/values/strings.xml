@@ -2,4 +2,22 @@
 <resources>
     <string name="app_name">Custom Maps</string>
     <string name="home_tagline">Navigation for Android Auto</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="navigate_back">Back</string>
+
+    <string name="token_title">Mapbox access token</string>
+    <string name="token_missing_explainer">Maps, routes and search need your Mapbox public token. Create one at console.mapbox.com under Tokens and paste it here.</string>
+    <string name="token_field_label">Public token (pk.…)</string>
+    <string name="token_save">Save token</string>
+    <string name="token_replace">Replace token</string>
+    <string name="token_remove">Remove token</string>
+    <string name="token_saved">Token saved.</string>
+    <string name="token_saved_as">Saved on this phone: %1$s</string>
+    <string name="token_not_set">Not set</string>
+    <string name="token_storage_note">The token is stored only on this phone. It is never built into the app and is excluded from backups and device transfers.</string>
+    <string name="token_error_empty">Paste a token first.</string>
+    <string name="token_error_secret">This is a secret token (sk.). Use a public token that starts with pk.</string>
+    <string name="token_error_not_public">Mapbox public tokens start with pk.</string>
+    <string name="token_error_malformed">This does not look like a complete Mapbox token.</string>
 </resources>
