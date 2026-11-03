@@ -52,7 +52,7 @@ class FileDebugLog(
         } catch (e: RuntimeException) {
             JsonLines.event(now, "log_error", mapOf("type" to type, "error" to e.toString()))
         }
-        entries.trySend(Entry(now.atZone(clock.zone).toLocalDate(), line))
+        entries.trySend(Entry(now.atZone(clock.zone).toLocalDate(), Redaction.redact(line)))
     }
 
     override suspend fun sizeBytes(): Long = withContext(io) {
