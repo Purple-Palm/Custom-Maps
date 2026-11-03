@@ -137,8 +137,9 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
             else -> viewModel.onStart()
         }
     }
+    // Asks once when the screen opens; system settings open only when the driver taps the prompt.
     LaunchedEffect(Unit) {
-        if (locationAccess == LocationAccess.NONE) requestLocation()
+        if (locationAccess == LocationAccess.NONE && !locationBlocked) requestLocation()
     }
     // Access may also be granted in system settings while the app is in the background.
     LifecycleResumeEffect(Unit) {
