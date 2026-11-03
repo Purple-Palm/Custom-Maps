@@ -13,8 +13,10 @@
         android:theme="@style/Theme.CustomMaps"
         tools:targetApi="31">
 
+        <!-- Rotation and resizing are handled by Compose, so the map is not rebuilt for them. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
