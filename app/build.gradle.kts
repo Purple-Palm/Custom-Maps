@@ -41,8 +41,11 @@ android {
         resValue("string", "build_revision", buildRevision)
 
         ndk {
-            // Phones run arm64; x86_64 keeps the emulator working. Smaller APKs to download and install.
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            // Phones run arm64; x86_64 keeps the emulator working. CI builds arm64 only
+            // (-Pcustommaps.abis=arm64-v8a) to halve the APK the phone downloads.
+            abiFilters += providers.gradleProperty("custommaps.abis")
+                .map { it.split(',').map(String::trim).filter(String::isNotEmpty) }
+                .getOrElse(listOf("arm64-v8a", "x86_64"))
         }
     }
 

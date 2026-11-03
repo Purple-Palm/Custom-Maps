@@ -174,8 +174,9 @@ stage 3 sets up an internal testing track for that.
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on demand.
-It builds the debug APK, runs the unit tests and lint, checks 16 KB page alignment and uploads the
-APK, unzipped, as an artifact that is kept for 30 days. The steps themselves live in
+It builds the debug APK for arm64 phones (every current phone), runs the unit tests and lint, checks
+16 KB page alignment and uploads the APK, unzipped, as an artifact that is kept for 30 days. Local
+builds also include x86_64 for the emulator. The steps themselves live in
 [`scripts/ci.sh`](scripts/ci.sh). CI needs no Mapbox token, and the debug signing secrets are optional.
 
 ## Mapbox usage

@@ -14,7 +14,8 @@ else
     echo "No shared debug key configured: the APK is signed with a temporary key."
 fi
 
-./gradlew assembleDebug testDebugUnitTest :core-nav:test :app:lintDebug --stacktrace
+# The published APK is for phones only (arm64), which roughly halves its size.
+./gradlew assembleDebug testDebugUnitTest :core-nav:test :app:lintDebug -Pcustommaps.abis=arm64-v8a --stacktrace
 scripts/check-16kb-alignment.sh app/build/outputs/apk/debug/app-debug.apk
 
 # The APK is published as is (not zipped); its name says which run and commit it comes from.
