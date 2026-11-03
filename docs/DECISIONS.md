@@ -97,3 +97,55 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Car service:** `CarAppService` stays in `:app`, the composition root. Car screens go to `:car` in stage 2.
 - **Dependency injection:** done by hand in `AppGraph`. A single-user app does not need Hilt or Koin.
 - **DataStore:** one DataStore instance per file per process, created at application level.
+
+## 13. Trip sessions start only on Start and stop before routes are cleared
+
+- **Chosen:** a pure state machine in `:core-nav` (`GuidanceStateMachine`) turns driver actions and SDK events into engine commands, and it alone starts and stops trip sessions.
+  - Preview routes stay in the engine and reach the navigator only when the driver presses Start.
+  - End and arrival stop the trip session first and clear the routes after that. Clearing routes while a session runs would switch it to free drive, which Mapbox bills.
+  - A dedicated lifecycle owner keeps the navigator alive only for the length of a drive. When the app goes to the background mid-drive, guidance carries on with the trip notification.
+- **Alternatives:** Mapbox's ready-made navigation UI, or free drive just to show the location. Both start billed sessions on their own.
+- **Why:** trip sessions are what Mapbox bills for navigation, and the rules are testable on the JVM this way.
+
+## 14. Location before guidance comes from the platform
+
+- **Chosen:** before Start, the puck uses the Maps SDK's platform location provider; during guidance it switches to the navigator's map-matched location.
+- **Alternative:** free drive for map-matched location at all times. It is billed as a trip.
+- **Cost:** no snapping to roads before Start.
+
+## 15. Night map from Mapbox Standard
+
+- **Chosen:** Mapbox Standard with the night light preset, the monochrome theme and 3D buildings, and graphite road and water colours with amber routes. The configuration is applied when the style data loads, before the first tiles draw, so there is no daylight flash.
+- **Alternative:** a custom style made in Mapbox Studio. It would have to be maintained in the Mapbox account, outside this repository.
+
+## 16. One map per activity
+
+- **Chosen:**
+  - The map stays composed for the whole life of the activity. Settings opens on top of it.
+  - The activity handles rotation and resizing itself, so the map is not rebuilt when the phone turns.
+  - Replacing or removing the token recreates the activity, so a new map and navigator use the new token. Replacing it is blocked during guidance.
+- **Why:** the Maps SDK releases a map only when its activity is destroyed, and rebuilding the navigator mid-drive would end the drive.
+
+## 17. Search
+
+- **Chosen:**
+  - Search Box API, which covers addresses and places (businesses, points of interest), limited to the US and English.
+  - Requests start 300 ms after typing stops, from two characters on; at most 8 suggestions.
+  - The search engine is recreated when the token changes.
+- **Alternative:** the Geocoding API, which covers addresses only.
+
+## 18. Simulated drive and the trip session log
+
+- **Simulated drive:** a switch in **Settings → Debug** replays the selected route instead of following GPS, for testing at home and in the Desktop Head Unit. It still starts a trip session, and that session is logged as simulated.
+- **Trip session log:**
+  - Every new trip session (its session id changes) is stored with its time and kind, up to 500 entries.
+  - Settings shows the count for the current month and the latest entries, plus a link to the Mapbox statistics page.
+  - The count is an estimate; the Mapbox statistics page has the billed numbers.
+
+## 19. Own guidance visuals
+
+- **Chosen:**
+  - Maneuver arrows and lane arrows are drawn by the app in its own style.
+  - Maneuver text and lanes come from the Navigation SDK's maneuver API.
+  - Distances and times are formatted in US units by `:core-nav`.
+- **Alternative:** the Mapbox UI components for maneuvers and lanes. They bring their own look and are harder to fit into the graphite and amber palette.
