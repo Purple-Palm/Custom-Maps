@@ -58,6 +58,9 @@ place only works when all builds are signed with the same key, see the next sect
 ## Using the app
 
 1. On first launch, paste the Mapbox token, then allow location access. The map centers on you.
+   Routes and guidance need **precise** location; with approximate location only, the prompt at
+   the bottom offers to switch. If Android has stopped asking, the prompt opens the app's system
+   settings instead, where precise location can be turned on.
 2. Type an address or a place name in the search field and pick a suggestion.
 3. Tap **Directions**. Up to three routes appear: the chosen one in amber, turning orange and red
    where traffic is heavy, the alternatives in grey. Tap a route, on the map or in the list, to
@@ -65,7 +68,11 @@ place only works when all builds are signed with the same key, see the next sect
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
    notification. The maneuver card shows the next turn, its distance and the lanes; the bottom bar
    shows the arrival time, what is left, **Overview**/**Recenter** and **End**.
-5. Guidance stops at the destination (**Done**) or with **End**. Both stop the trip session.
+5. Guidance stops at the destination (**Done**) or with **End**. Both stop the trip session, and so
+   does **End Navigation** in the trip notification.
+
+The phone screen stays in portrait. If Mapbox refuses the token (mistyped or revoked), the map
+stays empty and the app says so, with a button to Settings where the token can be replaced.
 
 ### Simulated drive
 
@@ -87,8 +94,15 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
 for example Google Drive. Each day becomes one text file, `custom-maps-debug-<date>.txt`, with one
 JSON event per line. The log never leaves the phone otherwise: it is kept out of backups and device
-transfers, the oldest days are deleted once it passes 50 MB, and **Clear** deletes it. It never
-contains the Mapbox token; token-shaped text is masked in every line as a last safeguard.
+transfers, the oldest days are deleted once it passes 50 MB, and **Clear** deletes it together with
+the copies made for sharing. It never contains the Mapbox token; token-shaped text is masked in
+every line as a last safeguard.
+
+### Backups
+
+Android backs up only the app's settings and its trip session log. The token, the debug log and
+the data the Mapbox SDKs keep on the phone (map and routing caches) stay out of cloud backups and
+device transfers. The app keeps no search history.
 
 ## Shared debug signing key
 
@@ -220,8 +234,9 @@ builds also include x86_64 for the emulator. The steps themselves live in
 
 - Mapbox bills navigation by monthly active users and trips, with a free tier (see
   [mapbox.com/pricing](https://www.mapbox.com/pricing)). Free drive counts as a trip too.
-- The app starts a trip session only when you press Start, and stops it on arrival and on End;
-  from stage 2 also when the car disconnects. Every start is logged, and **Settings → Debug** shows
+- The app starts a trip session only when you press Start, once the navigator has the route, so a
+  drive is one active guidance session and never a free drive first. It stops the session on
+  arrival and on End; from stage 2 also when the car disconnects. Every start is logged, and **Settings → Debug** shows
   the count for the month, the latest starts and a link to the
   [Mapbox statistics page](https://console.mapbox.com/account/statistics/), which has the billed numbers.
 - Route and search requests made outside a trip session are billed per request.
