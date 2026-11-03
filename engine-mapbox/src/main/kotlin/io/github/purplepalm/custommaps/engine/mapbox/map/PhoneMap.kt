@@ -24,6 +24,7 @@ import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
 import com.mapbox.maps.plugin.locationcomponent.location
 import com.mapbox.maps.plugin.logo.logo
 import com.mapbox.maps.plugin.scalebar.scalebar
+import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.directions.session.RoutesObserver
@@ -82,13 +83,21 @@ class PhoneMap internal constructor(
     val view: View get() = mapView
 
     private var style: Style? = null
-    private var guidanceState = GuidanceState.IDLE
     private var lastPuck: Point? = null
     private var lastBearing: Double? = null
     private var centeredOnFirstFix = false
 
     private var defaultLocationProvider = DefaultLocationProvider(appContext)
     private val navigationLocationProvider = NavigationLocationProvider()
+
+    /** The navigator's routes; they change on reroute and are empty outside guidance. */
+    private var navigatorRoutes: List<NavigationRoute> = emptyList()
+
+    /**
+     * Read from the engine rather than copied from its flow: a map created during a drive gets the
+     * navigator's routes as soon as it registers, before a collector would have run.
+     */
+    private val guidanceState: GuidanceState get() = engine.guidanceState.value
 
     private val routeLineApi = MapboxRouteLineApi(
         MapboxRouteLineApiOptions.Builder().vanishingRouteLineEnabled(true).build(),
@@ -136,14 +145,10 @@ class PhoneMap internal constructor(
         }
     }
 
-    /** During guidance the navigator's routes (they change on reroute) are drawn instead of the preview. */
+    /** During guidance the navigator's routes are drawn instead of the preview. */
     private val routesObserver = RoutesObserver { result ->
-        if (guidanceState != GuidanceState.ACTIVE) return@RoutesObserver
-        val routes = result.navigationRoutes
-        if (routes.isEmpty()) return@RoutesObserver
-        drawRoutes(routes)
-        viewportDataSource.onRouteChanged(routes.first())
-        viewportDataSource.evaluate()
+        navigatorRoutes = result.navigationRoutes
+        if (guidanceState == GuidanceState.ACTIVE) showNavigatorRoutes()
     }
 
     private val routeProgressObserver = RouteProgressObserver { progress -> onRouteProgress(progress) }
@@ -196,10 +201,7 @@ class PhoneMap internal constructor(
 
         MapboxNavigationApp.registerObserver(navigationObserver)
         scope.launch {
-            combine(engine.guidanceState, engine.previewRoutes) { state, _ -> state }.collect { state ->
-                guidanceState = state
-                render(state)
-            }
+            combine(engine.guidanceState, engine.previewRoutes) { state, _ -> state }.collect { state -> render(state) }
         }
     }
 
@@ -263,6 +265,8 @@ class PhoneMap internal constructor(
             }
             GuidanceState.ACTIVE -> {
                 useLocationProvider(guidance = true)
+                // Also brings back the route when the map is created again during a drive.
+                showNavigatorRoutes()
                 navigationCamera.requestNavigationCameraToFollowing()
             }
             GuidanceState.IDLE, GuidanceState.ARRIVED -> {
@@ -297,7 +301,15 @@ class PhoneMap internal constructor(
         }
     }
 
-    private fun drawRoutes(routes: List<com.mapbox.navigation.base.route.NavigationRoute>) {
+    private fun showNavigatorRoutes() {
+        val routes = navigatorRoutes
+        if (routes.isEmpty()) return
+        drawRoutes(routes)
+        viewportDataSource.onRouteChanged(routes.first())
+        viewportDataSource.evaluate()
+    }
+
+    private fun drawRoutes(routes: List<NavigationRoute>) {
         val style = style ?: return
         routeLineApi.setNavigationRoutes(routes) { value -> routeLineView.renderRouteDrawData(style, value) }
     }
