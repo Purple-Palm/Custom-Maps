@@ -35,9 +35,33 @@ private fun RouteLeg.debugFields(): Map<String, Any?> = mapOf(
     "seconds" to duration(),
     "typicalSeconds" to durationTypical(),
     // How much of the leg is in each traffic level, counted in route segments.
-    "congestion" to annotation()?.congestion()?.groupingBy { it }?.eachCount(),
+    "congestion" to congestionLevels(),
     "steps" to steps().orEmpty().map { it.debugFields() },
 )
+
+/**
+ * Navigation routes come with numeric congestion (0 to 100) rather than levels; it is grouped
+ * here with the SDK's default level ranges.
+ */
+private fun RouteLeg.congestionLevels(): Map<String, Int>? {
+    val annotation = annotation() ?: return null
+    annotation.congestionNumeric()?.let { values ->
+        return values.groupingBy { value ->
+            when {
+                value == null -> "unknown"
+                value < MODERATE_CONGESTION -> "low"
+                value < HEAVY_CONGESTION -> "moderate"
+                value < SEVERE_CONGESTION -> "heavy"
+                else -> "severe"
+            }
+        }.eachCount()
+    }
+    return annotation.congestion()?.groupingBy { it }?.eachCount()
+}
+
+private const val MODERATE_CONGESTION = 40
+private const val HEAVY_CONGESTION = 60
+private const val SEVERE_CONGESTION = 80
 
 private fun LegStep.debugFields(): Map<String, Any?> {
     val maneuver = maneuver()
