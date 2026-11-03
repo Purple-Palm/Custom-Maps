@@ -52,7 +52,7 @@ class FileDebugLog(
         val line = try {
             JsonLines.event(now, type, fields)
         } catch (e: RuntimeException) {
-            JsonLines.event(now, "log_error", mapOf("type" to type, "error" to e.toString()))
+            JsonLines.event(now, "log_error", mapOf("failedType" to type, "error" to e.toString()))
         }
         entries.trySend(Entry(now.atZone(clock.zone).toLocalDate(), Redaction.redact(line)))
     }

@@ -166,7 +166,7 @@ class PhoneMap internal constructor(
 
     /** Tile and style failures, such as a rejected token, go to the debug log. */
     private val mapErrors = mapboxMap.subscribeMapLoadingError { error ->
-        debugLog.log("map_error", mapOf("type" to error.type.name, "message" to error.message, "source" to error.sourceId))
+        debugLog.log("map_error", mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId))
     }
 
     init {

@@ -9,16 +9,19 @@ import java.time.Instant
  */
 object JsonLines {
 
-    /** `{"t":"<time>","type":"<type>", ...fields}` */
+    /**
+     * `{"t":"<time>","type":"<type>", ...fields}`. A field named "t" or "type" is written as
+     * "field_t" or "field_type", so it cannot replace the event's own time or type.
+     */
     fun event(time: Instant, type: String, fields: Map<String, Any?>): String {
         val out = StringBuilder(INITIAL_CAPACITY)
-        out.append("{\"t\":")
+        out.append("{\"$TIME_KEY\":")
         appendString(out, time.toString())
-        out.append(",\"type\":")
+        out.append(",\"$TYPE_KEY\":")
         appendString(out, type)
         for ((key, value) in fields) {
             out.append(',')
-            appendString(out, key)
+            appendString(out, if (key == TIME_KEY || key == TYPE_KEY) "field_$key" else key)
             out.append(':')
             appendValue(out, value)
         }
@@ -89,4 +92,6 @@ object JsonLines {
     }
 
     private const val INITIAL_CAPACITY = 256
+    private const val TIME_KEY = "t"
+    private const val TYPE_KEY = "type"
 }

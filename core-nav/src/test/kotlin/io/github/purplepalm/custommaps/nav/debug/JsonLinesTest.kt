@@ -14,6 +14,12 @@ class JsonLinesTest {
     }
 
     @Test
+    fun `a field cannot replace the event time or type`() {
+        val line = JsonLines.event(Instant.parse("2026-11-03T17:00:00Z"), "map_error", mapOf("type" to "STYLE", "t" to 1))
+        assertEquals("""{"t":"2026-11-03T17:00:00Z","type":"map_error","field_type":"STYLE","field_t":1}""", line)
+    }
+
+    @Test
     fun `strings are escaped`() {
         assertEquals("\"a\\\"b\\\\c\\nd\\te\\u0001\"", JsonLines.encode("a\"b\\c\nd\te\u0001"))
     }
