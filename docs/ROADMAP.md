@@ -7,7 +7,8 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 |---|---|---|
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
-| 2 | Android Auto: car screen on the navigation template | In progress |
+| 1.1 | Guidance polish after the first drives (next build) | Designed; paused at a checkpoint |
+| 2 | Android Auto: car screen on the navigation template | Designed; paused at a checkpoint |
 | 3 | Signed release build and Google Play internal testing | Planned |
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
@@ -46,7 +47,31 @@ Owner checks: install the APK from Actions over the old one, allow precise locat
 route, run a simulated drive (Settings → Debug), end it from the app and once from the notification,
 see one trip per drive in Settings → Debug, and share the debug log to Google Drive.
 
-## Stage 2: Android Auto (in progress)
+## Stage 1.1: guidance polish after the first drives (next build)
+
+The first two drives showed what to fix before the car screen; see [DRIVES.md](DRIVES.md) and
+[CAMERA.md](CAMERA.md). Work is paused at a checkpoint until the owner answers the open questions in
+[STATUS.md](STATUS.md) and says to continue.
+
+- Camera styles in Settings: **Mapbox standard** (today's camera, unchanged, for comparison),
+  **Mapbox tuned** (the same camera with calmer settings) and **Smooth follow** (new, the default).
+- Smooth follow: the camera moves on every display frame and glides after the drawn car; the tilt
+  goes down onto the junction gradually before a turn and back up after it; the early turn on
+  curving roads stays.
+- More zoom at turns, so the junction and its lanes are larger (the full junction zoom is stage 4).
+- A **Then** chip that slides out under the maneuver card on the approach, with the arrow of the
+  maneuver after the next one.
+- Routes end at the place's entrance: Mapbox Search's stop point is the route's end, the place
+  itself the arrival target. No more routes that end behind a building.
+- Diagnostics in the debug log: crashes and earlier exit reasons, device state (screen, power
+  saving, heat, network), one camera line a second with the frame rate, repeated map errors folded
+  into one line a minute, stop points of search results and GPS fix age.
+- Offline: the street map and routing data along the route are downloaded ahead while online, and a
+  chip on the map says when the app has no internet.
+
+## Stage 2: Android Auto (designed)
+
+The full design is in [STAGE-2.md](STAGE-2.md).
 
 - Car app service (navigation category) and screens on the navigation template, on Car App Library
   1.8.0-rc01: 1.7.0 lets any app on the phone that holds the template-renderer permission pose as
