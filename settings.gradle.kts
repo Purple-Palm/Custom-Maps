@@ -29,3 +29,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "CustomMaps"
+
+include(":core-nav")
