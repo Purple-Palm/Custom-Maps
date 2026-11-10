@@ -1,6 +1,8 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
+import android.animation.ValueAnimator
 import android.content.Context
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import com.mapbox.common.location.Location
@@ -9,9 +11,12 @@ import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapView
+import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.Style
 import com.mapbox.maps.StyleDataLoadedType
 import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
+import com.mapbox.maps.plugin.animation.CameraAnimatorType
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.attribution.attribution
@@ -50,12 +55,18 @@ import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.debug.Cadence
+import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,6 +80,10 @@ import kotlinx.coroutines.launch
  * Before guidance the puck comes from the platform location provider, so no trip session (and no
  * free drive billing) is needed just to see where you are. The view's lifecycle follows the hosting
  * activity; call [release] when the view leaves the composition.
+ *
+ * During guidance it writes a "camera" line to the debug log once a second: where the camera is and
+ * where the navigation camera is taking it, how smoothly the camera and the puck moved, and how fast
+ * the map rendered (see [cameraSample]).
  */
 class PhoneMap internal constructor(
     context: Context,
@@ -137,6 +152,25 @@ class PhoneMap internal constructor(
     /** Tile and style errors; offline, the same error comes for every tile, so repeats are only counted. */
     private val mapErrorFolder = RepeatFolder(debugLog, scope)
 
+    // What the once-a-second camera line measures. Everything here runs on the main thread.
+    private var cameraSampling: Job? = null
+    private val cameraCadence = Cadence()
+    private val cameraSteps = CameraSteps()
+    private val puckCadence = Cadence()
+    private var fixes = 0
+    private var lastFixAt = 0L
+    private var lastKeyPoints = 0
+    private var frameUpdates = 0
+    private var frameUpdatesCut = 0
+    private var padding: ViewportPadding? = null
+    private var paddingChanges = 0
+    private var transitionStartedAt = 0L
+
+    // The map's own frame rate, reported about once a second on the render thread while it draws.
+    @Volatile private var renderFps = Double.NaN
+
+    @Volatile private var renderFpsAt = 0L
+
     private val puckPositionListener = OnIndicatorPositionChangedListener { point -> onPuckMoved(point) }
     private val puckBearingListener = OnIndicatorBearingChangedListener { bearing -> lastBearing = bearing }
 
@@ -172,6 +206,9 @@ class PhoneMap internal constructor(
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
             if (guidanceState != GuidanceState.ACTIVE) return
+            fixes += 1
+            lastFixAt = SystemClock.elapsedRealtimeNanos()
+            lastKeyPoints = locationMatcherResult.keyPoints.size
             navigationLocationProvider.changePosition(locationMatcherResult.enhancedLocation, locationMatcherResult.keyPoints)
             viewportDataSource.onLocationChanged(locationMatcherResult.enhancedLocation)
             viewportDataSource.evaluate()
@@ -192,6 +229,46 @@ class PhoneMap internal constructor(
         )
     }
 
+    /** Every camera frame while the camera line is being sampled: how often it moved, and its largest step. */
+    private val cameraChanges = mapboxMap.subscribeCameraChanged { event ->
+        if (cameraSampling == null) return@subscribeCameraChanged
+        cameraCadence.tick(SystemClock.elapsedRealtimeNanos())
+        val camera = event.cameraState
+        cameraSteps.onCamera(camera.center.latitude(), camera.center.longitude(), camera.zoom, camera.bearing, camera.pitch)
+    }
+
+    /**
+     * Counts the navigation camera's frame updates (each one a new animation of about a second) and
+     * the ones cancelled before they finished, because the next update or a gesture came first. Also
+     * logs who takes the camera from the navigation camera: any other animation (a gesture, the
+     * compass) turns it to IDLE. Added before [NavigationBasicGesturesHandler], so it still sees the
+     * state the camera was in.
+     */
+    private val cameraAnimations = object : CameraAnimationsLifecycleListener {
+        override fun onAnimatorStarting(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
+            if (owner == NavigationCamera.NAVIGATION_CAMERA_OWNER) {
+                if (type == CameraAnimatorType.CENTER) frameUpdates += 1
+            } else if (navigationCamera.state != NavigationCameraState.IDLE) {
+                debugLog.log("camera_taken", mapOf("owner" to owner, "animator" to type.name, "from" to navigationCamera.state.name))
+            }
+        }
+
+        // The navigation camera cancels its running animation itself before it starts the next one.
+        override fun onAnimatorCancelling(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
+            if (type == CameraAnimatorType.CENTER && owner == NavigationCamera.NAVIGATION_CAMERA_OWNER) frameUpdatesCut += 1
+        }
+
+        override fun onAnimatorInterrupting(
+            type: CameraAnimatorType,
+            runningAnimator: ValueAnimator,
+            runningAnimatorOwner: String?,
+            newAnimator: ValueAnimator,
+            newAnimatorOwner: String?,
+        ) = Unit
+
+        override fun onAnimatorEnding(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) = Unit
+    }
+
     init {
         mapView.alpha = 0f
         mapView.scalebar.enabled = false
@@ -199,7 +276,7 @@ class PhoneMap internal constructor(
             if (event.type == StyleDataLoadedType.STYLE) MapPalette.applyNight(mapboxMap)
         }
         mapboxMap.loadStyle(Style.STANDARD) { loaded ->
-            debugLog.log("map_style_loaded")
+            debugLog.log("map_style_loaded", mapOf("refreshHz" to mapView.display?.refreshRate))
             style = loaded
             mapView.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             render(guidanceState)
@@ -215,10 +292,20 @@ class PhoneMap internal constructor(
         mapView.location.addOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.addOnIndicatorBearingChangedListener(puckBearingListener)
 
+        mapView.camera.addCameraAnimationsLifecycleListener(cameraAnimations)
         mapView.camera.addCameraAnimationsLifecycleListener(NavigationBasicGesturesHandler(navigationCamera))
         navigationCamera.registerNavigationCameraStateChangeObserver { state ->
             _cameraMode.value = state.toCameraMode()
-            debugLog.log("camera_state", mapOf("state" to state.name))
+            // How long the transition into this state took ("ms" on the state it ended in).
+            val now = SystemClock.elapsedRealtime()
+            val tookMs = if (transitionStartedAt != 0L && !state.isTransition()) now - transitionStartedAt else null
+            transitionStartedAt = if (state.isTransition()) now else 0L
+            debugLog.log("camera_state", mapOf("state" to state.name, "ms" to tookMs).filterValues { it != null })
+        }
+        // Called on the render thread, about once a second while the map draws.
+        mapView.setOnFpsChangedListener { fps ->
+            renderFps = fps
+            renderFpsAt = SystemClock.elapsedRealtimeNanos()
         }
         mapView.gestures.addOnMapClickListener(mapClickListener)
 
@@ -229,6 +316,7 @@ class PhoneMap internal constructor(
     }
 
     override fun setCameraMode(mode: CameraMode) {
+        debugLog.log("camera_request", mapOf("mode" to mode, "from" to navigationCamera.state.name, "guidance" to guidanceState))
         when (mode) {
             CameraMode.FOLLOWING ->
                 if (guidanceState == GuidanceState.ACTIVE) navigationCamera.requestNavigationCameraToFollowing() else centerOnPuck()
@@ -241,6 +329,11 @@ class PhoneMap internal constructor(
     }
 
     override fun setViewportPadding(padding: ViewportPadding) {
+        // A new padding moves the camera at once; the next camera line says to what, and how often.
+        if (padding != this.padding) {
+            this.padding = padding
+            paddingChanges += 1
+        }
         val insets = EdgeInsets(padding.top.toDouble(), padding.left.toDouble(), padding.bottom.toDouble(), padding.right.toDouble())
         viewportDataSource.followingPadding = insets
         viewportDataSource.overviewPadding = insets
@@ -280,13 +373,16 @@ class PhoneMap internal constructor(
 
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {
+        stopCameraSampling()
         mapErrors.cancel()
+        cameraChanges.cancel()
         // The counts of the current minute, before the windows' timers go with the scope.
         mapErrorFolder.flush()
         scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
         mapView.location.removeOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.removeOnIndicatorBearingChangedListener(puckBearingListener)
+        mapView.camera.removeCameraAnimationsLifecycleListener(cameraAnimations)
         mapView.gestures.removeOnMapClickListener(mapClickListener)
         routeLineApi.cancel()
         routeLineView.cancel()
@@ -294,6 +390,7 @@ class PhoneMap internal constructor(
 
     private fun render(state: GuidanceState) {
         if (style == null) return
+        if (state == GuidanceState.ACTIVE) startCameraSampling() else stopCameraSampling()
         when (state) {
             GuidanceState.PREVIEW -> {
                 useLocationProvider(guidance = false)
@@ -334,6 +431,7 @@ class PhoneMap internal constructor(
     private fun onPuckMoved(point: Point) {
         lastPuck = point
         engine.lastPuckPosition = point
+        if (cameraSampling != null) puckCadence.tick(SystemClock.elapsedRealtimeNanos())
         val style = style ?: return
         if (guidanceState == GuidanceState.ACTIVE) {
             routeLineView.renderRouteLineUpdate(style, routeLineApi.updateTraveledRouteLine(point))
@@ -394,6 +492,133 @@ class PhoneMap internal constructor(
         )
     }
 
+    /** Starts the once-a-second camera line; does nothing if it is already running. */
+    private fun startCameraSampling() {
+        if (cameraSampling != null) return
+        val now = SystemClock.elapsedRealtimeNanos()
+        cameraCadence.take(now)
+        puckCadence.take(now)
+        cameraSteps.take()
+        fixes = 0
+        frameUpdates = 0
+        frameUpdatesCut = 0
+        // The first line says what the padding is.
+        paddingChanges = 1
+        startFrameStats()
+        cameraSampling = scope.launch {
+            while (true) {
+                delay(CAMERA_SAMPLE_MS)
+                // Taken even when hidden, so every logged line covers one second. In the background
+                // the map draws nothing; the "activity" lines say when that was.
+                val sample = cameraSample()
+                if (mapView.isShown) debugLog.log("camera", sample)
+            }
+        }
+    }
+
+    private fun stopCameraSampling() {
+        cameraSampling?.cancel() ?: return
+        cameraSampling = null
+        stopFrameStats()
+    }
+
+    /**
+     * The camera line, about 500 bytes a second (1.8 MB an hour of driving). Lags and steps are in
+     * meters, gaps in milliseconds. A smooth camera moves on every frame ("camUpdates" close to
+     * "render.frames", "camGapMs" near one frame); a stepping one shows long gaps and large "steps".
+     * "to" is where the navigation camera is taking the camera; "frameUpdatesCut" counts camera
+     * animations restarted before they finished. "renderFps" is the map's own frame rate against the
+     * screen's refresh; "animatorsEnabled" is false when Android's animations are switched off.
+     */
+    private fun cameraSample(): Map<String, Any?> {
+        val now = SystemClock.elapsedRealtimeNanos()
+        val camera = mapboxMap.cameraState
+        val target = viewportDataSource.getViewportData().cameraForFollowing
+        val puck = lastPuck
+        val fix = navigationLocationProvider.lastLocation
+        val cameraMoves = cameraCadence.take(now)
+        val puckMoves = puckCadence.take(now)
+        val fps = renderFps.takeIf { renderFpsAt != 0L && now - renderFpsAt <= FPS_FRESH_NANOS }
+        val sample = mapOf(
+            "state" to navigationCamera.state.name,
+            "zoom" to Motion.round(camera.zoom, 2),
+            "pitch" to Motion.round(camera.pitch, 1),
+            "bearing" to Motion.round(camera.bearing, 1),
+            "to" to mapOf(
+                "zoom" to target.zoom?.let { Motion.round(it, 2) },
+                "pitch" to target.pitch?.let { Motion.round(it, 1) },
+                "bearing" to target.bearing?.let { Motion.round(it, 1) },
+                "m" to target.center?.let { metersBetween(camera.center, it) },
+            ).filterValues { it != null },
+            // How far the puck trails the latest map-matched fix (it glides there over a second), how
+            // long ago that fix came, and how far the camera center is from the puck.
+            "puckLagM" to if (puck != null && fix != null) metersBetween(puck, Point.fromLngLat(fix.longitude, fix.latitude)) else null,
+            "sinceFixMs" to if (lastFixAt != 0L) (now - lastFixAt) / NANOS_PER_MILLI else null,
+            "camLagM" to puck?.let { metersBetween(camera.center, it) },
+            "camUpdates" to cameraMoves.count,
+            "camGapMs" to cameraMoves.longestGapMillis,
+            "puckUpdates" to puckMoves.count,
+            "puckGapMs" to puckMoves.longestGapMillis,
+            "steps" to cameraSteps.take(),
+            "fixes" to fixes,
+            "keyPoints" to lastKeyPoints,
+            "frameUpdates" to frameUpdates,
+            "frameUpdatesCut" to frameUpdatesCut,
+            "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
+            "paddingChanges" to paddingChanges.takeIf { it > 0 },
+            "render" to takeFrameStats(),
+            "renderFps" to fps?.let { Motion.round(it, 1) },
+            "animatorsEnabled" to ValueAnimator.areAnimatorsEnabled(),
+            "hz" to mapView.display?.refreshRate?.let { Math.round(it) },
+        )
+        fixes = 0
+        frameUpdates = 0
+        frameUpdatesCut = 0
+        paddingChanges = 0
+        return sample.filterValues { it != null }
+    }
+
+    // The render thread statistics are @MapboxExperimental: opted in here, for the camera line only.
+    @OptIn(MapboxExperimental::class)
+    private fun startFrameStats() {
+        val recorder = mapView.renderThreadStatsRecorder
+        if (!recorder.isRecording) recorder.start()
+    }
+
+    /**
+     * The frames of the last second: how many the map drew, how long the render thread took for them,
+     * and how many screen refreshes it missed. Mapbox advises sessions of one to two seconds.
+     */
+    @OptIn(MapboxExperimental::class)
+    private fun takeFrameStats(): Map<String, Any?>? {
+        val recorder = mapView.renderThreadStatsRecorder
+        if (!recorder.isRecording) return null
+        val stats = recorder.stop()
+        recorder.start()
+        val frames = stats.frameTimeList
+        return mapOf(
+            "frames" to frames.size,
+            "fps" to Motion.round(frames.size * 1_000.0 / stats.totalTime.coerceAtLeast(1L), 1),
+            "missedVsync" to stats.totalSkippedVsync,
+            "p50Ms" to stats.percentile50?.let { Motion.round(it, 1) },
+            "p95Ms" to stats.percentile95?.let { Motion.round(it, 1) },
+            "maxMs" to frames.maxOrNull()?.let { Motion.round(it, 1) },
+        )
+    }
+
+    /** The recorder keeps every frame time until stopped, so it never runs outside guidance. */
+    @OptIn(MapboxExperimental::class)
+    private fun stopFrameStats() {
+        val recorder = mapView.renderThreadStatsRecorder
+        if (recorder.isRecording) recorder.stop()
+    }
+
+    private fun metersBetween(from: Point, to: Point): Double =
+        Motion.round(Geo.meters(from.latitude(), from.longitude(), to.latitude(), to.longitude()), 1)
+
+    private fun NavigationCameraState.isTransition(): Boolean =
+        this == NavigationCameraState.TRANSITION_TO_FOLLOWING || this == NavigationCameraState.TRANSITION_TO_OVERVIEW
+
     private fun NavigationCameraState.toCameraMode(): CameraMode = when (this) {
         NavigationCameraState.FOLLOWING, NavigationCameraState.TRANSITION_TO_FOLLOWING -> CameraMode.FOLLOWING
         NavigationCameraState.OVERVIEW, NavigationCameraState.TRANSITION_TO_OVERVIEW -> CameraMode.OVERVIEW
@@ -418,5 +643,10 @@ class PhoneMap internal constructor(
         private const val CAMERA_EASE_MS = 800L
         private const val BROWSE_ZOOM = 15.5
         private const val BROWSE_PITCH = 40.0
+        private const val CAMERA_SAMPLE_MS = 1_000L
+        private const val NANOS_PER_MILLI = 1_000_000L
+
+        /** The map reports its frame rate about once a second; an older value means it stopped drawing. */
+        private const val FPS_FRESH_NANOS = 2_000_000_000L
     }
 }
