@@ -14,6 +14,7 @@ import com.mapbox.maps.plugin.animation.CameraAnimatorType
 import com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import com.mapbox.navigation.base.trip.model.RouteProgressState
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import com.mapbox.navigation.ui.maps.camera.data.ViewportData
 import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserver
@@ -355,7 +356,13 @@ internal class SmoothNavigationCamera(
             )
         }
         this.laneChoices = laneChoices
-        laneFocus.onProgress(now, progress.distanceTraveled.toDouble(), laneChoices, speedMps)
+        laneFocus.onProgress(
+            now = now,
+            routeMeters = progress.distanceTraveled.toDouble(),
+            choices = laneChoices,
+            speedMps = speedMps,
+            onRoute = progress.currentState != RouteProgressState.OFF_ROUTE,
+        )
         // Near a lane choice Large keeps the lanes at the car close to upright: the view turns
         // less toward the road ahead. The data source reads this with every frame it computes.
         setBearingLead(if (laneZoom == LaneZoom.LARGE && laneFocus.goal > 0.0) tuning.laneMaxBearingLead else LaneZoomFrames.SDK_BEARING_LEAD)

@@ -114,7 +114,8 @@ enum class LaneChoiceSkip {
  * - In over [CameraTuning.laneInSeconds], from [windowMeters] before the choice. Once a choice
  *   holds the view it keeps it: a car that brakes, and so shortens the window, stays close.
  * - Held past the choice for at least [CameraTuning.laneHoldMeters] and
- *   [CameraTuning.laneHoldSeconds].
+ *   [CameraTuning.laneHoldSeconds]. Off the route, and on a new route, the meters say nothing of
+ *   the choice, and the time alone holds the view.
  * - Out over [CameraTuning.laneOutSeconds], unless the next choice is no more than
  *   [CameraTuning.laneCoalesceSeconds] of driving from its own window: choices close together keep
  *   the view in.
@@ -149,11 +150,14 @@ class LaneFocus(private val tuning: CameraTuning) {
      * @param routeMeters how far the car is along the current route
      * @param choices the points with lanes ahead of the car; the ones that do not count are passed over
      * @param speedMps the car's speed; unknown counts as standing
+     * @param onRoute false while the navigator has the car off the route, where [routeMeters]
+     *   stands still and [choices] is empty
      */
-    fun onProgress(now: Double, routeMeters: Double, choices: List<LaneChoice>, speedMps: Double?) {
-        // A new route counts its meters from its own start, so where the last choice lay says
-        // nothing any more: only the time still holds the view.
-        if (routeMeters < lastRouteMeters - ROUTE_RESTART_METERS) choiceAt = Double.NaN
+    fun onProgress(now: Double, routeMeters: Double, choices: List<LaneChoice>, speedMps: Double?, onRoute: Boolean = true) {
+        // A new route counts its meters from its own start, and off the route they stand still.
+        // Where the last choice lay says nothing then: only the time still holds the view, and a
+        // car that never reaches the choice does not keep it close.
+        if (!onRoute || routeMeters < lastRouteMeters - ROUTE_RESTART_METERS) choiceAt = Double.NaN
         lastRouteMeters = routeMeters
 
         val window = windowMeters(tuning, speedMps)

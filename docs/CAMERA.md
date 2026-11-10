@@ -972,7 +972,11 @@ fires and how often a looser one would.
 - A next point no more than 10 s of driving from its own start keeps the view in: no zoom out and
   in again between a split and the next exit.
 - A reroute starts the route's metres again; the point that held the view is then held by its time
-  only. Off the route there are no lane choices.
+  only.
+- Off the route there are no lane choices and the route's metres stand still. A point that holds
+  the view when the car leaves the route is then held by its 2 s only as well, and the view eases
+  back out to the road's. A new route within a second or two still finds the view close. Back on
+  the same route, a point that is still ahead takes the view again.
 
 **The view.** The zoom goes to a lane of 14 dp and the tilt stays at 45°: straight down, that zoom
 would show only a few seconds of road at freeway speed. While a point holds the view, the bearing
@@ -1195,7 +1199,8 @@ routes). Among them:
   30 m past it, out over 6 s. Braking does not let the view out before the point.
 - Two lane choices 900 m apart keep the view in; 2.5 km apart let it out between them.
 - A reroute during the hold does not keep the view in, and a point at a distance that is no number
-  never holds it.
+  never holds it. Off the route a point the car never reaches is let go after its 2 s, wherever
+  the route's metres stand, and back on the route it takes the view again.
 - Default returns the frame's zoom. Large on the road is Default, and a frame of the open road
   counts no closer than that; it takes the junction frame's zoom up to 28 dp, lets it go along the
   tilt's curve after the turn, keeps it between two junctions the view stays down for, and goes to

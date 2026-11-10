@@ -14,6 +14,7 @@ import com.mapbox.maps.plugin.animation.CameraAnimationsPlugin
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import com.mapbox.navigation.base.trip.model.RouteProgressState
 import com.mapbox.navigation.ui.maps.camera.NavigationCamera
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import com.mapbox.navigation.ui.maps.camera.data.ViewportData
@@ -209,7 +210,13 @@ internal class NavigationCameraAdapter(
     override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>) {
         dataSource.onRouteProgressChanged(progress)
         if (tuned) {
-            laneFocus.onProgress(nowSeconds(), progress.distanceTraveled.toDouble(), laneChoices, speedMps)
+            laneFocus.onProgress(
+                now = nowSeconds(),
+                routeMeters = progress.distanceTraveled.toDouble(),
+                choices = laneChoices,
+                speedMps = speedMps,
+                onRoute = progress.currentState != RouteProgressState.OFF_ROUTE,
+            )
             LaneZoomFrames.beforeTunedEvaluate(dataSource, laneZoom, tuning, progress, laneWindow = laneFocus.goal > 0.0, latitude)
         }
         dataSource.evaluate()

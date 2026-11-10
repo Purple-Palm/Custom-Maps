@@ -198,6 +198,55 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `off the route a lane choice the car never reaches is held by its time only`() {
+        // The choice lies at 1,300 m of the route. Off the route there are no choices and the
+        // route's meters stand still: short of the choice, a little further on, or just past it.
+        for (frozenAt in listOf(1_000.0, 1_200.0, 1_299.0, 1_310.0)) {
+            val focus = LaneFocus(tuning)
+            focus.onProgress(0.0, 1_000.0, listOf(choice(5, 3, ahead = 300.0)), 29.0)
+            assertEquals(1.0, focus.goal)
+            focus.onProgress(1.0, frozenAt, emptyList(), 29.0, onRoute = false)
+            focus.onProgress(2.0, frozenAt, emptyList(), 29.0, onRoute = false)
+            assertEquals(1.0, focus.goal, "held for its 2 s at $frozenAt m")
+            for (t in 3..600) {
+                focus.onProgress(t.toDouble(), frozenAt, emptyList(), 29.0, onRoute = false)
+                assertEquals(0.0, focus.goal, "let go at $frozenAt m after $t s")
+            }
+            assertNull(focus.current)
+            assertEquals(0.0, focus.focusAt(9.0), 1e-9)
+        }
+    }
+
+    @Test
+    fun `a new route after a moment off the route does not keep the view in`() {
+        val focus = LaneFocus(tuning)
+        focus.onProgress(0.0, 1_000.0, listOf(choice(5, 3, ahead = 300.0)), 29.0)
+        focus.onProgress(1.0, 1_029.0, emptyList(), 29.0, onRoute = false)
+        // The new route counts from its own start, far below where the old one's choice lay.
+        focus.onProgress(2.0, 0.0, emptyList(), 29.0)
+        assertEquals(1.0, focus.goal, "still within the 2 s")
+        focus.onProgress(3.0, 29.0, emptyList(), 29.0)
+        assertEquals(0.0, focus.goal)
+        assertNull(focus.current)
+    }
+
+    @Test
+    fun `back on the route the lane choice ahead takes the view again`() {
+        val focus = LaneFocus(tuning)
+        focus.onProgress(0.0, 1_000.0, listOf(choice(5, 3, ahead = 300.0)), 29.0)
+        for (t in 1..5) focus.onProgress(t.toDouble(), 1_000.0, emptyList(), 29.0, onRoute = false)
+        assertEquals(0.0, focus.goal)
+        focus.onProgress(6.0, 1_050.0, listOf(choice(5, 3, ahead = 250.0)), 29.0)
+        assertEquals(1.0, focus.goal)
+        // And from there the hold past it lasts for its distance again, as on any drive.
+        focus.onProgress(20.0, 1_310.0, emptyList(), 2.0)
+        focus.onProgress(23.0, 1_316.0, emptyList(), 2.0)
+        assertEquals(1.0, focus.goal, "2 s have passed, the 30 m have not")
+        focus.onProgress(30.0, 1_330.0, emptyList(), 2.0)
+        assertEquals(0.0, focus.goal)
+    }
+
+    @Test
     fun `a car that brakes inside the window keeps the close view`() {
         val focus = LaneFocus(tuning)
         // At 29 m/s the window is 725 m, and the choice 700 m ahead is inside it.
