@@ -174,12 +174,17 @@ class ThenRuleTest {
         "EXIT_ROTARY, SLIGHT_RIGHT, false",
         "CONTINUE, SLIGHT_LEFT, true",
         "FORK, SLIGHT_RIGHT, true",
+        "OFF_RAMP, SLIGHT_RIGHT, true",
         "ROUNDABOUT, RIGHT, true",
+        "ROUNDABOUT_TURN, LEFT, true",
+        "ROTARY, RIGHT, true",
         "END_OF_ROAD, LEFT, true",
         "TURN, U_TURN, true",
     )
     fun `only maneuvers worth a look get a chip`(type: ManeuverType, modifier: TurnModifier?, expected: Boolean) {
         assertEquals(expected, ThenRule.isWorthShowing(Maneuver(type, modifier, "Pine Street")))
+        // And the rule asks: the pair is close and near, so only the kind of maneuver decides.
+        assertEquals(listOf(expected), shown(at(200.0, following = following(type, modifier))))
     }
 
     /**
