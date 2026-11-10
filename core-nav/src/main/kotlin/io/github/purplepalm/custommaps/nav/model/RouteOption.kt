@@ -9,4 +9,11 @@ data class RouteOption(
     val distance: Distance,
     /** Main roads of the route, for example "I-280 S, CA-85 S". May be empty. */
     val summary: String,
+    /**
+     * How far the route's last point is from the place itself, when both are known. A route ends
+     * on a road, at the place's stop point or where the road is nearest to the place, so this is
+     * seldom zero; a large value without a stop point means the route may end on another side of
+     * the place than the driver expects.
+     */
+    val endGap: Distance? = null,
 )

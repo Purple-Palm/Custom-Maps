@@ -283,7 +283,9 @@ internal class MapboxNavigationEngine(
 
     private fun showPreview(routes: List<NavigationRoute>) {
         _previewRoutes.value = routes
-        _routeOptions.value = routes.map { it.toRouteOption() }
+        // The place the routes were asked to: each option says how far from it the route ends.
+        val place = _destination.value
+        _routeOptions.value = routes.map { it.toRouteOption(place) }
     }
 
     /**

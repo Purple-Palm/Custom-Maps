@@ -5,11 +5,13 @@ import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.trip.model.RouteProgressState
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.Maneuver
+import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import kotlin.time.Duration
@@ -19,12 +21,33 @@ import com.mapbox.navigation.tripdata.maneuver.model.Maneuver as MapboxManeuver
 
 internal fun GeoPoint.toPoint(): Point = Point.fromLngLat(longitude, latitude)
 
-internal fun NavigationRoute.toRouteOption(): RouteOption = RouteOption(
+/** The route as the route sheet shows it; [place] is where it was asked to, for [RouteOption.endGap]. */
+internal fun NavigationRoute.toRouteOption(place: Place?): RouteOption = RouteOption(
     id = id,
     duration = directionsRoute.duration().coerceAtLeast(0.0).seconds,
     distance = Distance.meters(directionsRoute.distance().coerceAtLeast(0.0)),
     summary = directionsRoute.legs()?.firstOrNull()?.summary().orEmpty(),
+    endGap = place?.let { endGap(it, lastPoint()) },
 )
+
+/**
+ * Where the route ends: the point on a road the routing service moved the destination to, or
+ * else where the last step's maneuver, the arrival, is. Neither reads the route's shape.
+ */
+private fun NavigationRoute.lastPoint(): Point? =
+    waypoints?.lastOrNull()?.location()
+        ?: directionsRoute.legs()?.lastOrNull()?.steps()?.lastOrNull()?.maneuver()?.location()
+
+/**
+ * How far a route that ends at [routeEnd] ends from [place] itself, not from its stop point; null
+ * when the route's end is not known.
+ */
+internal fun endGap(place: Place, routeEnd: Point?): Distance? {
+    if (routeEnd == null) return null
+    val meters = Geo.meters(place.point.latitude, place.point.longitude, routeEnd.latitude(), routeEnd.longitude())
+    // A point that is no coordinate gives no distance: a bad value must not cost the preview.
+    return if (meters.isFinite()) Distance.meters(meters) else null
+}
 
 internal fun MapboxLane.toLaneInfo(): LaneInfo? = allLanes
     .takeIf { it.isNotEmpty() }

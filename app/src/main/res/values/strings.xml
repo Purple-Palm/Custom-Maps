@@ -37,6 +37,7 @@
     <string name="route_via">via %1$s</string>
     <string name="route_start">Start</string>
     <string name="route_start_simulated">Start simulation</string>
+    <string name="route_ends_away">Route ends %1$s from the place</string>
     <string name="route_simulated_note">Simulated drive is on: the car moves along the route by itself. It still counts as a trip.</string>
 
     <string name="guidance_roundabout_exit">Exit %1$d</string>

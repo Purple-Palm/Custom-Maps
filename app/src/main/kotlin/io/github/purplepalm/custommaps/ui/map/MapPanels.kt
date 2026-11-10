@@ -181,7 +181,10 @@ fun PlaceCard(place: Place, busy: Boolean, onDirections: () -> Unit, onClose: ()
     }
 }
 
-/** Routes to choose from; the first one is selected and drawn in amber on the map. */
+/**
+ * Routes to choose from; the first one is selected and drawn in amber on the map. A line under them
+ * says how far from the place the selected route ends, when that is worth knowing ([routeEndNote]).
+ */
 @Composable
 fun RouteSheet(
     destination: Place?,
@@ -234,6 +237,14 @@ fun RouteSheet(
                         )
                     }
                 }
+            }
+            routeEndNote(destination?.stopPoint, routes.firstOrNull()?.endGap)?.let { away ->
+                Text(
+                    text = stringResource(R.string.route_ends_away, away.toString()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
             if (simulateDrive) {
                 Text(
