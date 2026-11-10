@@ -3,13 +3,20 @@ package io.github.purplepalm.custommaps.nav.debug
 import java.io.File
 import java.io.IOException
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -98,6 +105,87 @@ class CrashRecorderTest {
         assertEquals(1, log.events.size)
         assertEquals("java.lang.RuntimeException: first", log.events.single().second["error"])
         assertEquals(2, previous.received.size)
+    }
+
+    /** A log whose crash line takes until [release] opens; [steps] records what happened, in order. */
+    private class SlowLog : UrgentDebugLog {
+        val writing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val steps: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
+        override fun log(type: String, fields: Map<String, Any?>) = Unit
+
+        override fun logNow(type: String, fields: Map<String, Any?>, timeoutMillis: Long): Boolean {
+            writing.countDown()
+            release.await(10, TimeUnit.SECONDS)
+            steps += "written: ${fields["error"]}"
+            return true
+        }
+    }
+
+    private class Passing(private val steps: MutableList<String>) : Thread.UncaughtExceptionHandler {
+        override fun uncaughtException(thread: Thread, error: Throwable) {
+            steps += "passed on: $error"
+        }
+    }
+
+    @Test
+    fun `a second thread that crashes meanwhile waits until the first crash is written`() {
+        val log = SlowLog()
+        val recorder = CrashRecorder(log, Passing(log.steps), firstCrashWaitMillis = 10_000)
+        val first = thread { recorder.uncaughtException(Thread.currentThread(), RuntimeException("first")) }
+        assertTrue(log.writing.await(5, TimeUnit.SECONDS))
+
+        val second = thread { recorder.uncaughtException(Thread.currentThread(), RuntimeException("second")) }
+        // Without the wait, the second thread would reach the previous handler, which ends the process.
+        second.join(200)
+        assertTrue(second.isAlive)
+        log.release.countDown()
+        first.join(5_000)
+        second.join(5_000)
+
+        assertEquals("written: java.lang.RuntimeException: first", log.steps.first())
+        assertEquals(
+            setOf("passed on: java.lang.RuntimeException: first", "passed on: java.lang.RuntimeException: second"),
+            log.steps.drop(1).toSet(),
+        )
+    }
+
+    @Test
+    fun `a second thread stops waiting once the first crash takes too long`() {
+        val log = SlowLog()
+        val recorder = CrashRecorder(log, Passing(log.steps), firstCrashWaitMillis = 50)
+        val first = thread { recorder.uncaughtException(Thread.currentThread(), RuntimeException("first")) }
+        assertTrue(log.writing.await(5, TimeUnit.SECONDS))
+
+        val second = thread { recorder.uncaughtException(Thread.currentThread(), RuntimeException("second")) }
+        second.join(5_000)
+
+        assertFalse(second.isAlive)
+        assertEquals(listOf("passed on: java.lang.RuntimeException: second"), log.steps.toList())
+        log.release.countDown()
+        first.join(5_000)
+    }
+
+    @Test
+    fun `a crash inside the crash's own write never waits for itself`() {
+        val previous = PreviousHandler()
+        lateinit var recorder: CrashRecorder
+        val log = object : UrgentDebugLog {
+            override fun log(type: String, fields: Map<String, Any?>) = Unit
+
+            override fun logNow(type: String, fields: Map<String, Any?>, timeoutMillis: Long): Boolean {
+                recorder.uncaughtException(Thread.currentThread(), RuntimeException("inside"))
+                return true
+            }
+        }
+        recorder = CrashRecorder(log, previous, firstCrashWaitMillis = 10_000)
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+            recorder.uncaughtException(Thread.currentThread(), RuntimeException("outer"))
+        }
+
+        assertEquals(listOf("inside", "outer"), previous.received.map { it.message })
     }
 
     @Test

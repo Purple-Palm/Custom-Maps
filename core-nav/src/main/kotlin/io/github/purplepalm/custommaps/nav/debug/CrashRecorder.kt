@@ -2,6 +2,8 @@ package io.github.purplepalm.custommaps.nav.debug
 
 import java.util.Collections
 import java.util.IdentityHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -15,6 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class CrashRecorder internal constructor(
     private val log: UrgentDebugLog,
     private val previous: Thread.UncaughtExceptionHandler?,
+    private val firstCrashWaitMillis: Long = FIRST_CRASH_WAIT_MILLIS,
 ) : Thread.UncaughtExceptionHandler {
 
     /**
@@ -27,13 +30,29 @@ class CrashRecorder internal constructor(
 
     private val recording = AtomicBoolean(false)
 
+    /** Opens once the first crash is written, or its write has failed. */
+    private val firstCrashDone = CountDownLatch(1)
+
+    @Volatile
+    private var firstCrashThread: Thread? = null
+
     override fun uncaughtException(thread: Thread, error: Throwable) {
         try {
-            // Only the first crash is written: a second thread failing at the same moment, or this
-            // handler failing, goes straight on to the previous handler.
+            // Only the first crash is written. A second thread failing at the same moment waits until
+            // that line is in the file, because the previous handler ends the process; the thread
+            // writing it never waits for itself, so a failure inside this handler goes straight on.
             if (recording.compareAndSet(false, true)) {
-                log.logNow(EVENT, describe(thread, error) + ("context" to safeContext()), WRITE_TIMEOUT_MILLIS)
+                firstCrashThread = Thread.currentThread()
+                try {
+                    log.logNow(EVENT, describe(thread, error) + ("context" to safeContext()), WRITE_TIMEOUT_MILLIS)
+                } finally {
+                    firstCrashDone.countDown()
+                }
+            } else if (firstCrashThread !== Thread.currentThread()) {
+                firstCrashDone.await(firstCrashWaitMillis, TimeUnit.MILLISECONDS)
             }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         } catch (ignored: Throwable) {
             // Nothing more can be saved; the crash still has to reach the previous handler.
         } finally {
@@ -53,6 +72,12 @@ class CrashRecorder internal constructor(
 
         /** How long a crashing thread waits for a write already in progress. */
         const val WRITE_TIMEOUT_MILLIS = 500L
+
+        /**
+         * How long a second crashing thread waits for the first crash's line: the write's wait for
+         * the files, then the events still queued and the line itself.
+         */
+        const val FIRST_CRASH_WAIT_MILLIS = 2 * WRITE_TIMEOUT_MILLIS
 
         private const val MAX_FRAMES = 40
         private const val MAX_CAUSES = 5
