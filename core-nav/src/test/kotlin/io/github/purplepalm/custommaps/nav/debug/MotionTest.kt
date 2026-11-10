@@ -31,7 +31,8 @@ class MotionTest {
     fun `a reset cadence starts over, with no gap back to the last tick before it`() {
         val cadence = Cadence()
         cadence.tick(0)
-        cadence.tick(16 * ms)
+        // A longer gap than any after the reset, so one that the reset kept would show.
+        cadence.tick(500 * ms)
 
         cadence.reset()
         // The next guidance, ten seconds later.
