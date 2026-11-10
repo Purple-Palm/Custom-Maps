@@ -51,6 +51,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigation
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import kotlinx.coroutines.MainScope
@@ -133,6 +134,9 @@ class PhoneMap internal constructor(
      */
     val accessDenied: StateFlow<Boolean> = _accessDenied.asStateFlow()
 
+    /** Tile and style errors; offline, the same error comes for every tile, so repeats are only counted. */
+    private val mapErrorFolder = RepeatFolder(debugLog, scope)
+
     private val puckPositionListener = OnIndicatorPositionChangedListener { point -> onPuckMoved(point) }
     private val puckBearingListener = OnIndicatorBearingChangedListener { bearing -> lastBearing = bearing }
 
@@ -174,10 +178,18 @@ class PhoneMap internal constructor(
         }
     }
 
-    /** Tile and style failures go to the debug log; a refused token is also shown on screen. */
+    /**
+     * Tile and style failures go to the debug log, the first of each kind in full and the rest as a
+     * count once a minute; a refused token is also shown on screen, checked on every error.
+     */
     private val mapErrors = mapboxMap.subscribeMapLoadingError { error ->
-        debugLog.log("map_error", mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId))
         if (AccessErrors.isAccessDenied(error.message)) _accessDenied.value = true
+        mapErrorFolder.record(
+            type = "map_error",
+            key = RepeatFolder.keyOf(error.type.name, error.message),
+            fields = mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId),
+            origin = error.sourceId,
+        )
     }
 
     init {
@@ -268,8 +280,10 @@ class PhoneMap internal constructor(
 
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {
-        scope.cancel()
         mapErrors.cancel()
+        // The counts of the current minute, before the windows' timers go with the scope.
+        mapErrorFolder.flush()
+        scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
         mapView.location.removeOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.removeOnIndicatorBearingChangedListener(puckBearingListener)
