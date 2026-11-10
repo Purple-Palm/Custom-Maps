@@ -15,6 +15,9 @@ import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.Style
 import com.mapbox.maps.StyleDataLoadedType
 import com.mapbox.maps.plugin.PuckBearing
+import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
+import com.mapbox.maps.plugin.animation.CameraAnimatorType
+import com.mapbox.maps.plugin.animation.MapAnimationOwnerRegistry
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.attribution.attribution
 import com.mapbox.maps.plugin.compass.compass
@@ -279,9 +282,37 @@ class PhoneMap internal constructor(
         }
     }
 
+    /**
+     * The driver's own moves of the map: a touch gesture or the compass, each of which starts a
+     * camera animation of its own. The cameras report only what is taken from them, and before the
+     * car's first position no camera has the map. A map the driver moved then is left where it is
+     * when the car appears. Touches on a map that is not shown yet do not count.
+     */
+    private val driverMoves = object : CameraAnimationsLifecycleListener {
+        // Called for every animator of every move of a drag: nothing here but the two comparisons.
+        override fun onAnimatorStarting(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
+            if (style != null && (owner == MapAnimationOwnerRegistry.GESTURES || owner == MapAnimationOwnerRegistry.COMPASS)) {
+                idleFollow.onMapMoved()
+            }
+        }
+
+        override fun onAnimatorInterrupting(
+            type: CameraAnimatorType,
+            runningAnimator: ValueAnimator,
+            runningAnimatorOwner: String?,
+            newAnimator: ValueAnimator,
+            newAnimatorOwner: String?,
+        ) = Unit
+
+        override fun onAnimatorEnding(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) = Unit
+
+        override fun onAnimatorCancelling(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) = Unit
+    }
+
     init {
         // First: everything registered below may call back, and what it calls expects a camera.
         camera = createCamera(cameraStyle)
+        mapView.camera.addCameraAnimationsLifecycleListener(driverMoves)
 
         mapView.alpha = 0f
         mapView.scalebar.enabled = false
@@ -434,6 +465,7 @@ class PhoneMap internal constructor(
         scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
         platformPuck.onGlide = null
+        mapView.camera.removeCameraAnimationsLifecycleListener(driverMoves)
         camera.destroy()
         // Nothing feeds the data source any more. Without this it keeps its style subscription, and a
         // frame still waiting for the map's size keeps the data source and the map alive.

@@ -101,7 +101,8 @@ shows the car from the phone's own location, as before ([DECISIONS.md](DECISIONS
 camera uses nothing else: no trip session and no request.
 
 - **When.** From the car's first position until the driver pans, zooms or rotates the map, and
-  again after **My location**. A route on the map, in the preview and during guidance, has the
+  again after **My location**. A map the driver moved before the first position, as while the
+  phone still looks for one, stays where it is too. A route on the map, in the preview and during guidance, has the
   cameras described below. When the route goes, the camera returns to the car and follows it if the
   route's camera still had the map, and stays where it is if the driver had taken the map. The rule
   is `IdleFollow` in `:core-nav`, tested on the JVM.
