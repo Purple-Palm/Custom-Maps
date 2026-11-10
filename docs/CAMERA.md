@@ -896,7 +896,12 @@ and the arrival.
   in while the tilt went down; that would have followed the road frame's zoom.
 - **After the maneuver** the frame shows the road beyond it. The camera keeps the zoom the
   junction had for as long as the view is held over it, and lets it go along the same eased curve
-  as the tilt comes back up (`ManeuverFocus.afterManeuver`).
+  as the tilt comes back up (`ManeuverFocus.afterManeuver`). Once the tilt is back up the
+  junction is forgotten. That is checked with every navigator update, also while the camera does
+  not follow the car: in the overview, with the map in the driver's hands, or with the app in the
+  background. A camera that comes back on the approach to a later turn starts from the road's
+  zoom and that turn's frame; one that comes back while the view is still held over the same
+  junction finds its zoom kept.
 - **Close turns** keep the view down and close, as they keep the tilt down. Turns within 150 m
   of each other the SDK frames together, so the zoom for both is a little farther out. A turn a
   little farther on, near enough that the tilt stays down for it but not yet framed, leaves a
@@ -1219,7 +1224,8 @@ routes). Among them:
 - Default returns the frame's zoom. Large on the road is Default, and a frame of the open road
   counts no closer than that; it takes the junction frame's zoom up to 28 dp, lets it go along the
   tilt's curve after the turn, keeps it between two junctions the view stays down for, does not
-  take up again what it let go, and goes to 14 dp near a lane choice. In the frame of a maneuver
+  take up again what it let go, forgets it when told that the tilt is back up, and goes to 14 dp
+  near a lane choice. In the frame of a maneuver
   a lane choice goes no closer than the frame.
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
 

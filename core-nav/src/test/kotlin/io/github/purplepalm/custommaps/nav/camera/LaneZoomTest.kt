@@ -422,6 +422,30 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `a junction forgotten while the camera was away does not come back before a later turn`() {
+        val cap = MapScale.zoomForLaneDp(28.0, 35.0)
+        // The camera leaves the car over a junction, and comes back on the approach to a later
+        // turn: the tilt is on its way down and the frame is still of the open road.
+        val away = ZoomPlanner(tuning)
+        assertEquals(cap, away.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        away.forgetJunction()
+        assertEquals(16.2, away.target(LaneZoom.LARGE, 16.2, 35.0, 0.6, false, 0.0, roadFrame = true), 1e-9)
+        assertEquals(ZoomPlanner.Kind.ROAD, away.kind)
+        // Not told that the tilt came back up meanwhile, it would go to the old junction's zoom.
+        val untold = ZoomPlanner(tuning)
+        untold.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false)
+        assertEquals(lerp(16.2, cap, 0.6), untold.target(LaneZoom.LARGE, 16.2, 35.0, 0.6, false, 0.0, roadFrame = true), 1e-9)
+        // Forgetting leaves what the log was told; the end of guidance takes that back as well.
+        val ended = ZoomPlanner(tuning)
+        ended.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false)
+        ended.forgetJunction()
+        assertEquals(ZoomPlanner.Kind.JUNCTION, ended.kind)
+        ended.reset()
+        assertEquals(ZoomPlanner.Kind.ROAD, ended.kind)
+        assertEquals(16.2, ended.target(LaneZoom.LARGE, 16.2, 35.0, 0.6, false, 0.0, roadFrame = true), 1e-9)
+    }
+
+    @Test
     fun `a change to default and back starts from the frame`() {
         val plan = ZoomPlanner(tuning)
         val cap = MapScale.zoomForLaneDp(28.0, 35.0)

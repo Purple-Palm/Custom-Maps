@@ -342,6 +342,11 @@ internal class SmoothNavigationCamera(
 
     override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>) {
         val now = now()
+        // The zoom planner sees the tilt only on frames that follow the car. In the overview,
+        // with the map in the driver's hands or hidden, it would keep the last junction's zoom
+        // for a later turn. The tilt changes its way only in the update below, so one that is
+        // back up is seen here before the next maneuver takes the view.
+        if (maneuverFocus.focusAt(now) <= 0.0) zoomPlanner.forgetJunction()
         val leg = progress.currentLegProgress
         val step = leg?.currentStepProgress
         if (leg != null && step != null) {

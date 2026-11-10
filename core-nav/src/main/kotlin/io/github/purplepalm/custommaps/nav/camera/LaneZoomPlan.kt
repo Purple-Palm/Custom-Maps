@@ -321,7 +321,17 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         return zoom
     }
 
-    /** Guidance ended: nothing is remembered of the last junction. */
+    /**
+     * The tilt is back up: the zoom of the last junction is forgotten. [target] does the same on
+     * every frame it is called on. A camera that stops calling it for a while, in the overview,
+     * with the map in the driver's hands or hidden, says so here instead, or it would come back
+     * to the zoom of a junction that is far behind when the tilt goes down for a later one.
+     */
+    fun forgetJunction() {
+        junctionZoom = Double.NaN
+    }
+
+    /** Guidance ended or the lane zoom changed: nothing is remembered of the last junction. */
     fun reset() {
         kind = Kind.ROAD
         junctionZoom = Double.NaN
