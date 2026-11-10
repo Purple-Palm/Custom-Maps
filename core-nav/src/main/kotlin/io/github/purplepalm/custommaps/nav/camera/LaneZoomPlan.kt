@@ -240,7 +240,9 @@ class LaneFocus(private val tuning: CameraTuning) {
  *   keeps both in view, and no closer than [CameraTuning.junctionLaneDp], along the same eased
  *   curve as the tilt;
  * - after the maneuver, the zoom the junction had, let go along that curve as the tilt comes back.
- *   Where the view stays down for a next maneuver, it is kept until that one is framed;
+ *   Where the view stays down for a next maneuver, it is kept until that one is framed. What was
+ *   let go is not taken up again: when the tilt turns back down for a next maneuver that is not
+ *   framed yet, the zoom waits where it is;
  * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve. In
  *   the frame of a maneuver that is no closer than the frame was fitted: its center is the
  *   frame's own point, not the car, and closer than its fit the car and the junction would be
@@ -258,6 +260,12 @@ class ZoomPlanner(private val tuning: CameraTuning) {
 
     /** The zoom over the junction the car is at or has just left; not a number on the road. */
     private var junctionZoom = Double.NaN
+
+    /**
+     * How much of [junctionZoom] is still kept, from 1 to 0: the lowest the focus has been since
+     * that zoom was taken from a frame.
+     */
+    private var keptShare = 1.0
 
     /**
      * @param frameZoom the zoom of the frame the navigation SDK fitted
@@ -287,10 +295,16 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         // the view stays down for: what the junction had is kept.
         val keeps = !junctionZoom.isNaN() && (afterManeuver || roadFrame)
         val junction = if (keeps) {
-            lerp(road, max(road, junctionZoom), junctionFocus)
+            // The focus can turn back toward 1 here, for a next maneuver that is latched and not
+            // framed yet. Going back in to the junction behind the car would be a bounce.
+            keptShare = min(keptShare, junctionFocus)
+            lerp(road, max(road, junctionZoom), keptShare)
         } else {
             val full = if (roadFrame) road else max(road, min(frameZoom, closest(tuning.junctionLaneDp, latitude)))
-            if (junctionFocus > 0.0 && !roadFrame) junctionZoom = full
+            if (junctionFocus > 0.0 && !roadFrame) {
+                junctionZoom = full
+                keptShare = 1.0
+            }
             lerp(road, full, junctionFocus)
         }
         val lanesGoal = max(road, closest(tuning.freewayLaneDp, latitude))

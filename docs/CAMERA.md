@@ -902,7 +902,10 @@ and the arrival.
   little farther on, near enough that the tilt stays down for it but not yet framed, leaves a
   stretch where the frame is of the open road again: there the camera keeps the zoom the first
   junction had until the SDK frames the second, and then eases to that frame. It does not go out
-  to the road's zoom and back in.
+  to the road's zoom and back in. A little farther apart still, about 250 to 300 m at town
+  speeds, the tilt has begun to come back up when the next turn takes the view and turns it down
+  again. The zoom that was let go by then is not taken up again: it waits where it is until the
+  SDK frames the next turn, and goes in once, with that frame.
 
 Simulated with the compiled camera at 60 frames a second, against a model of the data source (the
 car on its focal point on the road; from 180 m a flat fit of the rest of the step and the road
@@ -927,8 +930,10 @@ after it into the padded height). The road is made up and lies on the equator, w
 In the same model two turns 100 m apart stay flat with a lane no narrower than 13.5 dp between
 them, two turns 200 m apart with 10.6 dp, a roundabout with its way out 45 m on stays at 22.6 dp
 or wider, and the arrival ends at 28 dp with the car standing. Two turns 300 m apart get the
-road's view back in between. The real frames of the SDK can differ from the model by a few tenths
-of a zoom level.
+road's view back in between. Turns 160 to 280 m apart were run in steps: between them the zoom
+goes out once and in once in every case, and with 260 m it waits at a lane of about 6 dp until the
+second turn is framed. The real frames of the SDK can differ from the model by a few tenths of a
+zoom level.
 
 ### The lane-choice zoom on freeways
 
@@ -1213,9 +1218,9 @@ routes). Among them:
   the route's metres stand, and back on the route it takes the view again.
 - Default returns the frame's zoom. Large on the road is Default, and a frame of the open road
   counts no closer than that; it takes the junction frame's zoom up to 28 dp, lets it go along the
-  tilt's curve after the turn, keeps it between two junctions the view stays down for, and goes to
-  14 dp near a lane choice. In the frame of a maneuver a lane choice goes no closer than the
-  frame.
+  tilt's curve after the turn, keeps it between two junctions the view stays down for, does not
+  take up again what it let go, and goes to 14 dp near a lane choice. In the frame of a maneuver
+  a lane choice goes no closer than the frame.
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:

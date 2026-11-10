@@ -381,6 +381,29 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `a junction's zoom that was partly let go is not taken up again before the next one is framed`() {
+        val plan = ZoomPlanner(tuning)
+        val cap = MapScale.zoomForLaneDp(28.0, 35.0)
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        // Past the turn the tilt comes back up and the zoom lets go with it.
+        assertEquals(lerp(16.2, cap, 0.6), plan.target(LaneZoom.LARGE, 16.2, 35.0, 0.6, true, 0.0, roadFrame = true), 1e-9)
+        val lowest = lerp(16.2, cap, 0.3)
+        assertEquals(lowest, plan.target(LaneZoom.LARGE, 16.2, 35.0, 0.3, true, 0.0, roadFrame = true), 1e-9)
+        // The next turn takes the view before the tilt is all the way up: the tilt turns back
+        // down, and the frame is still of the open road. The zoom waits where it is.
+        assertEquals(lowest, plan.target(LaneZoom.LARGE, 16.2, 35.0, 0.5, false, 0.0, roadFrame = true), 1e-9)
+        assertEquals(lowest, plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true), 1e-9)
+        assertEquals(ZoomPlanner.Kind.AFTER_JUNCTION, plan.kind)
+        // It follows the road's zoom meanwhile, at the share that is left.
+        assertEquals(lerp(15.8, cap, 0.3), plan.target(LaneZoom.LARGE, 15.8, 35.0, 1.0, false, 0.0, roadFrame = true), 1e-9)
+        // The next junction is framed: its frame decides, and past it all of its zoom is kept again.
+        assertEquals(17.4, plan.target(LaneZoom.LARGE, 17.4, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
+        assertEquals(17.4, plan.target(LaneZoom.LARGE, 16.0, 35.0, 1.0, true, 0.0, roadFrame = true), 1e-9)
+        assertEquals(lerp(16.0, 17.4, 0.5), plan.target(LaneZoom.LARGE, 16.0, 35.0, 0.5, true, 0.0, roadFrame = true), 1e-9)
+    }
+
+    @Test
     fun `a frame of a wide junction is taken at its word, also when it is farther out than the last junction`() {
         val plan = ZoomPlanner(tuning)
         plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false)
