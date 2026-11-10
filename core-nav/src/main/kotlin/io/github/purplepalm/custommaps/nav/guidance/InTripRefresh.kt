@@ -58,12 +58,13 @@ object InTripRefresh {
     }
 
     /**
-     * What may be done now. It is asked at two moments of a trip, with the same rules.
+     * What may be done now. It is asked at two kinds of moment in a trip, with the same rules.
      *
-     * At the first progress of the trip, to learn what to begin: [routeCount] is then the number of
-     * routes the navigator guides on, and [destinationShiftMeters] is zero, as nothing has been
-     * requested yet. [InTripAction.REFRESH] says to ask for a refresh, [InTripAction.SET_ROUTES] to
-     * request routes again.
+     * Before something is begun, to learn what to begin: at the first progress of the trip, and
+     * again when a refresh has failed or was cancelled. [routeCount] is then the number of routes
+     * the navigator guides on, and [destinationShiftMeters] is zero, as nothing has been requested
+     * yet. [InTripAction.REFRESH] says to ask for a refresh, [InTripAction.SET_ROUTES] to request
+     * routes again.
      *
      * And when the answer to that request is there, to learn whether its routes may be set:
      * [routeCount] is then the number of routes in the answer, and [destinationShiftMeters] how far
