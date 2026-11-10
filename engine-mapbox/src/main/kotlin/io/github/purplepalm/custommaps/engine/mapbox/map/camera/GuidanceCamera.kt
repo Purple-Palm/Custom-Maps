@@ -50,7 +50,10 @@ internal interface GuidanceCamera {
      */
     fun diagnostics(): Map<String, Any?>
 
-    /** Stops for good: the camera lets go of the map and of the data source and calls no listener again. */
+    /**
+     * Stops for good, as when another camera takes its place: the camera lets go of the map, takes
+     * back every limit and override it set on the data source, and calls no listener again.
+     */
     fun destroy()
 
     /** Hears what the camera does. Called on the main thread, the first time while the camera is created. */

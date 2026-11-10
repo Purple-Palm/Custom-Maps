@@ -331,6 +331,9 @@ class PhoneMap internal constructor(
         // What the camera was doing is asked of the new one again, so a drive goes on being followed.
         val mode = _cameraMode.value
         camera.destroy()
+        // The old camera took back what it had set on the data source, but the frame the data source
+        // holds was computed with it. The new camera gets a frame of its own to start from.
+        viewportDataSource.evaluate()
         cameraStyle = style
         // The new camera starts idle; a transition the old one was in ends with it.
         transitionStartedAt = 0L

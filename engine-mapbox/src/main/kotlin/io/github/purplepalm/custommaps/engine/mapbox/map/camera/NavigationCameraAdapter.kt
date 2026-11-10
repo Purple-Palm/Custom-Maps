@@ -155,6 +155,7 @@ internal class NavigationCameraAdapter(
         cameraPlugin.removeCameraAnimationsLifecycleListener(animations)
         // Cancels the animation it is running.
         navigationCamera.requestNavigationCameraToIdle()
+        // Neither style of this camera sets anything on the data source, so nothing is taken back.
         source.detach()
     }
 
