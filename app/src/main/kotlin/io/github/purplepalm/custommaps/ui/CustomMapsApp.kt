@@ -78,6 +78,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 onSaveToken = tokenViewModel::save,
                 onClearToken = tokenViewModel::clear,
                 onCameraStyleChange = settingsViewModel::setCameraStyle,
+                onLaneZoomChange = settingsViewModel::setLaneZoom,
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onShareLog = {
                     scope.launch {

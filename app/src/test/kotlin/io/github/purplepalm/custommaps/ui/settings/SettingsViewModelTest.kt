@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.ui.settings
 
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
@@ -161,6 +162,38 @@ class SettingsViewModelTest {
         runCurrent()
         assertEquals(CameraStyle.SMOOTH_FOLLOW, settings.cameraStyle.value)
         assertEquals(CameraStyle.SMOOTH_FOLLOW, viewModel.guidance.value.cameraStyle)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
+    fun `shows the stored lane zoom next to the camera style`() = runTest(dispatcher) {
+        settings.laneZoom.value = LaneZoom.LARGE
+        settings.cameraStyle.value = CameraStyle.MAPBOX_STANDARD
+        val viewModel = viewModel()
+        assertEquals(GuidanceSettings(CameraStyle.MAPBOX_STANDARD, LaneZoom.LARGE), viewModel.guidance.value)
+    }
+
+    @Test
+    fun `a chosen lane zoom is stored and leaves the camera style alone`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        assertEquals(LaneZoom.DEFAULT, viewModel.guidance.value.laneZoom)
+        viewModel.setLaneZoom(LaneZoom.LARGE)
+        runCurrent()
+        assertEquals(LaneZoom.LARGE, settings.laneZoom.value)
+        assertEquals(GuidanceSettings(CameraStyle.SMOOTH_FOLLOW, LaneZoom.LARGE), viewModel.guidance.value)
+        viewModel.setLaneZoom(LaneZoom.DEFAULT)
+        runCurrent()
+        assertEquals(LaneZoom.DEFAULT, viewModel.guidance.value.laneZoom)
+    }
+
+    @Test
+    fun `a lane zoom that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setLaneZoom(LaneZoom.LARGE)
+        runCurrent()
+        assertEquals(LaneZoom.DEFAULT, settings.laneZoom.value)
+        assertEquals(LaneZoom.DEFAULT, viewModel.guidance.value.laneZoom)
         assertEquals(listOf("error"), archive.logged)
     }
 

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -24,6 +25,11 @@ interface AppSettings {
     val cameraStyle: Flow<CameraStyle>
 
     suspend fun setCameraStyle(style: CameraStyle)
+
+    /** How close the guidance camera goes before turns and lane choices. */
+    val laneZoom: Flow<LaneZoom>
+
+    suspend fun setLaneZoom(mode: LaneZoom)
 }
 
 /**
@@ -55,6 +61,14 @@ class DataStoreAppSettings(
         onChanged(CAMERA_STYLE.name, stored)
     }
 
+    override val laneZoom: Flow<LaneZoom> = preferences.map { laneZoomOf(it[LANE_ZOOM]) }.distinctUntilChanged()
+
+    override suspend fun setLaneZoom(mode: LaneZoom) {
+        val stored = mode.stored()
+        dataStore.edit { it[LANE_ZOOM] = stored }
+        onChanged(LANE_ZOOM.name, stored)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -62,6 +76,7 @@ class DataStoreAppSettings(
         const val RELATIVE_PATH = "datastore/$FILE_NAME.preferences_pb"
         private val SIMULATE_DRIVE = booleanPreferencesKey("simulate_drive")
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
+        private val LANE_ZOOM = stringPreferencesKey("lane_zoom")
 
         private fun CameraStyle.stored(): String = when (this) {
             CameraStyle.MAPBOX_STANDARD -> "mapbox_standard"
@@ -71,5 +86,13 @@ class DataStoreAppSettings(
 
         private fun cameraStyleOf(stored: String?): CameraStyle =
             CameraStyle.entries.firstOrNull { it.stored() == stored } ?: CameraStyle.DEFAULT
+
+        private fun LaneZoom.stored(): String = when (this) {
+            LaneZoom.DEFAULT -> "default"
+            LaneZoom.LARGE -> "large"
+        }
+
+        private fun laneZoomOf(stored: String?): LaneZoom =
+            LaneZoom.entries.firstOrNull { it.stored() == stored } ?: LaneZoom.DEFAULT
     }
 }

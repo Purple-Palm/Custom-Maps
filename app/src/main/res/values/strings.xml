@@ -83,6 +83,12 @@
     <string name="camera_style_smooth_follow">Smooth follow</string>
     <string name="camera_style_smooth_follow_note">Glides after the car on every frame</string>
     <string name="camera_style_note">Applies at once, also during a drive.</string>
+    <string name="lane_zoom_title">Lane zoom</string>
+    <string name="lane_zoom_default">Default</string>
+    <string name="lane_zoom_default_note">Default: today\'s zoom.</string>
+    <string name="lane_zoom_large">Large</string>
+    <string name="lane_zoom_large_note">Large: close in before every turn and, on freeways, before exits and lane splits; back out after.</string>
+    <string name="lane_zoom_mapbox_standard_note">The Mapbox standard camera keeps its own zoom.</string>
 
     <string name="debug_title">Debug</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>

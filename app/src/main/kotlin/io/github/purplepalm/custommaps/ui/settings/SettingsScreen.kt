@@ -20,6 +20,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -41,6 +44,7 @@ import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
@@ -65,6 +69,7 @@ fun SettingsScreen(
     onSaveToken: (String) -> AccessTokenCheck,
     onClearToken: () -> Unit,
     onCameraStyleChange: (CameraStyle) -> Unit,
+    onLaneZoomChange: (LaneZoom) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -100,7 +105,7 @@ fun SettingsScreen(
 
             TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
             SectionDivider()
-            GuidanceSection(guidance, onCameraStyleChange)
+            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange)
             SectionDivider()
             DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow)
             SectionDivider()
@@ -171,7 +176,11 @@ private fun TokenSection(
 
 /** How the app guides. Every choice here applies at once, also during a drive. */
 @Composable
-private fun GuidanceSection(guidance: GuidanceSettings, onCameraStyleChange: (CameraStyle) -> Unit) {
+private fun GuidanceSection(
+    guidance: GuidanceSettings,
+    onCameraStyleChange: (CameraStyle) -> Unit,
+    onLaneZoomChange: (LaneZoom) -> Unit,
+) {
     SectionTitle(R.string.guidance_title)
     Text(
         text = stringResource(R.string.camera_style_title),
@@ -211,6 +220,51 @@ private fun GuidanceSection(guidance: GuidanceSettings, onCameraStyleChange: (Ca
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    Spacer(Modifier.height(16.dp))
+    LaneZoomBlock(guidance, onLaneZoomChange)
+}
+
+/** How close the camera goes before turns and lane choices: one of two, each with a line that says what it does. */
+@Composable
+private fun LaneZoomBlock(guidance: GuidanceSettings, onLaneZoomChange: (LaneZoom) -> Unit) {
+    Text(
+        text = stringResource(R.string.lane_zoom_title),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+    ) {
+        val modes = LaneZoom.entries
+        modes.forEachIndexed { index, mode ->
+            SegmentedButton(
+                selected = mode == guidance.laneZoom,
+                onClick = { onLaneZoomChange(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
+            ) {
+                Text(stringResource(mode.titleRes()))
+            }
+        }
+    }
+    LaneZoom.entries.forEach { mode ->
+        Text(
+            text = stringResource(mode.noteRes()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (guidance.cameraStyle == CameraStyle.MAPBOX_STANDARD) {
+        // That style is the camera as it comes, for comparison: the choice above does not reach it.
+        Text(
+            text = stringResource(R.string.lane_zoom_mapbox_standard_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
 }
 
 /** Trip sessions are what Mapbox bills for navigation, so their count is kept in sight. */
@@ -400,6 +454,18 @@ private fun CameraStyle.noteRes(): Int = when (this) {
 }
 
 @StringRes
+private fun LaneZoom.titleRes(): Int = when (this) {
+    LaneZoom.DEFAULT -> R.string.lane_zoom_default
+    LaneZoom.LARGE -> R.string.lane_zoom_large
+}
+
+@StringRes
+private fun LaneZoom.noteRes(): Int = when (this) {
+    LaneZoom.DEFAULT -> R.string.lane_zoom_default_note
+    LaneZoom.LARGE -> R.string.lane_zoom_large_note
+}
+
+@StringRes
 private fun TripKind.labelRes(): Int = when (this) {
     TripKind.ACTIVE_GUIDANCE -> R.string.debug_trip_guidance
     TripKind.FREE_DRIVE -> R.string.debug_trip_free_drive
@@ -425,6 +491,7 @@ private fun SettingsScreenPreview() {
             onSaveToken = { AccessTokenCheck.VALID },
             onClearToken = {},
             onCameraStyleChange = {},
+            onLaneZoomChange = {},
             onSimulateDriveChange = {},
             onShareLog = {},
             onClearLog = {},
