@@ -266,6 +266,9 @@ class PhoneMap internal constructor(
     }
 
     init {
+        // First: everything registered below may call back, and what it calls expects a camera.
+        camera = createCamera(cameraStyle)
+
         mapView.alpha = 0f
         mapView.scalebar.enabled = false
         mapboxMap.subscribeStyleDataLoaded { event ->
@@ -288,7 +291,6 @@ class PhoneMap internal constructor(
         mapView.location.addOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.addOnIndicatorBearingChangedListener(puckBearingListener)
 
-        camera = createCamera(cameraStyle)
         // Called on the render thread, about once a second while the map draws.
         mapView.setOnFpsChangedListener { fps ->
             renderFps = fps
