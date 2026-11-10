@@ -118,9 +118,8 @@ class PhoneMap internal constructor(
      */
     private val guidanceState: GuidanceState get() = engine.guidanceState.value
 
-    private val routeLineApi = MapboxRouteLineApi(
-        MapboxRouteLineApiOptions.Builder().vanishingRouteLineEnabled(true).build(),
-    )
+    private val routeLineOptions = MapboxRouteLineApiOptions.Builder().vanishingRouteLineEnabled(true).build()
+    private val routeLineApi = MapboxRouteLineApi(routeLineOptions)
     private val routeLineView = MapboxRouteLineView(
         MapboxRouteLineViewOptions.Builder(context)
             .routeLineColorResources(MapPalette.routeLineColors)
@@ -135,6 +134,9 @@ class PhoneMap internal constructor(
             .withSlotName(ROUTE_SLOT)
             .build(),
     )
+
+    /** When the travelled part of the route line last took the puck's position, in nanoseconds. */
+    private var routeLineUpdatedAt = 0L
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
     private val navigationCamera = NavigationCamera(mapboxMap, mapView.camera, viewportDataSource)
@@ -432,11 +434,26 @@ class PhoneMap internal constructor(
         if (cameraSampling != null) puckCadence.tick(SystemClock.elapsedRealtimeNanos())
         val style = style ?: return
         if (guidanceState == GuidanceState.ACTIVE) {
-            routeLineView.renderRouteLineUpdate(style, routeLineApi.updateTraveledRouteLine(point))
+            updateTraveledRouteLine(style, point)
         } else if (!centeredOnFirstFix && guidanceState == GuidanceState.IDLE) {
             centeredOnFirstFix = true
             centerOnPuck()
         }
+    }
+
+    /**
+     * Moves the end of the travelled part of the route line to the puck. The puck moves on every
+     * frame, but the route line takes a new point only every 62.5 ms and answers a call in between
+     * with an error, which the view would only log. So a call is made only when one is due, and only
+     * an accepted update is rendered.
+     */
+    private fun updateTraveledRouteLine(style: Style, point: Point) {
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (now - routeLineUpdatedAt < routeLineOptions.vanishingRouteLineUpdateIntervalNano) return
+        val update = routeLineApi.updateTraveledRouteLine(point)
+        // Read again: the route line counts its interval from the end of its own work.
+        routeLineUpdatedAt = SystemClock.elapsedRealtimeNanos()
+        if (update.isValue) routeLineView.renderRouteLineUpdate(style, update)
     }
 
     private fun showNavigatorRoutes() {
