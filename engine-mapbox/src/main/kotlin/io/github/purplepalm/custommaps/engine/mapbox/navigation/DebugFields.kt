@@ -204,19 +204,20 @@ internal fun Location.debugFields(): Map<String, Any?> = mapOf(
 )
 
 /**
- * How old the fix is now, when its line is made. The monotonic time is Android's elapsed realtime
- * for fixes from its location service; without it, the wall clock time of the fix is used.
+ * What a route request says about the position it starts from: how old it was, and the speed and
+ * the direction the location service gave with it. The direction goes into the request only for a
+ * fresh position of a moving car ([DeviceFix.originBearing]).
  */
-private fun Location.ageMillis(): Long {
-    val monotonic = monotonicTimestamp
-    return if (monotonic != null) {
-        (SystemClock.elapsedRealtimeNanos() - monotonic) / NANOS_PER_MILLI
-    } else {
-        System.currentTimeMillis() - timestamp
-    }
-}
+internal fun DeviceFix.debugFields(): Map<String, Any?> = mapOf(
+    "ageMs" to ageMillis,
+    "speedMps" to speed,
+    "bearing" to bearing,
+)
 
-private const val NANOS_PER_MILLI = 1_000_000L
+/** How old the fix is now, when its line is made; see [fixAgeMillis]. */
+private fun Location.ageMillis(): Long =
+    fixAgeMillis(monotonicTimestamp, timestamp, SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis())
+
 private const val MILLIS_PER_SECOND = 1_000.0
 
 /** A failed route request. The request URL is left out on purpose: it contains the token. */

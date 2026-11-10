@@ -51,6 +51,7 @@ import java.io.IOException
 import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
+import kotlin.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,17 +183,21 @@ internal class MapboxNavigationEngine(
             debugLog.log("route_request_refused", mapOf("reason" to "guidance running"))
             return RouteRequestResult.Failed("Guidance is running")
         }
-        val deviceFix = deviceLocation.lastKnown()
-        val origin = deviceFix ?: lastPuckPosition ?: return RouteRequestResult.NoLocation.also {
+        deviceLocation.refresh()
+        // Of any age: an old position is a better start than none, as it always was.
+        val deviceFix = deviceLocation.lastFix(maxAge = Duration.INFINITE)
+        val origin = deviceFix?.point ?: lastPuckPosition ?: return RouteRequestResult.NoLocation.also {
             debugLog.log("route_request_refused", mapOf("reason" to "no location"))
         }
         // To the place's stop point when it has one, with the place itself as the arrival target.
-        val options = routeOptions(origin, destination)
+        // A car that is moving sends its direction along, so the routes start the way it drives.
+        val options = routeOptions(origin, destination, deviceFix?.originBearing())
         debugLog.log(
             "route_request",
             mapOf(
                 "origin" to origin.debugFields(),
                 "originSource" to if (deviceFix != null) "device" else "map puck",
+                "originFix" to deviceFix?.debugFields(),
                 "destination" to mapOf(
                     "name" to destination.name,
                     "address" to destination.address,
