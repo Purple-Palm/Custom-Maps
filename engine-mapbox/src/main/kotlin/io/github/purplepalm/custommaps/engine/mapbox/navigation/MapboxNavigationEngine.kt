@@ -40,7 +40,7 @@ import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
-import io.github.purplepalm.custommaps.nav.guidance.ThenRule
+import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
@@ -91,8 +91,8 @@ internal class MapboxNavigationEngine(
     /** Counts route requests; only the latest one may open a preview. */
     private var routeRequestCount = 0
 
-    /** What the Then rule remembers from one progress update to the next; every drive starts it over. */
-    private var thenState = ThenRule.State.NONE
+    /** What the Then chip remembers from one progress update to the next; every drive starts it over. */
+    private val thenTracker = ThenTracker()
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
@@ -286,7 +286,7 @@ internal class MapboxNavigationEngine(
                 // Keeps the navigator alive for the drive, even without a screen.
                 MapboxNavigationApp.attach(guidanceLifecycle)
                 // A new drive: the Then chip knows nothing of the last one.
-                thenState = ThenRule.State.NONE
+                thenTracker.reset()
                 val commit = ++commitCount
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
@@ -339,7 +339,7 @@ internal class MapboxNavigationEngine(
                 _previewRoutes.value = emptyList()
                 _routeOptions.value = emptyList()
                 _routeProgress.value = null
-                thenState = ThenRule.State.NONE
+                thenTracker.reset()
             }
         }
     }
@@ -356,13 +356,7 @@ internal class MapboxNavigationEngine(
     /** The UI's view of [progress], with the Then rule applied; null when the maneuver API has nothing. */
     private fun snapshotOf(progress: RouteProgress): RouteProgressSnapshot? {
         val next = maneuverApi.getManeuvers(progress).value?.firstOrNull() ?: return null
-        val fresh = progress.toSnapshot(next)
-        thenState = ThenRule.reduce(thenState, fresh)
-        // The same object for as long as the following maneuver is the same, so a screen that
-        // compares by identity can skip the chip on the updates that change nothing in it.
-        val previous = _routeProgress.value?.following
-        val following = if (fresh.following == previous) previous else fresh.following
-        return fresh.copy(following = following, showThen = thenState.shown)
+        return thenTracker.decide(progress.toSnapshot(next))
     }
 
     private val locationObserver = object : LocationObserver {
