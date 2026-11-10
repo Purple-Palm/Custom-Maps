@@ -80,7 +80,10 @@ internal class NavigationCameraAdapter(
     /** Settings, Lane zoom. Only the tuned style acts on it. */
     private var laneZoom = LaneZoom.DEFAULT
 
-    /** For the tuned style: whether the view is close for a lane choice on a freeway. */
+    /**
+     * For the tuned style: whether the lane choices' schedule is in for one on a freeway. It runs
+     * with either lane zoom and moves the limits only with Large.
+     */
     private val laneFocus = LaneFocus(tuning)
 
     // For the tuned style: the car's speed and latitude at the latest position.
@@ -244,8 +247,9 @@ internal class NavigationCameraAdapter(
         val fields = mapOf(
             "frameUpdates" to frameUpdates,
             "frameUpdatesCut" to frameUpdatesCut,
-            // The setting, whether the view is close for a lane choice, and the limits the data
-            // source fits its frames within. Mapbox standard keeps the SDK's limits whatever is set.
+            // The setting, whether the lane choices' schedule is in for one (it moves the limits
+            // only in the tuned style with Large, and does not run in Mapbox standard), and the
+            // limits the data source fits its frames within.
             "laneZoom" to laneZoom,
             "laneGoal" to laneFocus.goal,
             "maxZoom" to limits.maxZoom,

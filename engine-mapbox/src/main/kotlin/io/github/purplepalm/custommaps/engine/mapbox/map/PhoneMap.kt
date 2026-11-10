@@ -776,15 +776,16 @@ class PhoneMap internal constructor(
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
-     * (the setting), "laneGoal" (1 while the view is close for a lane choice) and "maxZoom" and
-     * "minZoom", the limits the data source fits its frames within. Smooth follow: "camFps",
-     * "camMaxGapMs" and "camWrites" (its frames, the longest time between two of them and how many
-     * set the map's camera), "focus" and "focusGoal" (how far the view is tilted onto the next
-     * maneuver, from 0 to 1, and where that is going), "zoomTarget", "bearingError" (the bearing
-     * still to turn) and "onPuck" (1 while the camera centers on the drawn car, 0 while it frames a
-     * maneuver or the route); "laneZoom", "zoomPlan" (what sets the zoom: ROAD, JUNCTION,
-     * AFTER_JUNCTION or LANES), "laneFocus" and "laneGoal" (how far the view is in for a lane
-     * choice, and where that is going), "laneAheadM" (meters to the nearest lane choice that
+     * (the setting), "laneGoal" (1 while the lane choices' schedule is in for one; it moves the
+     * limits only in Mapbox tuned with Large) and "maxZoom" and "minZoom", the limits the data
+     * source fits its frames within. Smooth follow: "camFps", "camMaxGapMs" and "camWrites" (its
+     * frames, the longest time between two of them and how many set the map's camera), "focus" and
+     * "focusGoal" (how far the view is tilted onto the next maneuver, from 0 to 1, and where that
+     * is going), "zoomTarget", "bearingError" (the bearing still to turn) and "onPuck" (1 while the
+     * camera centers on the drawn car, 0 while it frames a maneuver or the route); "laneZoom",
+     * "zoomPlan" (what sets the zoom: ROAD, JUNCTION, AFTER_JUNCTION or LANES), "laneFocus" and
+     * "laneGoal" (the lane choices' schedule: how far it is in for one, and where that is going;
+     * it moves the zoom only with Large), "laneAheadM" (meters to the nearest lane choice that
      * counts), "laneChoice" (the one that holds the view) and "centerLeadS" (how many seconds ahead
      * of the car the center aims).
      *

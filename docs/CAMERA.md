@@ -684,9 +684,13 @@ The two Mapbox styles do not run the controller. They add `frameUpdates`, the fr
 `NavigationCamera` started that second, and `frameUpdatesCut`, those cancelled before they
 finished because the next one came. While the car moves, Mapbox standard starts about two a second
 and Mapbox tuned one. They also add `laneZoom` (the setting, which Mapbox standard does not act
-on), `laneGoal` (1 while a lane choice holds the view in Mapbox tuned) and `maxZoom` and `minZoom`,
-the limits the data source fits its frames within: 16.35 and 10.5, but for Mapbox tuned with Large
-near a maneuver and near a lane choice.
+on), `laneGoal` and `maxZoom` and `minZoom`. `laneGoal` is the goal of the lane choices' schedule,
+as in Smooth follow: 1 from the start of a counted lane choice's window until the view would be
+let go again. Mapbox tuned runs the schedule with Default too, where it moves nothing; Mapbox
+standard does not run it, so it is always 0 there. `maxZoom` and `minZoom` are the limits the data
+source fits its frames within: 16.35 and 10.5, but for Mapbox tuned with Large near a maneuver and
+near a lane choice. So `laneGoal` 1 with `minZoom` 10.5 is Mapbox tuned with Default, or with
+Large while the SDK frames a maneuver.
 
 Other lines:
 
