@@ -250,6 +250,7 @@ internal class SmoothNavigationCamera(
         mode = Mode.IDLE
         arriving = false
         transitionSeconds = 0.0
+        snapOnNextFrame = false
         cancelFrame()
         setUserAnimation(false)
         listener.onCameraState(mode.shown, state, moving = false)
@@ -433,8 +434,12 @@ internal class SmoothNavigationCamera(
         val zoomGoal = if (zoomRamp.ready) zoomRamp.lead(now, tuning.zoomTau) else zoom.value
         val bearingGoal =
             if (bearingRamp.ready) Angles.nearest(bearingRamp.lead(now, tuning.bearingTau), bearing.value) else bearing.value
+        // A map that still shows the whole world, as one does that was never moved, has nothing to
+        // glide from: the camera is put on its target with the next frame.
+        val fromWorld = zoom.value < WORLD_ZOOM && zoomGoal - zoom.value > FAR_ZOOM_LEVELS
+        if (fromWorld) snapOnNextFrame = true
         // A change of mode may move as fast as it needs; within a mode zoom and bearing have a top speed.
-        if (transitionSeconds > 0.0 || lastZoomTarget.isNaN()) {
+        if (transitionSeconds > 0.0 || lastZoomTarget.isNaN() || fromWorld) {
             toZoom = zoomGoal
             toBearing = bearingGoal
         } else {
@@ -591,13 +596,12 @@ internal class SmoothNavigationCamera(
             else -> tuning.transitionSeconds
         }
         transitionStart = now
-        // A map that still shows the whole world, as one does that was never moved, has nothing to
-        // glide from: the camera is put on its target with the first frame, and has arrived then.
-        if (zoom.value < WORLD_ZOOM && toZoom - zoom.value > FAR_ZOOM_LEVELS) {
+        // The next frame puts the camera on its target, as from the world view or for a map that was
+        // not on screen: there is no way to go, and the camera has arrived with that frame.
+        if (snapOnNextFrame) {
             offset.fill(0.0)
             arcZoom = 0.0
             transitionSeconds = FIRST_FRAME_SECONDS
-            snapOnNextFrame = true
         }
         if (changed) {
             // Following on the browsing map is one state from the start; the others say when they got there.
