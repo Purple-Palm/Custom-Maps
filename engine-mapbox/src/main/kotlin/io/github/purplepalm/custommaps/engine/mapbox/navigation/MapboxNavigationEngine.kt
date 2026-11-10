@@ -5,11 +5,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.mapbox.api.directions.v5.DirectionsCriteria
 import com.mapbox.api.directions.v5.models.RouteOptions
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.ExperimentalPreviewMapboxNavigationAPI
-import com.mapbox.navigation.base.extensions.applyDefaultNavigationOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
@@ -24,6 +22,7 @@ import com.mapbox.navigation.core.formatter.MapboxDistanceFormatter
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
 import com.mapbox.navigation.core.replay.route.ReplayRouteSession
+import com.mapbox.navigation.core.reroute.RerouteOptionsAdapter
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.NavigationSessionState
@@ -110,6 +109,9 @@ internal class MapboxNavigationEngine(
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
 
+    /** Writes the request of every reroute to the debug log, and changes none of them. */
+    private val rerouteOptionsLogger = RerouteOptionsLogger(debugLog) { _destination.value }
+
     private val _guidanceState = MutableStateFlow(GuidanceState.IDLE)
     override val guidanceState: StateFlow<GuidanceState> = _guidanceState.asStateFlow()
 
@@ -142,6 +144,7 @@ internal class MapboxNavigationEngine(
         mapboxNavigation.registerLocationObserver(locationObserver)
         mapboxNavigation.registerOffRouteObserver(offRouteObserver)
         mapboxNavigation.registerRoutesObserver(routesObserver)
+        setRerouteOptionsAdapter(mapboxNavigation, rerouteOptionsLogger)
         debugLog.log("navigator_attached")
     }
 
@@ -152,9 +155,23 @@ internal class MapboxNavigationEngine(
         mapboxNavigation.unregisterLocationObserver(locationObserver)
         mapboxNavigation.unregisterOffRouteObserver(offRouteObserver)
         mapboxNavigation.unregisterRoutesObserver(routesObserver)
+        setRerouteOptionsAdapter(mapboxNavigation, null)
         navigation = null
         lastMatch = null
         debugLog.log("navigator_detached")
+    }
+
+    /**
+     * Gives the navigator the watcher of its reroute requests, or takes it back with null. The
+     * watcher only writes to the debug log, so a navigator that will not take it costs its lines
+     * and nothing else.
+     */
+    private fun setRerouteOptionsAdapter(mapboxNavigation: MapboxNavigation, adapter: RerouteOptionsAdapter?) {
+        try {
+            mapboxNavigation.setRerouteOptionsAdapter(adapter)
+        } catch (e: RuntimeException) {
+            debugLog.error("setRerouteOptionsAdapter", e)
+        }
     }
 
     override suspend fun previewRoutes(destination: Place): RouteRequestResult {
@@ -169,13 +186,8 @@ internal class MapboxNavigationEngine(
         val origin = deviceFix ?: lastPuckPosition ?: return RouteRequestResult.NoLocation.also {
             debugLog.log("route_request_refused", mapOf("reason" to "no location"))
         }
-        val options = RouteOptions.builder()
-            .applyDefaultNavigationOptions()
-            .coordinatesList(listOf(origin, destination.point.toPoint()))
-            .alternatives(true)
-            .language(LANGUAGE)
-            .voiceUnits(DirectionsCriteria.IMPERIAL)
-            .build()
+        // To the place's stop point when it has one, with the place itself as the arrival target.
+        val options = routeOptions(origin, destination)
         debugLog.log(
             "route_request",
             mapOf(
@@ -188,7 +200,7 @@ internal class MapboxNavigationEngine(
                 ),
                 "profile" to options.profile(),
                 "alternatives" to options.alternatives(),
-            ),
+            ) + routeRequestFields(destination, options),
         )
         val request = ++routeRequestCount
         // Billed per request (Directions API); no trip session is involved.
@@ -529,6 +541,5 @@ internal class MapboxNavigationEngine(
 
     private companion object {
         const val TAG = "TripSession"
-        const val LANGUAGE = "en"
     }
 }
