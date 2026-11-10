@@ -1027,8 +1027,11 @@ computed (`LaneZoomFrames.beforeTunedEvaluate`):
 
 - while the SDK frames a maneuver, by its own rule within 180 m of it, the frame may be fitted
   until a lane is 28 dp wide; elsewhere the limit is 16.35;
-- while a lane choice holds the view (the same `LaneFocus`), the frame is no farther out than a
-  lane of 14 dp, and the bearing leads by at most 20°;
+- while a lane choice holds the view (the same `LaneFocus`), the frame of the road is no farther
+  out than a lane of 14 dp, and the bearing leads by at most 20°. The frame of a maneuver keeps
+  the SDK's lower limit also then: the SDK applies the lower limit to that frame as well, and it
+  is fitted around the car and the junction, so a lower limit above its fit would push both off
+  the map;
 - the frame of a maneuver holds 30 m after the turn, as for Smooth follow.
 
 The camera's own animations (zoom 2.5 s, restarted by each update) turn these steps into glides.
@@ -1219,8 +1222,10 @@ In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coo
 `LaneChoicesTest` (31 tests: the points ahead with their distances and lane counts, designated
 lanes, the maneuver as a lane choice, the card's lanes, and each point reported to the log once),
 `LaneDetailsTest` (12: nothing is set within the callback of a style load, the setting is made
-after it and made again when something changed it, and nothing after the map is gone) and
-`RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own).
+after it and made again when something changed it, and nothing after the map is gone),
+`RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own) and
+`LaneZoomFramesTest` (7: the limits Mapbox tuned gives the data source with Default and with
+Large, on the road, in the frame of a maneuver and near a lane choice).
 
 The cameras themselves touch Android and Mapbox types and have no JVM tests. While it was written,
 `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by frame

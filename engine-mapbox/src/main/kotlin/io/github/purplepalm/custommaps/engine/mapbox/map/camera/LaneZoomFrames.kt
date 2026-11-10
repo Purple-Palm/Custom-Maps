@@ -30,7 +30,7 @@ internal object LaneZoomFrames {
 
     // The navigation SDK's own values, from FollowingFrameOptions.
     private const val SDK_MAX_ZOOM = 16.35
-    private const val SDK_MIN_ZOOM = 10.5
+    const val SDK_MIN_ZOOM = 10.5
     private const val SDK_METERS_AFTER_MANEUVER = 100.0
 
     /** How far the SDK lets the view turn from the car's heading toward the road ahead, in degrees. */
@@ -101,15 +101,10 @@ internal object LaneZoomFrames {
     }
 
     /**
-     * Mapbox tuned, before the frame of each progress update is computed. With Large:
-     * - while the SDK frames a maneuver, the frame may be fitted until a lane is
-     *   [CameraTuning.junctionLaneDp] wide; elsewhere the limit is the Default one;
-     * - near a lane choice the frame is no farther out than a lane of
-     *   [CameraTuning.freewayLaneDp], and the view turns less toward the road ahead.
-     * The camera's own animations turn these steps into glides. With Default the limits are the
-     * Default ones on every update.
+     * Mapbox tuned, before the frame of each progress update is computed: the data source gets
+     * the limits of [tunedLimits]. The camera's own animations turn these steps into glides.
      *
-     * @param laneWindow the view is close for a lane choice now
+     * @param laneWindow the lane choices' schedule is in for one now; it moves the limits only with Large
      * @param latitude where the car is; a lane's width on the screen depends on it
      */
     fun beforeTunedEvaluate(
@@ -120,21 +115,39 @@ internal object LaneZoomFrames {
         laneWindow: Boolean,
         latitude: Double,
     ) {
-        if (mode != LaneZoom.LARGE) {
-            resetLimits(dataSource, tuning)
-            return
-        }
         val options = dataSource.options.followingFrameOptions
-        val minZoom = if (laneWindow) max(SDK_MIN_ZOOM, closest(tuning.freewayLaneDp, latitude, tuning)) else SDK_MIN_ZOOM
-        val maxZoom = if (framesManeuver(progress, options)) {
-            max(tuning.defaultMaxZoom, closest(tuning.junctionLaneDp, latitude, tuning))
-        } else {
-            tuning.defaultMaxZoom
-        }
-        options.minZoom = minZoom
+        // With Default nothing of the drive is asked: the limits are the same on every update.
+        val framesManeuver = mode == LaneZoom.LARGE && framesManeuver(progress, options)
+        val limits = tunedLimits(mode, tuning, framesManeuver, laneWindow, latitude)
+        options.minZoom = limits.minZoom
+        options.maxZoom = limits.maxZoom
+        options.bearingSmoothing.maxBearingAngleDiff = limits.bearingLead
+    }
+
+    /** The zooms a following frame is fitted within, and how far the view may turn toward the road ahead, in degrees. */
+    class Limits(val minZoom: Double, val maxZoom: Double, val bearingLead: Double)
+
+    /**
+     * The limits of Mapbox tuned for one frame. With Default they are the Default ones on every
+     * update. With Large:
+     * - while the SDK frames a maneuver, the frame may be fitted until a lane is
+     *   [CameraTuning.junctionLaneDp] wide; elsewhere the upper limit is the Default one;
+     * - near a lane choice the frame of the road is no farther out than a lane of
+     *   [CameraTuning.freewayLaneDp], and the view turns less toward the road ahead. The frame of
+     *   a maneuver keeps the SDK's lower limit also then: the SDK applies the lower limit to that
+     *   frame too, and it is fitted around the car and the junction, so a limit above its fit
+     *   would push both off the map.
+     *
+     * @param framesManeuver the SDK frames the next maneuver now, not the road
+     * @param laneWindow the lane choices' schedule is in for one now
+     * @param latitude where the car is; a lane's width on the screen depends on it
+     */
+    fun tunedLimits(mode: LaneZoom, tuning: CameraTuning, framesManeuver: Boolean, laneWindow: Boolean, latitude: Double): Limits {
+        if (mode != LaneZoom.LARGE) return Limits(SDK_MIN_ZOOM, tuning.defaultMaxZoom, SDK_BEARING_LEAD)
+        val minZoom = if (laneWindow && !framesManeuver) max(SDK_MIN_ZOOM, closest(tuning.freewayLaneDp, latitude, tuning)) else SDK_MIN_ZOOM
+        val maxZoom = if (framesManeuver) max(tuning.defaultMaxZoom, closest(tuning.junctionLaneDp, latitude, tuning)) else tuning.defaultMaxZoom
         // The SDK takes the lower limit last, so the upper one may not be under it.
-        options.maxZoom = max(maxZoom, minZoom)
-        options.bearingSmoothing.maxBearingAngleDiff = if (laneWindow) tuning.laneMaxBearingLead else SDK_BEARING_LEAD
+        return Limits(minZoom, max(maxZoom, minZoom), if (laneWindow) tuning.laneMaxBearingLead else SDK_BEARING_LEAD)
     }
 
     /**
