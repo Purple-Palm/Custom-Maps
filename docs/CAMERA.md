@@ -1212,7 +1212,7 @@ Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
 jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
-For the lane zoom, `LaneZoomTest` in `:core-nav` (37 tests, on example latitudes and made-up
+For the lane zoom, `LaneZoomTest` in `:core-nav` (46 tests, on example latitudes and made-up
 routes). Among them:
 
 - Zoom and lane width are each other's inverse, with 18.89 for 28 dp and 17.89 for 14 dp at 35°.
@@ -1221,7 +1221,10 @@ routes). Among them:
 - The start of the close view grows with the speed between 400 and 1,200 m.
 - A lane choice 1.5 km ahead at 105 km/h: in from 725 m, fully in 6 s later, held at least 2 s and
   30 m past it, out over 6 s. Braking does not let the view out before the point.
-- Two lane choices 900 m apart keep the view in; 2.5 km apart let it out between them.
+- Two lane choices 900 m apart keep the view in, and the second has a hold of its own, by its own
+  place and time; 2.5 km apart let the view out between them. Of two inside the window the nearer
+  one holds the view, and a next one keeps the view in up to exactly 10 s of driving from its own
+  window.
 - A reroute during the hold does not keep the view in, and a point at a distance that is no number
   never holds it. Off the route a point the car never reaches is let go after its 2 s, wherever
   the route's metres stand, and back on the route it takes the view again.
@@ -1229,13 +1232,13 @@ routes). Among them:
   counts no closer than that; it takes the junction frame's zoom up to 28 dp, lets it go along the
   tilt's curve after the turn, keeps it between two junctions the view stays down for, does not
   take up again what it let go, forgets it when told that the tilt is back up, and goes to 14 dp
-  near a lane choice. In the frame of a maneuver
-  a lane choice goes no closer than the frame.
+  near a lane choice. In the frame of a maneuver a lane choice goes no closer than the frame.
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
-`LaneChoicesTest` (31 tests: the points ahead with their distances and lane counts, designated
-lanes, the maneuver as a lane choice, the card's lanes, and each point reported to the log once),
+`LaneChoicesTest` (35 tests: the points ahead with their distances and lane counts, designated
+lanes, the maneuver as a lane choice, the card's lanes with every usable lane lit, a step's lanes
+read once and none off the route, and each point reported to the log once),
 `LaneDetailsTest` (12: nothing is set within the callback of a style load, the setting is made
 after it and made again when something changed it, and nothing after the map is gone),
 `RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own) and
@@ -1249,10 +1252,15 @@ Recenter, the background and back (also after the road turned meanwhile), a tele
 and the end. For the lane zoom the same was done with a model of the data source: a turn, turns
 100 to 300 m apart, a roundabout, the arrival and a freeway with lane choices in Large, a change
 of the setting and of the style on the approach, a reroute and the background inside a lane
-window. With
-Default, every frame of the older runs came out the same as before the lane zoom was built, and
-the same with lane choices fed as without. Those checks are not part of the build; the simulated
-drive below is the first real one.
+window. After a review these were added: the car off the route inside a lane window with no new
+route for minutes, an exit ramp of 200 to 260 m that ends in a turn and a lane choice 100 m
+before a turn (at town speed and in a queue), turns 160 to 280 m apart in steps, and a gesture,
+the overview and the background over one junction with the return 183 to 400 m before a later
+turn. With Default, every frame of the older runs came out the same as before the lane zoom was
+built, and the same with lane choices fed as without. Those checks are not part of the build; the
+simulated drive below is the first real one. What `LaneZoomFrames` does to the data source itself,
+the route taken out and given back when the road kept after a maneuver changes, has only these
+runs behind it: no JVM test reaches the data source.
 
 ### Build
 
