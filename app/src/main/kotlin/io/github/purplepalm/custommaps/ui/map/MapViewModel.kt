@@ -50,7 +50,13 @@ data class MapUiState(
     val destination: Place? = null,
     val simulateDrive: Boolean = false,
     val message: UserMessage? = null,
-)
+) {
+    /**
+     * The place the map marks with a pin: the one picked from search, then the one of the routes,
+     * of the drive and of the arrival. Null once the place card is closed or guidance has ended.
+     */
+    val pinnedPlace: Place? get() = selectedPlace ?: destination
+}
 
 /** Screen logic for the phone map: search, place, routes and guidance. Holds no Android types. */
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)

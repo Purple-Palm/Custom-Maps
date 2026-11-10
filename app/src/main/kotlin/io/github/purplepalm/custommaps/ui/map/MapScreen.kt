@@ -114,6 +114,10 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     LaunchedEffect(phoneMap) { settings.laneZoom.collect(phoneMap::setLaneZoom) }
     // And for lane markings on the map, where the map has them.
     LaunchedEffect(phoneMap) { settings.laneDetails.collect(phoneMap::setLaneDetails) }
+    // The pin of the place picked from search, of the routes, the drive and the arrival. It goes
+    // when the place does: the place card closed, guidance ended.
+    val pinnedPlace = state.pinnedPlace
+    LaunchedEffect(phoneMap, pinnedPlace) { phoneMap.showPlace(pinnedPlace) }
 
     var locationAccess by remember { mutableStateOf(context.locationAccess()) }
     // Routes and guidance need precise location; approximate is only good for the puck.

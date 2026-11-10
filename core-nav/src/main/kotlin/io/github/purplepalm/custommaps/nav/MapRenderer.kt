@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.nav
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.model.Place
 import kotlinx.coroutines.flow.StateFlow
 
 /** Draws the map and the route and moves the camera, on the phone or in the car. */
@@ -32,6 +33,12 @@ interface MapRenderer {
      * them. A change applies at once. The car is drawn where it is on the road, never in a lane.
      */
     fun setLaneDetails(enabled: Boolean)
+
+    /**
+     * Marks [place] on the map with a pin at the place itself, such as the building, wherever a
+     * route to it ends; null takes the pin away. One place is marked at a time.
+     */
+    fun showPlace(place: Place?)
 }
 
 /** Insets in pixels from each edge of the map surface. */

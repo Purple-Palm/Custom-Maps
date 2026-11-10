@@ -69,6 +69,7 @@ import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.model.Place
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -81,7 +82,8 @@ import kotlinx.coroutines.launch
 
 /**
  * The phone's map: Mapbox Standard at night with 3D buildings, the device location, the routes of
- * the preview and, during guidance, the active route with traffic and the next maneuver arrow.
+ * the preview and, during guidance, the active route with traffic and the next maneuver arrow. The
+ * place being looked at or driven to has a pin of its own ([showPlace]), wherever its route ends.
  *
  * Before guidance the puck comes from the platform location provider, so no trip session (and no
  * free drive billing) is needed just to see where you are. The camera follows the car there too,
@@ -160,6 +162,9 @@ class PhoneMap internal constructor(
 
     /** Whether the route line view was told to stay thin close in; that follows [laneDetails]. */
     private var routeLineHeld = false
+
+    /** The pin of the place being looked at or driven to; none until [showPlace] brings a place. */
+    private val placePin = PlacePin.on(mapboxMap, debugLog)
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
 
@@ -348,6 +353,8 @@ class PhoneMap internal constructor(
             // Lane details are set a moment after this callback, never within it (see LaneDetails).
             laneDetails.onStyleLoaded()
             applyRouteLineWidths()
+            // The style comes without the pin of a place that was shown before it loaded.
+            placePin.onStyleLoaded()
             mapView.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             render(guidanceState)
         }
@@ -452,6 +459,11 @@ class PhoneMap internal constructor(
         applyRouteLineWidths()
     }
 
+    override fun showPlace(place: Place?) {
+        // At the place itself: the route line shows where the route ends, which may be elsewhere.
+        placePin.show(place?.point)
+    }
+
     /**
      * Puts the Mapbox logo and the attribution button in a fixed strip at the bottom left of the map,
      * just above [bottomInset] pixels of navigation bar or keyboard. The screen keeps that strip free
@@ -503,6 +515,7 @@ class PhoneMap internal constructor(
     fun release() {
         stopCameraSampling()
         laneDetails.release()
+        placePin.release()
         mapErrors.cancel()
         // The counts of the current minute, before the windows' timers go with the scope.
         mapErrorFolder.flush()

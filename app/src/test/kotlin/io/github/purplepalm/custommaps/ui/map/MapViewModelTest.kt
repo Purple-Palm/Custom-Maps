@@ -313,6 +313,67 @@ class MapViewModelTest {
         assertEquals("", viewModel.state.value.searchText)
     }
 
+    @Test
+    fun `the pin is on the picked place, through the routes and the drive, and goes when guidance ends`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        assertNull(viewModel.state.value.pinnedPlace)
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+        viewModel.onDirections()
+        advanceUntilIdle()
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+        viewModel.onStart()
+        advanceUntilIdle()
+        assertEquals(GuidanceState.ACTIVE, viewModel.state.value.guidance)
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+        viewModel.onEnd()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.pinnedPlace)
+    }
+
+    @Test
+    fun `closing the preview leaves the pin with the place card, and closing the card takes it away`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        viewModel.onDirections()
+        advanceUntilIdle()
+        viewModel.onCancelPreview()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.destination)
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+        viewModel.clearSearch()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.pinnedPlace)
+    }
+
+    @Test
+    fun `the pin stays at the arrival and goes when the arrival is dismissed`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        viewModel.onDirections()
+        advanceUntilIdle()
+        viewModel.onStart()
+        navigation.guidanceState.value = GuidanceState.ARRIVED
+        advanceUntilIdle()
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+        viewModel.onDismissArrival()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.pinnedPlace)
+    }
+
+    @Test
+    fun `typing a new search takes the pin off the picked place`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        viewModel.onSearchTextChange("pine")
+        runCurrent()
+        assertNull(viewModel.state.value.pinnedPlace)
+    }
+
     private class FakeNavigationEngine : NavigationEngine {
         override val guidanceState = MutableStateFlow(GuidanceState.IDLE)
         override val routeOptions = MutableStateFlow<List<RouteOption>>(emptyList())
@@ -344,15 +405,17 @@ class MapViewModelTest {
 
         override fun stopGuidance(reason: StopReason) {
             stops += reason
-            guidanceState.value = GuidanceState.IDLE
+            goIdle()
         }
 
-        override fun clearPreview() {
-            guidanceState.value = GuidanceState.IDLE
-        }
+        override fun clearPreview() = goIdle()
 
-        override fun dismissArrival() {
+        override fun dismissArrival() = goIdle()
+
+        /** As in the engine: an idle navigator has no destination. */
+        private fun goIdle() {
             guidanceState.value = GuidanceState.IDLE
+            destination.value = null
         }
     }
 
