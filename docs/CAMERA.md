@@ -759,9 +759,10 @@ Steps 1 to 4 are done.
 
 ### JVM tests, no device
 
-`CameraMotionTest` in `:core-nav` (JUnit 6), 21 tests. Among them:
+`CameraMotionTest` in `:core-nav` (JUnit 6), 27 tests. Among them:
 
-- The spring is exact for any frame time and, from rest, never passes its target.
+- The spring is exact for any frame time and, from rest, never passes its target. After one time
+  constant it has gone 1 − 2/e of the way, and a snapped spring is at rest.
 - Ramp, spring and lead hold a steady 5°/s curve within 4.8 to 5.2°/s, also with fix intervals
   between 0.977 and 1.016 s. The spring trails the ramp by one time constant there.
 - At the end of a turn, and of a change of zoom, the spring comes up to the last sample without
@@ -771,10 +772,13 @@ Steps 1 to 4 are done.
 - At 50 km/h the tilt is below 3° at 180 m, 0° at the junction and back at 45° after it, and peaks
   below 30°/s.
 - Braking never tilts the view up before the turn.
-- Excluded maneuver types keep 45°.
+- A car that stands, or whose speed is not known yet, gets the window of 3 m/s.
+- Excluded maneuver types keep 45°, also in the step after them.
+- After a turn the view stays down until the car is both 25 m and 2 s past it.
 - A second turn 120 m later keeps the view down.
 - A reroute that reuses the step numbers is still a new step.
-- Guidance that ends halfway down turns the tilt back from where it is.
+- Guidance that ends halfway down turns the tilt back from where it is, and leaves nothing behind
+  for the next drive.
 
 Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the frame),
 `IdleFollowTest` (12: when the camera follows the car before guidance) and `GuidancePaddingTest`

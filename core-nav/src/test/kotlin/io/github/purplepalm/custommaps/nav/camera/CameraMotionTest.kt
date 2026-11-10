@@ -33,6 +33,30 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `a spring from rest moves by the closed form and stays short of its target`() {
+        val tau = 0.2
+        val spring = Spring(tau).apply { snap(0.0) }
+        // After one time constant a critically damped spring has gone 1 - 2 / e of the way.
+        spring.step(10.0, tau)
+        assertEquals(10.0 * (1.0 - 2.0 / Math.E), spring.value, 1e-9)
+        assertEquals(10.0 / tau / Math.E, spring.velocity, 1e-9)
+        repeat(600) {
+            spring.step(10.0, frame)
+            assertTrue(spring.value <= 10.0, "value ${spring.value}")
+        }
+    }
+
+    @Test
+    fun `a snapped spring is at rest`() {
+        val spring = Spring(0.2).apply { snap(0.0) }
+        spring.step(10.0, 0.1)
+        assertTrue(spring.velocity > 1.0, "velocity ${spring.velocity}")
+        spring.snap(4.0)
+        assertEquals(4.0, spring.value, 0.0)
+        assertEquals(0.0, spring.velocity, 0.0)
+    }
+
+    @Test
     fun `ramp with lead keeps a steady curve at a steady rotation rate`() {
         val curve = steadyCurve { 1.0 }
         assertTrue(curve.slowest > 4.8 && curve.fastest < 5.2, "$curve")
@@ -83,6 +107,8 @@ class CameraMotionTest {
 
         ramp.push(9.0, 11.0)
         assertEquals(7.0, ramp.value(11.0), 1e-12)
+        // Asked about a moment before the sample came, it stands where it started.
+        assertEquals(7.0, ramp.value(10.99), 1e-12)
         assertEquals(8.0, ramp.value(11.0 + tuning.sampleHoldSeconds / 2), 1e-12)
         assertTrue(ramp.isMoving(11.5))
         assertEquals(2.0 / tuning.sampleHoldSeconds, ramp.rate(11.5), 1e-12)
@@ -198,6 +224,66 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `after a fork the view stays up`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 50.0, 500.0, "fork", excluded, 20.0)
+        assertEquals(0.0, focus.goal)
+        // Past the fork, with a turn far ahead: there was no view down to hold.
+        focus.onProgress(1.0, "r/0/1", 900.0, 0.0, "turn", excluded, 20.0)
+        assertEquals(0.0, focus.goal)
+        focus.onProgress(2.0, "r/0/1", 880.0, 20.0, "turn", excluded, 20.0)
+        assertEquals(0.0, focus.goal)
+        assertEquals(tuning.cruisePitch, focus.pitchAt(2.0), 1e-9)
+    }
+
+    @Test
+    fun `the view stays down after a turn until the car is both far enough and long enough past it`() {
+        // A car that stops just after the turn: long past it, but not far.
+        val stopped = pastATurn()
+        stopped.onProgress(101.0, "r/0/1", 897.0, 3.0, "turn", excluded, 0.0)
+        stopped.onProgress(111.0, "r/0/1", 897.0, 3.0, "turn", excluded, 0.0)
+        assertEquals(1.0, stopped.goal)
+
+        // A car that is quickly far past the turn, but not long.
+        val quick = pastATurn()
+        quick.onProgress(101.0, "r/0/1", 870.0, 30.0, "turn", excluded, 30.0)
+        assertEquals(1.0, quick.goal)
+
+        // Far enough and long enough: the view rises.
+        val gone = pastATurn()
+        gone.onProgress(101.0, "r/0/1", 870.0, 30.0, "turn", excluded, 30.0)
+        gone.onProgress(103.5, "r/0/1", 795.0, 105.0, "turn", excluded, 30.0)
+        assertEquals(0.0, gone.goal)
+    }
+
+    @Test
+    fun `a car that stands or has no speed yet still gets the tilt before the turn`() {
+        // The window opens at the framing distance plus what a slow car covers during the descent.
+        val window = tuning.maneuverFramingMeters + 3.0 * tuning.descentSeconds
+        for (speed in listOf(null, 0.0)) {
+            val outside = ManeuverFocus(tuning)
+            outside.onProgress(0.0, "r/0/0", window + 1.0, 0.0, "turn", excluded, speed)
+            assertEquals(0.0, outside.goal, "speed $speed")
+            val inside = ManeuverFocus(tuning)
+            inside.onProgress(0.0, "r/0/0", window - 1.0, 0.0, "turn", excluded, speed)
+            assertEquals(1.0, inside.goal, "speed $speed")
+        }
+    }
+
+    @Test
+    fun `a drive that ends before a turn leaves nothing for the next drive`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 150.0, 450.0, "turn", excluded, 10.0)
+        assertEquals(1.0, focus.goal)
+        focus.reset(1.0)
+        assertEquals(0.0, focus.goal)
+        // The same route again from its start: the same step, now far from its turn.
+        focus.onProgress(60.0, "r/0/0", 600.0, 0.0, "turn", excluded, 10.0)
+        assertEquals(0.0, focus.goal)
+        assertEquals(tuning.cruisePitch, focus.pitchAt(70.0), 1e-9)
+    }
+
+    @Test
     fun `a step without a maneuver type keeps the cruise tilt`() {
         val focus = ManeuverFocus(tuning)
         focus.onProgress(0.0, "r/0/0", 50.0, 0.0, null, excluded, 20.0)
@@ -278,6 +364,15 @@ class CameraMotionTest {
     fun `the car screen follows the puck a little more calmly`() {
         assertTrue(CameraTuning.CAR.centerTau > CameraTuning.PHONE.centerTau)
         assertEquals(CameraTuning.PHONE.copy(centerTau = CameraTuning.CAR.centerTau), CameraTuning.CAR)
+    }
+
+    /** A view that went down for the turn at the end of step r/0/0, as the car reaches the turn at 100 s. */
+    private fun pastATurn(): ManeuverFocus {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(90.0, "r/0/0", 100.0, 500.0, "turn", excluded, 10.0)
+        assertEquals(1.0, focus.goal)
+        focus.onProgress(100.0, "r/0/0", 1.0, 599.0, "turn", excluded, 10.0)
+        return focus
     }
 
     /** How a spring took a steady curve: its turn in degrees a second, and how far it was behind the ramp. */
