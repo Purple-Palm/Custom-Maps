@@ -97,6 +97,23 @@ class ThenRuleTest {
         assertEquals(listOf(false, true), shown(at(600.0, following = ramp), at(350.0, following = ramp)))
     }
 
+    @ParameterizedTest(name = "first {0} -> {1}")
+    @CsvSource("ON_RAMP, true", "OFF_RAMP, true", "FORK, true", "MERGE, true", "TURN, false", "ROUNDABOUT, false", "END_OF_ROAD, false")
+    fun `which first maneuvers show earlier and from farther apart`(next: ManeuverType, early: Boolean) {
+        // A turn 700 m and 38 s after the first maneuver, seen from 1,200 m and 45 s before it:
+        // too far apart and too early for a town turn, not for a ramp, a fork or a merge.
+        val turn = following(meters = 700.0, seconds = 38.0)
+        assertEquals(listOf(early), shown(at(1_200.0, toNextTime = 45.seconds, next = next, following = turn)))
+    }
+
+    @ParameterizedTest(name = "second {0} -> {1}")
+    @CsvSource("ON_RAMP, true", "OFF_RAMP, true", "FORK, true", "TURN, false", "ROUNDABOUT, false", "END_OF_ROAD, false")
+    fun `which second maneuvers count as close from farther apart`(type: ManeuverType, close: Boolean) {
+        // 700 m and 38 s after a town turn: close only when it is a ramp or a fork.
+        val second = following(type = type, modifier = TurnModifier.SLIGHT_RIGHT, meters = 700.0, seconds = 38.0)
+        assertEquals(listOf(close), shown(at(300.0, following = second)))
+    }
+
     @Test
     fun `once shown it stays for the rest of the step`() {
         val refreshed = following(meters = 150.0, seconds = 45.0)
