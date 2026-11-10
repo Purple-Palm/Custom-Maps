@@ -102,7 +102,7 @@ class ProcessRecordsTest {
     }
 
     @Test
-    fun `the file lists the records Android still holds, one pid and time per line`() {
+    fun `the file keeps a record Android dropped, ahead of the ones it lists, one pid and time per line`() {
         val file = File(temp, "exits-logged")
         val logged = LoggedExits(file)
         logged.markLogged(keys(exit(2), exit(1)))
@@ -110,9 +110,44 @@ class ProcessRecordsTest {
         // The oldest record dropped out of Android's list.
         logged.markLogged(keys(exit(3), exit(2)))
 
-        assertEquals(setOf("4203:${at(3)}", "4202:${at(2)}"), file.readLines().toSet())
+        assertEquals(listOf("4201:${at(1)}", "4203:${at(3)}", "4202:${at(2)}"), file.readLines())
         assertEquals(listOf(file.name), temp.list().orEmpty().toList())
-        assertEquals(listOf(exit(1)), logged.unseen(listOf(exit(1)), key))
+        assertEquals(emptyList<Exit>(), logged.unseen(listOf(exit(1)), key))
+    }
+
+    @Test
+    fun `a record Android dropped and lists again after a reboot is not logged twice`() {
+        val logged = LoggedExits(File(temp, "exits-logged"))
+        val written = mutableListOf<Exit>()
+        // Android keeps 16 records per app and lists them newest first.
+        val beforeLastExit = (16 downTo 1).map { exit(it) }
+        val afterLastExit = (17 downTo 2).map { exit(it) }
+        logged.logNew(beforeLastExit, key) { written.add(it) }
+        logged.logNew(afterLastExit, key) { written.add(it) }
+
+        // Android had not saved its records since the 17th exit: after the reboot it lists the old 16.
+        val count = logged.logNew(beforeLastExit, key) { written.add(it) }
+
+        assertEquals(0, count)
+        assertEquals((1..17).map { exit(it) }, written)
+    }
+
+    @Test
+    fun `the file stays short, and a record Android never drops is still logged once`() {
+        val file = File(temp, "exits-logged")
+        val logged = LoggedExits(file)
+        // Stamped while the phone's clock was ahead. Android drops the oldest times first, so never this one.
+        val clockAhead = exit(3_600)
+        val written = mutableListOf<Exit>()
+
+        for (latest in 1..200) {
+            val listed = (listOf(clockAhead) + (latest downTo 1).map { exit(it) }).take(16)
+            logged.logNew(listed, key) { written.add(it) }
+        }
+
+        assertEquals(listOf(exit(1), clockAhead) + (2..200).map { exit(it) }, written)
+        // The 16 listed and the last 48 of the dropped ones.
+        assertEquals(64, file.readLines().size)
     }
 
     @Test

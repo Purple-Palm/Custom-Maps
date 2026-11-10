@@ -30,11 +30,13 @@ data class ExitKey(val pid: Int, val timeMillis: Long) {
  * Remembers, in [file], which of the records Android keeps across many starts and app updates (how
  * earlier processes ended) are already in the debug log, so that each is logged once.
  *
- * The file holds the [ExitKey] of every record Android still held at the last start, one per line;
- * Android keeps only a few records per app, so the file stays small. A new list is written to a
- * temporary file next to it and renamed over it, so a write cut short by the process dying leaves
- * the previous list in place. A missing or unreadable file counts as nothing logged yet: every record Android
- * still holds is logged once more.
+ * The file holds one [ExitKey] per line: the records Android listed when the file was last
+ * written, and before them the last few it had stopped listing by then. Those stay because they can
+ * come back: Android saves its records only about every half hour and not when the phone shuts
+ * down, so after a reboot it lists again the ones it dropped since its last save. A new list is
+ * written to a temporary file next to it and renamed over it, so a write cut short by the process
+ * dying leaves the previous list in place. A missing or unreadable file counts as nothing logged
+ * yet: every record Android still holds is logged once more.
  */
 class LoggedExits(private val file: File) {
 
@@ -63,14 +65,18 @@ class LoggedExits(private val file: File) {
     }
 
     /**
-     * Stores [keys] as the records that are in the log, in place of the ones stored so far: records
-     * Android no longer holds never come back, so their keys can go. Nothing is written when the
-     * same keys are stored already, or when [keys] is empty: right after a reboot Android lists no
-     * records until it has read its own back from storage.
+     * Stores [keys], the records Android lists now that are in the log, after the keys stored so
+     * far. Of the stored keys Android no longer lists, the last [DROPPED_KEYS_KEPT] stay, by their
+     * place in the file and not by their time, which a wrong clock would upset; a key Android still
+     * lists is never cut. Nothing is written when every key is stored already, as when [keys] is
+     * empty: right after a reboot Android lists no records until it has read its own back from
+     * storage.
      */
     fun markLogged(keys: Collection<ExitKey>) {
-        val logged = keys.toSet()
-        if (logged.isEmpty() || logged == read()) return
+        val stored = read()
+        val listed = keys.toSet()
+        if (stored.containsAll(listed)) return
+        val logged = stored.filterNot { it in listed }.takeLast(DROPPED_KEYS_KEPT) + listed
         val text = logged.joinToString(separator = "") { "$it\n" }
         try {
             file.parentFile?.mkdirs()
@@ -85,16 +91,25 @@ class LoggedExits(private val file: File) {
         }
     }
 
-    /** Lines that are not keys are skipped: their records are logged once more. */
+    /**
+     * The stored keys in the order of the file. Lines that are not keys are skipped: their records
+     * are logged once more.
+     */
     private fun read(): Set<ExitKey> =
         try {
-            if (file.exists()) file.readLines().mapNotNullTo(HashSet()) { ExitKey.parse(it.trim()) } else emptySet()
+            if (file.exists()) file.readLines().mapNotNullTo(LinkedHashSet()) { ExitKey.parse(it.trim()) } else emptySet()
         } catch (e: IOException) {
             emptySet()
         }
 
     private companion object {
         const val TEMPORARY_SUFFIX = ".new"
+
+        /**
+         * How many keys of records Android no longer lists are kept. Only the ones it dropped since
+         * its last save can come back; this is three times the 16 records it keeps per app.
+         */
+        const val DROPPED_KEYS_KEPT = 48
     }
 }
 
