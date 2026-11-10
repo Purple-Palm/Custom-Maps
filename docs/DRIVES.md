@@ -521,8 +521,9 @@ On the drive:
 5. **The Then chip.** Before a turn that is closely followed by another, a chip should slide out
    from under the maneuver card, about 400 m or 30 s before the first turn, and show the second
    one. Note whether it comes too early or too late, whether a chain of close turns keeps it with
-   only its arrow changing, whether it shows early enough before a freeway exit with a turn at the
-   ramp's end, and whether it ever flashes or moves the map.
+   only the arrow or the road that changes fading (the same arrow again should not blink), whether
+   it shows early enough before a freeway exit with a turn at the ramp's end, and whether it ever
+   flashes or moves the map.
 
 Then share the debug log. What to read in it:
 

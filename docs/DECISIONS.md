@@ -292,7 +292,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **One rule decides, in `:core-nav`** (`ThenRule`), once per progress update in the engine. The phone reads its answer now and the car screen reads the same answer in stage 2, so both show the same maneuver at the same moment.
   - It shows when the second maneuver follows the first within 300 m or 20 s (1,000 m or 40 s around ramps, forks and merges, where lanes are picked early), from 400 m or 30 s before the first (1,500 m or 50 s when the first is a ramp, fork or merge), and not from closer than 30 m.
   - It never shows going straight on, a road that only changes its name, a merge or a note, and nothing after the arrival.
-  - Once shown it stays until the step changes, so GPS jitter, braking and a traffic refresh cannot make it flicker. Off the route it hides.
+  - Once shown it stays until the step changes, so GPS jitter, braking and a traffic refresh cannot make it flicker. Off the route it hides. When the next step keeps it, only the arrow or the road that changes fades; the same arrow again does not move.
   - The numbers are a first setting. The progress line of the debug log carries the second maneuver and whether the chip showed, to tune them after a drive.
 - **The chip is outside the measured panels.** It hangs under the maneuver card over the map, and during guidance the camera's top padding holds a constant band of 56 dp under the card for it, whether the chip shows or not. The chip never covers what the camera frames, and the camera never moves when the chip comes or goes.
 - **Alternatives:**
