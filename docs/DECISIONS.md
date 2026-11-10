@@ -106,6 +106,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - End and arrival stop the trip session first and clear the routes after that. Clearing routes while a session runs would switch it to free drive, which Mapbox bills.
   - A session stopped outside the app, by End Navigation in the SDK's trip notification, ends guidance the usual way.
   - A dedicated lifecycle owner keeps the navigator alive only for the length of a drive. When the app goes to the background mid-drive, guidance carries on with the trip notification.
+  - Inside a running trip the routes are refreshed or replaced only by the start plan of decision 40, under its own rules, so that the trip stays one billed trip.
 - **Alternatives:** Mapbox's ready-made navigation UI, or free drive just to show the location. Both start billed sessions on their own.
 - **Why:** trip sessions are what Mapbox bills for navigation, and the rules are testable on the JVM this way.
 
@@ -226,9 +227,15 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 28. Routes end at the stop point, not the display point
 
-- **Chosen:** a place keeps two points: where it is shown, and where a car stops (the routable point Mapbox Search gives for cars; points marked as a building entrance are for people on foot and are skipped). Routes go to the stop point; the display point is passed as the arrival target, so the instruction names the right side.
-- **Alternatives:** the display point only, which the Directions API snaps to the nearest road, sometimes the service road behind a building; or always arriving curbside, which can add a loop around the block.
+- **Chosen:** a place keeps two points: where it is, and where a car stops for it. Built in stage 1.1.
+  - **The stop point** is the first routable point of the Mapbox Search result whose name is not `entrance`, in any letter case, and that lies within 1 km of the place. Mapbox names these points in free text, so no list of good names is kept; `entrance` marks a door for people on foot. Routable points come with the result itself, with no extra request. A result without such a point has no stop point and works as before.
+  - **Routes go to the stop point.** The place itself goes along as the arrival target, so the arrival instruction names the side the place is on. Nothing is asked about the side of the road the car arrives on: the routes are the ones the service finds best.
+  - **The map shows the place** as an amber dot, from the moment it is picked through the routes, the drive and the arrival; the route line keeps its own end marker. When a place has no stop point and the route ends more than 50 m from it, the route sheet says so, for example "Route ends 250 ft from the place".
+  - **Reroutes are only watched.** The navigator builds the request of a reroute itself. That it ends at the same point is in the SDK's sources; whether it keeps the arrival target is not. Every reroute request is written to the debug log as it is and handed back unchanged; a drive shows whether anything needs correcting.
+  - A place also keeps the search provider's id of the result. Nothing reads it before the trip history.
+- **Alternatives:** the display point only, which the Directions API snaps to the nearest road, sometimes the service road behind a building; or always arriving curbside, which can add a loop around the block and which the owner chose to leave off.
 - **Why:** the first drive ended behind a big-box store whose address point lies in the middle of the building.
+- **Cost:** whether Mapbox has a stop point for a place, and where it lies, shows only in a drive's log. 1 km and 50 m are first settings, and none of it has been on a drive yet.
 
 ## 29. Diagnostics survive a crash
 
@@ -333,3 +340,36 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Moving the car's icon or the route line into a lane. There is no lane position to move it by.
 - **Why:** public, reversible and honest about what the phone knows.
 - **Cost:** the order of events the setting relies on is read from the SDK's source, not promised by it. Check it with each SDK upgrade ([ROADMAP.md](ROADMAP.md), watch list).
+
+## 40. Start at once with older routes
+
+- **Chosen (owner):** Start hands the previewed routes to the navigator at once, whatever their age. It never waits for a position or a request and shows no spinner. What is done about old routes happens inside the trip.
+- **Three plans,** picked at Start by one rule in `:core-nav` (`StartFreshness`) from the time since the routes arrived and how far the car is from where they were requested:
+
+  | Plan | When | Inside the trip |
+  |---|---|---|
+  | As previewed | Up to 5 minutes old, and the car within 100 m | Nothing |
+  | Refresh | Older than 5 minutes, or the car moved more than 100 m | One refresh of traffic, times and closures; the roads stay the same |
+  | Replan | Older than 30 minutes; or the refresh failed, or the routes cannot be refreshed | One route request from where the car is to the same place; its routes take the place of the old ones |
+
+  - The car's position at Start is what is at hand: the map's puck, or else the location service's last answer when it is no older than 30 s. With no position only the age counts.
+  - A simulated drive is always as previewed.
+  - A car that moved gets a refresh, never a replan. A car that has left the route is put on a new one by the navigator itself, free and inside the trip, as on both drives; a second request would only race it. From the moment the navigator finds the car off the route, or puts other routes in place for any reason, the plan does nothing more.
+  - The replan repeats the preview's request, to the same stop point with the same arrival target (28), from the navigator's position on the road, with the car's direction when it moves at 3 m/s or more. Of the fresh routes, the one with the most main roads of the route the driver started on goes first; with none in common the service's order stays.
+- **The billing guard.** Mapbox bills a trip once, when its session starts. Routes given to the navigator inside a trip are compared with its latest progress: routes that arrive while it has none, as before the first progress of a trip, or that end more than 100 m from where the trip goes, start a second billed trip. An empty list ends guidance while the session runs on, which is billed by the hour.
+  - So one pure rule (`InTripRefresh`, tested on the JVM) is asked before anything is done, and the engine only carries out its answer. Nothing happens before the first progress of the trip, after guidance ended or after a reroute. An empty answer is never set, and neither are routes worked out on the phone without network, which know less than the routes in use. A destination more than 100 m from the trip's is never set; the distance is measured the way the navigator measures it.
+  - Fresh routes are set from inside a progress update for the route the trip started on, the one moment the navigator is sure to have a progress.
+  - An answer that belongs to an earlier trip is dropped, and a request still under way is cancelled when guidance ends.
+- **What the refresh's results mean.** Success: done. Failure, no network or a refusal: replan. Not started, the navigator has no route it can refresh, such as one worked out on the phone: replan, since such routes are never refreshed later either. Cancelled, the navigator's routes changed while the refresh ran: nothing, the new routes are fresh.
+- **Logged:** `start_plan` at Start with the plan, the age and the distance; `start_refresh` and `start_replan` with the result, and the reason when nothing was set. Every route request the app sends is a `route_request` line that says whether it was sent inside a trip.
+- **Only logged for now:** what the navigator's reroutes ask for (28).
+- **Alternatives:**
+  - Start waits up to 4 s for fresh routes. The owner chose to start at once.
+  - Refresh the open preview on a timer. Each refresh is a billed request outside a trip, for a preview that may never be driven.
+  - Request again on every Start. It doubles the requests for nothing when the preview is fresh.
+- **Why:** the first drive started on routes 8 minutes old. Only a reroute a few seconds in brought fresh traffic; without it the arrival time would have stayed that old until the navigator's first own refresh, 5 minutes into the drive.
+- **Cost:**
+  - The drive begins on the old route; after a replan the route line and the first instruction can change a few seconds in.
+  - The refresh is an experimental call of the navigation SDK, and the navigator's rule for "the same trip" is read from its source, not promised by it. Re-check both with each SDK upgrade.
+  - The trip count in Settings follows the navigator's sessions (18). A second billed trip caused by swapped routes would not show there, only on Mapbox's statistics page, which is why the guard is a tested rule and not a habit.
+  - None of it has been on a drive yet; 5 minutes, 100 m and 30 minutes are first settings.

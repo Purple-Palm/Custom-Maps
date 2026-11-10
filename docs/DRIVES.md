@@ -25,10 +25,10 @@ Both drives: the owner's Samsung phone with Android 15, a stage 1 build.
 | The view switched abruptly near turns | The SDK's framing flips the tilt within 180 m of most turns and again at each step change | The tilt goes down and back up gradually | Built in stage 1.1 |
 | Lanes too small before a turn | The following camera stops at zoom 16.35 | A Lane zoom setting: with Large the view goes close onto the junction | Built in stage 1.1 |
 | The camera turned into a gentle curve well before the car (liked) | The SDK aims the camera at the far end of the road ahead | Kept | Built in stage 1.1, in every style |
-| The first drive's routes all ended behind the store | The route went to the middle of the building, and the router took the nearest road | Routes end at Mapbox's stop point for the place | Next build |
+| The first drive's routes all ended behind the store | The route went to the middle of the building, and the router took the nearest road | Routes end at Mapbox's stop point for the place, and the map shows the place as a pin | Built in stage 1.1 |
 | No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Next build; the network lines and the folded map errors are built |
 | The app restarted once before the first drive | Unknown: the log records no crash and no exit reason | Crash and exit-reason lines | Built in stage 1.1 |
-| A reroute right after Start, on both drives | First drive: the car was not yet matched to a road. Second drive: the navigator began with an out-of-date position | None needed: a reroute inside a trip is free. Start refreshes traffic on old routes | Next build |
+| A reroute right after Start, on both drives | First drive: the car was not yet matched to a road. Second drive: the navigator began with an out-of-date position | None needed: a reroute inside a trip is free. Start refreshes or replans old routes inside the trip | Built in stage 1.1 |
 
 ### What the owner reported
 
@@ -287,9 +287,9 @@ view at three points, while the camera stays in following mode:
 ### What changes
 
 The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). It is being built in steps: the
-diagnostics and the camera below are built, and so are the Then chip the owner asked for
-([DECISIONS.md](DECISIONS.md), 37) and the Lane zoom setting with lane details on the map (38,
-39); the rest is designed and not built yet. Stage 2 is the Android Auto stage.
+diagnostics, the camera, the destination and the start below are built, and so are the Then chip
+the owner asked for ([DECISIONS.md](DECISIONS.md), 37) and the Lane zoom setting with lane details
+on the map (38, 39); the rest is designed and not built yet. Stage 2 is the Android Auto stage.
 
 #### Camera
 
@@ -312,23 +312,32 @@ None of the camera changes has been on a drive yet.
 
 #### Destination
 
-- **Stop point (next build).** `Place` in `:core-nav` gets a stop point: where a car should stop
-  for the place, when Search gives one. The place's own point stays its pin.
-- **Which point (next build).** `MapboxSearchProvider` takes the first routable point meant for
-  cars (`POI`, `Address` or `default`). It skips points named `entrance`: in Mapbox's data they
-  mark a building door for people on foot, not where a car stops. It ignores any point more than
-  1 km from the place as bad data.
-- **Route request (next build).** Routes go to the stop point, with the place as the arrival
-  target (`RouteOptions.waypointTargetsList`, directions-models 7.10.1; `waypoint_targets` in the
+Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 28), except where a line says otherwise.
+
+- **Stop point.** `Place` in `:core-nav` has a stop point: where a car should stop for the place,
+  when Search gives one. The place's own point stays its pin.
+- **Which point.** `MapboxSearchProvider` takes the first routable point of the result whose name
+  is not `entrance`, in any letter case, and that lies within 1 km of the place. Mapbox names these
+  points in free text (`POI`, `Address`, `default` and others), so the app keeps no list of good
+  names. `entrance` marks a building door for people on foot, not where a car stops. A point
+  farther than 1 km counts as bad data and is passed over. With no such point the place has no
+  stop point.
+- **Route request.** Routes go to the stop point, with the place as the arrival target
+  (`RouteOptions.waypointTargetsList`, directions-models 7.10.1; `waypoint_targets` in the
   [Directions API](https://docs.mapbox.com/api/navigation/directions/)), so the arrival says which
-  side the building is on. Results without a stop point work as today. There are no extra search
+  side the building is on. Results without a stop point work as before. There are no extra search
   requests: routable points come in the same response.
-- **Reroutes (next build).** Every reroute, online and onboard, aims at the same stop, because
-  reroutes are built from the request. Whether the onboard router reads `waypoint_targets` is
-  unverified; offline, only the side named at arrival could differ.
-- **Preview (next build).** The map shows the place as a pin next to the route's end. Without a
+- **The car's direction.** A request from a position no older than 30 s of a car moving at 3 m/s
+  or more also carries the direction it drives in, so the routes start that way and not with a
+  U-turn. A car that stands sends none, as before.
+- **Reroutes.** The navigator builds a reroute's request itself. It ends at the same point; whether
+  it keeps the arrival target cannot be read from the SDK. The app writes every reroute request to
+  the debug log (`reroute_options`) and changes none. Offline, only the side named at arrival could
+  differ.
+- **Preview.** The map shows the place as an amber dot next to the route's end, from the moment the
+  place is picked until its card is closed, guidance ends or the arrival is dismissed. Without a
   stop point, when the route ends more than 50 m from the place, the route sheet says so, for
-  example "Route ends 230 ft from the place". 50 m is a starting value.
+  example "Route ends 250 ft from the place". 50 m is a starting value.
 - **Curb side (unchanged).** Arriving with the place always on the right stays off: it can add a
   loop around the block. The owner chose to keep it off (2026-11-10).
 - **Shared links (stage 2).** A Google Maps, Apple Maps or Waze link, or a `geo:` address, gives a
@@ -336,32 +345,55 @@ None of the camera changes has been on a drive yet.
   Search Box, and that result's stop point is used when it lies within about 150 m. The link's own
   point stays the place. This costs one extra Search Box request per link.
 - **Still unknown:** whether this store gives a stop point in front, searched by address or by
-  name. The next drive shows it.
+  name, and whether reroutes keep the arrival target. The next drive shows both. None of this has
+  been on a drive yet.
 
 #### Start
 
-Next build. On Start the app checks how old the routes are and how far the phone has moved since
-they were planned:
+Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 40). Start hands the previewed routes to the
+navigator at once and never waits. It looks at how old the routes are and how far the car is from
+where they were requested, and picks a plan that is carried out inside the trip:
 
-| Situation | What Start does | Cost |
-|---|---|---|
-| Routes up to 5 minutes old, phone within 100 m | Starts with the routes as they are | Nothing extra |
-| Routes 5 to 30 minutes old, phone within 100 m | Starts with them, then refreshes traffic and times inside the trip | Free, part of the trip |
-| Phone moved more than 100 m, or routes older than 30 minutes | Starts with them, then gets routes that begin where the car is, inside the trip | Free, part of the trip |
+| Plan (`start_plan`) | Situation at Start | What follows inside the trip | Cost |
+|---|---|---|---|
+| `AS_PREVIEWED` | Routes up to 5 minutes old, car within 100 m | Nothing | Nothing extra |
+| `REFRESH_IN_TRIP` | Routes older than 5 minutes, or the car moved more than 100 m | One refresh of traffic, times and closures on the same roads (`start_refresh`). If it fails, or the routes cannot be refreshed, the replan below follows | Part of the trip |
+| `REPLAN_IN_TRIP` | Routes older than 30 minutes | One route request from where the car is to the same place; its routes replace the old ones (`start_replan`) | Part of the trip |
 
-- The owner chose to start at once (2026-11-10): Start never waits, and fresh routes replace the old
-  ones inside the trip a moment later. The alternative was to wait up to 4 s for fresh routes before
-  the trip.
+- The owner chose to start at once (2026-11-10). The alternative was to wait up to 4 s for fresh
+  routes before the trip.
 - The first drive would have got the refresh: 8 minutes old, 22.5 m moved.
-- The new routes keep the chosen route when they have the same main roads. If the request fails,
-  the old routes go on and the SDK reroutes inside the trip by itself, as on both drives.
-- Nothing is swapped before the trip's first progress update, so the new routes always land inside
-  the same billed trip.
+- **The car's position at Start** is what is at hand: the map's puck, or else the location
+  service's last answer when it is no older than 30 s. With neither, only the age counts.
+- **A car that moved gets a refresh, not new routes.** If it has left the route, the navigator
+  reroutes it by itself inside the trip, as on both drives. From the moment the navigator finds the
+  car off the route, or sets routes of its own, the plan does nothing more: a refresh that then
+  fails is not followed by a replan, and a request under way is cancelled.
+- **The replan** asks what the preview asked: the same stop point and arrival target, from the
+  navigator's position on the road. Of the fresh routes, the one with the most main roads of the
+  route the driver started on goes first; with none in common the order of the service stays. If
+  the request fails, the old routes go on.
+- **Nothing happens before the trip's first progress update,** and fresh routes are set from inside
+  a progress update. Routes that reach the navigator while it has no progress, or that end more
+  than 100 m from where the trip goes, would start a second billed trip, and an empty list would
+  drop the trip into free drive. So an empty answer, routes worked out on the phone without
+  network and a destination that moved are never set. One rule in `:core-nav` (`InTripRefresh`)
+  decides each time, and the engine only does what it answers.
+- **Guidance that ends** cancels a request under way, and an answer that comes later changes
+  nothing, also not in the next drive.
 - A simulated drive always starts with the routes as they are.
-- The choice is logged as `start_plan`.
-- The refresh uses `RouteRefreshController.requestImmediateRouteRefresh` (Navigation 3.34.1), an
-  experimental API. When the SDK reroutes first, as on both drives, the reroute already brings
-  fresh traffic.
+- **The refresh** uses `RouteRefreshController.requestImmediateRouteRefresh` (Navigation 3.34.1),
+  an experimental API. Its four results: success; failure, which is followed by the replan; not
+  started, when the navigator has no route it can refresh, such as one worked out on the phone,
+  also followed by the replan; cancelled, when the navigator's routes changed meanwhile, followed
+  by nothing.
+- **In the log:** `start_plan` (plan, age in seconds, meters moved, simulated); `start_refresh`
+  and `start_replan` (the result, and the reason when nothing was set). Every route request is a
+  `route_request` line with `inTrip`.
+- The trip count in **Settings → Debug** follows the navigator's sessions and should show one trip
+  for one drive. A second billed trip from swapped routes would not show there, only on Mapbox's
+  statistics page; that is why the rule above is tested and not left to care.
+- 5 minutes, 100 m and 30 minutes are first settings. None of this has been on a drive yet.
 - Prices: [Navigation SDK pricing](https://docs.mapbox.com/android/navigation/guides/pricing/) and
   [mapbox.com/pricing](https://www.mapbox.com/pricing).
 
@@ -420,7 +452,9 @@ Built in stage 1.1. New lines in the debug log:
 | Camera | Once a second during guidance while the map is on screen (the `activity` and `screen` lines show when it was not): zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. Also how wide a lane is on the screen, what sets the zoom with the Large lane zoom, and whether lane details are on. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
 | Lane choices | Once for each point of the route with lanes, when it comes as near as the close view would start: its lanes, how many can be used and how many leave the route, whether the road is a freeway, and the reason when the rule passes it over. Each route also lists, step by step, its intersections with lanes | How often Large goes close on a freeway, and how often a looser rule would |
 | Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
-| Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it, the result's types, categories and Mapbox id | Behind the store |
+| Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it and the one the app took, the result's types, categories and Mapbox id | Behind the store |
+| Route requests | Every route request the app sends: where it starts, and how old, how fast and in which direction that position was; the stop point, the arrival target and the direction sent with it; whether it was sent inside a trip. And every reroute request of the navigator: how many points and arrival targets it has, whether the destination's target is set, and how far its end is from where the trip goes | Behind the store; what a drive costs |
+| Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, and the reason whenever fresh routes were not set | Old routes at Start |
 | Routes | How far the Directions API moved each requested point: about 71 m for the store. The lines that describe whole routes are put together off the main thread, so they are written a moment after the lines that follow them | Behind the store |
 | Fix age | Every matched location carries the age of its fix in ms and the number of points the drawn car glides through | GPS delay; old fixes, as at the second drive's Start |
 
@@ -512,16 +546,24 @@ Before the drive:
 On the drive:
 
 1. **The store, twice.** Search the big-box store by its street address, press Directions, and note
-   where the route ends next to the store's pin. Then search it by its name and do the same. Drive
-   one of them and note where the arrival is and which side it names.
+   where the route ends next to the store's pin, the amber dot, and whether the route sheet says
+   "Route ends ... from the place". Then search it by its name and do the same. Drive one of them
+   and note where the arrival is and which side it names. Note the pin too: its size, how it looks
+   at night and over a 3D building, and whether it is gone after End.
 2. **Camera styles.** Compare Mapbox standard, Mapbox tuned and Smooth follow on the same kinds of
    road: a gently curving road (the early turn must stay), ordinary turns, and a freeway entry and
    exit. Note smoothness, how the tilt changes before and after turns, and whether the freeway
    view zooms out too far. Change the style only while stopped.
 3. **Offline.** If the network drops, the offline chip should appear within about 3 s, and the map
    along the route should stay complete.
-4. **Old routes (optional).** Leave the routes open for more than 5 minutes before Start; the log
-   should show a refresh right after Start.
+4. **Old routes.** Start must go at once every time, with no pause and no spinner.
+   - Leave the routes open for more than 5 minutes, parked, then press Start: the drive begins on
+     the routes as shown, and the arrival time may correct itself within a few seconds.
+   - If there is time, leave routes open for more than 30 minutes, then press Start: the route
+     line may change once, a few seconds in, and the drive goes on.
+   - After each drive, **Settings → Debug** must show one more trip, not two. Once the month's
+     drives are done, compare the count with Mapbox's statistics page.
+   - Leave the route once on purpose, so the log has a reroute.
 5. **The Then chip.** Before a turn that is closely followed by another, a chip should slide out
    from under the maneuver card, about 400 m or 30 s before the first turn, and show the second
    one. Note whether it comes too early or too late, whether a chain of close turns keeps it with
@@ -556,10 +598,15 @@ Then share the debug log. What to read in it:
 | Device state | Power saving, heat, charging, display rate |
 | Connectivity | Which case cut the app off, see below |
 | Search results and routes | Stop points by address and by name; how far each point was moved |
+| `search_result`: `stopPoint` | Which routable point the app took for each search, its name and its distance from the place; null when it took none |
+| `route_request`: `stopPoint`, `targets`, `bearings`, `originFix`, `inTrip` | Whether routes went to the stop point with the place as target; whether a direction was sent and from what speed; one request for each Directions press, and at most one with `inTrip` in a drive |
+| `reroute_options` | Whether reroutes keep the arrival target: `targets` null with `targetWanted` true means a reroute lost it. `endMeters` near 0 means it still ends at the same point |
 | Offline downloads | Size and time of the route download |
 | Map errors | A few lines a minute instead of thousands |
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
-| Start plan | What Start did with the routes |
+| `start_plan` | The plan, the age of the routes in seconds and the meters moved |
+| `start_refresh`, `start_replan` | After a plan other than `AS_PREVIEWED`: one closing line each, never before the drive's first `progress` line. `start_replan` with `set` is followed by `routes_updated`; any other result names its reason |
+| `session_state` | One `ActiveGuidance` session id for the whole drive, also across a `start_replan` |
 | Progress: `after`, `thenShown`, `stepMetersLeft`, `stepSecondsLeft` | Where the Then chip showed, and for which pairs of maneuvers, to tune its distances |
 | Camera: `laneDp`, `zoomPlan`, `laneFocus`, `centerLeadS` | Whether Large reached about 28 dp at junctions and 14 dp before lane choices, and how much of the freeway stayed in the long view |
 | `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
