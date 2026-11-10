@@ -143,8 +143,11 @@ class PhoneMap internal constructor(
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
 
-    /** How the camera moves; Mapbox standard until [setCameraStyle] says otherwise. */
-    private var cameraStyle = CameraStyle.MAPBOX_STANDARD
+    /**
+     * How the camera moves. The map starts with the style Settings starts with, so that the stored
+     * choice, which [setCameraStyle] brings a moment later, mostly finds its camera already there.
+     */
+    private var cameraStyle = CameraStyle.DEFAULT
 
     /** Moves the map during guidance and in the route preview, in the way of [cameraStyle]. */
     private var camera: GuidanceCamera

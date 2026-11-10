@@ -11,12 +11,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -31,11 +34,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
+import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
@@ -55,9 +60,11 @@ private val TRIP_TIME = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.US)
 fun SettingsScreen(
     tokenState: TokenState,
     tokenEditable: Boolean,
+    guidance: GuidanceSettings,
     debug: DebugState,
     onSaveToken: (String) -> AccessTokenCheck,
     onClearToken: () -> Unit,
+    onCameraStyleChange: (CameraStyle) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -92,6 +99,8 @@ fun SettingsScreen(
             Spacer(Modifier.height(24.dp))
 
             TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
+            SectionDivider()
+            GuidanceSection(guidance, onCameraStyleChange)
             SectionDivider()
             DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow)
             SectionDivider()
@@ -155,6 +164,50 @@ private fun TokenSection(
     Spacer(Modifier.height(8.dp))
     Text(
         text = stringResource(R.string.token_storage_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** How the app guides. Every choice here applies at once, also during a drive. */
+@Composable
+private fun GuidanceSection(guidance: GuidanceSettings, onCameraStyleChange: (CameraStyle) -> Unit) {
+    SectionTitle(R.string.guidance_title)
+    Text(
+        text = stringResource(R.string.camera_style_title),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Column(Modifier.selectableGroup()) {
+        CameraStyle.entries.forEach { style ->
+            val selected = style == guidance.cameraStyle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onCameraStyleChange(style) })
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The whole row is the button.
+                RadioButton(selected = selected, onClick = null)
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = stringResource(style.titleRes()),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(style.noteRes()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+    Text(
+        text = stringResource(R.string.camera_style_note),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -333,6 +386,20 @@ private fun SectionDivider() {
 }
 
 @StringRes
+private fun CameraStyle.titleRes(): Int = when (this) {
+    CameraStyle.MAPBOX_STANDARD -> R.string.camera_style_mapbox_standard
+    CameraStyle.MAPBOX_TUNED -> R.string.camera_style_mapbox_tuned
+    CameraStyle.SMOOTH_FOLLOW -> R.string.camera_style_smooth_follow
+}
+
+@StringRes
+private fun CameraStyle.noteRes(): Int = when (this) {
+    CameraStyle.MAPBOX_STANDARD -> R.string.camera_style_mapbox_standard_note
+    CameraStyle.MAPBOX_TUNED -> R.string.camera_style_mapbox_tuned_note
+    CameraStyle.SMOOTH_FOLLOW -> R.string.camera_style_smooth_follow_note
+}
+
+@StringRes
 private fun TripKind.labelRes(): Int = when (this) {
     TripKind.ACTIVE_GUIDANCE -> R.string.debug_trip_guidance
     TripKind.FREE_DRIVE -> R.string.debug_trip_free_drive
@@ -345,6 +412,7 @@ private fun SettingsScreenPreview() {
         SettingsScreen(
             tokenState = TokenState.Present("pk.abcd…wxyz"),
             tokenEditable = true,
+            guidance = GuidanceSettings(),
             debug = DebugState(
                 tripsThisMonth = 3,
                 recentTrips = listOf(
@@ -356,6 +424,7 @@ private fun SettingsScreenPreview() {
             ),
             onSaveToken = { AccessTokenCheck.VALID },
             onClearToken = {},
+            onCameraStyleChange = {},
             onSimulateDriveChange = {},
             onShareLog = {},
             onClearLog = {},

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
@@ -15,8 +16,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/** The guidance section: how the app guides, as the driver chose it. */
+data class GuidanceSettings(
+    val cameraStyle: CameraStyle = CameraStyle.DEFAULT,
+)
 
 /** The debug section: trip sessions started on this phone, the simulated drive switch and the debug log. */
 data class DebugState(
@@ -37,6 +44,10 @@ class SettingsViewModel(
 
     private val logBytes = MutableStateFlow<Long?>(null)
 
+    val guidance: StateFlow<GuidanceSettings> =
+        settings.cameraStyle.map { style -> GuidanceSettings(cameraStyle = style) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
+
     val debug: StateFlow<DebugState> =
         combine(tripLog.entries, settings.simulateDrive, logBytes) { entries, simulate, bytes ->
             DebugState(
@@ -54,6 +65,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value.
                 debugLog.error("settings.setSimulateDrive", e)
+            }
+        }
+    }
+
+    /** Applies at once, also during a drive: the map follows the stored setting. */
+    fun setCameraStyle(style: CameraStyle) {
+        viewModelScope.launch {
+            try {
+                settings.setCameraStyle(style)
+            } catch (e: IOException) {
+                // Not stored, so the choice keeps showing the stored value, which the map keeps too.
+                debugLog.error("settings.setCameraStyle", e)
             }
         }
     }

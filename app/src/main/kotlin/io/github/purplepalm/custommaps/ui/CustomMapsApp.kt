@@ -67,14 +67,17 @@ fun CustomMapsApp(graph: AppGraph) {
             val settingsViewModel = viewModel { SettingsViewModel(graph.tripLogStore, graph.settings, graph.debugLog) }
             LaunchedEffect(Unit) { settingsViewModel.refreshLogSize() }
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()
+            val guidanceSettings by settingsViewModel.guidance.collectAsStateWithLifecycle()
             val debug by settingsViewModel.debug.collectAsStateWithLifecycle()
             val guidance by graph.engine.navigation.guidanceState.collectAsStateWithLifecycle()
             SettingsScreen(
                 tokenState = tokenState,
                 tokenEditable = guidance != GuidanceState.ACTIVE,
+                guidance = guidanceSettings,
                 debug = debug,
                 onSaveToken = tokenViewModel::save,
                 onClearToken = tokenViewModel::clear,
+                onCameraStyleChange = settingsViewModel::setCameraStyle,
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onShareLog = {
                     scope.launch {

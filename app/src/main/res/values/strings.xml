@@ -57,6 +57,16 @@
     <string name="message_token_rejected">Mapbox did not accept the access token.</string>
     <string name="token_rejected_prompt">Mapbox did not accept the access token, so the map cannot load. Check the token in Settings.</string>
 
+    <string name="guidance_title">Guidance</string>
+    <string name="camera_style_title">Camera style</string>
+    <string name="camera_style_mapbox_standard">Mapbox standard</string>
+    <string name="camera_style_mapbox_standard_note">The Mapbox camera as it comes, for comparison</string>
+    <string name="camera_style_mapbox_tuned">Mapbox tuned</string>
+    <string name="camera_style_mapbox_tuned_note">The same camera with calmer moves</string>
+    <string name="camera_style_smooth_follow">Smooth follow</string>
+    <string name="camera_style_smooth_follow_note">Glides after the car on every frame</string>
+    <string name="camera_style_note">Applies at once, also during a drive.</string>
+
     <string name="debug_title">Debug</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
     <string name="debug_trips_note">Counted on this phone each time guidance starts, simulated drives included. It is an estimate: Mapbox bills by its own count.</string>

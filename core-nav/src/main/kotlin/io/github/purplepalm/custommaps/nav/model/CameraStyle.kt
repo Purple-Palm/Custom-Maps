@@ -10,4 +10,10 @@ enum class CameraStyle {
 
     /** The app's own camera: it moves the map on every display frame and glides after the drawn car. */
     SMOOTH_FOLLOW,
+    ;
+
+    companion object {
+        /** The style in use until the driver chooses another. */
+        val DEFAULT = SMOOTH_FOLLOW
+    }
 }

@@ -101,6 +101,8 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
         onStopOrDispose { phoneMap.setVisible(false) }
     }
     val cameraMode by phoneMap.cameraMode.collectAsStateWithLifecycle()
+    // The camera style chosen in Settings, and every later choice at once, also during a drive.
+    LaunchedEffect(phoneMap) { settings.cameraStyle.collect(phoneMap::setCameraStyle) }
 
     var locationAccess by remember { mutableStateOf(context.locationAccess()) }
     // Routes and guidance need precise location; approximate is only good for the puck.

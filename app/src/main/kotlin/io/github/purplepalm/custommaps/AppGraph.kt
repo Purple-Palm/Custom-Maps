@@ -74,7 +74,10 @@ class AppGraph(private val application: Application) {
 
     val tripLogStore = DataStoreTripLogStore(preferences(DataStoreTripLogStore.FILE_NAME))
 
-    val settings: AppSettings = DataStoreAppSettings(preferences(DataStoreAppSettings.FILE_NAME))
+    /** Every change of a setting goes to the debug log, with whether a drive was running. */
+    val settings: AppSettings = DataStoreAppSettings(preferences(DataStoreAppSettings.FILE_NAME)) { key, value ->
+        debugLog.log("settings", mapOf("key" to key, "value" to value, "guidance" to engine.navigation.guidanceState.value))
+    }
 
     /** How earlier processes ended and why this one started, as Android recorded it. */
     private val processHistory = ProcessHistory(application, debugLog)

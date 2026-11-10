@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.ui.settings
 
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
+import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
@@ -78,6 +79,7 @@ class SettingsViewModelTest {
 
     private fun TestScope.viewModel() = SettingsViewModel(tripLog, settings, archive) { now }.also {
         it.debug.launchIn(backgroundScope)
+        it.guidance.launchIn(backgroundScope)
         runCurrent()
     }
 
@@ -131,6 +133,34 @@ class SettingsViewModelTest {
         viewModel.setSimulateDrive(true)
         runCurrent()
         assertFalse(viewModel.debug.value.simulateDrive)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
+    fun `shows the stored camera style`() = runTest(dispatcher) {
+        settings.cameraStyle.value = CameraStyle.MAPBOX_TUNED
+        val viewModel = viewModel()
+        assertEquals(CameraStyle.MAPBOX_TUNED, viewModel.guidance.value.cameraStyle)
+    }
+
+    @Test
+    fun `a chosen camera style is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        assertEquals(CameraStyle.SMOOTH_FOLLOW, viewModel.guidance.value.cameraStyle)
+        viewModel.setCameraStyle(CameraStyle.MAPBOX_STANDARD)
+        runCurrent()
+        assertEquals(CameraStyle.MAPBOX_STANDARD, settings.cameraStyle.value)
+        assertEquals(CameraStyle.MAPBOX_STANDARD, viewModel.guidance.value.cameraStyle)
+    }
+
+    @Test
+    fun `a camera style that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setCameraStyle(CameraStyle.MAPBOX_TUNED)
+        runCurrent()
+        assertEquals(CameraStyle.SMOOTH_FOLLOW, settings.cameraStyle.value)
+        assertEquals(CameraStyle.SMOOTH_FOLLOW, viewModel.guidance.value.cameraStyle)
         assertEquals(listOf("error"), archive.logged)
     }
 
