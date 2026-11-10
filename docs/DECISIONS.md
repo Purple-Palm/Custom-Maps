@@ -229,7 +229,12 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 29. Diagnostics survive a crash
 
-- **Chosen:** the debug log gets a synchronous write path. An uncaught-exception handler writes the crash with its stack before handing it to Android, and every start logs Android's record of earlier exits (crash, ANR, low memory, the user) on Android 11 and newer. The log also records device state, one camera line a second with the frame rate, connectivity, and repeated map errors as one line a minute.
+- **Chosen:**
+  - The debug log gets a synchronous write path next to its background writer: an uncaught-exception handler writes the crash with its stack, after the events still queued, on the crashing thread, then hands it to Android's own handler, which still ends the process and keeps its record.
+  - Every start logs Android's record of earlier exits (crash, native crash, ANR, low memory, the user) on Android 11 and newer, with the short state summary the app left with the process, and on Android 15 and newer why this start happened.
+  - One network monitor, the app's only network callback, logs every change of the app's network and the settings that can cut off only this app; its state is plain data the offline chip can read.
+  - The log also records device state, whether Android's animations run, one camera line a second with the frame rate, and repeated map errors as one line a minute.
+  - All of it stays in the debug log on the phone; nothing is sent anywhere, and the owner shares it by hand (20).
 - **Alternatives:** logcat only, which is lost and needs a computer; a crash reporting service, which sends data to a third party.
 - **Why:** the app restarted once on the first drive and the log could not say why.
 

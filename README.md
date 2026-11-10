@@ -89,8 +89,16 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 - every route request and answer, with each step: road, maneuver, lanes, distance, time and traffic;
 - the route you picked, Start, End and arrival;
 - every second of guidance: position, speed, the road you are on, the speed limit, the next
-  maneuver and what is left;
-- off-route moments and reroutes, searches, trip sessions and errors.
+  maneuver and what is left, and how old each position fix was;
+- off-route moments and reroutes, searches, trip sessions and errors;
+- crashes, written before the app closes, and at each start how earlier runs ended as Android
+  recorded it (a crash, the system freeing memory, a swipe from Recents) and why this one started;
+- the phone's state: on screen or not, the screen, charging, Power saving, heat and memory, with a
+  sample once a minute during guidance, and whether Android's animations run;
+- the app's network on every change, and the phone settings that can keep only this app offline;
+- one camera line a second during guidance: where the camera is and where it is heading, how
+  smoothly the camera and the car move, and the map's frame rate;
+- map errors, the first of each kind in full and the repeats as one count a minute.
 
 To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
 for example Google Drive. Each day becomes one text file, `custom-maps-debug-<date>.txt`, with one
@@ -98,6 +106,9 @@ JSON event per line. The log never leaves the phone otherwise: it is kept out of
 transfers, the oldest days are deleted once it passes 50 MB, and **Clear** deletes it together with
 the copies made for sharing. It never contains the Mapbox token; token-shaped text is masked in
 every line as a last safeguard.
+
+Debug builds also offer **Settings → Debug → Crash now**, which closes the app as a crash would, to
+check on the phone that the crash and how the app ended are recorded.
 
 ### Backups
 

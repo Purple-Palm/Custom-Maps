@@ -26,8 +26,8 @@ Both drives: the owner's Samsung phone with Android 15, a stage 1 build.
 | Lanes too small before a turn | The following camera stops at zoom 16.35 | More zoom at turns | Next build; full junction zoom in stage 4 |
 | The camera turned into a gentle curve well before the car (liked) | The SDK aims the camera at the far end of the road ahead | Kept | Next build |
 | The first drive's routes all ended behind the store | The route went to the middle of the building, and the router took the nearest road | Routes end at Mapbox's stop point for the place | Next build |
-| No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Next build |
-| The app restarted once before the first drive | Unknown: the log records no crash and no exit reason | Crash and exit-reason lines | Next build |
+| No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Next build; the network lines and the folded map errors are built |
+| The app restarted once before the first drive | Unknown: the log records no crash and no exit reason | Crash and exit-reason lines | Built in stage 1.1 |
 | A reroute right after Start, on both drives | First drive: the car was not yet matched to a road. Second drive: the navigator began with an out-of-date position | None needed: a reroute inside a trip is free. Start refreshes traffic on old routes | Next build |
 
 ### What the owner reported
@@ -285,8 +285,9 @@ view at three points, while the camera stays in following mode:
 
 ### What changes
 
-The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). At the time of writing it is designed,
-not built. Stage 2 is the Android Auto stage.
+The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). It is being built in steps: the
+diagnostics below are built, the rest is designed and not built yet. Stage 2 is the Android Auto
+stage.
 
 #### Camera
 
@@ -399,18 +400,19 @@ they were planned:
 
 #### Diagnostics
 
-Next build. New lines in the debug log:
+Built in stage 1.1. New lines in the debug log:
 
 | What | Recorded | For |
 |---|---|---|
-| Crash | A Kotlin or Java crash on any thread, written to the file at once, before Android shows "keeps stopping": thread, exception, stack and causes, guidance state, and whether the app was on screen | The restart |
-| Exit reasons | At every start, each earlier end of the app not logged yet: when, Android's reason (a swipe from Recents shows as `USER_REQUESTED`, "remove task"), status, importance, memory, the app's saved state summary, and for an ANR the main thread's stack | The restart |
+| Crash | A Kotlin or Java crash on any thread, written to the file at once, after the events still queued and before Android shows "keeps stopping": thread, exception, stack and causes, guidance state, and whether the app was on screen | The restart |
+| Exit reasons | At every start, on Android 11 and newer, each earlier end of the app not logged yet: when, Android's reason (a swipe from Recents shows as `USER_REQUESTED`, "remove task"), status, importance, memory, the state summary the app left with the process (guidance state, on screen, since when), and for an ANR the main thread's stack | The restart |
 | Start reason | On Android 15 and newer: why the app started (launcher, Recents, a service), cold, warm or hot, and whether it had been force-stopped | The restart |
-| Device state | On screen or not; screen on, off, unlocked; charging; Power saving and Doze; heat; memory pressure. Once per start: battery limits, background restriction, Data saver. During guidance, one line a minute: battery level and temperature, thermal headroom, Power saving, memory | Phone conditions |
-| Connectivity | Every change of the app's network: Wi-Fi or mobile, internet reached or not, blocked or not, and which networks the app can see. Also the settings that can cut off only this app: Data saver, the Mobile data switch, the SIM, battery limits | The missing internet |
-| Camera | Once a second during guidance: the active camera style, zoom, tilt and bearing against their targets, how far the camera trails the drawn car, the frame rate and the worst gap between frames, and whether Android's animations run. A line on every camera mode change, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
-| Map errors | The first error of each kind in full, then one line a minute with the counts | The flood |
-| Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it, the result's types and categories | Behind the store |
+| Device state | On screen or not; screen on, off, unlocked; charging; Power saving and Doze; heat; memory pressure. Once per start: battery limits, background restriction, standby bucket, Data saver, location power saving. During guidance, one line a minute: battery level and temperature, thermal status and headroom, Power saving, memory | Phone conditions |
+| Connectivity | Every change of the app's network: Wi-Fi or mobile, internet reached or not, blocked or not, metered, roaming, suspended, and which networks the app can see. At start, on every return to the app and after each change, the settings that can cut off only this app: Data saver, the Mobile data switch, the SIM, background restriction, battery limits | The missing internet |
+| Animations | Whether Android's animations run and the animator duration scale, when the first screen opens, when guidance starts and whenever the scale changes. Logged only; the app never changes the setting | Steps |
+| Camera | Once a second during guidance: zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
+| Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
+| Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it, the result's types, categories and Mapbox id | Behind the store |
 | Routes | How far the Directions API moved each requested point: about 71 m for the store | Behind the store |
 | Fix age | Every matched location carries the age of its fix in ms and the number of points the drawn car glides through | GPS delay; old fixes, as at the second drive's Start |
 
@@ -419,7 +421,12 @@ Next build. New lines in the debug log:
 - Android keeps exit records across app updates. Installed over the current build, the next
   build's first start should log the record behind the first drive's restart, as long as it is
   still among the last 16 that Android keeps.
+- Android writes its exit records to storage only about every 30 minutes, so a reboot soon after
+  an exit can lose that record.
 - A crash in native code or an ANR never reaches a Kotlin handler; the exit records cover those.
+- Debug builds have **Settings → Debug → Crash now**, which closes the app with an error as a crash
+  would. The log then holds a `crash` line, and the next start a `process_exit` with reason
+  `CRASH` and the state summary.
 - None of this has run on a phone yet.
 
 ### What the owner checks on the phone
