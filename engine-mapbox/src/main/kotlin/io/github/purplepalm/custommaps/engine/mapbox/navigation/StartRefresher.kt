@@ -50,8 +50,10 @@ internal sealed interface ReplanAnswer<out R> {
  * @param routeId the route the navigator guides on
  * @param destination the one stop this route still leads to, as the navigator placed it on a
  *   road; null when the route is not one from an origin to a single destination still ahead
+ * @param offRoute the navigator has the car off the route in this very update, which is when it
+ *   starts to reroute
  */
-internal data class TripMoment(val routeId: String, val destination: Point?)
+internal data class TripMoment(val routeId: String, val destination: Point?, val offRoute: Boolean = false)
 
 /** What [StartRefresher] asks of the navigator. Called on the main thread, and answers there. */
 internal interface TripRoutes<R> {
@@ -209,8 +211,9 @@ internal class StartRefresher<R>(
     }
 
     private fun atFirstProgress(moment: TripMoment) {
-        // A progress on another route: the navigator has replaced the routes already.
-        if (moment.routeId != routeId) rerouteSeen = true
+        // A progress on another route: the navigator has replaced the routes already. One off the
+        // route: it is about to.
+        if (moment.routeId != routeId || moment.offRoute) rerouteSeen = true
         // The navigator guides on the route of this progress, and nothing has been requested yet.
         when (decide(routeCount = 1, destinationShiftMeters = 0.0)) {
             InTripAction.REFRESH -> refresh()
@@ -276,7 +279,7 @@ internal class StartRefresher<R>(
         val ordered = MainRoads.closestFirst(chosenSummary, fresh, routes::summary)
         val first = ordered.firstOrNull()
         val shift = first?.let { destinationShiftMeters(moment.destination, routes.destination(it)) }
-        if (moment.routeId != routeId) rerouteSeen = true
+        if (moment.routeId != routeId || moment.offRoute) rerouteSeen = true
         val details = mapOf(
             "count" to answer.routes.size,
             "online" to answer.online,

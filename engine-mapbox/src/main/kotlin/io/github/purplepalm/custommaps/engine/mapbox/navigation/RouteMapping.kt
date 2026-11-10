@@ -57,6 +57,7 @@ internal fun endGap(place: Place, routeEnd: Point?): Distance? {
 internal fun RouteProgress.toTripMoment(): TripMoment = TripMoment(
     routeId = navigationRoute.id,
     destination = soleDestination(navigationRoute.waypoints?.map { it.location() }, remainingWaypoints),
+    offRoute = currentState == RouteProgressState.OFF_ROUTE,
 )
 
 internal fun MapboxLane.toLaneInfo(): LaneInfo? = allLanes

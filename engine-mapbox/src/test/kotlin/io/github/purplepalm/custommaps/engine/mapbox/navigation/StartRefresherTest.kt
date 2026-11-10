@@ -576,6 +576,30 @@ class StartRefresherTest {
     }
 
     @Test
+    fun `a first progress off the route begins nothing`() {
+        for (plan in listOf(REFRESH_IN_TRIP, REPLAN_IN_TRIP)) {
+            begin(plan, trip = plan.ordinal)
+            refresher.onProgress(onRoute.copy(offRoute = true))
+            repeat(3) { refresher.onProgress(onRoute) }
+        }
+
+        assertEquals(0, navigator.calls)
+        assertEquals(listOf<Any?>("rerouted"), lines.reasons("start_refresh"))
+        assertEquals(listOf<Any?>("rerouted"), lines.reasons("start_replan"))
+    }
+
+    @Test
+    fun `routes are not set from a progress that is off the route`() {
+        replanAnswered()
+        refresher.onProgress(onRoute.copy(offRoute = true))
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertTrue(navigator.sets.isEmpty())
+        assertEquals(listOf<Any?>("dropped"), lines.results("start_replan"))
+        assertEquals(listOf<Any?>("rerouted"), lines.reasons("start_replan"))
+    }
+
+    @Test
     fun `other routes in the navigator than the trip started on count as a reroute`() {
         begin(REPLAN_IN_TRIP)
         refresher.onProgress(onRoute)
