@@ -133,6 +133,22 @@ class ThenRuleTest {
     }
 
     @Test
+    fun `inside a roundabout the chip keeps the maneuver it shows`() {
+        // On the approach the turn comes 40 m of roundabout and 90 m of road after the way in.
+        val approach = at(200.0, next = ManeuverType.ROUNDABOUT, following = following(meters = 130.0, seconds = 14.0))
+        // Inside, the next maneuver is the way out, 18 m ahead, and the same turn still follows.
+        val inside = at(18.0, next = ManeuverType.EXIT_ROUNDABOUT, following = following(meters = 90.0, seconds = 8.0), step = stepB)
+        assertEquals(listOf(true, true), shown(approach, inside))
+        // A chip does not start there.
+        assertEquals(listOf(false), shown(inside))
+        // And a chip that showed another maneuver does not stay for this one.
+        val other = following(modifier = TurnModifier.LEFT, meters = 130.0, seconds = 14.0)
+        assertEquals(listOf(true, false), shown(at(200.0, next = ManeuverType.ROUNDABOUT, following = other), inside))
+        // Leaving the route in between starts over: the chip was gone, so it does not stay.
+        assertEquals(listOf(true, false, false), shown(approach, approach.copy(offRoute = true), inside))
+    }
+
+    @Test
     fun `nothing follows the arrival`() {
         val arriving = at(100.0, next = ManeuverType.ARRIVE, following = null)
         assertEquals(listOf(false), shown(arriving))
@@ -154,6 +170,8 @@ class ThenRuleTest {
         "NOTIFICATION, RIGHT, false",
         "UNKNOWN, RIGHT, false",
         "DEPART, , false",
+        "EXIT_ROUNDABOUT, RIGHT, false",
+        "EXIT_ROTARY, SLIGHT_RIGHT, false",
         "CONTINUE, SLIGHT_LEFT, true",
         "FORK, SLIGHT_RIGHT, true",
         "ROUNDABOUT, RIGHT, true",

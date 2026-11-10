@@ -35,12 +35,15 @@ data class ThenTuning(
  *
  * Within a step the answer changes at most once, from hidden to shown: once shown, the chip stays
  * until the step changes, the navigator leaves the route or no maneuver follows. So it never
- * flickers on GPS jitter, braking or a traffic refresh.
+ * flickers on GPS jitter, braking or a traffic refresh. At a step change it is decided again.
  */
 object ThenRule {
 
-    /** What the rule remembers between updates: the step it last decided for, and its answer. */
-    data class State(val stepKey: String?, val shown: Boolean) {
+    /**
+     * What the rule remembers between updates: the step it last decided for, its answer, and the
+     * maneuver a shown chip names.
+     */
+    data class State(val stepKey: String?, val shown: Boolean, val maneuver: Maneuver? = null) {
         companion object {
             /** Before the first update of a drive. */
             val NONE = State(stepKey = null, shown = false)
@@ -51,23 +54,37 @@ object ThenRule {
         val following = progress.following
         if (progress.offRoute || following == null) return State(progress.stepKey, shown = false)
         if (state.shown && state.stepKey == progress.stepKey) return state
-        return State(progress.stepKey, shown = wanted(progress, following, tuning))
+        // A chip that names this very maneuver already does not start, it stays. That is the step
+        // inside a roundabout: the next maneuver is only the way out, a few meters ahead, and
+        // what follows the roundabout is what the chip has shown all along.
+        val staying = state.shown && state.maneuver == following.maneuver
+        val shown = wanted(progress, following, tuning, staying)
+        return State(progress.stepKey, shown, if (shown) following.maneuver else null)
     }
 
-    /** Whether the chip should start showing now. */
-    internal fun wanted(progress: RouteProgressSnapshot, following: FollowingManeuver, tuning: ThenTuning): Boolean {
+    /** Whether the chip should show from now on; [staying] when it shows this maneuver already. */
+    internal fun wanted(
+        progress: RouteProgressSnapshot,
+        following: FollowingManeuver,
+        tuning: ThenTuning,
+        staying: Boolean = false,
+    ): Boolean {
         if (!isWorthShowing(following.maneuver)) return false
         val rampNext = progress.nextManeuver.type in RAMP_NEXT
         val close = if (rampNext || following.maneuver.type in RAMP_FOLLOWING) tuning.rampClose else tuning.close
         val window = if (rampNext) tuning.rampWindow else tuning.window
         return close.covers(following.distanceAfterNext, following.durationAfterNext) &&
             window.covers(progress.distanceToNextManeuver, progress.durationToNextManeuver) &&
-            progress.distanceToNextManeuver > tuning.startCutoff
+            (staying || progress.distanceToNextManeuver > tuning.startCutoff)
     }
 
-    /** Going on along the same road, joining a road or a note is no reason to look at the chip. */
+    /**
+     * Going on along the same road, joining a road or a note is no reason to look at the chip. Nor
+     * is the way out of a roundabout: the card's roundabout arrow shows it from the way in.
+     */
     fun isWorthShowing(maneuver: Maneuver): Boolean = when (maneuver.type) {
         ManeuverType.DEPART, ManeuverType.MERGE, ManeuverType.NOTIFICATION, ManeuverType.UNKNOWN -> false
+        ManeuverType.EXIT_ROUNDABOUT, ManeuverType.EXIT_ROTARY -> false
         ManeuverType.CONTINUE, ManeuverType.NEW_NAME -> maneuver.modifier != null && maneuver.modifier != TurnModifier.STRAIGHT
         else -> true
     }
