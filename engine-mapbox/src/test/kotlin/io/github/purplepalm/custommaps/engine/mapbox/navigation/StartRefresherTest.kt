@@ -203,19 +203,6 @@ class StartRefresherTest {
     }
 
     @Test
-    fun `a refresh the navigator cancelled is not followed by anything`() {
-        begin(REFRESH_IN_TRIP)
-        refresher.onProgress(onRoute)
-        navigator.refreshed(RefreshOutcome.CANCELLED)
-        repeat(3) { refresher.onProgress(onRoute) }
-
-        assertEquals(0, navigator.requests)
-        assertTrue(navigator.sets.isEmpty())
-        assertEquals(listOf<Any?>("cancelled"), lines.results("start_refresh"))
-        assertTrue(lines.of("start_replan").isEmpty())
-    }
-
-    @Test
     fun `a replan sends one request at the first progress and sets its routes once`() {
         begin(REPLAN_IN_TRIP)
         refresher.onProgress(onRoute)
@@ -385,6 +372,164 @@ class StartRefresherTest {
         refresher.onProgress(onRoute)
         assertEquals(listOf(listOf(fastest)), navigator.sets)
         assertTrue(navigator.cancelled.isEmpty())
+    }
+
+    // A refresh the navigator cancelled.
+
+    @Test
+    fun `a refresh cancelled while the trip stays on its route is asked for once more`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        // Only the alternatives changed: the navigator still guides on the route of the start.
+        refresher.onRoutesChanged(started.id)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        // Not from inside the navigator's answer: the next progress asks.
+        assertEquals(1, navigator.refreshes)
+        assertTrue(refresher.awaitsProgress)
+
+        refresher.onProgress(onRoute)
+        assertEquals(2, navigator.refreshes)
+        assertFalse(refresher.awaitsProgress)
+        navigator.refreshed(RefreshOutcome.SUCCESS)
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(2, navigator.refreshes)
+        assertEquals(0, navigator.requests)
+        assertTrue(navigator.sets.isEmpty())
+        assertEquals(listOf<Any?>("cancelled", "success"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(true, null), lines.of("start_refresh").map { it["again"] })
+        assertTrue(lines.of("start_replan").isEmpty())
+    }
+
+    @Test
+    fun `a refresh cancelled a second time is left to the navigator`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        assertFalse(refresher.awaitsProgress)
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(2, navigator.refreshes)
+        assertEquals(0, navigator.requests)
+        assertEquals(listOf<Any?>("cancelled", "cancelled"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(true, false), lines.of("start_refresh").map { it["again"] })
+        assertTrue(lines.of("start_replan").isEmpty())
+    }
+
+    @Test
+    fun `a refresh cancelled by a reroute is not asked for again`() {
+        begin(REFRESH_IN_TRIP, trip = 1)
+        refresher.onProgress(onRoute)
+        refresher.onReroute()
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        assertFalse(refresher.awaitsProgress)
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        // The same when the navigator's other routes are the only sign of it.
+        begin(REFRESH_IN_TRIP, trip = 2)
+        refresher.onProgress(onRoute)
+        refresher.onRoutesChanged("rerouted#0")
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        assertFalse(refresher.awaitsProgress)
+        repeat(3) { refresher.onProgress(TripMoment("rerouted#0", end)) }
+
+        assertEquals(2, navigator.refreshes)
+        assertEquals(0, navigator.requests)
+        assertEquals(listOf<Any?>("cancelled", "cancelled"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(false, false), lines.of("start_refresh").map { it["again"] })
+        assertTrue(lines.of("start_replan").isEmpty())
+    }
+
+    @Test
+    fun `a reroute heard only after the cancel stops the refresh that waits`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        assertTrue(refresher.awaitsProgress)
+        refresher.onRoutesChanged("rerouted#0")
+        assertFalse(refresher.awaitsProgress)
+        repeat(3) { refresher.onProgress(TripMoment("rerouted#0", end)) }
+
+        assertEquals(1, navigator.refreshes)
+        assertEquals(0, navigator.requests)
+        assertEquals(listOf<Any?>("cancelled", "skipped"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(null, "rerouted"), lines.reasons("start_refresh"))
+    }
+
+    @Test
+    fun `a progress off the route after the cancel asks for nothing`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        refresher.onProgress(onRoute.copy(offRoute = true))
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(1, navigator.refreshes)
+        assertEquals(0, navigator.requests)
+        assertEquals(listOf<Any?>("cancelled", "skipped"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(null, "rerouted"), lines.reasons("start_refresh"))
+    }
+
+    @Test
+    fun `a refresh cancelled once guidance has stopped is not asked for again`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        guidanceActive = false
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        assertFalse(refresher.awaitsProgress)
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(1, navigator.refreshes)
+        assertEquals(listOf<Any?>("cancelled"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(false), lines.of("start_refresh").map { it["again"] })
+    }
+
+    @Test
+    fun `guidance that ends after the cancel asks for nothing, and the next drive may ask twice again`() {
+        begin(REFRESH_IN_TRIP, trip = 1)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        refresher.end()
+        repeat(3) { refresher.onProgress(onRoute) }
+        assertEquals(1, navigator.refreshes)
+        assertEquals(listOf<Any?>("cancelled", "skipped"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>(null, "guidance_ended"), lines.reasons("start_refresh"))
+
+        begin(REFRESH_IN_TRIP, trip = 2)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        refresher.onProgress(onRoute)
+        assertEquals(3, navigator.refreshes)
+        // The cancel of the first drive's refresh, should it come again, belongs to no trip.
+        navigator.refreshed(RefreshOutcome.CANCELLED, index = 1)
+        assertFalse(refresher.awaitsProgress)
+        navigator.refreshed(RefreshOutcome.SUCCESS)
+        assertEquals(0, navigator.requests)
+        assertEquals(
+            listOf<Any?>("cancelled", "skipped", "cancelled", "success"),
+            lines.results("start_refresh"),
+        )
+    }
+
+    @Test
+    fun `a refresh that fails when it is asked for again is followed by one replan`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.FAILURE)
+        assertEquals(1, navigator.requests)
+        navigator.answered(routes(fastest))
+        refresher.onProgress(onRoute)
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(2, navigator.refreshes)
+        assertEquals(1, navigator.requests)
+        assertEquals(listOf(listOf(fastest)), navigator.sets)
+        assertEquals(listOf<Any?>("cancelled", "failure"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>("set"), lines.results("start_replan"))
     }
 
     // Guidance that ends.

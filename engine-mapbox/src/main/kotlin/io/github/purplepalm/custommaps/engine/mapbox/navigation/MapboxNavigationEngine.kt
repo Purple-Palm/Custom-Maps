@@ -590,7 +590,8 @@ internal class MapboxNavigationEngine(
         )
         if (active) logLaneChoices(progress)
         if (snapshot != null) _routeProgress.value = snapshot
-        // The first progress of a trip, and the first one after an answer to its replan.
+        // The first progress of a trip, the next one after a cancelled refresh, and the first one
+        // after an answer to its replan.
         if (active && startRefresher.awaitsProgress) startRefresher.onProgress(progress.toTripMoment())
     }
 

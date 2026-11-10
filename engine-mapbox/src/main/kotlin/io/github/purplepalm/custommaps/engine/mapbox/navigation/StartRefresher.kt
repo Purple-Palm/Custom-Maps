@@ -25,8 +25,11 @@ internal enum class RefreshOutcome {
     NOT_STARTED,
 
     /**
-     * The navigator dropped the refresh because its routes changed while it ran: it rerouted, or
-     * guidance ended. There is nothing left to refresh.
+     * The navigator dropped the refresh because its list of routes changed while it ran. It does
+     * so on every such change that is not itself a refresh: a reroute, the end of guidance, and
+     * also a change of the alternatives alone, as when the car passes the point where one of them
+     * leaves the route. Then the route in use is as old as it was, and the navigator's own refresh
+     * starts its interval over, five minutes unless set otherwise.
      */
     CANCELLED,
 }
@@ -95,7 +98,9 @@ internal interface TripRoutes<R> {
  *
  * One line in the debug log closes each plan: "start_refresh" for a refresh, with the navigator's
  * result; "start_replan" for routes requested again, with "set" or the reason they were not. A
- * failed refresh is followed by a replan, so it has both.
+ * failed refresh is followed by a replan, so it has both. A refresh that the navigator cancelled
+ * while the trip stayed on its route is asked for once more, so it is followed by a second
+ * "start_refresh" line; its own line says so with "again".
  *
  * Main thread only.
  *
@@ -113,7 +118,7 @@ internal class StartRefresher<R>(
         /** No trip, a plan that asks for nothing, or everything done. */
         IDLE,
 
-        /** Waiting for the first progress of the trip. */
+        /** Waiting for the first progress of the trip, or for the next one after a cancelled refresh. */
         BEFORE_PROGRESS,
 
         /** The navigator was asked to refresh and has not answered. */
@@ -136,6 +141,9 @@ internal class StartRefresher<R>(
     private var routeId: String? = null
     private var chosenSummary: String? = null
     private var rerouteSeen = false
+
+    /** A cancelled refresh was asked for once more; a trip does that once. */
+    private var refreshRepeated = false
     private var requestId: Long? = null
     private var requestedAt = 0L
     private var answer: ReplanAnswer.Routes<R>? = null
@@ -208,6 +216,7 @@ internal class StartRefresher<R>(
         routeId = null
         chosenSummary = null
         rerouteSeen = false
+        refreshRepeated = false
     }
 
     private fun atFirstProgress(moment: TripMoment) {
@@ -231,10 +240,20 @@ internal class StartRefresher<R>(
     private fun onRefreshed(asked: Int, outcome: RefreshOutcome) {
         // An answer for an earlier trip, or for one that has ended.
         if (asked != trip || step != Step.REFRESHING) return
-        debugLog.log(REFRESH, mapOf("result" to outcome.name.lowercase()))
         step = Step.IDLE
+        // The navigator drops a refresh whenever its list of routes changes, also when only the
+        // alternatives did and the trip is still on its route with traffic as old as before. Then
+        // the refresh is asked for once more, at the next progress, which checks the route again.
+        val again = outcome == RefreshOutcome.CANCELLED && !refreshRepeated &&
+            decide(routeCount = 1, destinationShiftMeters = 0.0) == InTripAction.REFRESH
+        val result = mapOf("result" to outcome.name.lowercase())
+        debugLog.log(REFRESH, if (outcome == RefreshOutcome.CANCELLED) result + ("again" to again) else result)
         when (outcome) {
-            RefreshOutcome.SUCCESS, RefreshOutcome.CANCELLED -> Unit
+            RefreshOutcome.SUCCESS -> Unit
+            RefreshOutcome.CANCELLED -> if (again) {
+                refreshRepeated = true
+                step = Step.BEFORE_PROGRESS
+            }
             RefreshOutcome.FAILURE, RefreshOutcome.NOT_STARTED -> {
                 // The routes are as old as they were: plan them again, if that is still allowed.
                 plan = StartPlan.REPLAN_IN_TRIP
