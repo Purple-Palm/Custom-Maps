@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import android.os.SystemClock
 import com.mapbox.api.directions.v5.models.LegStep
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.common.location.Location
@@ -127,6 +128,8 @@ internal fun LocationMatcherResult.debugFields(): Map<String, Any?> = mapOf(
     "teleport" to isTeleport,
     "matchProbability" to roadEdgeMatchProbability,
     "inTunnel" to inTunnel,
+    // Predicted points the drawn car glides through up to this fix; none means one straight move.
+    "keyPoints" to keyPoints.size,
 )
 
 internal fun Location.debugFields(): Map<String, Any?> = mapOf(
@@ -136,7 +139,23 @@ internal fun Location.debugFields(): Map<String, Any?> = mapOf(
     "bearing" to bearing,
     "accuracyMeters" to horizontalAccuracy,
     "source" to source,
+    "fixAgeMs" to ageMillis(),
 )
+
+/**
+ * How old the fix is now, when its line is made. The monotonic time is Android's elapsed realtime
+ * for fixes from its location service; without it, the wall clock time of the fix is used.
+ */
+private fun Location.ageMillis(): Long {
+    val monotonic = monotonicTimestamp
+    return if (monotonic != null) {
+        (SystemClock.elapsedRealtimeNanos() - monotonic) / NANOS_PER_MILLI
+    } else {
+        System.currentTimeMillis() - timestamp
+    }
+}
+
+private const val NANOS_PER_MILLI = 1_000_000L
 
 /** A failed route request. The request URL is left out on purpose: it contains the token. */
 internal fun RouterFailure.debugFields(): Map<String, Any?> = mapOf(
