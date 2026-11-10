@@ -272,15 +272,15 @@ class LaneZoomTest {
     @Test
     fun `default keeps the frame zoom`() {
         val plan = ZoomPlanner(tuning)
-        assertEquals(17.2, plan.target(LaneZoom.DEFAULT, 17.2, 35.0, 1.0, false, 1.0))
+        assertEquals(17.2, plan.target(LaneZoom.DEFAULT, 17.2, 35.0, 1.0, false, 1.0, false))
         assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
     }
 
     @Test
     fun `large on the road is default`() {
         val plan = ZoomPlanner(tuning)
-        assertEquals(16.35, plan.target(LaneZoom.LARGE, 18.0, 35.0, 0.0, false, 0.0), 1e-9)
-        assertEquals(14.2, plan.target(LaneZoom.LARGE, 14.2, 35.0, 0.0, false, 0.0), 1e-9)
+        assertEquals(16.35, plan.target(LaneZoom.LARGE, 18.0, 35.0, 0.0, false, 0.0, false), 1e-9)
+        assertEquals(14.2, plan.target(LaneZoom.LARGE, 14.2, 35.0, 0.0, false, 0.0, false), 1e-9)
         assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
     }
 
@@ -288,62 +288,101 @@ class LaneZoomTest {
     fun `large follows the junction frame up to the lane cap along the tilt curve`() {
         val plan = ZoomPlanner(tuning)
         val cap = MapScale.zoomForLaneDp(28.0, 35.0)
-        assertEquals(lerp(16.35, 17.4, 0.5), plan.target(LaneZoom.LARGE, 17.4, 35.0, 0.5, false, 0.0), 1e-9)
-        assertEquals(18.5, plan.target(LaneZoom.LARGE, 18.5, 35.0, 1.0, false, 0.0), 1e-9)
-        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0), 1e-9)
+        assertEquals(lerp(16.35, 17.4, 0.5), plan.target(LaneZoom.LARGE, 17.4, 35.0, 0.5, false, 0.0, false), 1e-9)
+        assertEquals(18.5, plan.target(LaneZoom.LARGE, 18.5, 35.0, 1.0, false, 0.0, false), 1e-9)
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, false), 1e-9)
         assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
         // On the next step the frame shows the road ahead of the car again: the junction's zoom
         // is kept and let go as the tilt comes back up.
-        assertEquals(cap, plan.target(LaneZoom.LARGE, 16.1, 35.0, 1.0, true, 0.0), 1e-9)
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 16.1, 35.0, 1.0, true, 0.0, false), 1e-9)
         assertEquals(ZoomPlanner.Kind.AFTER_JUNCTION, plan.kind)
-        assertEquals(lerp(16.1, cap, 0.25), plan.target(LaneZoom.LARGE, 16.1, 35.0, 0.25, true, 0.0), 1e-9)
-        assertEquals(16.1, plan.target(LaneZoom.LARGE, 16.1, 35.0, 0.0, true, 0.0), 1e-9)
+        assertEquals(lerp(16.1, cap, 0.25), plan.target(LaneZoom.LARGE, 16.1, 35.0, 0.25, true, 0.0, false), 1e-9)
+        assertEquals(16.1, plan.target(LaneZoom.LARGE, 16.1, 35.0, 0.0, true, 0.0, false), 1e-9)
+        assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
+    }
+
+    @Test
+    fun `a frame of the open road counts no closer than the road, also while the tilt goes down`() {
+        val plan = ZoomPlanner(tuning)
+        // Fitted to a short stretch of road ahead, such a frame says nothing of the junction.
+        assertEquals(16.35, plan.target(LaneZoom.LARGE, 18.4, 35.0, 0.5, false, 0.0, roadFrame = true), 1e-9)
+        assertEquals(16.35, plan.target(LaneZoom.LARGE, 18.4, 35.0, 1.0, false, 0.0, roadFrame = true), 1e-9)
+        assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
+        assertEquals(15.0, plan.target(LaneZoom.LARGE, 15.0, 35.0, 1.0, false, 0.0, roadFrame = true), 1e-9)
+        // The frame around the car and the junction is what goes closer.
+        assertEquals(17.3, plan.target(LaneZoom.LARGE, 17.3, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
+    }
+
+    @Test
+    fun `between two junctions the view stays down for, the first one's zoom is kept until the second is framed`() {
+        val plan = ZoomPlanner(tuning)
+        val cap = MapScale.zoomForLaneDp(28.0, 35.0)
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        // Past the first turn, with the next one's window open already: the tilt stays down, the
+        // frame is of the road again, and the view does not go out and back in.
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true), 1e-9)
+        assertEquals(ZoomPlanner.Kind.AFTER_JUNCTION, plan.kind)
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true), 1e-9)
+        // The second junction is framed: its frame decides from here on, so it stays in view.
+        assertEquals(17.4, plan.target(LaneZoom.LARGE, 17.4, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
+        // And past the second one it is that junction's zoom that is kept and let go.
+        assertEquals(lerp(16.0, 17.4, 0.5), plan.target(LaneZoom.LARGE, 16.0, 35.0, 0.5, true, 0.0, roadFrame = true), 1e-9)
+    }
+
+    @Test
+    fun `a frame of a wide junction is taken at its word, also when it is farther out than the last junction`() {
+        val plan = ZoomPlanner(tuning)
+        plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false)
+        // Two maneuvers framed together need a wider view than the road's: both must stay in view.
+        assertEquals(15.9, plan.target(LaneZoom.LARGE, 15.9, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
         assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
     }
 
     @Test
     fun `once the view is back on the road the last junction is forgotten`() {
         val plan = ZoomPlanner(tuning)
-        plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0)
-        plan.target(LaneZoom.LARGE, 16.1, 35.0, 0.0, true, 0.0)
+        plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, false)
+        plan.target(LaneZoom.LARGE, 16.1, 35.0, 0.0, true, 0.0, false)
         // Whatever comes next on that step starts from the frame again, not from the old junction.
-        assertEquals(lerp(16.35, 17.0, 0.5), plan.target(LaneZoom.LARGE, 17.0, 35.0, 0.5, true, 0.0), 1e-9)
+        assertEquals(lerp(16.35, 17.0, 0.5), plan.target(LaneZoom.LARGE, 17.0, 35.0, 0.5, true, 0.0, false), 1e-9)
     }
 
     @Test
     fun `a change to default and back starts from the frame`() {
         val plan = ZoomPlanner(tuning)
         val cap = MapScale.zoomForLaneDp(28.0, 35.0)
-        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0), 1e-9)
-        assertEquals(16.1, plan.target(LaneZoom.DEFAULT, 16.1, 35.0, 1.0, true, 0.0))
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, false), 1e-9)
+        assertEquals(16.1, plan.target(LaneZoom.DEFAULT, 16.1, 35.0, 1.0, true, 0.0, false))
         assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
         // Back to Large after the turn: the junction's zoom was dropped, the frame's is taken.
-        assertEquals(16.1, plan.target(LaneZoom.LARGE, 16.1, 35.0, 1.0, true, 0.0), 1e-9)
+        assertEquals(16.1, plan.target(LaneZoom.LARGE, 16.1, 35.0, 1.0, true, 0.0, false), 1e-9)
     }
 
     @Test
     fun `large zooms in to the lane width before a lane choice`() {
         val plan = ZoomPlanner(tuning)
         val lanes = MapScale.zoomForLaneDp(14.0, 35.0)
-        assertEquals(lanes, plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0), 1e-9)
-        assertEquals(lerp(14.0, lanes, 0.5), plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 0.5), 1e-9)
+        assertEquals(lanes, plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, false), 1e-9)
+        assertEquals(lerp(14.0, lanes, 0.5), plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 0.5, false), 1e-9)
         assertEquals(ZoomPlanner.Kind.LANES, plan.kind)
         // The same lane width takes a closer zoom nearer the equator.
-        assertTrue(plan.target(LaneZoom.LARGE, 14.0, 25.0, 0.0, false, 1.0) > lanes)
+        assertTrue(plan.target(LaneZoom.LARGE, 14.0, 25.0, 0.0, false, 1.0, false) > lanes)
     }
 
     @Test
     fun `large never goes closer than its limit`() {
         val close = ZoomPlanner(tuning.copy(maxZoom = 18.0))
-        assertEquals(18.0, close.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0), 1e-9)
-        assertEquals(17.89, close.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0), 0.01)
+        assertEquals(18.0, close.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, false), 1e-9)
+        assertEquals(17.89, close.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, false), 0.01)
     }
 
     @Test
     fun `a latitude that is not a number zooms in nowhere`() {
         val plan = ZoomPlanner(tuning)
-        assertEquals(16.35, plan.target(LaneZoom.LARGE, 19.6, Double.NaN, 1.0, false, 1.0), 1e-9)
-        assertEquals(14.0, plan.target(LaneZoom.LARGE, 14.0, Double.NaN, 1.0, false, 1.0), 1e-9)
+        assertEquals(16.35, plan.target(LaneZoom.LARGE, 19.6, Double.NaN, 1.0, false, 1.0, false), 1e-9)
+        assertEquals(14.0, plan.target(LaneZoom.LARGE, 14.0, Double.NaN, 1.0, false, 1.0, false), 1e-9)
     }
 
     @Test

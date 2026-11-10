@@ -229,10 +229,14 @@ class LaneFocus(private val tuning: CameraTuning) {
  * The zoom the camera aims at, from the zoom of the frame the navigation SDK fitted and from the
  * two schedules, [ManeuverFocus] and [LaneFocus]. With [LaneZoom.DEFAULT] it is the frame's zoom,
  * unchanged. With [LaneZoom.LARGE] the frame may be fitted closer than before, and the zoom is:
- * - on the road, the frame's zoom up to [CameraTuning.defaultMaxZoom], as with Default;
- * - toward a maneuver, up to the frame's zoom, which keeps the car and the junction in view, and no
- *   closer than [CameraTuning.junctionLaneDp], along the same eased curve as the tilt;
- * - after the maneuver, the zoom the junction had, let go along that curve as the tilt comes back;
+ * - on the road, the frame's zoom up to [CameraTuning.defaultMaxZoom], as with Default. A frame of
+ *   the open road counts no closer than that: it is fitted to the road ahead of the car and says
+ *   nothing of a junction;
+ * - toward a maneuver, up to the zoom of the frame fitted around the car and the junction, which
+ *   keeps both in view, and no closer than [CameraTuning.junctionLaneDp], along the same eased
+ *   curve as the tilt;
+ * - after the maneuver, the zoom the junction had, let go along that curve as the tilt comes back.
+ *   Where the view stays down for a next maneuver, it is kept until that one is framed;
  * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve.
  *
  * Called on every frame; it allocates nothing.
@@ -254,6 +258,8 @@ class ZoomPlanner(private val tuning: CameraTuning) {
      * @param junctionFocus [ManeuverFocus.focusAt] now
      * @param afterManeuver [ManeuverFocus.afterManeuver]
      * @param laneFocus [LaneFocus.focusAt] now
+     * @param roadFrame the frame is one of the open road, with the car on its usual place; false
+     *   for a frame fitted around the car and a maneuver
      */
     fun target(
         mode: LaneZoom,
@@ -262,6 +268,7 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         junctionFocus: Double,
         afterManeuver: Boolean,
         laneFocus: Double,
+        roadFrame: Boolean,
     ): Double {
         if (mode == LaneZoom.DEFAULT) {
             reset()
@@ -269,12 +276,14 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         }
         val road = min(frameZoom, tuning.defaultMaxZoom)
         if (junctionFocus <= 0.0) junctionZoom = Double.NaN
-        val junction = if (afterManeuver && !junctionZoom.isNaN()) {
-            // The frame shows the road beyond the junction by now: keep what the junction had.
+        // The frame shows the road by now, beyond the junction or short of the next one that
+        // the view stays down for: what the junction had is kept.
+        val keeps = !junctionZoom.isNaN() && (afterManeuver || roadFrame)
+        val junction = if (keeps) {
             lerp(road, max(road, junctionZoom), junctionFocus)
         } else {
-            val full = max(road, min(frameZoom, closest(tuning.junctionLaneDp, latitude)))
-            if (junctionFocus > 0.0) junctionZoom = full
+            val full = if (roadFrame) road else max(road, min(frameZoom, closest(tuning.junctionLaneDp, latitude)))
+            if (junctionFocus > 0.0 && !roadFrame) junctionZoom = full
             lerp(road, full, junctionFocus)
         }
         val lanes = lerp(road, max(road, closest(tuning.freewayLaneDp, latitude)), laneFocus)
@@ -282,7 +291,7 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         kind = when {
             zoom <= road + SAME_ZOOM -> Kind.ROAD
             lanes >= junction -> Kind.LANES
-            afterManeuver -> Kind.AFTER_JUNCTION
+            afterManeuver || keeps -> Kind.AFTER_JUNCTION
             else -> Kind.JUNCTION
         }
         return zoom

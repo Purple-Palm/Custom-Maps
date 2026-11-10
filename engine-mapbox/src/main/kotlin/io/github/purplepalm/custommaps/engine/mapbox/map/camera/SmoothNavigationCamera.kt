@@ -194,6 +194,9 @@ internal class SmoothNavigationCamera(
     /** The points with lanes ahead at the last progress update, for the camera line. */
     private var laneChoices: List<LaneChoice> = emptyList()
 
+    /** Whether the data source's newest following frame is one of the open road, not of a maneuver. */
+    private var roadFrame = true
+
     // How fast the drawn puck moves, in degrees a second, and where it was on the frame before.
     // Followed only while Large follows the car, for the center's aim ahead of it.
     private var puckSeenLat = Double.NaN
@@ -524,6 +527,7 @@ internal class SmoothNavigationCamera(
         // data source frames the road around it, and the overview frames the route: a point of the map.
         val carOnFocalPoint = mode == Mode.FOLLOWING && padding != null && leavesOnePoint(padding)
         onPuckRamp.push(if (carOnFocalPoint) 1.0 else 0.0, now)
+        if (mode == Mode.FOLLOWING) roadFrame = carOnFocalPoint
         target.zoom?.let { fitted ->
             // With Large the data source may fit its frames closer than before. That is meant for
             // the frame of a maneuver, which holds the car and the junction. A frame of the road
@@ -572,6 +576,7 @@ internal class SmoothNavigationCamera(
                 junctionFocus = maneuverFocus.focusAt(now),
                 afterManeuver = maneuverFocus.afterManeuver,
                 laneFocus = laneFocus.focusAt(now),
+                roadFrame = roadFrame,
             )
         } else {
             frameZoom
