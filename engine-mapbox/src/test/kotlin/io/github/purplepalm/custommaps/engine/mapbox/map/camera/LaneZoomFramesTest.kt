@@ -1,17 +1,31 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
+import com.mapbox.api.directions.v5.models.StepManeuver
+import com.mapbox.navigation.ui.maps.camera.data.FollowingFrameOptions
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-/** The limits Mapbox tuned gives the data source before each frame, at example latitudes. */
+/**
+ * The limits Mapbox tuned gives the data source before each frame, at example latitudes, and the
+ * upper limit Smooth follow gives it, with the SDK's own options for when a maneuver is framed.
+ */
 class LaneZoomFramesTest {
     private val tuning = CameraTuning.PHONE
     private val sdkMin = LaneZoomFrames.SDK_MIN_ZOOM
     private val sdkLead = LaneZoomFrames.SDK_BEARING_LEAD
+
+    /** The SDK's own options: a maneuver is framed within 180 m, but for the kinds it leaves the view up for. */
+    private val near = FollowingFrameOptions.PitchNearManeuvers()
+    private val trigger = near.triggerDistanceFromManeuver.toFloat()
+
+    /** Smooth follow's upper limit for a progress with [metersToManeuver] left before a maneuver of [type]. */
+    private fun smoothLimit(mode: LaneZoom, type: String?, metersToManeuver: Float): Double =
+        LaneZoomFrames.smoothMaxZoom(mode, tuning, LaneZoomFrames.framesManeuver(type, metersToManeuver, near))
 
     private fun limits(mode: LaneZoom, framesManeuver: Boolean, laneWindow: Boolean, latitude: Double = 35.0) =
         LaneZoomFrames.tunedLimits(mode, tuning, framesManeuver, laneWindow, latitude)
@@ -73,5 +87,54 @@ class LaneZoomFramesTest {
     fun `a latitude that is not a number moves no limit`() {
         assertLimits(sdkMin, tuning.defaultMaxZoom, tuning.laneMaxBearingLead, limits(LaneZoom.LARGE, false, true, latitude = Double.NaN))
         assertLimits(sdkMin, tuning.defaultMaxZoom, sdkLead, limits(LaneZoom.LARGE, true, false, latitude = Double.NaN))
+    }
+
+    @Test
+    fun `smooth follow with large fits a frame of the road from the default limit`() {
+        // The SDK's fit of a road frame starts its search at the upper limit, and from the raised
+        // one it can end at the SDK's lowest zoom. So the road gets the limit Default gives it.
+        assertTrue(tuning.maxZoom > tuning.defaultMaxZoom)
+        assertEquals(tuning.defaultMaxZoom, smoothLimit(LaneZoom.LARGE, StepManeuver.TURN, 2_000f))
+        assertEquals(tuning.defaultMaxZoom, smoothLimit(LaneZoom.LARGE, StepManeuver.TURN, trigger + 1f))
+        // A maneuver the SDK leaves the view up for keeps the frame of the road all the way.
+        assertEquals(tuning.defaultMaxZoom, smoothLimit(LaneZoom.LARGE, StepManeuver.OFF_RAMP, 50f))
+        // Without a banner the SDK frames no maneuver.
+        assertEquals(tuning.defaultMaxZoom, smoothLimit(LaneZoom.LARGE, null, 50f))
+    }
+
+    @Test
+    fun `smooth follow with large lets the frame of a maneuver be fitted up to its closest zoom`() {
+        assertEquals(tuning.maxZoom, smoothLimit(LaneZoom.LARGE, StepManeuver.TURN, trigger))
+        assertEquals(tuning.maxZoom, smoothLimit(LaneZoom.LARGE, StepManeuver.ROUNDABOUT, 60f))
+        assertEquals(tuning.maxZoom, smoothLimit(LaneZoom.LARGE, StepManeuver.ARRIVE, 0f))
+    }
+
+    @Test
+    fun `smooth follow with default keeps the default limit whatever the drive does`() {
+        for (meters in listOf(2_000f, trigger + 1f, trigger, 60f, 0f)) {
+            for (type in listOf(StepManeuver.TURN, StepManeuver.OFF_RAMP, StepManeuver.ARRIVE, null)) {
+                assertEquals(tuning.defaultMaxZoom, smoothLimit(LaneZoom.DEFAULT, type, meters))
+            }
+        }
+        assertEquals(tuning.defaultMaxZoom, LaneZoomFrames.smoothMaxZoom(LaneZoom.DEFAULT, tuning, framesManeuver = true))
+    }
+
+    @Test
+    fun `a maneuver is framed as the sdk frames it`() {
+        // Its own rule: within the trigger distance, for every kind it does not leave out, and
+        // only while that is switched on.
+        assertTrue(LaneZoomFrames.framesManeuver(StepManeuver.TURN, trigger, near))
+        assertFalse(LaneZoomFrames.framesManeuver(StepManeuver.TURN, trigger + 0.5f, near))
+        for (type in near.excludedManeuvers) assertFalse(LaneZoomFrames.framesManeuver(type, 10f, near), type)
+        assertFalse(LaneZoomFrames.framesManeuver(null, 10f, near))
+        val off = FollowingFrameOptions.PitchNearManeuvers().apply { enabled = false }
+        assertFalse(LaneZoomFrames.framesManeuver(StepManeuver.TURN, 10f, off))
+        // The options are read each time: another distance and another list count at once.
+        val wide = FollowingFrameOptions.PitchNearManeuvers().apply {
+            triggerDistanceFromManeuver = 300.0
+            excludedManeuvers = emptyList()
+        }
+        assertTrue(LaneZoomFrames.framesManeuver(StepManeuver.TURN, 300f, wide))
+        assertTrue(LaneZoomFrames.framesManeuver(StepManeuver.FORK, 300f, wide))
     }
 }

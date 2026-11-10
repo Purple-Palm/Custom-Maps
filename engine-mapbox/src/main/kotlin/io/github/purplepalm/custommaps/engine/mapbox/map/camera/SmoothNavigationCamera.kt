@@ -375,6 +375,10 @@ internal class SmoothNavigationCamera(
         // It gets the tilt the camera will have when this frame has been reached.
         dataSource.followingPitchPropertyOverride(maneuverFocus.pitchAt(now + tuning.sampleHoldSeconds))
         dataSource.onRouteProgressChanged(progress)
+        // With this progress the data source has decided whether its frames are of the road or
+        // of a maneuver, until the next progress. Only the frame of a maneuver may be fitted
+        // closer with Large, so the upper limit follows that choice with every progress.
+        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress)
         dataSource.evaluate()
         pacing.onProgress(SystemClock.elapsedRealtime())
         // The tilt may have begun to move, also when the frame of the data source is the same.
@@ -401,7 +405,9 @@ internal class SmoothNavigationCamera(
         speedMps = null
         teleportUntil = 0.0
         dataSource.clearFollowingOverrides()
-        setBearingLead(LaneZoomFrames.SDK_BEARING_LEAD)
+        // The upper limit and the bearing lead moved with the drive. Without a progress no
+        // maneuver is framed, and both are back where a drive starts.
+        LaneZoomFrames.resetLimits(dataSource, tuning)
     }
 
     override fun diagnostics(): Map<String, Any?> {
@@ -541,10 +547,12 @@ internal class SmoothNavigationCamera(
         onPuckRamp.push(if (carOnFocalPoint) 1.0 else 0.0, now)
         if (mode == Mode.FOLLOWING) roadFrame = carOnFocalPoint
         target.zoom?.let { fitted ->
-            // With Large the data source may fit its frames closer than before. That is meant for
-            // the frame of a maneuver, which holds the car and the junction. A frame of the road
-            // is fitted to the stretch of road ahead, short or long, and says nothing of the
-            // junction: it counts no closer than it always could.
+            // With Large the data source may fit the frame of a maneuver, which holds the car and
+            // the junction, closer than before. A frame of the road is fitted within the limit
+            // it always had and says nothing of the junction. One frame can still come with the
+            // raised limit and the car on its usual place: when the data source has lost its
+            // route or its progress while it framed a maneuver, it frames the car alone until
+            // the next progress, at the limit itself. That one counts no closer than the road.
             zoomRamp.push(if (carOnFocalPoint && laneZoom == LaneZoom.LARGE) min(fitted, tuning.defaultMaxZoom) else fitted, now)
         }
     }
@@ -578,8 +586,9 @@ internal class SmoothNavigationCamera(
             steady -> zoomRamp.lead(now, tuning.zoomTau * tuning.rampLead)
             else -> zoomRamp.value(now)
         }
-        // With Large the frames may be fitted closer than before. The camera then holds the open
-        // road at the zoom it always had, and goes closer toward a maneuver and near a lane choice.
+        // With Large the frame of a maneuver may be fitted closer than before. The camera holds
+        // the open road at the zoom it always had, and goes closer toward a maneuver and near a
+        // lane choice.
         val zoomGoal = if (largeFollowing) {
             zoomPlanner.target(
                 mode = laneZoom,
