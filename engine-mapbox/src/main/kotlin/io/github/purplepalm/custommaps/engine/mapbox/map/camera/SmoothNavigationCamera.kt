@@ -592,10 +592,11 @@ internal class SmoothNavigationCamera(
         }
         transitionStart = now
         // A map that still shows the whole world, as one does that was never moved, has nothing to
-        // glide from: the camera is put on its target with the first frame.
+        // glide from: the camera is put on its target with the first frame, and has arrived then.
         if (zoom.value < WORLD_ZOOM && toZoom - zoom.value > FAR_ZOOM_LEVELS) {
             offset.fill(0.0)
             arcZoom = 0.0
+            transitionSeconds = FIRST_FRAME_SECONDS
             snapOnNextFrame = true
         }
         if (changed) {
