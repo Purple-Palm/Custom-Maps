@@ -383,17 +383,28 @@ where they were requested, and picks a plan that is carried out inside the trip:
   nothing, also not in the next drive.
 - A simulated drive always starts with the routes as they are.
 - **The refresh** uses `RouteRefreshController.requestImmediateRouteRefresh` (Navigation 3.34.1),
-  an experimental API. Its four results: success; failure, which is followed by the replan; not
-  started, when the navigator has no route it can refresh, such as one worked out on the phone,
-  also followed by the replan; cancelled, when the navigator's routes changed meanwhile, followed
-  by nothing.
+  an experimental API. Its four results:
+  - Success: done.
+  - Failure: followed by the replan.
+  - Not started, when the navigator has no route it can refresh, such as one worked out on the
+    phone: also followed by the replan.
+  - Cancelled: the navigator drops a refresh on every change of its routes that is not itself a
+    refresh. After a reroute or the end of guidance nothing follows. It also cancels when only the
+    alternatives changed: the car passed the point where one of them leaves the route, or the
+    navigator found new ones. The trip is then still on its old route, and the navigator's own
+    refresh starts its 5 minutes over. So a refresh cancelled while the trip is on the route it
+    started on is asked for once more, at the next progress update. A second cancel is left alone.
+    How often the navigator changes its alternatives in the first seconds of a trip cannot be read
+    from its source; the next drive shows it.
 - **In the log:** `start_plan` (plan, age in seconds, meters moved, simulated); `start_refresh`
-  and `start_replan` (the result, and the reason when nothing was set). Every route request is a
-  `route_request` line with `inTrip`.
+  and `start_replan` (the result, and the reason when nothing was set; a cancelled refresh says
+  with `again` whether it is asked for once more). Every route request is a `route_request` line
+  with `inTrip`.
 - The trip count in **Settings → Debug** follows the navigator's sessions and should show one trip
   for one drive. A second billed trip from swapped routes would not show there, only on Mapbox's
   statistics page; that is why the rule above is tested and not left to care.
-- 5 minutes, 100 m and 30 minutes are first settings. None of this has been on a drive yet.
+- 5 minutes, 100 m and 30 minutes are first settings, and so is the single repeat of a cancelled
+  refresh. None of this has been on a drive yet.
 - Prices: [Navigation SDK pricing](https://docs.mapbox.com/android/navigation/guides/pricing/) and
   [mapbox.com/pricing](https://www.mapbox.com/pricing).
 
@@ -454,7 +465,7 @@ Built in stage 1.1. New lines in the debug log:
 | Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
 | Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it and the one the app took, the result's types, categories and Mapbox id | Behind the store |
 | Route requests | Every route request the app sends: where it starts, and how old, how fast and in which direction that position was; the stop point, the arrival target and the direction sent with it; whether it was sent inside a trip. And every reroute request of the navigator: how many points and arrival targets it has, whether the destination's target is set, and how far its end is from where the trip goes | Behind the store; what a drive costs |
-| Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, and the reason whenever fresh routes were not set | Old routes at Start |
+| Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, whether a cancelled refresh is asked for once more, and the reason whenever fresh routes were not set | Old routes at Start |
 | Routes | How far the Directions API moved each requested point: about 71 m for the store. The lines that describe whole routes are put together off the main thread, so they are written a moment after the lines that follow them | Behind the store |
 | Fix age | Every matched location carries the age of its fix in ms and the number of points the drawn car glides through | GPS delay; old fixes, as at the second drive's Start |
 
@@ -606,6 +617,7 @@ Then share the debug log. What to read in it:
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
 | `start_plan` | The plan, the age of the routes in seconds and the meters moved |
 | `start_refresh`, `start_replan` | After a plan other than `AS_PREVIEWED`: one closing line each, never before the drive's first `progress` line. `start_replan` with `set` is followed by `routes_updated`; any other result names its reason |
+| `start_refresh` with `cancelled`, next to `routes_updated` | Whether the navigator changes its alternatives in the first seconds of a trip and so cancels the start's refresh, and whether the refresh asked for again went through |
 | `session_state` | One `ActiveGuidance` session id for the whole drive, also across a `start_replan` |
 | Progress: `after`, `thenShown`, `stepMetersLeft`, `stepSecondsLeft` | Where the Then chip showed, and for which pairs of maneuvers, to tune its distances |
 | Camera: `laneDp`, `zoomPlan`, `laneFocus`, `centerLeadS` | Whether Large reached about 28 dp at junctions and 14 dp before lane choices, and how much of the freeway stayed in the long view |

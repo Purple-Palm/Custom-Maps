@@ -360,8 +360,12 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - So one pure rule (`InTripRefresh`, tested on the JVM) is asked before anything is done, and the engine only carries out its answer. Nothing happens before the first progress of the trip, after guidance ended or after a reroute. An empty answer is never set, and neither are routes worked out on the phone without network, which know less than the routes in use. A destination more than 100 m from the trip's is never set; the distance is measured the way the navigator measures it.
   - Fresh routes are set from inside a progress update for the route the trip started on, the one moment the navigator is sure to have a progress.
   - An answer that belongs to an earlier trip is dropped, and a request still under way is cancelled when guidance ends.
-- **What the refresh's results mean.** Success: done. Failure, no network or a refusal: replan. Not started, the navigator has no route it can refresh, such as one worked out on the phone: replan, since such routes are never refreshed later either. Cancelled, the navigator's routes changed while the refresh ran: nothing, the new routes are fresh.
-- **Logged:** `start_plan` at Start with the plan, the age and the distance; `start_refresh` and `start_replan` with the result, and the reason when nothing was set. Every route request the app sends is a `route_request` line that says whether it was sent inside a trip.
+- **What the refresh's results mean.**
+  - Success: done.
+  - Failure, no network or a refusal: replan.
+  - Not started, the navigator has no route it can refresh, such as one worked out on the phone: replan, since such routes are never refreshed later either.
+  - Cancelled: the navigator drops a refresh on every change of its routes that is not itself a refresh (`RouteRefreshController`, Navigation 3.34.1). After a reroute or the end of guidance there is nothing left to do. But a change of the alternatives alone cancels it too, as when the car passes the point where one of them leaves the route, or the navigator finds new ones. The trip is then still on its old route, and the navigator's own refresh starts its 5 minutes over. So a refresh cancelled while the trip is on the route it started on is asked for once more, at the next progress update, where the same rule is asked again. A second cancel is followed by nothing.
+- **Logged:** `start_plan` at Start with the plan, the age and the distance; `start_refresh` and `start_replan` with the result, and the reason when nothing was set; a cancelled refresh says whether it is asked for once more. Every route request the app sends is a `route_request` line that says whether it was sent inside a trip.
 - **Only logged for now:** what the navigator's reroutes ask for (28).
 - **Alternatives:**
   - Start waits up to 4 s for fresh routes. The owner chose to start at once.
@@ -372,4 +376,5 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The drive begins on the old route; after a replan the route line and the first instruction can change a few seconds in.
   - The refresh is an experimental call of the navigation SDK, and the navigator's rule for "the same trip" is read from its source, not promised by it. Re-check both with each SDK upgrade.
   - The trip count in Settings follows the navigator's sessions (18). A second billed trip caused by swapped routes would not show there, only on Mapbox's statistics page, which is why the guard is a tested rule and not a habit.
-  - None of it has been on a drive yet; 5 minutes, 100 m and 30 minutes are first settings.
+  - How often the navigator changes its alternatives in the first seconds of a trip cannot be read from its source. If it does so more than once while the refresh runs, the single repeat is used up and the refresh is lost as before.
+  - None of it has been on a drive yet; 5 minutes, 100 m, 30 minutes and the single repeat are first settings.
