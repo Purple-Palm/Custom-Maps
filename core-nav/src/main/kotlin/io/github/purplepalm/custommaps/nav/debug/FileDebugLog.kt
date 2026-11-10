@@ -46,6 +46,13 @@ class FileDebugLog(
     private val entries = Channel<Entry>(BUFFERED_EVENTS, BufferOverflow.DROP_OLDEST)
 
     /**
+     * Wakes the background writer; one wake-up covers every event queued meanwhile. The writer
+     * waits here rather than on [entries], because a waiting receiver would take an event off the
+     * queue at once, before it holds [files].
+     */
+    private val wakeUps = Channel<Unit>(Channel.CONFLATED)
+
+    /**
      * Guards the files and the open writer. A thread lock rather than a coroutine mutex, because
      * [logNow] runs on a thread that cannot suspend; it is never held across a suspension point.
      */
@@ -56,16 +63,18 @@ class FileDebugLog(
 
     init {
         scope.launch(io) {
-            for (entry in entries) {
-                // Encoded before taking the lock, so a large event never keeps logNow waiting.
-                val line = encode(entry)
-                files.withLock { write(line) }
+            for (wakeUp in wakeUps) {
+                // One event per turn of the lock, so logNow waits for one event at most.
+                while (files.withLock { writeOldestQueued() }) {
+                    // Until the queue is empty.
+                }
             }
         }
     }
 
     override fun log(type: String, fields: Map<String, Any?>) {
         entries.trySend(Entry(clock.instant(), type, fields))
+        wakeUps.trySend(Unit)
     }
 
     override fun logNow(type: String, fields: Map<String, Any?>, timeoutMillis: Long): Boolean {
@@ -79,16 +88,26 @@ class FileDebugLog(
         }
         if (!locked) return false
         try {
-            // Events logged just before this one are still queued; they go first, in order. Only an
-            // event the background writer has already taken off the queue can land after this one.
-            while (true) {
-                val queued = entries.tryReceive().getOrNull() ?: break
-                write(encode(queued))
+            // Every event logged before this one is written already or still queued: the queued
+            // ones go first, in order.
+            while (writeOldestQueued()) {
+                // Until the queue is empty.
             }
             return write(encode(entry))
         } finally {
             files.unlock()
         }
+    }
+
+    /**
+     * Takes the oldest event off the queue, then encodes and writes it; false when the queue is
+     * empty. Call it holding [files]: events leave the queue only then, so [logNow] never misses
+     * one that the background writer has taken but not written yet.
+     */
+    private fun writeOldestQueued(): Boolean {
+        val entry = entries.tryReceive().getOrNull() ?: return false
+        write(encode(entry))
+        return true
     }
 
     /** The JSON line of [entry] with tokens masked; an event that cannot be encoded becomes "log_error". */

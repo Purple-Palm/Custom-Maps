@@ -7,9 +7,14 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -210,6 +215,30 @@ class FileDebugLogTest {
     }
 
     @Test
+    fun `logNow lands after an event logged just before it, also with the writer on its own thread`() {
+        val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        try {
+            val log = FileDebugLog(logDirectory, exportDirectory, scope, dispatcher, clock)
+            // Each time the writer is idle when the event comes, as before a crash on the main thread.
+            repeat(RACE_RUNS) { run ->
+                log.log("error", mapOf("run" to run))
+                assertTrue(log.logNow("crash", mapOf("run" to run), timeoutMillis = 5_000))
+            }
+
+            assertEquals(
+                (0 until RACE_RUNS).flatMap { listOf("error $it", "crash $it") },
+                firstDay.readLines().map { line ->
+                    line.substringAfter("\"type\":\"").substringBefore('"') + " " + line.substringAfter("\"run\":").substringBefore('}')
+                },
+            )
+        } finally {
+            scope.cancel()
+            dispatcher.close()
+        }
+    }
+
+    @Test
     fun `logNow masks tokens like every other event`() = runTest {
         val log = newLog()
 
@@ -264,6 +293,10 @@ class FileDebugLogTest {
             listOf("slow", "during", "first"),
             firstDay.readLines().map { it.substringAfter("\"type\":\"").substringBefore('"') },
         )
+    }
+
+    private companion object {
+        const val RACE_RUNS = 200
     }
 
     private class MutableClock(var now: Instant, private val zone: ZoneId) : Clock() {
