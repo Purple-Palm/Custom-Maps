@@ -2,23 +2,28 @@ package io.github.purplepalm.custommaps
 
 import android.app.Application
 import android.os.Build
+import android.os.Process
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
+import io.github.purplepalm.custommaps.nav.debug.StateSummary
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
 import io.github.purplepalm.custommaps.token.DataStoreTokenStore
 import io.github.purplepalm.custommaps.token.TokenStore
 import io.github.purplepalm.custommaps.trip.DataStoreTripLogStore
 import java.io.File
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Whether maps can be shown: only once a valid token has been handed to the SDKs. */
 sealed interface MapsAccess {
@@ -62,6 +68,9 @@ class AppGraph(private val application: Application) {
 
     val settings: AppSettings = DataStoreAppSettings(preferences(DataStoreAppSettings.FILE_NAME))
 
+    /** How earlier processes ended and why this one started, as Android recorded it. */
+    private val processHistory = ProcessHistory(application, debugLog)
+
     /** Sets up the navigator; starts no trip session. */
     val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog)
 
@@ -87,9 +96,20 @@ class AppGraph(private val application: Application) {
     )
 
     fun start() {
-        debugLog.log("app_start", debugLogHeader())
+        // The pid ties this start to the "process_exit" record Android writes when it ends.
+        debugLog.log("app_start", debugLogHeader() + ("pid" to Process.myPid()))
         // Read on the crashing thread, which can be any thread: only StateFlow values.
         crashRecorder.context = { mapOf("guidance" to engine.navigation.guidanceState.value) }
+        applicationScope.launch(Dispatchers.IO) { processHistory.logOnStart() }
+        // Kept by Android with this process and handed back in its exit record.
+        applicationScope.launch {
+            engine.navigation.guidanceState.collect { guidance ->
+                val summary = StateSummary.encode(
+                    mapOf("guidance" to guidance, "since" to Instant.now().truncatedTo(ChronoUnit.SECONDS)),
+                )
+                withContext(Dispatchers.IO) { processHistory.setStateSummary(summary) }
+            }
+        }
         // Hand the stored token to the SDKs before any map exists, and again whenever it changes.
         applicationScope.launch {
             var generation = 0
