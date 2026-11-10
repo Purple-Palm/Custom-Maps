@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
+import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
@@ -49,6 +50,12 @@ class AppGraph(private val application: Application) {
         io = Dispatchers.IO,
     )
 
+    /**
+     * Writes an uncaught exception into the debug log before the process dies. Installed right
+     * after the log exists, so a crash while the stores and the navigator start up is caught too.
+     */
+    private val crashRecorder = CrashRecorder.install(debugLog)
+
     val tokenStore: TokenStore = DataStoreTokenStore(preferences(DataStoreTokenStore.FILE_NAME))
 
     val tripLogStore = DataStoreTripLogStore(preferences(DataStoreTripLogStore.FILE_NAME))
@@ -81,6 +88,8 @@ class AppGraph(private val application: Application) {
 
     fun start() {
         debugLog.log("app_start", debugLogHeader())
+        // Read on the crashing thread, which can be any thread: only StateFlow values.
+        crashRecorder.context = { mapOf("guidance" to engine.navigation.guidanceState.value) }
         // Hand the stored token to the SDKs before any map exists, and again whenever it changes.
         applicationScope.launch {
             var generation = 0

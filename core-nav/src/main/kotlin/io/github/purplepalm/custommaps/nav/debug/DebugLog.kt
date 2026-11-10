@@ -27,7 +27,7 @@ interface DebugLog {
 
 /**
  * A [DebugLog] that can also write on the calling thread, for the last moments of a process that is
- * about to die, such as a thread with an uncaught exception.
+ * about to die, such as a thread with an uncaught exception. See [CrashRecorder].
  */
 interface UrgentDebugLog : DebugLog {
 
