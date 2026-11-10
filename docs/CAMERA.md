@@ -102,10 +102,10 @@ camera uses nothing else: no trip session and no request.
 
 - **When.** From the car's first position until the driver pans, zooms or rotates the map, and
   again after **My location**. A map the driver moved before the first position, as while the
-  phone still looks for one, stays where it is too. A route on the map, in the preview and during guidance, has the
-  cameras described below. When the route goes, the camera returns to the car and follows it if the
-  route's camera still had the map, and stays where it is if the driver had taken the map. The rule
-  is `IdleFollow` in `:core-nav`, tested on the JVM.
+  phone still looks for one, stays where it is too. A route on the map, in the preview and during
+  guidance, has the cameras described below. When the route goes, the camera returns to the car
+  and follows it if the route's camera still had the map, and stays where it is if the driver had
+  taken the map. The rule is `IdleFollow` in `:core-nav`, tested on the JVM.
 - **The view.** Zoom 15.5, tilt 40°, the bearing the map has, and no padding: the car sits in the
   middle of the map, and no panel, chip or list moves it.
 - **The two Mapbox styles** ease to the car over 0.8 s. Then every new position of the phone's
@@ -129,7 +129,9 @@ camera uses nothing else: no trip session and no request.
   every style. Nothing is computed from it until a route is shown; the preview's overview and
   the Start flight then begin from where the car is, not from where it was when following began.
 - **In the log** the `camera_state` line says `IDLE_FOLLOW` while the camera is on the car and
-  `IDLE` once the driver has the map. A `camera_taken` line says who took it.
+  `IDLE` once the driver has the map. A `camera_taken` line says who took it. A map moved before
+  the car's first position was not taken from a camera and leaves no such line: the state then
+  stays `IDLE` when the car appears.
 
 ## Why the camera behaved that way
 
@@ -855,7 +857,8 @@ Try:
 - **Overview** on and off while moving: the camera tracks the moving target, with no surge at the
   end.
 - The preview, then Start.
-- The app to the background and back.
+- The app to the background and back, also across a turn: the first frame shows the road as it is
+  now, and the map does not swing round.
 - The map created again mid-drive: with **Developer options → Don't keep activities** on, leave the
   app and open it again.
 - A second drive in the same session: the puck must not jump to where the first drive ended.
