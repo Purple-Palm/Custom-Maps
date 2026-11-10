@@ -32,12 +32,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
@@ -74,6 +77,12 @@ private val THEN_CHIP_SHAPE = RoundedCornerShape(bottomStart = 20.dp, bottomEnd 
 
 /** The side of the destination gets this small before it is cut, on a narrow screen with a large font. */
 private val THEN_SIDE_MIN_FONT = 12.sp
+
+/**
+ * And never larger than this on the screen. A large font setting would otherwise raise the floor
+ * with everything else, until the side no longer fits beside the label and the arrow.
+ */
+private val THEN_SIDE_MIN_SIZE = 12.dp
 
 private const val THEN_ENTER_MS = 280
 private const val THEN_EXIT_MS = 200
@@ -194,7 +203,7 @@ private fun ThenManeuver(maneuver: Maneuver) {
                 // A long road name is cut. The side of the destination is the whole message, so it
                 // shrinks to fit first.
                 autoSize = if (maneuver.type == ManeuverType.ARRIVE) {
-                    TextAutoSize.StepBased(minFontSize = THEN_SIDE_MIN_FONT, maxFontSize = style.fontSize)
+                    TextAutoSize.StepBased(minFontSize = LocalDensity.current.thenSideMinFont(), maxFontSize = style.fontSize)
                 } else {
                     null
                 },
@@ -202,6 +211,12 @@ private fun ThenManeuver(maneuver: Maneuver) {
         }
     }
 }
+
+/**
+ * The smallest font for the side of the destination: [THEN_SIDE_MIN_FONT] at the usual font size
+ * and below, and whatever comes out at [THEN_SIDE_MIN_SIZE] on the screen with a larger one.
+ */
+internal fun Density.thenSideMinFont(): TextUnit = minOf(THEN_SIDE_MIN_FONT.value, THEN_SIDE_MIN_SIZE.toSp().value).sp
 
 /** The short text after the arrow: the road, or the side the destination is on. */
 @Composable
@@ -293,15 +308,19 @@ private fun ManeuverPanelPreview() {
     }
 }
 
-/** A narrow phone with a large font: the road gives way, the label and the arrow stay. */
-@Preview(widthDp = 360, fontScale = 1.3f)
+/**
+ * A narrow phone with a large font, and with the largest one: the side of the destination shrinks
+ * to fit beside the label and the arrow.
+ */
+@Preview(name = "large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "largest font", widthDp = 360, fontScale = 2f)
 @Composable
 private fun ManeuverPanelDestinationPreview() {
     CustomMapsTheme {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(240.dp)
+                .height(320.dp)
                 .background(Color(0xFF2B3036))
                 .padding(12.dp),
         ) {
