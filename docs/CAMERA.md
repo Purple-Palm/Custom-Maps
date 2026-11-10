@@ -385,7 +385,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). Stage 4's junction zoom reads the same curve. |
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
 | `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
-| `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt. |
+| `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt and the distance from which a new position is a jump. |
 | `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, and only growing during guidance. |
 | `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress`, `onPuckGlide`, `onGuidanceEnded`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
@@ -796,7 +796,8 @@ Steps 1 to 4 are done.
   for the next drive.
 
 Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the frame),
-`IdleFollowTest` (12: when the camera follows the car before guidance) and `GuidancePaddingTest`
+`IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
+jump) and `GuidancePaddingTest`
 (7: the top inset that only grows).
 
 The classes in `:engine-mapbox` touch Android and Mapbox types and have no JVM tests. While it was

@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.camera
 
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -112,6 +113,21 @@ class IdleFollowTest {
         follow.onMapMoved()
         assertFalse(follow.onRouteGone(routeCameraHadMap = true))
         assertFalse(follow.following)
+    }
+
+    @Test
+    fun `a position far from where the car is drawn is a jump`() {
+        // Made-up points near 0, 0, east of each other: one degree of longitude is 111.2 km there.
+        val metersPerDegree = Geo.meters(0.0, 0.0, 0.0, 1.0)
+        fun east(meters: Double) = meters / metersPerDegree
+        // What a car covers in a second, also on a freeway, and after a position or two went missing.
+        assertFalse(IdleFollow.isJump(0.0, 0.0, 0.0, east(40.0)))
+        assertFalse(IdleFollow.isJump(0.0, 0.0, 0.0, east(149.0)))
+        assertFalse(IdleFollow.isJump(0.0, 0.0, 0.0, 0.0))
+        // Farther than that, in any direction.
+        assertTrue(IdleFollow.isJump(0.0, 0.0, 0.0, east(151.0)))
+        assertTrue(IdleFollow.isJump(0.0, east(151.0), 0.0, 0.0))
+        assertTrue(IdleFollow.isJump(0.0, 0.0, east(3_000.0), 0.0))
     }
 
     @Test

@@ -1,5 +1,7 @@
 package io.github.purplepalm.custommaps.nav.camera
 
+import io.github.purplepalm.custommaps.nav.geo.Geo
+
 /**
  * Decides when the camera follows the car on the browsing map: outside guidance, with no route on
  * the map.
@@ -93,5 +95,19 @@ class IdleFollow {
 
         /** How long the camera takes to come to the car, in seconds. */
         const val ARRIVE_SECONDS = 0.8
+
+        /**
+         * A new position farther than this from where the car is drawn is a jump: more than a car
+         * drives between two positions a second apart. It comes after the map was off screen for a
+         * while, or after the phone had no position.
+         */
+        const val JUMP_METERS = 150.0
+
+        /**
+         * Whether a new position of the car is a jump from where the car is drawn. The car and the
+         * camera are then put there at once: gliding there would cross all the map in between.
+         */
+        fun isJump(drawnLat: Double, drawnLng: Double, newLat: Double, newLng: Double): Boolean =
+            Geo.meters(drawnLat, drawnLng, newLat, newLng) > JUMP_METERS
     }
 }
