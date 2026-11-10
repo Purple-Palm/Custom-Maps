@@ -84,8 +84,24 @@ class FollowingManeuverTest {
         assertEquals(ManeuverType.ROUNDABOUT, following.maneuver.type)
         assertEquals(3, following.maneuver.roundaboutExitNumber)
         assertEquals(270.0, following.maneuver.roundaboutExitDegrees)
-        // A plain turn carries neither, whatever the step after it says.
-        val turn = requireNotNull(followingManeuver(leg, stepIndex = 0))
+        // An exit number of zero is no exit number, and must not end the drive.
+        val zeroExit = roundaboutLeg.toMutableList().also {
+            it[2] = step("roundabout", "left", 300.0, 25.0, banner("Elm Street", "arrive", null), exit = 0)
+        }
+        val unnumbered = requireNotNull(followingManeuver(zeroExit, stepIndex = 0))
+        assertEquals(ManeuverType.ROUNDABOUT, unnumbered.maneuver.type)
+        assertNull(unnumbered.maneuver.roundaboutExitNumber)
+    }
+
+    @Test
+    fun `a plain turn carries no exit number and no angle, whatever the route says`() {
+        // The turn's banner has an angle and the step after it an exit number, as only roundabouts should.
+        val odd = leg.toMutableList().also {
+            it[1] = step("turn", "left", 150.0, 12.0, banner("Pine Street", "turn", "right", degrees = 90.0))
+            it[2] = step("turn", "right", 300.0, 25.0, banner("Pine Street", "arrive", "right"), exit = 2)
+        }
+        val turn = requireNotNull(followingManeuver(odd, stepIndex = 0))
+        assertEquals(ManeuverType.TURN, turn.maneuver.type)
         assertNull(turn.maneuver.roundaboutExitNumber)
         assertNull(turn.maneuver.roundaboutExitDegrees)
     }
@@ -93,14 +109,17 @@ class FollowingManeuverTest {
     /**
      * Along Oak Street into a roundabout, out at its second exit onto Elm Street, right onto Pine
      * Street 90 m later. The way out is a step of its own, as in the routes the app asks for.
+     * [circle] is the route's word for it: "roundabout" or "rotary".
      */
-    private val throughRoundabout = listOf(
-        step("depart", null, 400.0, 30.0, banner("Elm Street", "roundabout", "straight", degrees = 180.0)),
-        step("roundabout", "straight", 40.0, 6.0, banner("Elm Street", "exit roundabout", "right"), exit = 2),
-        step("exit roundabout", "right", 90.0, 8.0, banner("Pine Street", "turn", "right"), exit = 2),
+    private fun through(circle: String) = listOf(
+        step("depart", null, 400.0, 30.0, banner("Elm Street", circle, "straight", degrees = 180.0)),
+        step(circle, "straight", 40.0, 6.0, banner("Elm Street", "exit $circle", "right"), exit = 2),
+        step("exit $circle", "right", 90.0, 8.0, banner("Pine Street", "turn", "right"), exit = 2),
         step("turn", "right", 300.0, 25.0, banner("Pine Street", "arrive", "left")),
         step("arrive", "left", 0.0, 0.0, null),
     )
+
+    private val throughRoundabout = through("roundabout")
 
     @Test
     fun `what follows a roundabout is the maneuver after its way out`() {
@@ -115,6 +134,8 @@ class FollowingManeuverTest {
         assertEquals(approaching.maneuver, inside.maneuver)
         assertEquals(Distance.meters(90.0), inside.distanceAfterNext)
         assertEquals(8.seconds, inside.durationAfterNext)
+        // A rotary has a way out of its own too, and the same turn follows it.
+        assertEquals(approaching, followingManeuver(through("rotary"), stepIndex = 0))
     }
 
     @Test
@@ -136,6 +157,13 @@ class FollowingManeuverTest {
         val following = requireNotNull(followingManeuver(noTime, stepIndex = 0))
         assertEquals(Distance.meters(130.0), following.distanceAfterNext)
         assertEquals(Duration.ZERO, following.durationAfterNext)
+        // The same when it is the time after the way out that is unknown.
+        val noTimeAfter = throughRoundabout.toMutableList().also {
+            it[2] = step("exit roundabout", "right", 90.0, 0.0, banner("Pine Street", "turn", "right"), exit = 2)
+        }
+        val followingAfter = requireNotNull(followingManeuver(noTimeAfter, stepIndex = 0))
+        assertEquals(Distance.meters(130.0), followingAfter.distanceAfterNext)
+        assertEquals(Duration.ZERO, followingAfter.durationAfterNext)
     }
 
     @Test
@@ -146,6 +174,8 @@ class FollowingManeuverTest {
         assertNull(followingManeuver(noLength, stepIndex = 0))
         val endless = leg.toMutableList().also { it[1] = step("turn", "left", Double.POSITIVE_INFINITY, 12.0, banner("Pine Street", "turn", "right")) }
         assertNull(followingManeuver(endless, stepIndex = 0))
+        val negative = leg.toMutableList().also { it[1] = step("turn", "left", -1.0, 12.0, banner("Pine Street", "turn", "right")) }
+        assertNull(followingManeuver(negative, stepIndex = 0))
         val noTime = leg.toMutableList().also { it[1] = step("turn", "left", 150.0, Double.NaN, banner("Pine Street", "turn", "right")) }
         assertEquals(Duration.ZERO, requireNotNull(followingManeuver(noTime, stepIndex = 0)).durationAfterNext)
     }
