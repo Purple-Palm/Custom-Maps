@@ -43,7 +43,9 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | A crash or system kill mid-drive: offer to resume to the same destination | [Resume after a crash](#resume-after-a-crash) | 32 |
 | Location "Allow all the time", asked for after precise location | [The start problem](#the-start-problem-on-android-14-and-15) | 33 |
 | Coordinates in links are used as they are; Google place pages are read for exact coordinates, on by default with a switch; the fallback is a Mapbox search near the link's place hint | [Shared links](#shared-links) | 34 |
-| A link during a drive offers "Go there now", which changes the running drive's destination after a confirmation | [A link during a drive](#a-link-during-a-drive) | 34 |
+| A link during a drive offers "Go there now", on the phone and in the car, which changes the running drive's destination after a confirmation | [A link during a drive](#a-link-during-a-drive) | 34 |
+| Opening Custom Maps on the car screen again during a drive takes the car back from another navigation app | [onStopNavigation](#onstopnavigation) | 32 |
+| Internal App Sharing is set up during this stage, once the Play account is verified, so the car screen can be tried in the real car before stage 3 | [The real car](#the-real-car) | ROADMAP |
 | Trip logs go to a private GitHub repository: a fine-grained token for that repository only, 366 days, a reminder two weeks before it expires, an upload after every trip and Upload now | [GitHub log upload](#github-log-upload) | 35 |
 | A bright, colourful day map in the car, the existing dark map at night | [Day and night](#day-and-night) | 36 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
@@ -563,9 +565,10 @@ throws without a callback; `updateTrip()` throws when navigation has not started
   app's callback if navigation had started (car-app 1.7.0 source). Because neither path stops the
   drive now, the drive no longer depends on telling them apart. At ON_DESTROY the bridge marks itself
   gone and clears its callback inside a try/catch; a posted callback that still arrives only logs.
-- Taking the car back, proposed: when the driver opens Custom Maps on the car screen again during the
-  drive, the bridge calls `navigationStarted()` again. Unverified: whether that makes this app the
-  active navigation app in the car again; check on the DHU. See [open question 2](#open-questions).
+- Taking the car back (the owner's choice): when the driver opens Custom Maps on the car screen again
+  during the drive, the bridge calls `navigationStarted()` again. Unverified: whether that makes this
+  app the active navigation app in the car again, and whether the host then asks the other app to
+  stop, as it asked this one; check on the DHU.
 - NF-5 blocks a release only on the open testing and production tracks. Closed testing is reviewed
   without blocking, and internal testing is not reviewed.
 
@@ -938,7 +941,15 @@ when it applies, then searches. Its tests use fakes.
 ### A link during a drive
 
 - The owner's choice: a link that arrives while guidance is ACTIVE offers **Go there now** on the
-  phone. A confirmation names the new destination, and only then does the drive change.
+  phone and in the car. A confirmation names the new destination, and only then does the drive
+  change.
+- On the phone the offer is a dialog. In the car it is an `Alert` (`AppManager.showAlert`, Car API 5,
+  within this stage's level 7) with the new place as its title and two actions, **Go there now** and
+  **Not now**, and a 20-second timeout. Driving rules allow it: an alert is the car library's own
+  surface for this, and it needs one tap.
+- The first answer on either screen wins: the other screen's offer is dismissed at once
+  (`AppManager.dismissAlert` in the car). Not now, the timeout, or ending the drive dismisses both.
+  Without a car connection only the phone asks.
 - `NavigationEngine.changeDestination(place)` asks for routes from where the car is to the new place
   and hands them to the navigator inside the running trip session. It never clears the routes in
   between, which would turn the session into billed free drive (DECISIONS 13). If the request fails,
@@ -1367,7 +1378,7 @@ Debug build, phone on USB, Android Auto developer mode. Unlock the phone to star
   them ([testing](https://developer.android.com/training/cars/testing)). The CI debug APK runs only on
   the DHU.
 - So every car check of this stage happens on the DHU until stage 3, or until an Internal App Sharing
-  upload ([open question 1](#open-questions)).
+  upload (the owner's choice: set it up during this stage).
 - Play checks apps against the car quality guidelines only on some tracks: internal sharing and
   internal testing are not reviewed, closed testing does not block, open testing and production do.
 - "Allow all the time" brings Play's background location declaration, a video and a review of the
@@ -1439,15 +1450,14 @@ Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then:
 | The size figures are synthetic | Measure on a real drive |
 | A public logs repository would publish location history | The worker refuses public repositories on every run |
 
-## Open questions
+## The owner's answers
 
-1. **Internal App Sharing.** A car runs only apps installed from Google Play. Set up Internal App
-   Sharing during this stage, as soon as the Play account is verified, so the car screen can be tried
-   in the real car before stage 3? The proposal is yes.
-2. **Taking the car back.** After another navigation app takes over in the car, Custom Maps keeps
-   guiding on the phone. When the driver opens Custom Maps on the car screen again during the drive,
-   should it take the car back (the routing card, the turn notifications and the cluster)? The host
-   would then probably ask the other app to stop, as it asked this one; that is unverified and is
-   checked on the DHU. The proposal is yes.
-3. **Where Go there now asks.** A link that arrives during a drive is confirmed on the phone, where it
-   arrived. Should the car show the offer too? The proposal is the phone only.
+Answered on 2026-11-10:
+
+1. **Internal App Sharing:** yes, set it up during this stage as soon as the Play account is
+   verified.
+2. **Taking the car back:** yes.
+3. **Where Go there now asks:** on the phone and in the car; the first answer wins.
+
+Links and addresses shared into the app from other apps stay in this stage (step 13 of the order of
+work), as designed.

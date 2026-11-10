@@ -1,7 +1,7 @@
-# Status: checkpoint of 2026-11-03
+# Status: stage 1.1 in progress (2026-11-10)
 
-Work is **paused** at the owner's request. Nothing is built until the owner answers the questions
-below and says to continue.
+The owner answered the checkpoint questions on 2026-11-10 and said to continue. Stage 1.1, the next
+phone build, is being built; stage 2 (Android Auto) follows it.
 
 ## Where things stand
 
@@ -11,68 +11,49 @@ below and says to continue.
 - **Stage 2 (Android Auto) is designed**, with the owner's choices: [STAGE-2.md](STAGE-2.md).
 - Decisions 26 to 36 in [DECISIONS.md](DECISIONS.md) record what was chosen and why.
 
-## What comes next
+## The owner's answers of 2026-11-10
 
-1. **Stage 1.1, the next phone build** ([ROADMAP.md](ROADMAP.md)): camera styles in Settings with
-   the new Smooth follow camera as the default, a gradual tilt and more zoom at turns, the **Then**
-   chip, routes that end where a car stops for the place, a refresh of old routes at Start, offline
-   downloads along the route and an offline chip, and diagnostics that survive a crash.
-2. **A test drive** with that build: try each camera style, search the store from the first drive
-   by its address and by its name, and share the log (see "What the next drive tests" in
-   [DRIVES.md](DRIVES.md)).
-3. **Stage 2, the car screen**, checked on the Desktop Head Unit. The first test there is whether
-   Start pressed in the car works with the phone locked (see STAGE-2.md, the start problem).
+1. **System animations** were off through an accessibility switch (Reduce animations). The owner
+   turned them back on, and guidance became smooth. The app never overrides that setting.
+2. **Lane size at turns:** a **Lane zoom** setting with two choices, **Default** (today's zoom) and
+   **Large**: a very close view where the junction fills the screen and the lanes are clearly
+   visible. Large also zooms in on freeways where lanes split off while the route goes straight on.
+3. **Freeways:** the long view ahead stays as it is.
+4. **Old routes at Start:** start at once and refresh the routes inside the trip. New: a **trip
+   history**. Every trip is recorded on the phone (where, when, how often); search shows it; the app
+   suggests likely destinations by time, day and frequency; and if the app stays open and the car
+   drives off toward one of them, the predictor grows more confident until guidance starts by
+   itself. No End or Cancel within the first minute counts as a successful prediction. The map must
+   stay smooth through all of it.
+5. **Arriving on the right side:** no.
+6. **Internal App Sharing in stage 2:** yes.
+7. **Taking the car back** when Custom Maps is opened on the car screen again: yes.
+8. **Go there now** is offered on the phone and in the car. Links and addresses shared into the app
+   from other apps come with stage 2, as designed ([STAGE-2.md](STAGE-2.md), shared links).
+9. **Order:** stage 1.1 first, then stage 2.
 
-## Questions for the owner
+## What is being built
 
-Where a question has a proposal, "as proposed" is enough as an answer.
+Stage 1.1, in this order, each part pushed to `main` once CI is green:
 
-### Camera
+1. Diagnostics: crashes, earlier exits, device state, network, a camera line, folded map errors.
+2. Camera styles in Settings, with Smooth follow as the default; the map follows the car before Start
+   too.
+3. The **Then** chip under the maneuver card.
+4. Lane zoom (Default, Large) and lane markings on the map where Mapbox has them.
+5. Routes that end where a car stops, the place pin, and Start at once with older routes.
+6. Offline data along the route and an offline chip.
+7. Trip history, history in search, suggestions, the "Heading to" hint and guidance that starts by
+   itself.
+8. Docs and the checklist for the next drive.
 
-1. **System animations.** Both drives fit only system animations switched off: Settings →
-   Accessibility → Vision enhancements → Remove animations (older menus: Visibility enhancements;
-   some versions say Reduce animations), or Settings → Developer options → Animator duration
-   scale = Off. Was that so, and is it deliberate? If it is, should the drawn car stay smooth
-   anyway, as a separate setting? The proposal: turn animations back on for the next drive, and no
-   override of the setting unless the owner asks for one, because Remove animations is an
-   accessibility choice.
-2. **Lane size at turns.** How large should lanes get before a turn? Today a lane is under 1 mm on
-   the screen. The proposal is that the junction fills the view, with a lane about 4 mm wide (zoom
-   about 18.75). The closer the zoom, the less road around the junction fits on the screen.
-3. **Freeways.** On the freeway the camera zoomed out to show several kilometres ahead. Keep that,
-   or stay closer, about 3 to 4 km ahead?
-
-### Routes
-
-4. **An old route preview at Start.** When the preview is a few minutes old or the car has moved
-   since, should Start wait a few seconds for a fresh route, or start at once and switch to a fresh
-   route a moment later? Both cost nothing at this use. The proposal is to start at once.
-5. **Arriving on the right side.** For house addresses, should routes always arrive with the place
-   on the right (no crossing traffic), even if that adds a loop around the block? The proposal is no.
-
-### Car (stage 2)
-
-6. **The real car before stage 3.** A car runs only apps installed from Google Play. When the Play
-   account is verified, set up Internal App Sharing during stage 2, so the car screen can be tried
-   in the real car early? The proposal is yes.
-7. **Taking the car back.** After another navigation app takes over in the car, Custom Maps keeps
-   guiding on the phone. When the driver opens Custom Maps on the car screen again during the
-   drive, should it take the car back (the routing card, the turn notifications and the cluster)?
-   The proposal is yes.
-8. **Where Go there now asks.** A link shared during a drive is confirmed on the phone, where it
-   arrived. Should the car show the offer too? The proposal is the phone only.
-
-### Order
-
-9. **Order of work.** Stage 1.1 first, then stage 2? The proposal is yes.
+Then a test drive with that build, and stage 2, the car screen, checked on the Desktop Head Unit.
 
 ## Checks on the phone
 
 The full list, with Samsung's menu paths, is in [DRIVES.md](DRIVES.md) ("What the owner checks on
 the phone"). In short:
 
-- **Animations:** see question 1. For the next drive, set Animator duration scale to 1x and turn
-  Remove animations off, unless that is deliberate.
 - **Mobile data for the app:** the first drive lost the internet at the edge of home Wi-Fi and never
   got it back. Does the phone have a SIM with a data plan, and was Mobile data on? Check Settings →
   Connections → Data usage: Mobile data usage (did Custom Maps use any data on the day of the first

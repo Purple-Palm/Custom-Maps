@@ -7,8 +7,8 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 |---|---|---|
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
-| 1.1 | Guidance polish after the first drives (next build) | Designed; paused at a checkpoint |
-| 2 | Android Auto: car screen on the navigation template | Designed; paused at a checkpoint |
+| 1.1 | Guidance polish after the first drives, trip history and prediction (next build) | In progress |
+| 2 | Android Auto: car screen on the navigation template | Designed; after stage 1.1 |
 | 3 | Signed release build and Google Play internal testing | Planned |
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
@@ -47,30 +47,40 @@ Owner checks: install the APK from Actions over the old one, allow precise locat
 route, run a simulated drive (Settings → Debug), end it from the app and once from the notification,
 see one trip per drive in Settings → Debug, and share the debug log to Google Drive.
 
-## Stage 1.1: guidance polish after the first drives (next build)
+## Stage 1.1: guidance polish, trip history and prediction (in progress)
 
 The first two drives showed what to fix before the car screen; see [DRIVES.md](DRIVES.md) and
-[CAMERA.md](CAMERA.md). Work is paused at a checkpoint until the owner answers the open questions in
-[STATUS.md](STATUS.md) and says to continue.
+[CAMERA.md](CAMERA.md). The owner's answers of 2026-11-10 ([STATUS.md](STATUS.md)) added the Lane
+zoom setting and the trip history with prediction.
 
 - Camera styles in Settings: **Mapbox standard** (today's camera, unchanged, for comparison),
   **Mapbox tuned** (the same camera with calmer settings) and **Smooth follow** (new, the default).
 - Smooth follow: the camera moves on every display frame and glides after the drawn car; the tilt
   goes down onto the junction gradually before a turn and back up after it; the early turn on
   curving roads stays.
-- More zoom at turns, so the junction and its lanes are larger (the full junction zoom is stage 4).
+- The map follows the car before Start too, until the driver moves the map.
+- **Lane zoom** in Settings: **Default** (today's zoom) and **Large**, a very close view where the
+  junction fills the screen and the lanes are clearly visible; Large also zooms in on freeways where
+  lanes split off while the route goes straight on. Lane markings on the map where Mapbox has them,
+  behind a switch. The car stays on the road line: the phone cannot tell which lane it is in.
 - A **Then** chip that slides out under the maneuver card on the approach, with the arrow of the
   maneuver after the next one.
 - Routes end where a car stops for the place: Mapbox Search's stop point for cars is the route's
   end, and the place itself is the arrival target, so the arrival names the right side. No more
   routes that end behind a building when Search knows the stop point.
-- Start checks how old the routes are and how far the car has moved since they were planned, and
-  refreshes them when needed (whether Start waits for the refresh is an open question).
+- Start goes at once (the owner's choice). When the routes are older or the car has moved since they
+  were planned, they are refreshed inside the trip right after Start.
 - Diagnostics in the debug log: crashes and earlier exit reasons, device state (screen, power
   saving, heat, network), one camera line a second with the frame rate, repeated map errors folded
   into one line a minute, stop points of search results and GPS fix age.
 - Offline: the street map and routing data along the route are downloaded ahead while online, and a
   chip on the map says when the app has no internet.
+- **Trip history and prediction:** every trip is recorded on the phone (where, when, how often), and
+  search shows the history. When the app opens it suggests likely destinations by time, day and how
+  often each is visited. If the app stays open and the car drives off toward one of them, the
+  predictor grows more confident, shows a "Heading to" hint, and finally starts guidance by itself.
+  No End or Cancel within the first minute counts as a successful prediction. Each automatic start
+  is a billed trip, so daily limits apply.
 
 ## Stage 2: Android Auto (designed)
 
@@ -130,7 +140,7 @@ a cleaner night look and larger, clearer lanes, as far as the public Mapbox SDK 
 
 The goal is guidance as beautiful and smooth as possible, on the phone and in the car, with lanes that are
 impossible to miss. Mapbox's own "3D Live Navigation" and "Magic Carpet" (a glowing path on the lane to
-take) are products for car makers, in private preview and in production only in BMW cars; they need
+take) are products for car makers, in private preview and in production only in some car makers' cars; they need
 lane geometry and the car's own cameras, and are not in the public SDK this app uses. This stage builds
 what the public SDK allows:
 

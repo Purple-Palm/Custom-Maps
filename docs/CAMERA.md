@@ -5,11 +5,8 @@ camera behaved that way, the designs considered, the one chosen, and how it will
 references are to Maps SDK 11.34.1 and Navigation SDK 3.34.1 (ui-maps 3.34.1). The drives are
 described in [DRIVES.md](DRIVES.md); stages are in [ROADMAP.md](ROADMAP.md).
 
-**Status:** designed for the next build (stage 1.1), not built. Draft code for the new camera
-compiles against the SDK jars and its seven JVM tests pass, but it is not in the repository yet.
-Work is paused at a checkpoint until the owner answers the open questions in
-[STATUS.md](STATUS.md) and says to continue; the camera questions are
-[at the end](#open-questions-for-the-owner).
+**Status:** being built in stage 1.1 (from 2026-11-10). The owner answered the camera questions;
+the answers are [at the end](#the-owners-answers).
 
 ## What the owner reported
 
@@ -96,7 +93,8 @@ The evidence comes from the debug log of the first drive and from the SDK and An
   scale: Off** in the developer options. Battery saver is unlikely: Android 15's own battery saver
   does not turn animations off by default. A phone maker could change that, but nothing in the log
   points to it.
-- Which switch it was is for the owner to confirm (question 1).
+- The owner confirmed it: Reduce animations was on. With animations on again, guidance became
+  smooth ([answer 1](#the-owners-answers)).
 
 ### Even with animations on, the standard camera moves in one-second pieces
 
@@ -565,7 +563,7 @@ Stage 4, smart camera:
   through the existing blend of world point and puck. The controller sets the zoom itself, so the
   data source's 16.35 cap does not limit it. Because it reads the tilt's curve, close turns get one
   zoom-in, as they get one tilt. The roadmap brings a first part of this, more zoom at turns, into
-  the next build; how much depends on the owner's answer on lane size (question 2).
+  the next build as the Lane zoom setting ([answer 2](#the-owners-answers)).
 - **Keep the early turn.** If stage 4 shortens the framed geometry near turns or overrides the
   bearing (`followingBearingPropertyOverride` bypasses the data source's bearing smoothing), it must
   keep that smoothing or rebuild it. Otherwise the early turn disappears near junctions.
@@ -637,8 +635,8 @@ Stage 5, 3D:
   one `Choreographer` callback that moves the puck, the camera and the route line together, which
   the stage 5 plans already point to. That path would ignore the system setting on purpose. Remove
   animations is an accessibility setting, for example for motion sensitivity, so it must not be
-  overridden silently. An always-smooth puck becomes a separate choice the owner confirms
-  (question 1), not a default.
+  overridden silently. The owner turned animations back on and wants no override
+  ([answer 1](#the-owners-answers)), so this path is not built.
 
 ## Test plan
 
@@ -748,22 +746,17 @@ rate. If it collapses, the main thread's frames are being held back: try the fal
 - No visible steps.
 - The tilt peaks at 30°/s or less, and is 0° at each counted junction.
 
-## Open questions for the owner
+## The owner's answers
 
-1. **Were system animations off during the drive, and is that on purpose?** On the owner's Samsung
-   phone with Android 15, check **Settings → Accessibility → Vision enhancements → Remove
-   animations** (older menus: Visibility enhancements; some versions say Reduce animations) and
-   **Settings → Developer options → Animator duration scale**. A sign that they were off: after
-   Start the map jumped straight into the driving view instead of flying in over 1 to 3 seconds. If
-   it was an accident, turn animations back on (scale 1x) for the next test drive. If it is on
-   purpose, say so. Then decide whether the puck should get its own always-smooth motion despite
-   the setting, or stay as the setting asks.
-2. **How large should the lanes get?** Today a lane is about 5 dp. Zoom 17.5 gives about 11 dp,
-   zoom 18.75 about 27 dp. 27 dp is about 4 mm on screen, not a fingertip: a fingertip is 3 to 4
-   times that. The closer the zoom, the less road around the junction fits on screen. The map draws
-   no lane lines either way; the lane arrows stay in the maneuver card. The proposal is that the
-   junction fills the view, with a lane about 4 mm wide.
-3. **How far ahead on freeways?** On the logged drive a freeway step zoomed out to roughly 13 to
-   14.5 (an estimate), showing several kilometres ahead. Keep that, or stay closer, about 3 to 4 km
-   ahead? A minimum zoom of 14 instead of today's 10.5 would stop freeway frames at about 4 km
-   instead of 6 to 7 km.
+Answered on 2026-11-10.
+
+1. **System animations.** They were off through an accessibility switch (Reduce animations). The
+   owner turned them back on, and guidance became smooth. The app never overrides the setting, and
+   the drawn car gets no separate always-smooth motion.
+2. **Lane size.** A **Lane zoom** setting with two choices: **Default**, today's zoom, and
+   **Large**, a very close view at junctions where the lanes are clearly visible (a lane about 4 mm
+   wide on screen, zoom about 18.75 and closer). Large also zooms in on freeways where lanes split
+   off while the route goes straight on. The map cannot show which lane the car is in: phone GPS is
+   not lane-accurate and the public SDK has no lane geometry, so the car stays on the road line and
+   the lanes to use stay in the maneuver card.
+3. **Freeways.** The long view ahead stays as it is: no minimum zoom of 14.

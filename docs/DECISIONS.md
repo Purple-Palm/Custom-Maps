@@ -250,6 +250,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen (owner):**
   - When the car disconnects mid-drive, guidance continues on the phone; when it connects again, guidance continues on the car screen.
   - If another navigation app starts guiding in the car, this app keeps guiding too.
+  - When the driver opens Custom Maps on the car screen again during the drive, it takes the car back: the routing card, the turn notifications and the cluster.
   - After a crash or a system kill mid-drive, the phone and the car offer to resume to the same destination, which is a new billed trip.
 - **How:** the drive belongs to the engine's state machine, not to a screen. Car sessions only keep the navigator alive while connected; the guidance lifecycle owner keeps it alive for the drive.
 - **Cost:** the trip session runs until arrival or End, whichever screen is gone.
@@ -262,7 +263,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 34. Shared links and Google place pages
 
-- **Chosen (owner):** coordinates in a link are used as they are. A Google Maps link without coordinates, which is what the Google Maps phone app shares, has its place page loaded once to read the exact coordinates; on by default, with a switch in Settings. The fallback is a Mapbox search near the place hint the link carries. A link that arrives during a drive offers to go there now.
+- **Chosen (owner):** coordinates in a link are used as they are. A Google Maps link without coordinates, which is what the Google Maps phone app shares, has its place page loaded once to read the exact coordinates; on by default, with a switch in Settings. The fallback is a Mapbox search near the place hint the link carries. A link that arrives during a drive offers to go there now, on the phone and in the car; the first answer on either screen wins.
 - **Cost:** Google's terms do not allow reading its pages this way, and the page format can change at any time; the fallback keeps links working.
 
 ## 35. Trip logs go to a private GitHub repository

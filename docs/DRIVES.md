@@ -322,7 +322,7 @@ The reasons and numbers behind each style are in [CAMERA.md](CAMERA.md).
   stop point, when the route ends more than 50 m from the place, the route sheet says so, for
   example "Route ends 230 ft from the place". 50 m is a starting value.
 - **Curb side (unchanged).** Arriving with the place always on the right stays off: it can add a
-  loop around the block. See the open questions below.
+  loop around the block. The owner chose to keep it off (2026-11-10).
 - **Shared links (stage 2).** A Google Maps, Apple Maps or Waze link, or a `geo:` address, gives a
   point, often the middle of a building, and no stop point. The link's point is looked up once in
   Search Box, and that result's stop point is used when it lies within about 150 m. The link's own
@@ -339,14 +339,16 @@ they were planned:
 |---|---|---|
 | Routes up to 5 minutes old, phone within 100 m | Starts with the routes as they are | Nothing extra |
 | Routes 5 to 30 minutes old, phone within 100 m | Starts with them, then refreshes traffic and times inside the trip | Free, part of the trip |
-| Phone moved more than 100 m, or routes older than 30 minutes | Gets routes that begin where the car is, in one of two ways (below) | Free when fetched inside the trip; one Directions request when fetched before it, and the first 100,000 a month are free |
+| Phone moved more than 100 m, or routes older than 30 minutes | Starts with them, then gets routes that begin where the car is, inside the trip | Free, part of the trip |
 
-- The two ways are an open question for the owner: Start waits up to 4 s for fresh routes before
-  the trip, or it starts at once and switches a moment later. The proposal is to start at once.
+- The owner chose to start at once (2026-11-10): Start never waits, and fresh routes replace the old
+  ones inside the trip a moment later. The alternative was to wait up to 4 s for fresh routes before
+  the trip.
 - The first drive would have got the refresh: 8 minutes old, 22.5 m moved.
-- When Start waits, it shows a spinner and keeps the chosen route if the new answer has the same
-  main roads. If the request fails or times out, the old routes go ahead and the SDK reroutes
-  inside the trip.
+- The new routes keep the chosen route when they have the same main roads. If the request fails,
+  the old routes go on and the SDK reroutes inside the trip by itself, as on both drives.
+- Nothing is swapped before the trip's first progress update, so the new routes always land inside
+  the same billed trip.
 - A simulated drive always starts with the routes as they are.
 - The choice is logged as `start_plan`.
 - The refresh uses `RouteRefreshController.requestImmediateRouteRefresh` (Navigation 3.34.1), an
@@ -471,21 +473,18 @@ Samsung's menu names vary a little between versions.
      live traffic?
    - About 22 s before End the camera stopped following. Was the map touched then?
 
-#### Open questions
+#### The owner's answers
 
-All questions for the owner are collected in [STATUS.md](STATUS.md). These come from the drives:
+Answered on 2026-11-10; all answers are in [STATUS.md](STATUS.md). Those about the drives:
 
-- **System animations:** were they off on purpose? If so, should the car marker stay smooth anyway,
-  as a separate setting?
-- **Lane size at turns:** how large should lanes get? The proposal is that the junction fills the
-  view, with a lane about 4 mm wide on screen.
-- **Freeways:** keep showing several kilometres ahead, or stay closer, about 3 to 4 km?
-- **Old routes at Start:** when the routes are old or the car has moved since, should Start wait a
-  few seconds for fresh routes, or start at once and switch a moment later? Both cost nothing at
-  this use. The proposal is to start at once.
-- **Arriving on the right side:** for house addresses, should routes always arrive with the place on
-  the right, so the car never crosses traffic, even if that adds a loop around the block? The
-  proposal is no.
+- **System animations:** Reduce animations was on. The owner turned it off, and guidance became
+  smooth. No override in the app.
+- **Lane size at turns:** a Lane zoom setting, Default (today's zoom) and Large (the junction fills
+  the view and the lanes are clearly visible; also on freeways where lanes split off while the route
+  goes straight on).
+- **Freeways:** the long view ahead stays.
+- **Old routes at Start:** start at once and refresh inside the trip.
+- **Arriving on the right side:** no.
 
 ### What the next drive tests
 
