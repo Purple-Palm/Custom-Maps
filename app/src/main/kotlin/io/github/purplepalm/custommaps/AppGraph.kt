@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import io.github.purplepalm.custommaps.diagnostics.DeviceLog
 import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
@@ -16,6 +17,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
+import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
 import io.github.purplepalm.custommaps.token.DataStoreTokenStore
@@ -27,9 +29,14 @@ import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -71,6 +78,9 @@ class AppGraph(private val application: Application) {
     /** How earlier processes ended and why this one started, as Android recorded it. */
     private val processHistory = ProcessHistory(application, debugLog)
 
+    /** The phone's state: on screen, screen, power, heat, memory; a sample a minute during guidance. */
+    private val deviceLog = DeviceLog(application, debugLog, applicationScope)
+
     /** Sets up the navigator; starts no trip session. */
     val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog)
 
@@ -99,16 +109,37 @@ class AppGraph(private val application: Application) {
         // The pid ties this start to the "process_exit" record Android writes when it ends.
         debugLog.log("app_start", debugLogHeader() + ("pid" to Process.myPid()))
         // Read on the crashing thread, which can be any thread: only StateFlow values.
-        crashRecorder.context = { mapOf("guidance" to engine.navigation.guidanceState.value) }
+        crashRecorder.context = {
+            mapOf("guidance" to engine.navigation.guidanceState.value, "visible" to deviceLog.visible.value)
+        }
+        deviceLog.start()
         applicationScope.launch(Dispatchers.IO) { processHistory.logOnStart() }
         // Kept by Android with this process and handed back in its exit record.
         applicationScope.launch {
-            engine.navigation.guidanceState.collect { guidance ->
-                val summary = StateSummary.encode(
-                    mapOf("guidance" to guidance, "since" to Instant.now().truncatedTo(ChronoUnit.SECONDS)),
-                )
-                withContext(Dispatchers.IO) { processHistory.setStateSummary(summary) }
-            }
+            combine(engine.navigation.guidanceState, deviceLog.visible) { guidance, visible -> guidance to visible }
+                .distinctUntilChanged()
+                .collect { (guidance, visible) ->
+                    val summary = StateSummary.encode(
+                        mapOf(
+                            "guidance" to guidance,
+                            "visible" to visible,
+                            "since" to Instant.now().truncatedTo(ChronoUnit.SECONDS),
+                        ),
+                    )
+                    withContext(Dispatchers.IO) { processHistory.setStateSummary(summary) }
+                }
+        }
+        // Battery, heat and memory once a minute while a drive runs.
+        applicationScope.launch {
+            engine.navigation.guidanceState
+                .map { it == GuidanceState.ACTIVE }
+                .distinctUntilChanged()
+                .collectLatest { active ->
+                    while (active) {
+                        withContext(Dispatchers.IO) { deviceLog.logSample() }
+                        delay(DEVICE_SAMPLE_MILLIS)
+                    }
+                }
         }
         // Hand the stored token to the SDKs before any map exists, and again whenever it changes.
         applicationScope.launch {
@@ -133,5 +164,7 @@ class AppGraph(private val application: Application) {
 
         /** Under the app's cache directory. Must match res/xml/debug_log_paths.xml, which shares it. */
         const val DEBUG_LOG_EXPORT_DIRECTORY = "debug-log-export"
+
+        private const val DEVICE_SAMPLE_MILLIS = 60_000L
     }
 }
