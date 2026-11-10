@@ -22,7 +22,6 @@ import com.mapbox.maps.plugin.attribution.attribution
 import com.mapbox.maps.plugin.compass.compass
 import com.mapbox.maps.plugin.gestures.OnMapClickListener
 import com.mapbox.maps.plugin.gestures.gestures
-import com.mapbox.maps.plugin.locationcomponent.DefaultLocationProvider
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorBearingChangedListener
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
@@ -50,6 +49,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCameraAdapter
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.nav.MapRenderer
@@ -93,7 +93,6 @@ class PhoneMap internal constructor(
     private val debugLog: DebugLog,
 ) : MapRenderer {
 
-    private val appContext = context.applicationContext
     private val mapView = MapView(context, MapInitOptions(context, styleUri = null))
     private val mapboxMap = mapView.mapboxMap
     private val scope = MainScope()
@@ -107,9 +106,10 @@ class PhoneMap internal constructor(
     private var lastBearing: Double? = null
     private var centeredOnFirstFix = false
 
-    private var defaultLocationProvider = DefaultLocationProvider(appContext)
+    /** The puck's positions outside guidance: the phone's own location, without a trip session. */
+    private val platformPuck = PlatformPuck(context)
 
-    /** The puck's positions during guidance; before guidance they come from the platform provider. */
+    /** The puck's positions during guidance, from the navigator. */
     private val guidancePuck = GuidancePuck()
 
     /** The navigator's routes; they change on reroute and are empty outside guidance. */
@@ -290,7 +290,7 @@ class PhoneMap internal constructor(
             render(guidanceState)
         }
 
-        mapView.location.setLocationProvider(defaultLocationProvider)
+        mapView.location.setLocationProvider(platformPuck)
         mapView.location.updateSettings {
             enabled = true
             locationPuck = createDefault2DPuck(withBearing = true)
@@ -389,8 +389,7 @@ class PhoneMap internal constructor(
      * provider notices the new permission only at its next check, which can take a few seconds.
      */
     fun onLocationPermissionGranted() {
-        defaultLocationProvider = DefaultLocationProvider(appContext)
-        if (guidanceState != GuidanceState.ACTIVE) mapView.location.setLocationProvider(defaultLocationProvider)
+        platformPuck.restart()
     }
 
     /**
@@ -551,7 +550,7 @@ class PhoneMap internal constructor(
         val current = mapView.location.getLocationProvider()
         // Guidance starts: without this the puck would first jump to where the last drive ended.
         if (guidance && current !== guidancePuck) guidancePuck.newDrive()
-        val wanted = if (guidance) guidancePuck else defaultLocationProvider
+        val wanted = if (guidance) guidancePuck else platformPuck
         if (current !== wanted) mapView.location.setLocationProvider(wanted)
     }
 
