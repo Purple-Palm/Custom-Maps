@@ -48,6 +48,9 @@ internal object ManeuverMapping {
 
     fun isRoundabout(type: ManeuverType): Boolean = type in ROUNDABOUT_TYPES
 
+    /** The way out of a roundabout, which routes carry as a maneuver of its own. */
+    fun isRoundaboutExit(type: ManeuverType): Boolean = type == ManeuverType.EXIT_ROUNDABOUT || type == ManeuverType.EXIT_ROTARY
+
     private val ROUNDABOUT_TYPES = setOf(
         ManeuverType.ROUNDABOUT,
         ManeuverType.ROUNDABOUT_TURN,

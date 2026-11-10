@@ -90,6 +90,54 @@ class FollowingManeuverTest {
         assertNull(turn.maneuver.roundaboutExitDegrees)
     }
 
+    /**
+     * Along Oak Street into a roundabout, out at its second exit onto Elm Street, right onto Pine
+     * Street 90 m later. The way out is a step of its own, as in the routes the app asks for.
+     */
+    private val throughRoundabout = listOf(
+        step("depart", null, 400.0, 30.0, banner("Elm Street", "roundabout", "straight", degrees = 180.0)),
+        step("roundabout", "straight", 40.0, 6.0, banner("Elm Street", "exit roundabout", "right"), exit = 2),
+        step("exit roundabout", "right", 90.0, 8.0, banner("Pine Street", "turn", "right"), exit = 2),
+        step("turn", "right", 300.0, 25.0, banner("Pine Street", "arrive", "left")),
+        step("arrive", "left", 0.0, 0.0, null),
+    )
+
+    @Test
+    fun `what follows a roundabout is the maneuver after its way out`() {
+        val approaching = requireNotNull(followingManeuver(throughRoundabout, stepIndex = 0))
+        assertEquals(ManeuverType.TURN, approaching.maneuver.type)
+        assertEquals("Pine Street", approaching.maneuver.primaryText)
+        // Counted from the way in: the roundabout itself and the road after it.
+        assertEquals(Distance.meters(130.0), approaching.distanceAfterNext)
+        assertEquals(14.seconds, approaching.durationAfterNext)
+        // Inside the roundabout the same turn follows, now counted from the way out.
+        val inside = requireNotNull(followingManeuver(throughRoundabout, stepIndex = 1))
+        assertEquals(approaching.maneuver, inside.maneuver)
+        assertEquals(Distance.meters(90.0), inside.distanceAfterNext)
+        assertEquals(8.seconds, inside.durationAfterNext)
+    }
+
+    @Test
+    fun `a roundabout with nothing after its way out, or with an unknown time, is handled`() {
+        // The destination lies at the way out: the roundabout is followed by nothing.
+        val endsAtExit = throughRoundabout.take(2) + step("arrive", null, 0.0, 0.0, null)
+        assertNull(followingManeuver(endsAtExit, stepIndex = 0))
+        // The destination is on the road after the way out.
+        val endsAfterExit = throughRoundabout.take(2) +
+            step("exit roundabout", "right", 90.0, 8.0, banner("Elm Street", "arrive", "right"), exit = 2) +
+            step("arrive", "right", 0.0, 0.0, null)
+        val destination = requireNotNull(followingManeuver(endsAfterExit, stepIndex = 0))
+        assertEquals(ManeuverType.ARRIVE, destination.maneuver.type)
+        assertEquals(Distance.meters(130.0), destination.distanceAfterNext)
+        // One of the two times is unknown: so is their sum.
+        val noTime = throughRoundabout.toMutableList().also {
+            it[1] = step("roundabout", "straight", 40.0, Double.NaN, banner("Elm Street", "exit roundabout", "right"), exit = 2)
+        }
+        val following = requireNotNull(followingManeuver(noTime, stepIndex = 0))
+        assertEquals(Distance.meters(130.0), following.distanceAfterNext)
+        assertEquals(Duration.ZERO, following.durationAfterNext)
+    }
+
     @Test
     fun `a step without a banner or a valid length gives nothing, a missing time gives zero`() {
         val noBanner = leg.toMutableList().also { it[1] = step("turn", "left", 150.0, 12.0, banner = null) }

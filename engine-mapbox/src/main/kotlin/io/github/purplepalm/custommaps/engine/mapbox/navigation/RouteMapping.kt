@@ -78,14 +78,31 @@ internal fun RouteProgress.followingManeuver(): FollowingManeuver? {
  * the following one, its first banner describes the following one, and step k + 2 starts with it.
  * Read from the route's steps, not from the banner's `sub`: the Directions API puts lanes there
  * instead whenever the next maneuver has lanes, which is where the following maneuver matters most.
+ *
+ * Routes come with a step of their own for the way out of a roundabout. When the next maneuver
+ * goes into a roundabout, the way out is no maneuver to announce, since the roundabout arrow shows
+ * it already: what follows is the maneuver after the way out, the roundabout's own length included.
  */
 internal fun followingManeuver(steps: List<LegStep>, stepIndex: Int): FollowingManeuver? {
-    val between = steps.getOrNull(stepIndex + 1) ?: return null
-    // No step after it: the next maneuver is the arrival.
-    val after = steps.getOrNull(stepIndex + 2) ?: return null
-    val banner = between.bannerInstructions()?.firstOrNull()?.primary() ?: return null
+    val following = maneuverAtEndOf(steps, stepIndex + 1) ?: return null
+    if (!ManeuverMapping.isRoundaboutExit(following.maneuver.type)) return following
+    val beyond = maneuverAtEndOf(steps, stepIndex + 2) ?: return null
+    val bothTimesKnown = following.durationAfterNext.isPositive() && beyond.durationAfterNext.isPositive()
+    return FollowingManeuver(
+        maneuver = beyond.maneuver,
+        distanceAfterNext = following.distanceAfterNext + beyond.distanceAfterNext,
+        durationAfterNext = if (bothTimesKnown) following.durationAfterNext + beyond.durationAfterNext else Duration.ZERO,
+    )
+}
+
+/** The maneuver step [index] ends with, as the step's first banner describes it, and the step's length and time. */
+private fun maneuverAtEndOf(steps: List<LegStep>, index: Int): FollowingManeuver? {
+    val step = steps.getOrNull(index) ?: return null
+    // No step after it: this step is the arrival, and nothing follows it.
+    val after = steps.getOrNull(index + 1) ?: return null
+    val banner = step.bannerInstructions()?.firstOrNull()?.primary() ?: return null
     // A length that is not a number gives nothing: a bad value must not end the drive.
-    val meters = between.distance().takeIf { it.isFinite() && it >= 0.0 } ?: return null
+    val meters = step.distance().takeIf { it.isFinite() && it >= 0.0 } ?: return null
     val type = ManeuverMapping.type(banner.type())
     val roundabout = ManeuverMapping.isRoundabout(type)
     return FollowingManeuver(
@@ -97,7 +114,7 @@ internal fun followingManeuver(steps: List<LegStep>, stepIndex: Int): FollowingM
             roundaboutExitDegrees = if (roundabout) banner.degrees() else null,
         ),
         distanceAfterNext = Distance.meters(meters),
-        durationAfterNext = between.duration().knownSeconds(),
+        durationAfterNext = step.duration().knownSeconds(),
     )
 }
 
