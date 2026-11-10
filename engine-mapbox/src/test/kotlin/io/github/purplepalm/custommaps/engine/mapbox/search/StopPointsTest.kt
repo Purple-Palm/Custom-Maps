@@ -125,6 +125,33 @@ class StopPointsTest {
     }
 
     @Test
+    fun `a number just outside the range of coordinates is passed over, however near the place`() {
+        // A place in the sea, 5 m from the 180th meridian. The candidate is 11 m from it the short
+        // way around, well within the limit, but its longitude is none.
+        val atMeridian = GeoPoint(0.0, 179.99995)
+        assertNull(StopPoints.choose(listOf(Candidate("POI", 0.0, 180.00005)), atMeridian))
+        // The same for a latitude, next to the pole.
+        assertNull(StopPoints.choose(listOf(Candidate("POI", 90.00005, 0.0)), GeoPoint(89.99995, 0.0)))
+
+        // A good one after it is taken, with its place in the list.
+        val choice = StopPoints.choose(
+            listOf(Candidate("POI", 0.0, 180.00005), Candidate("Address", 0.0, 179.9999)),
+            atMeridian,
+        )
+        assertEquals(GeoPoint(0.0, 179.9999), choice?.point)
+        assertEquals(1, choice?.index)
+    }
+
+    @Test
+    fun `a routable point across the 180th meridian is measured the short way`() {
+        val choice = StopPoints.choose(listOf(Candidate("POI", 0.0, -179.99995)), GeoPoint(0.0, 179.99995))
+
+        assertEquals(GeoPoint(0.0, -179.99995), choice?.point)
+        // 0.0001 degrees along the equator, about 11 m.
+        assertEquals(metersOf(0.0001), choice!!.metersFromPlace, 1e-3)
+    }
+
+    @Test
     fun `a routable point at the place itself is a stop point`() {
         val choice = StopPoints.choose(listOf(Candidate("Address", 0.0, 0.0)), place)
 
