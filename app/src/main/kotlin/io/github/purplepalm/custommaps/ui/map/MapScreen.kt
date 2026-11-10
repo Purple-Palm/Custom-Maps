@@ -68,6 +68,7 @@ import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.camera.GuidancePadding
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -186,15 +187,25 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     val ornamentStrip = PhoneMap.ORNAMENT_STRIP_DP.dp
     val bottomPanelsBottom = with(density) { ornamentInset.toDp() } + ornamentStrip
 
-    // Keep the route and the puck clear of the panels.
+    // Keep the route and the puck clear of the panels. At the top only the maneuver panel counts,
+    // and during guidance the inset only grows, so a panel that changes its height, the search bar
+    // and its suggestions never make the camera frame the road again.
     var screenHeight by remember { mutableIntStateOf(0) }
+    var topPanelTop by remember { mutableIntStateOf(0) }
     var topPanelBottom by remember { mutableIntStateOf(0) }
+    var maneuverPanelBottom by remember { mutableIntStateOf(0) }
     var bottomPanelTop by remember { mutableIntStateOf(0) }
-    LaunchedEffect(screenHeight, topPanelBottom, bottomPanelTop) {
-        val margin = with(density) { 16.dp.roundToPx() }
+    val panelMargin = with(density) { 16.dp.roundToPx() }
+    // A screen of another size starts over.
+    val guidancePadding = remember(screenHeight) { GuidancePadding() }
+    val guiding = state.guidance == GuidanceState.ACTIVE
+    LaunchedEffect(screenHeight, guiding, topPanelTop, maneuverPanelBottom, bottomPanelTop) {
+        val top = guidancePadding.topInset(guiding, panelBottom = maneuverPanelBottom, restTop = topPanelTop)
         val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
-        phoneMap.setViewportPadding(ViewportPadding(margin, topPanelBottom + margin, margin, bottom + margin))
+        phoneMap.setViewportPadding(ViewportPadding(panelMargin, top + panelMargin, panelMargin, bottom + panelMargin))
     }
+    // The compass sits under whatever the top of the screen shows.
+    LaunchedEffect(topPanelBottom) { phoneMap.setCompassTopInset(topPanelBottom + panelMargin) }
 
     BackHandler(enabled = state.guidance == GuidanceState.PREVIEW) { viewModel.onCancelPreview() }
     BackHandler(enabled = state.guidance == GuidanceState.IDLE && state.searchText.isNotEmpty()) { viewModel.clearSearch() }
@@ -214,10 +225,20 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom))
                 .padding(bottom = ornamentStrip)
                 .padding(12.dp)
-                .onGloballyPositioned { topPanelBottom = it.boundsInRoot().bottom.toInt() },
+                .onGloballyPositioned {
+                    val bounds = it.boundsInRoot()
+                    topPanelTop = bounds.top.toInt()
+                    topPanelBottom = bounds.bottom.toInt()
+                },
         ) {
             when (state.guidance) {
-                GuidanceState.ACTIVE -> state.progress?.let { ManeuverCard(it) }
+                GuidanceState.ACTIVE -> state.progress?.let { progress ->
+                    ManeuverCard(
+                        progress = progress,
+                        modifier = Modifier.onGloballyPositioned { maneuverPanelBottom = it.boundsInRoot().bottom.toInt() },
+                    )
+                    DisposableEffect(Unit) { onDispose { maneuverPanelBottom = 0 } }
+                }
                 GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                     SearchBar(
                         text = state.searchText,

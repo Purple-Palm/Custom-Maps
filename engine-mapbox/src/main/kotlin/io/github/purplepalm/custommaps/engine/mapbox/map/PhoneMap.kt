@@ -325,16 +325,15 @@ class PhoneMap internal constructor(
     }
 
     override fun setViewportPadding(padding: ViewportPadding) {
+        // The same padding again would only make the camera start its move over.
+        if (padding == this.padding) return
         // A new padding moves the camera at once; the next camera line says to what, and how often.
-        if (padding != this.padding) {
-            this.padding = padding
-            paddingChanges += 1
-        }
+        this.padding = padding
+        paddingChanges += 1
         val insets = EdgeInsets(padding.top.toDouble(), padding.left.toDouble(), padding.bottom.toDouble(), padding.right.toDouble())
         viewportDataSource.followingPadding = insets
         viewportDataSource.overviewPadding = insets
         viewportDataSource.evaluate()
-        mapView.compass.updateSettings { marginTop = padding.top + ORNAMENT_MARGIN_DP * density }
     }
 
     override fun setCameraStyle(style: CameraStyle) {
@@ -375,6 +374,14 @@ class PhoneMap internal constructor(
             marginLeft = left + (LOGO_WIDTH_DP + ORNAMENT_GAP_DP) * density
             marginBottom = bottom
         }
+    }
+
+    /**
+     * Puts the compass just below [topInset] pixels of panels at the top of the map. It follows the
+     * panels as they are, also when the camera's padding does not.
+     */
+    fun setCompassTopInset(topInset: Int) {
+        mapView.compass.updateSettings { marginTop = topInset + ORNAMENT_MARGIN_DP * density }
     }
 
     /**
