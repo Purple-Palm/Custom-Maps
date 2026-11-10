@@ -38,24 +38,26 @@ class FileDebugLogTest {
 
     private val clock = MutableClock(Instant.parse("2000-01-01T00:00:00Z"), ZoneOffset.UTC)
 
-    private fun TestScope.newLog(maxBytes: Long = FileDebugLog.DEFAULT_MAX_BYTES) =
+    private fun TestScope.newLog(maxBytes: Long = FileDebugLog.DEFAULT_MAX_BYTES, clock: Clock = this@FileDebugLogTest.clock) =
         FileDebugLog(logDirectory, exportDirectory, backgroundScope, StandardTestDispatcher(testScheduler), clock, maxBytes)
 
     @Test
-    fun `writes one line per event into the file of its day`() = runTest {
-        val log = newLog()
-        clock.now = Instant.parse("2000-01-01T23:59:00Z")
+    fun `writes one line per event into the file of its local day`() = runTest {
+        // A made-up offset of 12 hours: the times stay on 2000-01-01 and the lines show them in UTC,
+        // but the clock's own day, and with it the file, changes at noon UTC.
+        val clock = MutableClock(Instant.parse("2000-01-01T11:59:00Z"), ZoneOffset.ofHours(12))
+        val log = newLog(clock = clock)
         log.log("route_request", mapOf("to" to "Elm Street"))
-        clock.now = Instant.parse("2000-01-02T00:01:00Z")
+        clock.now = Instant.parse("2000-01-01T12:01:00Z")
         log.log("arrival")
         runCurrent()
 
         assertEquals(
-            listOf("""{"t":"2000-01-01T23:59:00Z","type":"route_request","to":"Elm Street"}"""),
+            listOf("""{"t":"2000-01-01T11:59:00Z","type":"route_request","to":"Elm Street"}"""),
             firstDay.readLines(),
         )
         assertEquals(
-            listOf("""{"t":"2000-01-02T00:01:00Z","type":"arrival"}"""),
+            listOf("""{"t":"2000-01-01T12:01:00Z","type":"arrival"}"""),
             File(logDirectory, "2000-01-02.jsonl").readLines(),
         )
     }
