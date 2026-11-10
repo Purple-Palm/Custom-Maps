@@ -127,6 +127,7 @@ class LaneZoomTest {
         assertEquals(1.0, focus[53], 1e-9)
         assertEquals(1.0, focus[54], 1e-9)
         assertTrue(focus[57] > 0.0 && focus[57] < 1.0, "on its way out: ${focus[57]}")
+        assertTrue(focus[59] > 0.0, "the way out takes its 6 s: ${focus[59]}")
         assertEquals(0.0, focus[60], 1e-9)
     }
 
@@ -175,6 +176,61 @@ class LaneZoomTest {
         val focus = drive(speed, listOf(1_500.0, 2_400.0), 120)
         val between = focus.subList(52, 80)
         assertTrue(between.all { it == 1.0 }, "no dip between: $between")
+        // The second choice has a hold of its own: passed at 82.8 s and seen at 83 s, the car is
+        // 30 m past it at 84 s and 2 s past it at 85 s. Then out over 6 s.
+        assertEquals(1.0, focus[85], 1e-9)
+        assertTrue(focus[86] < 1.0, "on its way out: ${focus[86]}")
+        assertTrue(focus[90] > 0.0, "still on its way out: ${focus[90]}")
+        assertEquals(0.0, focus[91], 1e-9)
+    }
+
+    @Test
+    fun `the hold after a second lane choice lasts for its own distance`() {
+        // In a jam at walking pace: the window is 400 m, and a next choice within 20 m more keeps
+        // the view in. The second choice is 415 m ahead when the hold after the first ends.
+        val speed = 2.0
+        val focus = LaneFocus(tuning)
+        var releasedAt = -1
+        for (t in 0..300) {
+            val routeMeters = speed * t
+            val ahead = listOf(20.0, 465.0).mapIndexedNotNull { i, at ->
+                val meters = at - routeMeters
+                if (meters >= 0.0) choice(5, 3, ahead = meters, key = "r/0/1/$i") else null
+            }
+            focus.onProgress(t.toDouble(), routeMeters, ahead, speed)
+            if (releasedAt < 0 && focus.goal == 0.0) releasedAt = t
+        }
+        // In from the first update to 30 m past the second choice: 495 m, after 248 s. The 2 s
+        // past it ended at 235 s, and 30 m past the first choice was long before.
+        assertEquals(248, releasedAt)
+    }
+
+    @Test
+    fun `of two lane choices inside the window the nearer one holds the view`() {
+        val near = choice(5, 3, ahead = 200.0, key = "r/0/1/0")
+        val far = choice(4, 2, ahead = 600.0, key = "r/0/1/1")
+        for (choices in listOf(listOf(near, far), listOf(far, near))) {
+            val focus = LaneFocus(tuning)
+            focus.onProgress(0.0, 0.0, choices, 29.0)
+            assertEquals("r/0/1/0", focus.current?.key)
+            // And it stays the one on the next update, when both have come nearer.
+            focus.onProgress(1.0, 29.0, choices.map { it.copy(metersAhead = it.metersAhead - 29.0) }, 29.0)
+            assertEquals(171.0, focus.current?.metersAhead)
+        }
+    }
+
+    @Test
+    fun `a next lane choice keeps the view in up to 10 s of driving from its own window`() {
+        // At 29 m/s the window is 725 m and 10 s of driving are 290 m more.
+        for ((metersAhead, goal) in listOf(1_015.0 to 1.0, 1_015.5 to 0.0)) {
+            val focus = LaneFocus(tuning)
+            focus.onProgress(0.0, 0.0, listOf(choice(5, 3, ahead = 100.0, key = "r/0/1/0")), 29.0)
+            // The first choice is passed; its hold of 30 m and 2 s is over by the third update.
+            focus.onProgress(10.0, 290.0, listOf(choice(5, 3, ahead = metersAhead + 87.0, key = "r/0/1/1")), 29.0)
+            assertEquals(1.0, focus.goal)
+            focus.onProgress(13.0, 377.0, listOf(choice(5, 3, ahead = metersAhead, key = "r/0/1/1")), 29.0)
+            assertEquals(goal, focus.goal, "the next choice $metersAhead m ahead")
+        }
     }
 
     @Test
