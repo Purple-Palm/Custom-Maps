@@ -808,6 +808,11 @@ For the Large lane zoom and lane details:
 - **The SDK's maneuver frame at close zoom** is untried on a device. The model in the simulation
   fits it flat; the real one can differ by a few tenths of a zoom level, and a junction wider than
   the view never reaches 28 dp. The log's `laneDp` shows what a drive gets.
+- **The fit of a road frame depends on where its search starts**, which is why Large leaves the
+  road's limit alone ([The junction zoom](#the-junction-zoom)). That is read from the native map
+  library and from models, for Maps SDK 11.34.1. On a drive with Large, `to.zoom` on the open road
+  is never above 16.35, and on a winding stretch it does not drop to 10.5 for a few seconds and
+  come back. Read the fit again with each SDK upgrade.
 - **Little around the junction.** At 28 dp the view is about 55 m wide on a phone. The Then chip
   and the 30 m after the turn carry what comes next. One constant, `junctionLaneDp`.
 - **Fast ground near a lane choice.** At 14 dp and 105 km/h the road moves about 110 dp a second.
@@ -883,21 +888,46 @@ It runs for the maneuvers the tilt goes down for
 ([The tilt before a turn](#the-tilt-before-a-turn)): turns, ends of roads, roundabouts, U-turns
 and the arrival.
 
-- **What Large changes on the data source** (Smooth follow, `LaneZoomFrames.applySmoothFollow`):
-  its frames may be fitted as close as zoom 20 instead of 16.35, and the frame of a maneuver holds
-  30 m of road after the turn instead of 100 m. The SDK still fits that frame, flat and within the
-  padding, around the car, the rest of the step and any maneuver that follows within 150 m. So the
-  car and the junction are both on screen all the way, and the frame gets closer as the car does.
+- **What Large changes on the data source** (Smooth follow, `LaneZoomFrames`): the frame of a
+  maneuver may be fitted as close as zoom 20 instead of 16.35, and it holds 30 m of road after the
+  turn instead of 100 m. The SDK still fits that frame, flat and within the padding, around the
+  car, the rest of the step and any maneuver that follows within 150 m. So the car and the
+  junction are both on screen all the way, and the frame gets closer as the car does.
+- **The upper limit is raised only for that frame.** With every navigator update the camera gives
+  the data source the progress, sets the limit, and has the frame computed
+  (`LaneZoomFrames.beforeSmoothEvaluate`): zoom 20 while the SDK frames a maneuver, by its own
+  rule within 180 m of it, and 16.35 for every other frame. With Default the limit is 16.35 on
+  every update and nothing is written.
 - **The camera takes the zoom of that frame**, up to the zoom at which a lane is 28 dp wide
   (`ZoomPlanner`). It moves there over the 1.1 s of a sample and never faster than 1 zoom level a
   second.
-- **The open road stays at 16.35.** A frame of the road counts no closer than that, however close
-  the data source fitted it. The SDK fits such a frame to the road ahead of the car, the rest of
-  the step or seven times the mean distance between intersections, not to the junction. Its zoom
-  says nothing about the junction, and the SDK's own source notes that such fits can fail at high
-  zoom. So the view goes close from where the SDK starts to frame the maneuver, 180 m before it,
-  when the tilt is already down: first the tilt, then the zoom. The first design blended the zoom
-  in while the tilt went down; that would have followed the road frame's zoom.
+- **The open road stays at 16.35, and its frames are fitted exactly as with Default.** The SDK
+  fits a frame of the road to the road ahead of the car, the rest of the step or seven times the
+  mean distance between intersections, not to the junction, so its zoom says nothing about the
+  junction. And it fits it with a search that starts at the upper limit, and where the search ends
+  depends on where it starts:
+  - At zoom 20 the tilted camera stands only about 80 to 115 m behind the car. The fit is given
+    the box around the car and the framed road. A corner of that box that lies farther back, as on
+    an S-shaped stretch whose far end lies to the other side of the car, or with points behind a
+    car that heads away from the route, has no place on the screen. The search takes it for an
+    outermost point and runs out until the SDK stops it at its lowest zoom, 10.5.
+  - Started at 16.35, where the camera stands a kilometre or more behind the car, the search
+    passes over the same corner and ends at the zoom the road needs, 13.6 to 14.4 in the cases
+    looked at.
+  - In a model about 1 in 100 random curved road frames went wrong from zoom 20. On a drive that
+    would be the open-road view drifting out to a map some 20 km wide, at up to one zoom level a
+    second, and coming back. The cap below cannot catch that direction.
+  - This comes from reading the native map library (11.34.1) and from two models of its fit. It
+    was not seen on a device.
+
+  So a frame of the road never gets the raised limit. The view goes close from where the SDK
+  starts to frame the maneuver, 180 m before it, when the tilt is already down: first the tilt,
+  then the zoom. The first design blended the zoom in while the tilt went down; that would have
+  followed the road frame's zoom.
+- **A frame with the car on its usual place counts no closer than 16.35** in the camera as well.
+  One such frame can still come with the raised limit: when the data source loses its route or
+  its progress while it frames a maneuver, at a new route or at the end of guidance, it frames
+  the car alone until the next progress, and its zoom is then the limit itself, with no fit.
 - **After the maneuver** the frame shows the road beyond it. The camera keeps the zoom the
   junction had for as long as the view is held over it, and lets it go along the same eased curve
   as the tilt comes back up (`ManeuverFocus.afterManeuver`). Once the tilt is back up the
@@ -1048,6 +1078,10 @@ computed (`LaneZoomFrames.beforeTunedEvaluate`):
   the map;
 - the frame of a maneuver holds 30 m after the turn, as for Smooth follow.
 
+Both styles go by the same rule for when the SDK frames a maneuver, and neither raises the upper
+limit for a frame of the road outside a lane window. Inside one, tuned raises both limits to the
+same zoom, so the frame has that zoom whatever the fit of the road ends at.
+
 The camera's own animations (zoom 2.5 s, restarted by each update) turn these steps into glides.
 Its zoom back out after a turn starts when the step changes, not with the tilt. With Default the
 limits are the SDK's on every update. In the model above the limit is zoom 19.18 from 175 m before
@@ -1059,6 +1093,9 @@ the turn and the frame reaches 28 dp from 32 m before it.
 
 - `PhoneMap.setLaneZoom` sets up the data source for the camera style and the new mode
   (`LaneZoomFrames.apply`), tells the camera, and has a frame computed.
+- For Smooth follow that set-up also sets the upper limit, for the progress the data source
+  frames by: a change to Large in the frame of a maneuver raises it at once, and anywhere else it
+  is 16.35 until the camera moves it with a later progress.
 - The data source works out the road after each maneuver when it is given a route, and ignores a
   route it already has. So when the 30 m or 100 m change, the route is taken out and given back
   together with the latest progress, within one call on the main thread. No frame is computed in
@@ -1242,8 +1279,10 @@ read once and none off the route, and each point reported to the log once),
 `LaneDetailsTest` (12: nothing is set within the callback of a style load, the setting is made
 after it and made again when something changed it, and nothing after the map is gone),
 `RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own) and
-`LaneZoomFramesTest` (7: the limits Mapbox tuned gives the data source with Default and with
-Large, on the road, in the frame of a maneuver and near a lane choice).
+`LaneZoomFramesTest` (11: the limits Mapbox tuned gives the data source with Default and with
+Large, on the road, in the frame of a maneuver and near a lane choice; the upper limit Smooth
+follow gives it, raised only with Large in the frame of a maneuver; and the rule for when a
+maneuver is framed, with the SDK's own options).
 
 The cameras themselves touch Android and Mapbox types and have no JVM tests. While it was written,
 `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by frame
@@ -1256,11 +1295,15 @@ window. After a review these were added: the car off the route inside a lane win
 route for minutes, an exit ramp of 200 to 260 m that ends in a turn and a lane choice 100 m
 before a turn (at town speed and in a queue), turns 160 to 280 m apart in steps, and a gesture,
 the overview and the background over one junction with the return 183 to 400 m before a later
-turn. With Default, every frame of the older runs came out the same as before the lane zoom was
-built, and the same with lane choices fed as without. Those checks are not part of the build; the
-simulated drive below is the first real one. What `LaneZoomFrames` does to the data source itself,
-the route taken out and given back when the road kept after a maneuver changes, has only these
-runs behind it: no JVM test reaches the data source.
+turn. After a second review: every path that has the data source compute a frame, in the order
+of two drives (the preview, Start, the road, a turn, seconds without a progress, a padding change,
+a change of the setting and of the style, a new route, the arrival and the end of guidance), with
+the upper limit checked at each, and a road whose fit depends on where it starts. With Default,
+every frame of the older runs came out the same as before the lane zoom was built, and the same
+with lane choices fed as without. Those checks are not part of the build; the simulated drive
+below is the first real one. What `LaneZoomFrames` does to the data source itself, the upper
+limit moved with each progress and the route taken out and given back when the road kept after a
+maneuver changes, has only these runs behind it: no JVM test reaches the data source.
 
 ### Build
 
@@ -1295,9 +1338,10 @@ exit and, if the data has one, a split:
   After the turn the zoom eases back out as the tilt comes up.
 - The two close turns stay flat and close, with at most a small step out between them. The
   roundabout fits; the arrival ends close on the destination.
-- Between maneuvers the view is the one Default has. On the freeway it stays far ahead, except
-  about 25 s before the exit (and a split), where it goes close with the tilt unchanged and comes
-  back after.
+- Between maneuvers the view is the one Default has, also on a winding stretch: `to.zoom` in the
+  camera line is never above 16.35 on the open road, and it does not drop to 10.5 for a few
+  seconds and come back. On the freeway it stays far ahead, except about 25 s before the exit (and
+  a split), where it goes close with the tilt unchanged and comes back after.
 - The camera line: `laneDp` about 28 at junctions and 14 in lane windows, `zoomPlan` `ROAD` on
   most seconds, and no `steps.zoom` above about 0.02 outside a change of mode. `centerLeadS` is 0
   on the road between turns and on the open freeway, and above 0 only while the view is closer
