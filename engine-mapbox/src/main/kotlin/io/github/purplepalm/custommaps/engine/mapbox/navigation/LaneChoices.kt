@@ -10,6 +10,7 @@ import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.Polyline
+import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Lane
@@ -24,8 +25,9 @@ import io.github.purplepalm.custommaps.nav.model.LanesAhead
  * straight through has lanes of its own, for example where a freeway splits or where two lanes
  * turn into an exit; those are read here, and so is the next maneuver where it is an exit or a
  * fork. Whether a point is worth a close view is [LaneChoice.skipReason]'s decision: every point
- * with lanes is handed out, so the ones passed over can be logged with their lane counts. The
- * maneuver card gets the lanes of a lane choice ahead from here as well ([lanesAhead]).
+ * with lanes is handed out, so the ones passed over can be logged with their lane counts
+ * ([entering]). The maneuver card gets the lanes of a lane choice ahead from here as well
+ * ([lanesAhead]).
  *
  * The engine owns one. The lanes of a step are read once, when the car enters it; an update of the
  * route progress only measures how far ahead each point is. Called on the main thread.
@@ -56,6 +58,9 @@ internal class LaneChoices(
     /** The choice whose lanes the card shows, and what was handed out for it at the last update. */
     private var cardKey: String? = null
     private var cardLanes: LanesAhead? = null
+
+    /** The points of the current step that [entering] has handed out. */
+    private val reported = HashSet<String>()
 
     /**
      * The points with lanes ahead on the current step, nearest first, and the next maneuver where
@@ -102,6 +107,7 @@ internal class LaneChoices(
         this.stepKey = stepKey
         points = emptyList()
         maneuverPoint = null
+        reported.clear()
         try {
             points = stepLanes(intersections, stepPoints).map {
                 LanePoint("$stepKey/${it.index}", it.metersFromStepStart, it.counts, it.onFreeway, intersections[it.index]?.lanesAhead())
@@ -173,6 +179,47 @@ internal class LaneChoices(
         return cardLanes
     }
 
+    /**
+     * The points among [choices] that have come as near as the close view's start
+     * ([LaneFocus.windowMeters]) since the last call, for the debug log. Each point is handed out
+     * once: when the view would go close for it, or would if the rule that passes it over were
+     * looser. Empty on most updates.
+     *
+     * @param choices the points ahead at this update, as [ahead] gave them
+     * @param speedMps the car's speed, the one the camera gets
+     */
+    fun entering(choices: List<LaneChoice>, speedMps: Double?): List<LaneChoice> {
+        if (choices.isEmpty()) return emptyList()
+        val window = LaneFocus.windowMeters(tuning, speedMps)
+        var entered: ArrayList<LaneChoice>? = null
+        for (i in choices.indices) {
+            val choice = choices[i]
+            if (!choice.isAhead || choice.metersAhead > window || !reported.add(choice.key)) continue
+            val list = entered ?: ArrayList<LaneChoice>(1).also { entered = it }
+            list.add(choice)
+        }
+        return entered ?: emptyList()
+    }
+
+    /**
+     * The "lane_choice" line of the debug log for [choice]: how far ahead it is and how far the
+     * close view's start, in meters, its lanes, the speed in meters a second, and why it is passed
+     * over when it is. No coordinates. The lane counts are what a looser rule would be judged by
+     * after a drive.
+     */
+    fun debugFields(choice: LaneChoice, speedMps: Double?): Map<String, Any?> = mapOf(
+        "kind" to if (choice.atManeuver) "maneuver" else "straight",
+        "metersAhead" to Math.round(choice.metersAhead),
+        "window" to Math.round(LaneFocus.windowMeters(tuning, speedMps)),
+        "lanes" to choice.laneCount,
+        "usable" to choice.usableLanes,
+        "leaving" to choice.leavingLanes,
+        "designated" to choice.designatedLanes,
+        "freeway" to choice.onFreeway,
+        "speed" to speedMps?.let { Motion.round(it, 1) },
+        "skipped" to choice.skipReason(tuning),
+    ).filterValues { it != null }
+
     /** A drive ended or a new one begins: nothing is kept of the last step. */
     fun clear() {
         stepKey = null
@@ -182,6 +229,7 @@ internal class LaneChoices(
         lastAhead = emptyList()
         cardKey = null
         cardLanes = null
+        reported.clear()
     }
 
     private fun LanePoint.toChoice(metersAhead: Double, atManeuver: Boolean) = LaneChoice(

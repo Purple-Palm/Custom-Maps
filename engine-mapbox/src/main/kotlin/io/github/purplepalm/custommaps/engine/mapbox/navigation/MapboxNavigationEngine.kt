@@ -377,12 +377,26 @@ internal class MapboxNavigationEngine(
     }
 
     private val routeProgressObserver = RouteProgressObserver { progress ->
-        val snapshot = if (_guidanceState.value == GuidanceState.ACTIVE) snapshotOf(progress) else null
+        val active = _guidanceState.value == GuidanceState.ACTIVE
+        val snapshot = if (active) snapshotOf(progress) else null
         debugLog.log(
             "progress",
             progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "thenShown" to snapshot?.showThen),
         )
+        if (active) logLaneChoices(progress)
         if (snapshot != null) _routeProgress.value = snapshot
+    }
+
+    /**
+     * Writes a "lane_choice" line for each point with lanes that has come as near as the close
+     * view's start: once for each point, with its lane counts, and with the reason when the view
+     * stays as it is for it. With every camera style and either lane zoom, so a drive shows how
+     * often the rule fires and how often a looser one would.
+     */
+    private fun logLaneChoices(progress: RouteProgress) {
+        val speed = lastMatch?.enhancedLocation?.speed
+        val entering = laneChoices.entering(laneChoices.ahead(progress), speed)
+        for (i in entering.indices) debugLog.log("lane_choice", laneChoices.debugFields(entering[i], speed))
     }
 
     /**

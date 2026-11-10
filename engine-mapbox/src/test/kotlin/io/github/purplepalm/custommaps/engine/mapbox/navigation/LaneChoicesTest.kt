@@ -353,6 +353,90 @@ class LaneChoicesTest {
     }
 
     @Test
+    fun `a point is reported once when it comes within the close view's start`() {
+        val lanes = split()
+        // At 29 m/s the window is 725 m.
+        assertTrue(lanes.entering(listOf(beforeSplit(lanes, 726.0)), 29.0).isEmpty(), "still outside")
+        assertEquals(listOf("r/0/2/2"), lanes.entering(listOf(beforeSplit(lanes, 725.0)), 29.0).map { it.key })
+        assertTrue(lanes.entering(listOf(beforeSplit(lanes, 700.0)), 29.0).isEmpty(), "reported already")
+        assertTrue(lanes.entering(emptyList(), 29.0).isEmpty())
+    }
+
+    @Test
+    fun `the points passed over are reported too, each once, nearest first`() {
+        val allGoOn = listOf(lane(true), lane(true), lane(true))
+        val lanes = loaded(
+            listOf(intersection(0), intersection(2, allGoOn), intersection(3, splitLanes)),
+            maneuver = intersection(10, listOf(lane(false), lane(true))),
+        )
+        val ahead = lanes.choices(metersOnStep = 0.0, metersToManeuver = 380.0, maneuverIsChoice = true)
+        // A standing car: the window is 400 m, and all three lie within it.
+        val entered = lanes.entering(ahead, speedMps = null)
+        assertEquals(listOf("r/0/2/1", "r/0/2/2", "r/0/2/end"), entered.map { it.key })
+        assertEquals(
+            listOf(LaneChoiceSkip.NO_LANE_LEAVES, null, LaneChoiceSkip.TOO_FEW_LANES),
+            entered.map { it.skipReason(tuning) },
+        )
+        assertTrue(lanes.entering(ahead, speedMps = null).isEmpty())
+    }
+
+    @Test
+    fun `a point behind the car or at a distance that is no number is not reported`() {
+        val lanes = split()
+        val choice = beforeSplit(lanes, 100.0)
+        assertTrue(lanes.entering(listOf(choice.copy(metersAhead = -1.0)), 29.0).isEmpty())
+        assertTrue(lanes.entering(listOf(choice.copy(metersAhead = Double.NaN)), 29.0).isEmpty())
+        assertTrue(lanes.entering(listOf(choice.copy(metersAhead = Double.POSITIVE_INFINITY)), 29.0).isEmpty())
+        // None of them used up the point's one report.
+        assertEquals(1, lanes.entering(listOf(choice), 29.0).size)
+    }
+
+    @Test
+    fun `a new step and a new drive report their points afresh`() {
+        val lanes = split()
+        assertEquals(1, lanes.entering(listOf(beforeSplit(lanes, 300.0)), 29.0).size)
+        // The same step again after a reroute has the same keys only if the route is the same.
+        lanes.load("r/0/2", listOf(intersection(0), intersection(4), intersection(7, splitLanes)), points, maneuver = null)
+        assertEquals(1, lanes.entering(listOf(beforeSplit(lanes, 300.0)), 29.0).size)
+        lanes.clear()
+        lanes.load("r/0/2", listOf(intersection(0), intersection(4), intersection(7, splitLanes)), points, maneuver = null)
+        assertEquals(1, lanes.entering(listOf(beforeSplit(lanes, 300.0)), 29.0).size)
+    }
+
+    @Test
+    fun `the log line of a lane choice has its counts and no place`() {
+        val lanes = split()
+        val fields = lanes.debugFields(beforeSplit(lanes, 612.4), speedMps = 29.04)
+        assertEquals(
+            mapOf(
+                "kind" to "straight",
+                "metersAhead" to 612L,
+                "window" to 726L,
+                "lanes" to 4,
+                "usable" to 2,
+                "leaving" to 2,
+                "designated" to 1,
+                "freeway" to true,
+                "speed" to 29.0,
+            ),
+            fields,
+        )
+    }
+
+    @Test
+    fun `the log line of a point passed over says why, and one at the maneuver says so`() {
+        val exit = listOf(lane(false), lane(true))
+        val lanes = loaded(listOf(intersection(0), intersection(5)), maneuver = intersection(10, exit))
+        val atExit = lanes.choices(metersOnStep = 700.0, metersToManeuver = 300.0, maneuverIsChoice = true).single()
+        val fields = lanes.debugFields(atExit, speedMps = null)
+        assertEquals("maneuver", fields["kind"])
+        assertEquals(300L, fields["metersAhead"])
+        assertEquals(400L, fields["window"], "a car whose speed is not known counts as standing")
+        assertEquals(LaneChoiceSkip.TOO_FEW_LANES, fields["skipped"])
+        assertFalse("speed" in fields)
+    }
+
+    @Test
     fun `the log gets the lanes of a step as the rule counts them`() {
         val split = listOf(lane(true), lane(true), lane(true, active = false), lane(false), lane(false, designated = listOf("hov")))
         val step = listOf(intersection(0), intersection(4), intersection(7, split, freeway = false))
