@@ -112,6 +112,9 @@ class StartRefresherTest {
 
     private val onRoute = TripMoment(started.id, end)
 
+    /** A progress on the route with the phone's last known position, measured long ago. */
+    private val oldPosition = onRoute.copy(live = false)
+
     private fun begin(plan: StartPlan, trip: Int = 1) = refresher.begin(trip, plan, started.id, started.summary)
 
     private fun routes(vararg routes: Route, online: Boolean = true) = ReplanAnswer.Routes(routes.toList(), online)
@@ -374,6 +377,92 @@ class StartRefresherTest {
         assertTrue(navigator.cancelled.isEmpty())
     }
 
+    // A trip that opens on an old position.
+
+    @Test
+    fun `a first progress with an old position begins nothing until a recent one comes`() {
+        for (plan in listOf(REFRESH_IN_TRIP, REPLAN_IN_TRIP)) {
+            val before = navigator.calls
+            begin(plan, trip = plan.ordinal)
+            repeat(3) { refresher.onProgress(oldPosition) }
+            assertEquals(before, navigator.calls, "$plan")
+            assertTrue(refresher.awaitsProgress, "$plan")
+            assertTrue(lines.all.isEmpty(), "$plan")
+
+            refresher.onProgress(onRoute)
+            assertEquals(before + 1, navigator.calls, "$plan")
+            assertFalse(refresher.awaitsProgress, "$plan")
+            refresher.end()
+            lines.all.clear()
+        }
+        assertEquals(1, navigator.refreshes)
+        assertEquals(1, navigator.requests)
+    }
+
+    @Test
+    fun `routes that cannot be refreshed are requested from the recent position, not the old one`() {
+        navigator.refreshAtOnce = RefreshOutcome.NOT_STARTED
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(oldPosition)
+        assertEquals(0, navigator.calls)
+
+        refresher.onProgress(onRoute)
+        assertEquals(1, navigator.refreshes)
+        assertEquals(1, navigator.requests)
+    }
+
+    @Test
+    fun `a reroute while the plan waits for a recent position leaves the trip to the navigator`() {
+        begin(REPLAN_IN_TRIP)
+        refresher.onProgress(oldPosition)
+        refresher.onReroute()
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(0, navigator.calls)
+        assertEquals(listOf<Any?>("skipped"), lines.results("start_replan"))
+        assertEquals(listOf<Any?>("rerouted"), lines.reasons("start_replan"))
+    }
+
+    @Test
+    fun `an old position off the route ends the plan without a wait`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(oldPosition.copy(offRoute = true))
+        assertFalse(refresher.awaitsProgress)
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        assertEquals(0, navigator.calls)
+        assertEquals(listOf<Any?>("skipped"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>("rerouted"), lines.reasons("start_refresh"))
+    }
+
+    @Test
+    fun `guidance that ends while the plan waits for a recent position begins nothing`() {
+        begin(REFRESH_IN_TRIP, trip = 1)
+        refresher.onProgress(oldPosition)
+        refresher.end()
+        repeat(3) { refresher.onProgress(onRoute) }
+
+        // The session stopped a moment before guidance heard of it: no wait either.
+        begin(REFRESH_IN_TRIP, trip = 2)
+        guidanceActive = false
+        refresher.onProgress(oldPosition)
+        assertFalse(refresher.awaitsProgress)
+
+        assertEquals(0, navigator.calls)
+        assertEquals(listOf<Any?>("skipped", "skipped"), lines.results("start_refresh"))
+        assertEquals(listOf<Any?>("guidance_ended", "guidance_ended"), lines.reasons("start_refresh"))
+    }
+
+    @Test
+    fun `fresh routes are set from the next progress, whatever the age of its position`() {
+        replanAnswered()
+        refresher.onProgress(oldPosition)
+
+        // The routes start where the car was when they were requested; setting them needs a progress only.
+        assertEquals(1, navigator.sets.size)
+        assertEquals(listOf<Any?>("set"), lines.results("start_replan"))
+    }
+
     // A refresh the navigator cancelled.
 
     @Test
@@ -399,6 +488,19 @@ class StartRefresherTest {
         assertEquals(listOf<Any?>("cancelled", "success"), lines.results("start_refresh"))
         assertEquals(listOf<Any?>(true, null), lines.of("start_refresh").map { it["again"] })
         assertTrue(lines.of("start_replan").isEmpty())
+    }
+
+    @Test
+    fun `a cancelled refresh is asked for again at a progress with a recent position`() {
+        begin(REFRESH_IN_TRIP)
+        refresher.onProgress(onRoute)
+        navigator.refreshed(RefreshOutcome.CANCELLED)
+        repeat(3) { refresher.onProgress(oldPosition) }
+        assertEquals(1, navigator.refreshes)
+        assertTrue(refresher.awaitsProgress)
+
+        refresher.onProgress(onRoute)
+        assertEquals(2, navigator.refreshes)
     }
 
     @Test

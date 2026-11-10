@@ -27,14 +27,15 @@ internal data class DeviceFix(
     val ageMillis: Long,
 ) {
 
+    /** True when the position is no older than [DeviceLocation.MAX_AGE]: it says where the car is now. */
+    val live: Boolean get() = ageMillis <= DeviceLocation.MAX_AGE.inWholeMilliseconds
+
     /**
      * The direction to send with a route request that starts at this position, or null. Only a
      * fresh position of a moving car has one: the direction of a car that stands or crawls is
      * noise, and that of an old position says nothing about where the car heads now.
      */
-    fun originBearing(): Double? = bearing?.takeIf {
-        it.isFinite() && ageMillis <= DeviceLocation.MAX_AGE.inWholeMilliseconds && (speed ?: 0.0) >= MOVING_METERS_PER_SECOND
-    }
+    fun originBearing(): Double? = bearing?.takeIf { it.isFinite() && live && (speed ?: 0.0) >= MOVING_METERS_PER_SECOND }
 
     companion object {
         /** From this speed on a car counts as moving, and its direction as known: about 7 mph. */

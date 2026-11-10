@@ -181,8 +181,9 @@ internal class MapboxNavigationEngine(
         override fun request(done: (ReplanAnswer<NavigationRoute>) -> Unit): Long? {
             val navigation = navigation ?: return null
             val destination = _destination.value ?: return null
-            // Where the navigator has the car on the road, and the way it drives there.
-            val from = lastMatch?.enhancedLocation?.let(DeviceFix::of) ?: return null
+            // Where the navigator has the car on the road, and the way it drives there. An old
+            // position is no start for routes that replace the ones in use: no request then.
+            val from = livePosition() ?: return null
             // The request of the preview again: to the same stop point, with the same arrival target.
             val options = routeOptions(from.point, destination, from.originBearing())
             logRouteRequest(from.point, "navigator", from, destination, options, inTrip = true)
@@ -592,8 +593,17 @@ internal class MapboxNavigationEngine(
         if (snapshot != null) _routeProgress.value = snapshot
         // The first progress of a trip, the next one after a cancelled refresh, and the first one
         // after an answer to its replan.
-        if (active && startRefresher.awaitsProgress) startRefresher.onProgress(progress.toTripMoment())
+        if (active && startRefresher.awaitsProgress) {
+            startRefresher.onProgress(progress.toTripMoment(live = livePosition() != null))
+        }
     }
+
+    /**
+     * The navigator's latest position on the road when it is a recent one ([DeviceFix.live]); null
+     * for an old one, such as the phone's last known position that a trip can begin with, and
+     * before the first.
+     */
+    private fun livePosition(): DeviceFix? = lastMatch?.enhancedLocation?.let(DeviceFix::of)?.takeIf { it.live }
 
     /**
      * Writes a "lane_choice" line for each point with lanes that has come as near as the close

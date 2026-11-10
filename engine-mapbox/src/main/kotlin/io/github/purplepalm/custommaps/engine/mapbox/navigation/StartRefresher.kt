@@ -55,8 +55,15 @@ internal sealed interface ReplanAnswer<out R> {
  *   road; null when the route is not one from an origin to a single destination still ahead
  * @param offRoute the navigator has the car off the route in this very update, which is when it
  *   starts to reroute
+ * @param live the navigator's position in this update is a recent one ([DeviceFix.live]). The
+ *   first position of a trip can be the last one the phone knew, minutes old
  */
-internal data class TripMoment(val routeId: String, val destination: Point?, val offRoute: Boolean = false)
+internal data class TripMoment(
+    val routeId: String,
+    val destination: Point?,
+    val offRoute: Boolean = false,
+    val live: Boolean = true,
+)
 
 /** What [StartRefresher] asks of the navigator. Called on the main thread, and answers there. */
 internal interface TripRoutes<R> {
@@ -66,7 +73,8 @@ internal interface TripRoutes<R> {
 
     /**
      * Sends one route request from where the car is now to the place the trip goes to, and returns
-     * its id; null when it could not be sent, and then [done] is never called.
+     * its id; null when it could not be sent, as without a recent position of the car, and then
+     * [done] is never called.
      */
     fun request(done: (ReplanAnswer<R>) -> Unit): Long?
 
@@ -92,9 +100,10 @@ internal interface TripRoutes<R> {
  * or at a moment when it has no progress, or that end elsewhere, start a second billed trip. So
  * everything here begins with the first progress of the trip, and fresh routes are set only from
  * inside a progress update for the route the trip started on: at that moment the navigator has a
- * progress, this one. The navigator's own reroute always comes first: from the moment it finds
- * the car off the route, or puts other routes in place for any reason, nothing here is begun or
- * set, and a request under way is cancelled.
+ * progress, this one. A progress with an old position begins nothing: the plan waits for one that
+ * says where the car is now. The navigator's own reroute always comes first: from the moment it
+ * finds the car off the route, or puts other routes in place for any reason, nothing here is begun
+ * or set, and a request under way is cancelled.
  *
  * One line in the debug log closes each plan: "start_refresh" for a refresh, with the navigator's
  * result; "start_replan" for routes requested again, with "set" or the reason they were not. A
@@ -118,7 +127,10 @@ internal class StartRefresher<R>(
         /** No trip, a plan that asks for nothing, or everything done. */
         IDLE,
 
-        /** Waiting for the first progress of the trip, or for the next one after a cancelled refresh. */
+        /**
+         * Waiting for the first progress of the trip with a recent position, or for the next such
+         * one after a cancelled refresh.
+         */
         BEFORE_PROGRESS,
 
         /** The navigator was asked to refresh and has not answered. */
@@ -224,7 +236,12 @@ internal class StartRefresher<R>(
         // route: it is about to.
         if (moment.routeId != routeId || moment.offRoute) rerouteSeen = true
         // The navigator guides on the route of this progress, and nothing has been requested yet.
-        when (decide(routeCount = 1, destinationShiftMeters = 0.0)) {
+        val action = decide(routeCount = 1, destinationShiftMeters = 0.0)
+        // The navigator can open a trip on the last position the phone knew, minutes old. Routes
+        // requested from there would start where the car no longer is, so what the plan asks for
+        // begins with a later progress, one whose position is recent.
+        if (action != InTripAction.NONE && !moment.live) return
+        when (action) {
             InTripAction.REFRESH -> refresh()
             InTripAction.SET_ROUTES -> request()
             InTripAction.NONE -> close(lineOf(plan), SKIPPED, reason(routeCount = 1, destinationShiftMeters = 0.0))

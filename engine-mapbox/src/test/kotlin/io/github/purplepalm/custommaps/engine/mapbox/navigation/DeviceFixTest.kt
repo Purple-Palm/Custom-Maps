@@ -2,7 +2,9 @@ package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
 import com.mapbox.geojson.Point
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /** Invented positions in the sea near the point 0, 0, and invented clocks. */
@@ -48,6 +50,16 @@ class DeviceFixTest {
         assertEquals(44.0, fix(ageMillis = 30_000L).originBearing())
         assertNull(fix(ageMillis = 30_001L).originBearing())
         assertNull(fix(ageMillis = 600_000L).originBearing())
+    }
+
+    @Test
+    fun `a position says where the car is now for thirty seconds`() {
+        assertTrue(fix(ageMillis = 0L).live)
+        assertTrue(fix(ageMillis = 30_000L).live)
+        assertFalse(fix(ageMillis = 30_001L).live)
+        assertFalse(fix(ageMillis = 300_000L).live)
+        // Neither the speed nor the direction counts for it.
+        assertTrue(fix(bearing = null, speed = null).live)
     }
 
     @Test

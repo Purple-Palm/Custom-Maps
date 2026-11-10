@@ -53,11 +53,14 @@ internal fun endGap(place: Place, routeEnd: Point?): Distance? {
  * This progress as the start plan needs it: the route the navigator is on, and the one stop the
  * route still leads to. The stop is what Mapbox compares fresh routes with, to tell the same trip
  * from a new one.
+ *
+ * @param live whether the position the navigator reported with this progress is a recent one
  */
-internal fun RouteProgress.toTripMoment(): TripMoment = TripMoment(
+internal fun RouteProgress.toTripMoment(live: Boolean): TripMoment = TripMoment(
     routeId = navigationRoute.id,
     destination = soleDestination(navigationRoute.waypoints?.map { it.location() }, remainingWaypoints),
     offRoute = currentState == RouteProgressState.OFF_ROUTE,
+    live = live,
 )
 
 internal fun MapboxLane.toLaneInfo(): LaneInfo? = allLanes
