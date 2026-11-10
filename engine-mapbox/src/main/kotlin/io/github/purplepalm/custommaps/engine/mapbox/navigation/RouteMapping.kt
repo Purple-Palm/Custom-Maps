@@ -49,6 +49,16 @@ internal fun endGap(place: Place, routeEnd: Point?): Distance? {
     return if (meters.isFinite()) Distance.meters(meters) else null
 }
 
+/**
+ * This progress as the start plan needs it: the route the navigator is on, and the one stop the
+ * route still leads to. The stop is what Mapbox compares fresh routes with, to tell the same trip
+ * from a new one.
+ */
+internal fun RouteProgress.toTripMoment(): TripMoment = TripMoment(
+    routeId = navigationRoute.id,
+    destination = soleDestination(navigationRoute.waypoints?.map { it.location() }, remainingWaypoints),
+)
+
 internal fun MapboxLane.toLaneInfo(): LaneInfo? = allLanes
     .takeIf { it.isNotEmpty() }
     ?.let { lanes -> LaneInfo(lanes.map { ManeuverMapping.lane(it.directions, it.isActive, it.activeDirection) }) }
