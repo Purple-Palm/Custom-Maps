@@ -379,6 +379,11 @@ where they were requested, and picks a plan that is carried out inside the trip:
   drop the trip into free drive. So an empty answer, routes worked out on the phone without
   network and a destination that moved are never set. One rule in `:core-nav` (`InTripRefresh`)
   decides each time, and the engine only does what it answers.
+- **The plan begins with a live position.** The navigator can open a trip on the phone's last
+  known position, as on the second drive. The plan waits for the first progress update whose
+  position is no older than 30 s, so that a replan asks for routes from where the car is. A replan
+  after a failed refresh is skipped when the position is older (`no_position`). The wait trusts
+  the age the navigator gives its positions, `fixAgeMs` in the `progress` lines.
 - **Guidance that ends** cancels a request under way, and an answer that comes later changes
   nothing, also not in the next drive.
 - A simulated drive always starts with the routes as they are.
@@ -403,8 +408,8 @@ where they were requested, and picks a plan that is carried out inside the trip:
 - The trip count in **Settings → Debug** follows the navigator's sessions and should show one trip
   for one drive. A second billed trip from swapped routes would not show there, only on Mapbox's
   statistics page; that is why the rule above is tested and not left to care.
-- 5 minutes, 100 m and 30 minutes are first settings, and so is the single repeat of a cancelled
-  refresh. None of this has been on a drive yet.
+- 5 minutes, 100 m and 30 minutes are first settings, and so are the 30 s of a live position and
+  the single repeat of a cancelled refresh. None of this has been on a drive yet.
 - Prices: [Navigation SDK pricing](https://docs.mapbox.com/android/navigation/guides/pricing/) and
   [mapbox.com/pricing](https://www.mapbox.com/pricing).
 
@@ -618,6 +623,7 @@ Then share the debug log. What to read in it:
 | `start_plan` | The plan, the age of the routes in seconds and the meters moved |
 | `start_refresh`, `start_replan` | After a plan other than `AS_PREVIEWED`: one closing line each, never before the drive's first `progress` line. `start_replan` with `set` is followed by `routes_updated`; any other result names its reason |
 | `start_refresh` with `cancelled`, next to `routes_updated` | Whether the navigator changes its alternatives in the first seconds of a trip and so cancels the start's refresh, and whether the refresh asked for again went through |
+| `progress`: `fixAgeMs` in the first lines of a drive | Whether the trip opened on an old position. The plan then waits: a `start_refresh` or `start_replan` line with a result from the navigator comes only after a `progress` line with an age of 30,000 or less |
 | `session_state` | One `ActiveGuidance` session id for the whole drive, also across a `start_replan` |
 | Progress: `after`, `thenShown`, `stepMetersLeft`, `stepSecondsLeft` | Where the Then chip showed, and for which pairs of maneuvers, to tune its distances |
 | Camera: `laneDp`, `zoomPlan`, `laneFocus`, `centerLeadS` | Whether Large reached about 28 dp at junctions and 14 dp before lane choices, and how much of the freeway stayed in the long view |
