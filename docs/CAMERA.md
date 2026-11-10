@@ -526,9 +526,11 @@ the turn. It glides in over about 1.5 s through the on-puck weight instead of ju
   most 3 levels.
 - Overview, also used for the route preview: the data source's overview frame and its tilt, through
   the same ramps and springs.
-- While the activity is stopped (phone) or the surface is detached (car), no frames run. When the
-  phone's activity starts again, the first frame snaps to the targets, since the map was not on
-  screen. The car builds a new controller for each new surface.
+- While the activity is stopped (phone) or the surface is detached (car), no frames run. The
+  navigator's updates still reach the data source during a drive. When the phone's activity
+  starts again, the camera starts its mode over from the data source's newest frame, and the first
+  frame snaps to the targets, since the map was not on screen: the road may have turned and the
+  zoom changed meanwhile. The car builds a new controller for each new surface.
 - A map that still shows the whole world (zoom below 3), as one does that was never moved, is not
   flown from either: the camera is put on its target with the next frame. That is the first
   position after launch, and a map created again during a drive.
@@ -787,7 +789,8 @@ Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the
 The classes in `:engine-mapbox` touch Android and Mapbox types and have no JVM tests. While it was
 written, `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by
 frame through a made-up drive: the browsing map, the preview, Start, a turn, a red light, a drag,
-Recenter, the background and back, a teleport, the overview and the end. That check is not part of
+Recenter, the background and back (also after the road turned meanwhile), a teleport, the overview
+and the end. That check is not part of
 the build; the simulated drive below is the first real one.
 
 ### Build

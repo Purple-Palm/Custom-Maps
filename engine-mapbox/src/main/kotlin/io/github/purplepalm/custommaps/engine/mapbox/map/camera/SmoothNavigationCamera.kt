@@ -266,10 +266,12 @@ internal class SmoothNavigationCamera(
             return
         }
         if (mode != Mode.IDLE) {
-            // The map was not on screen, so there is nothing to glide from: the first frame drawn is right.
+            // The map was not on screen, so there is nothing to glide from: the first frame drawn is
+            // right. What the camera took in before it was hidden is old by now, so the mode starts
+            // over from the data source's newest frame.
             syncToMap()
             snapOnNextFrame = true
-            requestFrame()
+            beginTransition(mode, again = true)
         }
     }
 
@@ -548,7 +550,7 @@ internal class SmoothNavigationCamera(
 
     /**
      * Starts the move into [target], from wherever the camera is. [again] starts it over within the
-     * mode the camera is in, for a puck that jumped.
+     * mode the camera is in: for a puck that jumped, and for a map that comes back on screen.
      */
     private fun beginTransition(target: Mode, seconds: Double? = null, again: Boolean = false) {
         if (target == mode && !again) return
