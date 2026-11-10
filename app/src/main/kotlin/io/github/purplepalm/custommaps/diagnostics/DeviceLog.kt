@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.diagnostics
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.Application
@@ -15,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Debug
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -29,8 +31,9 @@ import kotlinx.coroutines.launch
 
 /**
  * The phone's side of a drive, for the debug log: whether the app is on screen, the screen itself,
- * charging, battery saver and Doze, heat and memory pressure. Only changes are logged, plus one
- * [logSample] a minute while guidance runs. The network is logged by its own monitor.
+ * charging, battery saver and Doze, heat, memory pressure, and whether Android's animations run.
+ * Only changes are logged, plus one [logSample] a minute while guidance runs. The network is logged
+ * by its own monitor.
  *
  * Every reading that asks the system (power, battery, standby) runs on [io], and its line is
  * written after it; the callbacks themselves only note what happened. Call [start] once, on the
@@ -61,6 +64,11 @@ internal class DeviceLog(
      */
     var onActivityResumed: () -> Unit = {}
 
+    private var animationsLogged = false
+
+    /** Held here because Android keeps only a weak reference to it. */
+    private var scaleListener: Any? = null
+
     fun start() {
         logAfterReading("device_state") { stateFields() }
         application.registerActivityLifecycleCallbacks(activities)
@@ -78,6 +86,24 @@ internal class DeviceLog(
         // to be sure of getting every system broadcast.
         ContextCompat.registerReceiver(application, system, systemEvents, ContextCompat.RECEIVER_EXPORTED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) listenToHeat()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) listenToAnimationScale()
+    }
+
+    /**
+     * Whether Android's animations run, and why it was checked. With the animator duration scale at
+     * 0 (Developer options, an accessibility switch, Power saving on some phones) the map's puck and
+     * camera jump instead of gliding. Only logged: the app never changes the setting.
+     */
+    fun logAnimations(reason: String, newScale: Float? = null) {
+        logAfterReading("animations") {
+            mapOf(
+                "reason" to reason,
+                "enabled" to ValueAnimator.areAnimatorsEnabled(),
+                "durationScale" to Settings.Global.getFloat(application.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f),
+                "newScale" to newScale,
+                "powerSave" to powerManager?.isPowerSaveMode,
+            ).filterValues { it != null }
+        }
     }
 
     /** Battery, heat and memory; once a minute during guidance. Asks the system: call it off the main thread. */
@@ -134,6 +160,11 @@ internal class DeviceLog(
             logActivity(activity, "started")
             started += 1
             _visible.value = started > 0
+            // Android hands the scale to the process only once a window exists.
+            if (!animationsLogged) {
+                animationsLogged = true
+                logAnimations("first activity")
+            }
         }
 
         override fun onActivityResumed(activity: Activity) {
@@ -197,6 +228,13 @@ internal class DeviceLog(
         powerManager?.addThermalStatusListener(ContextCompat.getMainExecutor(application)) { status ->
             debugLog.log("thermal", mapOf("status" to thermalName(status)))
         }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun listenToAnimationScale() {
+        val listener = ValueAnimator.DurationScaleChangeListener { scale -> logAnimations("scale changed", scale) }
+        scaleListener = listener
+        ValueAnimator.registerDurationScaleChangeListener(listener)
     }
 
     /** How close the phone is to throttling, 0 to 1 and beyond; NaN, so null, where unsupported. */

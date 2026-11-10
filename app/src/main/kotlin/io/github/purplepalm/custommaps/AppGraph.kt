@@ -137,12 +137,13 @@ class AppGraph(private val application: Application) {
                     withContext(Dispatchers.IO) { processHistory.setStateSummary(summary) }
                 }
         }
-        // Battery, heat and memory once a minute while a drive runs.
+        // Battery, heat and memory once a minute while a drive runs; animations as it starts.
         applicationScope.launch {
             engine.navigation.guidanceState
                 .map { it == GuidanceState.ACTIVE }
                 .distinctUntilChanged()
                 .collectLatest { active ->
+                    if (active) deviceLog.logAnimations("guidance")
                     while (active) {
                         withContext(Dispatchers.IO) { deviceLog.logSample() }
                         delay(DEVICE_SAMPLE_MILLIS)
