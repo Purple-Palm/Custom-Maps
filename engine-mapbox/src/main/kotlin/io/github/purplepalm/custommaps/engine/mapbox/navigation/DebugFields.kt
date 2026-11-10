@@ -9,6 +9,8 @@ import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.RouterFailure
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
+import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.geo.Geo
 
 /*
  * What the debug log records about Mapbox objects. Only plain values go in: no request URLs,
@@ -29,6 +31,22 @@ internal fun NavigationRoute.debugFields(): Map<String, Any?> {
         "legs" to route.legs().orEmpty().map { it.debugFields() },
     )
 }
+
+/**
+ * Where the Directions API put each requested point, in order: the road it snapped to and how far
+ * it moved the point ("snappedMeters"). A large move at the destination ends the route elsewhere.
+ */
+internal fun NavigationRoute.waypointsDebugFields(requested: List<Point>): List<Map<String, Any?>>? =
+    waypoints?.mapIndexed { index, waypoint ->
+        val snapped = waypoint.location()
+        mapOf(
+            "name" to waypoint.name(),
+            "at" to snapped.debugFields(),
+            "snappedMeters" to requested.getOrNull(index)?.let { asked ->
+                Motion.round(Geo.meters(asked.latitude(), asked.longitude(), snapped.latitude(), snapped.longitude()), 1)
+            },
+        )
+    }
 
 private fun RouteLeg.debugFields(): Map<String, Any?> = mapOf(
     "summary" to summary(),

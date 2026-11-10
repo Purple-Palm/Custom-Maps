@@ -14,12 +14,15 @@ import com.mapbox.search.common.CompletionCallback
 import com.mapbox.search.common.SearchRequestException
 import com.mapbox.search.common.IsoCountryCode
 import com.mapbox.search.common.IsoLanguageCode
+import com.mapbox.search.result.ResultAccuracy
 import com.mapbox.search.result.SearchResult
 import com.mapbox.search.result.SearchSuggestion
 import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.nav.AccessDeniedException
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Place
@@ -98,13 +101,13 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
             debugLog.log("search_resolve_missing", mapOf("name" to suggestion.name))
         }
         debugLog.log("search_resolve", mapOf("name" to original.name, "address" to original.fullAddress))
-        val place = suspendCancellableCoroutine { continuation ->
+        val result = suspendCancellableCoroutine<SearchResult?> { continuation ->
             val task = engine().select(
                 original,
                 SelectOptions(addResultToHistory = false),
                 object : SearchSelectionCallback {
                     override fun onResult(suggestion: SearchSuggestion, result: SearchResult, responseInfo: ResponseInfo) {
-                        if (continuation.isActive) continuation.resume(result.toPlace())
+                        if (continuation.isActive) continuation.resume(result)
                     }
 
                     override fun onResults(
@@ -113,7 +116,7 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
                         responseInfo: ResponseInfo,
                     ) {
                         // A category such as "coffee": take the closest match.
-                        if (continuation.isActive) continuation.resume(results.firstOrNull()?.toPlace())
+                        if (continuation.isActive) continuation.resume(results.firstOrNull())
                     }
 
                     override fun onSuggestions(suggestions: List<SearchSuggestion>, responseInfo: ResponseInfo) {
@@ -128,15 +131,50 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
             )
             continuation.invokeOnCancellation { task.cancel() }
         }
+        val place = result?.toPlace()
         debugLog.log(
             "search_result",
             mapOf(
                 "name" to place?.name,
                 "address" to place?.address,
                 "at" to place?.let { listOf(it.point.latitude, it.point.longitude) },
-            ),
+            ) + result?.debugFields().orEmpty(),
         )
         return place
+    }
+
+    /**
+     * How exact the result's point is (rooftop, parcel, interpolated, street...), what kind of place
+     * it is, and the points where a car can reach it, with how far each is from the result's point.
+     */
+    private fun SearchResult.debugFields(): Map<String, Any?> = mapOf(
+        "accuracy" to accuracy?.debugName(),
+        "routablePoints" to routablePoints?.map { routable ->
+            val point = routable.point
+            mapOf(
+                "name" to routable.name,
+                "at" to listOf(point.latitude(), point.longitude()),
+                "metersFromPoint" to Motion.round(
+                    Geo.meters(coordinate.latitude(), coordinate.longitude(), point.latitude(), point.longitude()),
+                    1,
+                ),
+            )
+        },
+        "types" to newTypes,
+        "categories" to categories,
+        "mapboxId" to mapboxId,
+    )
+
+    private fun ResultAccuracy.debugName(): String = when (this) {
+        ResultAccuracy.Rooftop -> "rooftop"
+        ResultAccuracy.Parcel -> "parcel"
+        ResultAccuracy.Point -> "point"
+        ResultAccuracy.Interpolated -> "interpolated"
+        ResultAccuracy.Intersection -> "intersection"
+        ResultAccuracy.Approximate -> "approximate"
+        ResultAccuracy.Street -> "street"
+        ResultAccuracy.Proximate -> "proximate"
+        else -> javaClass.simpleName
     }
 
     /**

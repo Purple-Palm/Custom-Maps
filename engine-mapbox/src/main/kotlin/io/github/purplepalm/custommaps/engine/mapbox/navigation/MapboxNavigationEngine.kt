@@ -186,7 +186,15 @@ internal class MapboxNavigationEngine(
                 if (response.accessDenied) RouteRequestResult.AccessDenied else RouteRequestResult.Failed(response.message)
             }
             is RouteResponse.Routes -> {
-                debugLog.log("route_response", mapOf("count" to response.routes.size, "routes" to response.routes.map { it.debugFields() }))
+                debugLog.log(
+                    "route_response",
+                    mapOf(
+                        "count" to response.routes.size,
+                        // The same for every route of a response.
+                        "waypoints" to response.routes.firstOrNull()?.waypointsDebugFields(options.coordinatesList()),
+                        "routes" to response.routes.map { it.debugFields() },
+                    ),
+                )
                 if (response.routes.isEmpty()) {
                     RouteRequestResult.NoRoute
                 } else {
