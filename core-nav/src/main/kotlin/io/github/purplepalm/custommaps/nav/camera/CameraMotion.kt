@@ -55,6 +55,43 @@ data class CameraTuning(
     val maxArcZoom: Double = 3.0,
     /** A jump of the matched position that leaves the camera farther than this from the puck is flown, not chased. */
     val teleportMeters: Double = 60.0,
+    /**
+     * The closest the view goes with the Default lane zoom, and on the open road with Large: the
+     * navigation SDK's own limit. What follows is what Large adds; none of it applies with Default.
+     */
+    val defaultMaxZoom: Double = 16.35,
+    /** Large never goes closer than this. */
+    val maxZoom: Double = 20.0,
+    /** Large at a junction: a lane is this wide on the screen, about 4.4 mm. */
+    val junctionLaneDp: Double = 28.0,
+    /** Large near a lane choice on a freeway, with the tilt kept at [cruisePitch]: about 2.2 mm. */
+    val freewayLaneDp: Double = 14.0,
+    /** How much road after a maneuver Large keeps in the frame of that maneuver; the navigation SDK keeps 100 m. */
+    val largeMetersAfterManeuver: Double = 30.0,
+    /** A lane choice takes at least this many lanes, not counting lanes kept for buses, car pools and the like. */
+    val laneChoiceMinLanes: Int = 3,
+    /** Where the route goes straight on, at least this many lanes have to leave it. */
+    val laneChoiceMinLeaving: Int = 2,
+    /** The close view starts this long before a lane choice, no nearer and no farther than the two distances. */
+    val laneLeadSeconds: Double = 25.0,
+    val laneMinWindowMeters: Double = 400.0,
+    val laneMaxWindowMeters: Double = 1_200.0,
+    /** The view goes close and comes back over this long. */
+    val laneInSeconds: Double = 6.0,
+    val laneOutSeconds: Double = 6.0,
+    /** After a lane choice the view stays close for at least this far and this long. */
+    val laneHoldMeters: Double = 30.0,
+    val laneHoldSeconds: Double = 2.0,
+    /** A lane choice no more than this much driving from its own close view keeps the view close until then. */
+    val laneCoalesceSeconds: Double = 10.0,
+    /**
+     * Near a lane choice the view turns at most this far from the car's heading toward the road
+     * ahead, so the lanes at the car stay close to upright. Elsewhere the navigation SDK's 45
+     * degrees apply.
+     */
+    val laneMaxBearingLead: Double = 20.0,
+    /** Close in, the camera aims ahead of the moving car so that its center trails the car by no more than this. */
+    val maxPuckLagDp: Double = 12.0,
 ) {
     companion object {
         val PHONE = CameraTuning()
@@ -185,7 +222,8 @@ fun lerp(a: Double, b: Double, f: Double) = a + (b - a) * f
 /**
  * How far the view has moved from the road onto the next maneuver, as a smooth function of time:
  * 0 on the road, 1 over the junction. It is fed once a second from the route progress and read on
- * every frame. The tilt is lerp(cruisePitch, maneuverPitch, focus).
+ * every frame. The tilt is lerp(cruisePitch, maneuverPitch, focus), and the Large lane zoom goes
+ * close to the junction along the same curve ([ZoomPlanner]).
  *
  * It keeps the navigation SDK's rule for which maneuvers count and where the view is down, and
  * replaces the SDK's one-step change of tilt with timed, eased moves:
@@ -217,6 +255,15 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     fun pitchAt(now: Double) = lerp(tuning.cruisePitch, tuning.maneuverPitch, focusAt(now))
 
     fun isAnimating(now: Double) = from != to && now - start < duration
+
+    /**
+     * True on the step after a maneuver the view went down for, until the next maneuver of that
+     * step takes the view: the car is past the junction, and the frame of the navigation SDK shows
+     * the road beyond it. The Large lane zoom keeps the junction's zoom meanwhile and lets it go as
+     * the focus comes back.
+     */
+    val afterManeuver: Boolean
+        get() = holdStep != null && holdStep == stepKey && latchedStep != stepKey
 
     /**
      * @param stepKey the route, leg and step. It must include the route's id: a reroute is then a
