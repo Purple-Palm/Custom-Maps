@@ -39,7 +39,6 @@ import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
-import com.mapbox.navigation.ui.maps.location.NavigationLocationProvider
 import com.mapbox.navigation.ui.maps.route.arrow.api.MapboxRouteArrowApi
 import com.mapbox.navigation.ui.maps.route.arrow.api.MapboxRouteArrowView
 import com.mapbox.navigation.ui.maps.route.arrow.model.RouteArrowOptions
@@ -49,6 +48,7 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCameraAdapter
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.nav.MapRenderer
@@ -104,7 +104,9 @@ class PhoneMap internal constructor(
     private var centeredOnFirstFix = false
 
     private var defaultLocationProvider = DefaultLocationProvider(appContext)
-    private val navigationLocationProvider = NavigationLocationProvider()
+
+    /** The puck's positions during guidance; before guidance they come from the platform provider. */
+    private val guidancePuck = GuidancePuck()
 
     /** The navigator's routes; they change on reroute and are empty outside guidance. */
     private var navigatorRoutes: List<NavigationRoute> = emptyList()
@@ -209,7 +211,7 @@ class PhoneMap internal constructor(
             fixes += 1
             lastFixAt = SystemClock.elapsedRealtimeNanos()
             lastKeyPoints = locationMatcherResult.keyPoints.size
-            navigationLocationProvider.changePosition(locationMatcherResult.enhancedLocation, locationMatcherResult.keyPoints)
+            guidancePuck.onFix(locationMatcherResult)
             camera.onLocation(locationMatcherResult.enhancedLocation, locationMatcherResult.isTeleport)
         }
     }
@@ -461,10 +463,11 @@ class PhoneMap internal constructor(
     }
 
     private fun useLocationProvider(guidance: Boolean) {
-        val wanted = if (guidance) navigationLocationProvider else defaultLocationProvider
-        if (mapView.location.getLocationProvider() !== wanted) {
-            mapView.location.setLocationProvider(wanted)
-        }
+        val current = mapView.location.getLocationProvider()
+        // Guidance starts: without this the puck would first jump to where the last drive ended.
+        if (guidance && current !== guidancePuck) guidancePuck.newDrive()
+        val wanted = if (guidance) guidancePuck else defaultLocationProvider
+        if (current !== wanted) mapView.location.setLocationProvider(wanted)
     }
 
     private fun centerOnPuck() {
@@ -531,9 +534,8 @@ class PhoneMap internal constructor(
         val shown = mapboxMap.cameraState
         val target = viewportDataSource.getViewportData().cameraForFollowing
         val puck = lastPuck
-        val fix = navigationLocationProvider.lastLocation
-        // False until this guidance has had a fix: until then the location provider holds the last
-        // fix of the guidance before, if there was one.
+        val fix = guidancePuck.lastLocation
+        // False until this guidance has had a fix.
         val hasFix = lastFixAt != 0L
         val cameraMoves = cameraCadence.take(now)
         val puckMoves = puckCadence.take(now)
