@@ -82,9 +82,9 @@ import kotlinx.coroutines.launch
  * free drive billing) is needed just to see where you are. The view's lifecycle follows the hosting
  * activity; call [release] when the view leaves the composition.
  *
- * During guidance it writes a "camera" line to the debug log once a second: where the camera is and
- * where the navigation camera is taking it, how smoothly the camera and the puck moved, and how fast
- * the map rendered (see [cameraSample]).
+ * During guidance, while the map is on screen, it writes a "camera" line to the debug log once a
+ * second: where the camera is and where the navigation camera is taking it, how smoothly the camera
+ * and the puck moved, and how fast the map rendered (see [cameraSample]).
  */
 class PhoneMap internal constructor(
     context: Context,

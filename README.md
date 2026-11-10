@@ -96,8 +96,8 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 - the phone's state: on screen or not, the screen, charging, Power saving, heat and memory, with a
   sample once a minute during guidance, and whether Android's animations run;
 - the app's network on every change, and the phone settings that can keep only this app offline;
-- one camera line a second during guidance: where the camera is and where it is heading, how
-  smoothly the camera and the car move, and the map's frame rate;
+- one camera line a second during guidance while the map is on screen: where the camera is and
+  where it is heading, how smoothly the camera and the car move, and the map's frame rate;
 - map errors, the first of each kind in full and the repeats as one count a minute.
 
 To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
