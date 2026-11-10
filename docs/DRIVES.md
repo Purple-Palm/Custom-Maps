@@ -21,10 +21,10 @@ Both drives: the owner's Samsung phone with Android 15, a stage 1 build.
 
 | Finding | Cause | Change | Stage |
 |---|---|---|---|
-| The car and the map moved in steps, once a second | Android's animations were off; the SDK camera also moves in 1 s linear pieces | Camera styles with a new Smooth follow; the owner checks system animations | Next build |
-| The view switched abruptly near turns | The SDK's framing flips the tilt within 180 m of most turns and again at each step change | The tilt goes down and back up gradually | Next build |
+| The car and the map moved in steps, once a second | Android's animations were off; the SDK camera also moves in 1 s linear pieces | Camera styles with a new Smooth follow; the owner checks system animations | Built in stage 1.1 |
+| The view switched abruptly near turns | The SDK's framing flips the tilt within 180 m of most turns and again at each step change | The tilt goes down and back up gradually | Built in stage 1.1 |
 | Lanes too small before a turn | The following camera stops at zoom 16.35 | More zoom at turns | Next build; full junction zoom in stage 4 |
-| The camera turned into a gentle curve well before the car (liked) | The SDK aims the camera at the far end of the road ahead | Kept | Next build |
+| The camera turned into a gentle curve well before the car (liked) | The SDK aims the camera at the far end of the road ahead | Kept | Built in stage 1.1, in every style |
 | The first drive's routes all ended behind the store | The route went to the middle of the building, and the router took the nearest road | Routes end at Mapbox's stop point for the place | Next build |
 | No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Next build; the network lines and the folded map errors are built |
 | The app restarted once before the first drive | Unknown: the log records no crash and no exit reason | Crash and exit-reason lines | Built in stage 1.1 |
