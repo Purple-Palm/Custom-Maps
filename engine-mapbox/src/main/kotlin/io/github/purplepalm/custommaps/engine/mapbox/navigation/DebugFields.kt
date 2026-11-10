@@ -3,11 +3,13 @@ package io.github.purplepalm.custommaps.engine.mapbox.navigation
 import android.os.SystemClock
 import com.mapbox.api.directions.v5.models.LegStep
 import com.mapbox.api.directions.v5.models.RouteLeg
+import com.mapbox.api.directions.v5.models.StepIntersection
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.RouterFailure
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import com.mapbox.navigation.base.utils.DecodeUtils.stepsGeometryToPoints
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.geo.Geo
@@ -19,16 +21,22 @@ import io.github.purplepalm.custommaps.nav.geo.Geo
 
 internal fun Point.debugFields(): List<Double> = listOf(latitude(), longitude())
 
-/** A route with every leg and step: roads, maneuvers, distances, times and traffic. */
+/**
+ * A route with every leg and step: roads, maneuvers, distances, times and traffic, and the
+ * intersections that have lanes. It reads the shape of every step, which is too much work for the
+ * main thread: call it on a background thread.
+ */
 internal fun NavigationRoute.debugFields(): Map<String, Any?> {
     val route = directionsRoute
+    // One list of points for each step of each leg.
+    val shapes = route.stepsGeometryToPoints()
     return mapOf(
         "id" to id,
         "origin" to origin,
         "meters" to route.distance(),
         "seconds" to route.duration(),
         "typicalSeconds" to route.durationTypical(),
-        "legs" to route.legs().orEmpty().map { it.debugFields() },
+        "legs" to route.legs().orEmpty().mapIndexed { index, leg -> leg.debugFields(shapes.getOrNull(index).orEmpty()) },
     )
 }
 
@@ -48,14 +56,14 @@ internal fun NavigationRoute.waypointsDebugFields(requested: List<Point>): List<
         )
     }
 
-private fun RouteLeg.debugFields(): Map<String, Any?> = mapOf(
+private fun RouteLeg.debugFields(stepShapes: List<List<Point>>): Map<String, Any?> = mapOf(
     "summary" to summary(),
     "meters" to distance(),
     "seconds" to duration(),
     "typicalSeconds" to durationTypical(),
     // How much of the leg is in each traffic level, counted in route segments.
     "congestion" to congestionLevels(),
-    "steps" to steps().orEmpty().map { it.debugFields() },
+    "steps" to steps().orEmpty().mapIndexed { index, step -> step.debugFields(stepShapes.getOrNull(index).orEmpty()) },
 )
 
 /**
@@ -82,7 +90,7 @@ private const val MODERATE_CONGESTION = 40
 private const val HEAVY_CONGESTION = 60
 private const val SEVERE_CONGESTION = 80
 
-private fun LegStep.debugFields(): Map<String, Any?> {
+private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
     val maneuver = maneuver()
     return mapOf(
         "road" to name(),
@@ -102,8 +110,32 @@ private fun LegStep.debugFields(): Map<String, Any?> {
         "lanes" to bannerInstructions()?.firstOrNull()?.sub()?.components()
             ?.filter { it.type() == "lane" }
             ?.map { mapOf("directions" to it.directions(), "active" to it.active(), "activeDirection" to it.activeDirection()) },
+        "laneIntersections" to laneIntersectionFields(intersections().orEmpty(), shape),
     )
 }
+
+/**
+ * The intersections of a step that have lanes of their own, which is where a lane choice can be,
+ * also where the route goes straight on: how far into the step each one lies, its lanes as the
+ * lane choice rule counts them, the classes of the road that leaves it, and whether the road that
+ * leads to it is a freeway. With these the rule can be tried with other numbers after a drive.
+ * Null for a step without any, which is most steps.
+ *
+ * @param shape the points of the step; each intersection lies on one of them
+ */
+internal fun laneIntersectionFields(intersections: List<StepIntersection?>, shape: List<Point>): List<Map<String, Any?>>? =
+    stepLanes(intersections, shape).takeIf { it.isNotEmpty() }?.map { point ->
+        mapOf(
+            "meters" to Motion.round(point.metersFromStepStart, 0),
+            "lanes" to point.counts.lanes,
+            "usable" to point.counts.usable,
+            "active" to point.counts.active,
+            "designated" to point.counts.designated,
+            // Copied: the route may hand out a view of its own data.
+            "classes" to intersections[point.index]?.classes()?.toList(),
+            "freeway" to point.onFreeway,
+        )
+    }
 
 /** One moment of guidance: where on the route, what is left and what comes next. */
 internal fun RouteProgress.debugFields(): Map<String, Any?> {

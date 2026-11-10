@@ -52,6 +52,7 @@ import java.io.IOException
 import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,6 +94,18 @@ internal class MapboxNavigationEngine(
 
     /** What the Then chip remembers from one progress update to the next; every drive starts it over. */
     private val thenTracker = ThenTracker()
+
+    /**
+     * The points with lanes ahead of the car, read from the route once for each step. The engine
+     * owns the one copy; the map's camera reads the same list, so both see the same lane choices.
+     */
+    internal val laneChoices = LaneChoices { error -> debugLog.error("laneChoices", error) }
+
+    /**
+     * Where the debug lines that describe whole routes are put together: off the main thread, since
+     * they read the shape of every step, and one at a time, so the lines keep their order.
+     */
+    private val routeLines = Dispatchers.Default.limitedParallelism(1)
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
@@ -190,15 +203,15 @@ internal class MapboxNavigationEngine(
                 if (response.accessDenied) RouteRequestResult.AccessDenied else RouteRequestResult.Failed(response.message)
             }
             is RouteResponse.Routes -> {
-                debugLog.log(
-                    "route_response",
+                val routes = response.routes
+                logRoutes("route_response") {
                     mapOf(
-                        "count" to response.routes.size,
+                        "count" to routes.size,
                         // The same for every route of a response.
-                        "waypoints" to response.routes.firstOrNull()?.waypointsDebugFields(options.coordinatesList()),
-                        "routes" to response.routes.map { it.debugFields() },
-                    ),
-                )
+                        "waypoints" to routes.firstOrNull()?.waypointsDebugFields(options.coordinatesList()),
+                        "routes" to routes.map { it.debugFields() },
+                    )
+                }
                 if (response.routes.isEmpty()) {
                     RouteRequestResult.NoRoute
                 } else {
@@ -261,6 +274,23 @@ internal class MapboxNavigationEngine(
         _routeOptions.value = routes.map { it.toRouteOption() }
     }
 
+    /**
+     * Writes a debug line that describes whole routes. Its fields are put together on a background
+     * thread, so the line is written a moment after the lines that follow it in the code.
+     */
+    private fun logRoutes(type: String, fields: () -> Map<String, Any?>) {
+        scope.launch(routeLines) {
+            val built = try {
+                fields()
+            } catch (e: RuntimeException) {
+                // A route that cannot be read costs its line, never the drive.
+                debugLog.error(type, e)
+                return@launch
+            }
+            debugLog.log(type, built)
+        }
+    }
+
     private fun dispatch(event: GuidanceEvent) {
         val from = _guidanceState.value
         val transition = GuidanceStateMachine.reduce(from, event)
@@ -285,8 +315,9 @@ internal class MapboxNavigationEngine(
             is GuidanceCommand.CommitRoutes -> {
                 // Keeps the navigator alive for the drive, even without a screen.
                 MapboxNavigationApp.attach(guidanceLifecycle)
-                // A new drive: the Then chip knows nothing of the last one.
+                // A new drive: the Then chip and the lane choices know nothing of the last one.
                 thenTracker.reset()
+                laneChoices.clear()
                 val commit = ++commitCount
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
@@ -340,6 +371,7 @@ internal class MapboxNavigationEngine(
                 _routeOptions.value = emptyList()
                 _routeProgress.value = null
                 thenTracker.reset()
+                laneChoices.clear()
             }
         }
     }
@@ -374,15 +406,15 @@ internal class MapboxNavigationEngine(
     /** Route changes inside the navigator: the committed route, reroutes, refreshes and the final clean-up. */
     private val routesObserver = RoutesObserver { result ->
         val routes = result.navigationRoutes
-        debugLog.log(
-            "routes_updated",
+        val reason = result.reason
+        logRoutes("routes_updated") {
             mapOf(
-                "reason" to result.reason,
+                "reason" to reason,
                 "ids" to routes.map { it.id },
                 // The new route in full after a reroute; refreshes only update traffic and times.
-                "primary" to routes.firstOrNull()?.takeIf { result.reason != RoutesExtra.ROUTES_UPDATE_REASON_REFRESH }?.debugFields(),
-            ),
-        )
+                "primary" to routes.firstOrNull()?.takeIf { reason != RoutesExtra.ROUTES_UPDATE_REASON_REFRESH }?.debugFields(),
+            )
+        }
     }
 
     private val arrivalObserver = object : ArrivalObserver {
