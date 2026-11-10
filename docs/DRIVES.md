@@ -363,8 +363,9 @@ where they were requested, and picks a plan that is carried out inside the trip:
 - The owner chose to start at once (2026-11-10). The alternative was to wait up to 4 s for fresh
   routes before the trip.
 - The first drive would have got the refresh: 8 minutes old, 22.5 m moved.
-- **The car's position at Start** is what is at hand: the map's puck, or else the location
-  service's last answer when it is no older than 30 s. With neither, only the age counts.
+- **The car's position at Start** is the map's puck. Without one nothing is measured, and only
+  the age counts. The location service's last answer is no second source: the app asks for it only
+  for a route request, so at Start it still is the position the routes were requested from.
 - **A car that moved gets a refresh, not new routes.** If it has left the route, the navigator
   reroutes it by itself inside the trip, as on both drives. From the moment the navigator finds the
   car off the route, or sets routes of its own, the plan does nothing more: a refresh that then
@@ -620,7 +621,7 @@ Then share the debug log. What to read in it:
 | Offline downloads | Size and time of the route download |
 | Map errors | A few lines a minute instead of thousands |
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
-| `start_plan` | The plan, the age of the routes in seconds and the meters moved |
+| `start_plan` | The plan, the age of the routes in seconds and the meters moved; `movedMeters` and `position` are null when the map had shown no position |
 | `start_refresh`, `start_replan` | After a plan other than `AS_PREVIEWED`: one closing line each, never before the drive's first `progress` line. `start_replan` with `set` is followed by `routes_updated`; any other result names its reason |
 | `start_refresh` with `cancelled`, next to `routes_updated` | Whether the navigator changes its alternatives in the first seconds of a trip and so cancels the start's refresh, and whether the refresh asked for again went through |
 | `progress`: `fixAgeMs` in the first lines of a drive | Whether the trip opened on an old position. The plan then waits: a `start_refresh` or `start_replan` line with a result from the navigator comes only after a `progress` line with an age of 30,000 or less |

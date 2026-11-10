@@ -352,7 +352,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   | Refresh | Older than 5 minutes, or the car moved more than 100 m | One refresh of traffic, times and closures; the roads stay the same |
   | Replan | Older than 30 minutes; or the refresh failed, or the routes cannot be refreshed | One route request from where the car is to the same place; its routes take the place of the old ones |
 
-  - The car's position at Start is what is at hand: the map's puck, or else the location service's last answer when it is no older than 30 s. With no position only the age counts.
+  - The car's position at Start is the map's puck. Without one nothing is measured and only the age counts. The location service's last answer is no second source: the app asks for it only for a route request, so at Start it still is the position the routes were requested from.
   - A simulated drive is always as previewed.
   - A car that moved gets a refresh, never a replan. A car that has left the route is put on a new one by the navigator itself, free and inside the trip, as on both drives; a second request would only race it. From the moment the navigator finds the car off the route, or puts other routes in place for any reason, the plan does nothing more.
   - The replan repeats the preview's request, to the same stop point with the same arrival target (28), from the navigator's position on the road, with the car's direction when it moves at 3 m/s or more. Of the fresh routes, the one with the most main roads of the route the driver started on goes first; with none in common the service's order stays.
