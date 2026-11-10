@@ -78,6 +78,34 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `a ramp left alone ends exactly on its sample`() {
+        val ramp = SampleRamp(tuning.sampleHoldSeconds)
+        // 0.1 + (0.3 - 0.1) is not 0.3 in floating point; the end of the ramp has to be.
+        ramp.push(0.1, 0.0)
+        ramp.push(0.3, 1.0)
+        assertEquals(0.3, ramp.value(1.0 + tuning.sampleHoldSeconds + 0.001), 0.0)
+        assertEquals(0.3, ramp.value(50.0), 0.0)
+        // The same sample again then moves nothing.
+        ramp.push(0.3, 3.0)
+        assertFalse(ramp.isMoving(3.0))
+        assertEquals(0.0, ramp.rate(3.5), 0.0)
+    }
+
+    @Test
+    fun `a ramp given the same sample every second comes to rest within a tolerance`() {
+        val ramp = SampleRamp(tuning.sampleHoldSeconds)
+        ramp.push(15.0, 0.0)
+        // The hold is longer than a second, so each sample starts the rest of the way over.
+        for (second in 1..5) ramp.push(16.0, second.toDouble())
+        assertTrue(ramp.isMoving(5.0), "still ${16.0 - ramp.value(5.0)} away")
+        assertFalse(ramp.isMoving(5.0, tolerance = 1e-3))
+        assertEquals(16.0, ramp.value(5.0), 1e-3)
+        // A new sample moves it again, also with the tolerance.
+        ramp.push(17.0, 6.0)
+        assertTrue(ramp.isMoving(6.5, tolerance = 1e-3))
+    }
+
+    @Test
     fun `angles wrap and take the short way round`() {
         assertEquals(-170.0, Angles.wrap180(190.0), 1e-12)
         assertEquals(-180.0, Angles.wrap180(180.0), 1e-12)

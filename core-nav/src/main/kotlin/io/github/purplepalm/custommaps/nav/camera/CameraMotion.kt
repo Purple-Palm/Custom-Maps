@@ -125,7 +125,11 @@ class SampleRamp(private val holdSeconds: Double) {
         start = now
     }
 
-    fun value(now: Double) = from + (to - from) * ((now - start) / holdSeconds).coerceIn(0.0, 1.0)
+    /** Where the value is at [now]: on the newest sample itself once the hold has passed. */
+    fun value(now: Double): Double {
+        val fraction = (now - start) / holdSeconds
+        return if (fraction >= 1.0) to else from + (to - from) * fraction.coerceAtLeast(0.0)
+    }
 
     /** The change per second at [now]; zero once the sample is reached. */
     fun rate(now: Double) = if (now - start < holdSeconds) (to - from) / holdSeconds else 0.0
@@ -136,7 +140,13 @@ class SampleRamp(private val holdSeconds: Double) {
      */
     fun lead(now: Double, tau: Double) = value(now) + rate(now) * 2.0 * tau
 
-    fun isMoving(now: Double) = from != to && now - start < holdSeconds
+    /**
+     * Whether the value is still on its way, more than [tolerance] from the newest sample. A sample
+     * that comes before the last one was reached starts the way over from where the value is. So a
+     * value that is given the same sample again and again comes ever closer to it and takes many
+     * seconds to arrive; with a tolerance it counts as at rest once it is close.
+     */
+    fun isMoving(now: Double, tolerance: Double = 0.0) = now - start < holdSeconds && abs(to - value(now)) > tolerance
 }
 
 /** Angles in degrees. */
