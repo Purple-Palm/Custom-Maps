@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +73,7 @@ import io.github.purplepalm.custommaps.nav.camera.GuidancePadding
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.ui.guidance.ArrivedCard
 import io.github.purplepalm.custommaps.ui.guidance.GuidanceBar
@@ -87,6 +89,9 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     val density = LocalDensity.current
     val viewModel = viewModel { MapViewModel(engine.navigation, engine.search, settings, debugLog) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // Guidance progress changes about once a second. It is passed on unread, so an update
+    // recomposes only the two panels that show it, not this screen.
+    val progress = viewModel.progress.collectAsStateWithLifecycle()
 
     // The navigator lives while this screen does (and for the length of any drive).
     DisposableEffect(lifecycleOwner) {
@@ -232,13 +237,7 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 },
         ) {
             when (state.guidance) {
-                GuidanceState.ACTIVE -> state.progress?.let { progress ->
-                    ManeuverCard(
-                        progress = progress,
-                        modifier = Modifier.onGloballyPositioned { maneuverPanelBottom = it.boundsInRoot().bottom.toInt() },
-                    )
-                    DisposableEffect(Unit) { onDispose { maneuverPanelBottom = 0 } }
-                }
+                GuidanceState.ACTIVE -> ManeuverSlot(progress, onBottomChanged = { maneuverPanelBottom = it })
                 GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                     SearchBar(
                         text = state.searchText,
@@ -289,8 +288,8 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                     onStart = startGuidance,
                     onClose = viewModel::onCancelPreview,
                 )
-                state.guidance == GuidanceState.ACTIVE -> GuidanceBar(
-                    progress = state.progress,
+                state.guidance == GuidanceState.ACTIVE -> GuidanceBarSlot(
+                    progress = progress,
                     following = cameraMode == CameraMode.FOLLOWING,
                     onToggleOverview = {
                         phoneMap.setCameraMode(if (cameraMode == CameraMode.FOLLOWING) CameraMode.OVERVIEW else CameraMode.FOLLOWING)
@@ -336,6 +335,32 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 .padding(24.dp),
         )
     }
+}
+
+/**
+ * The maneuver card once guidance has its first progress. It reads the progress itself, and
+ * reports where its bottom edge is, 0 while it is not shown, for the camera's padding.
+ */
+@Composable
+private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, onBottomChanged: (Int) -> Unit) {
+    progress.value?.let { current ->
+        ManeuverCard(
+            progress = current,
+            modifier = Modifier.onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) },
+        )
+        DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
+    }
+}
+
+/** The guidance bar, reading the progress itself. */
+@Composable
+private fun GuidanceBarSlot(
+    progress: State<RouteProgressSnapshot?>,
+    following: Boolean,
+    onToggleOverview: () -> Unit,
+    onEnd: () -> Unit,
+) {
+    GuidanceBar(progress = progress.value, following = following, onToggleOverview = onToggleOverview, onEnd = onEnd)
 }
 
 @Composable

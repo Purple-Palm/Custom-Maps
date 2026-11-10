@@ -6,14 +6,19 @@ import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.nav.model.Maneuver
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import io.github.purplepalm.custommaps.settings.FakeAppSettings
 import java.io.IOException
+import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,6 +34,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -272,6 +278,27 @@ class MapViewModelTest {
         viewModel.onCancelPreview()
         runCurrent()
         assertNull(viewModel.state.value.message)
+    }
+
+    @Test
+    fun `guidance progress is handed on without a new screen state`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        navigation.guidanceState.value = GuidanceState.ACTIVE
+        runCurrent()
+        val screen = viewModel.state.value
+        assertNull(viewModel.progress.value)
+        val progress = RouteProgressSnapshot(
+            nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.LEFT, "Oak Street"),
+            distanceToNextManeuver = Distance.meters(300.0),
+            lanes = null,
+            distanceRemaining = Distance.meters(5_000.0),
+            durationRemaining = 10.minutes,
+        )
+        navigation.routeProgress.value = progress
+        runCurrent()
+        assertSame(progress, viewModel.progress.value)
+        // The very same state: what reads it has nothing to do on a progress update.
+        assertSame(screen, viewModel.state.value)
     }
 
     @Test

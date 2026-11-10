@@ -48,7 +48,6 @@ data class MapUiState(
     val busy: Boolean = false,
     val routes: List<RouteOption> = emptyList(),
     val destination: Place? = null,
-    val progress: RouteProgressSnapshot? = null,
     val simulateDrive: Boolean = false,
     val message: UserMessage? = null,
 )
@@ -89,11 +88,16 @@ class MapViewModel(
     private val engineState = combine(
         navigation.guidanceState,
         navigation.routeOptions,
-        navigation.routeProgress,
         navigation.destination,
-    ) { guidance, routes, progress, destination ->
-        MapUiState(guidance = guidance, routes = routes, progress = progress, destination = destination)
+    ) { guidance, routes, destination ->
+        MapUiState(guidance = guidance, routes = routes, destination = destination)
     }
+
+    /**
+     * Guidance progress, about one update a second during a drive. It is kept out of [state], so
+     * that an update reaches only what shows the progress and the rest of the screen stays as it is.
+     */
+    val progress: StateFlow<RouteProgressSnapshot?> = navigation.routeProgress
 
     val state: StateFlow<MapUiState> = combine(engineState, local, settings.simulateDrive) { engine, local, simulate ->
         engine.copy(
