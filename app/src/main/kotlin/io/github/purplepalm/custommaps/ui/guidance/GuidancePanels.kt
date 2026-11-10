@@ -43,6 +43,9 @@ import kotlin.time.Duration.Companion.minutes
 
 private const val TABULAR_DIGITS = "tnum"
 
+/** Corner radius of the maneuver card; the Then chip tucks this far under its bottom edge. */
+internal val CARD_CORNER = 24.dp
+
 /** Next maneuver: the arrow, a large distance and the road, with lane guidance below. */
 @Composable
 fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier) {
@@ -50,7 +53,7 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
     val distance = ImperialFormat.distance(progress.distanceToNextManeuver)
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(CARD_CORNER),
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Column(Modifier.padding(16.dp)) {

@@ -51,7 +51,7 @@ fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, modifier: Modifier = Mod
     }
 }
 
-private val ROUNDABOUTS = setOf(
+internal val ROUNDABOUTS = setOf(
     ManeuverType.ROUNDABOUT,
     ManeuverType.ROUNDABOUT_TURN,
     ManeuverType.EXIT_ROUNDABOUT,

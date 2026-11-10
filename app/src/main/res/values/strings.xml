@@ -47,6 +47,23 @@
     <string name="guidance_end">End</string>
     <string name="guidance_arrived">You have arrived</string>
     <string name="guidance_done">Done</string>
+    <string name="guidance_then">Then</string>
+    <string name="guidance_then_description">Then: %1$s</string>
+    <string name="guidance_then_on_left">On the left</string>
+    <string name="guidance_then_on_right">On the right</string>
+    <string name="guidance_then_destination">Destination</string>
+    <string name="then_sharp_right">sharp right</string>
+    <string name="then_right">right</string>
+    <string name="then_slight_right">slight right</string>
+    <string name="then_straight">straight on</string>
+    <string name="then_slight_left">slight left</string>
+    <string name="then_left">left</string>
+    <string name="then_sharp_left">sharp left</string>
+    <string name="then_u_turn">U-turn</string>
+    <string name="then_roundabout">roundabout</string>
+    <string name="then_destination">destination</string>
+    <string name="then_destination_left">destination on the left</string>
+    <string name="then_destination_right">destination on the right</string>
 
     <string name="message_no_location">Waiting for your location. Try again in a moment.</string>
     <string name="message_no_route">No route found to this place.</string>

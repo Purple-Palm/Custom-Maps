@@ -77,7 +77,8 @@ import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.ui.guidance.ArrivedCard
 import io.github.purplepalm.custommaps.ui.guidance.GuidanceBar
-import io.github.purplepalm.custommaps.ui.guidance.ManeuverCard
+import io.github.purplepalm.custommaps.ui.guidance.ManeuverPanel
+import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
 
 /** The main screen: the map with search, route choice and guidance drawn over it. */
 @Composable
@@ -194,7 +195,10 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
 
     // Keep the route and the puck clear of the panels. At the top only the maneuver panel counts,
     // and during guidance the inset only grows, so a panel that changes its height, the search bar
-    // and its suggestions never make the camera frame the road again.
+    // and its suggestions never make the camera frame the road again. The Then chip hangs under
+    // the panel, outside its measured size: the band it hangs in stays out of the camera's frame
+    // for the whole of guidance, so the chip never covers what the camera frames, and the camera
+    // never moves when the chip comes or goes.
     var screenHeight by remember { mutableIntStateOf(0) }
     var topPanelTop by remember { mutableIntStateOf(0) }
     var topPanelBottom by remember { mutableIntStateOf(0) }
@@ -204,8 +208,9 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     // A screen of another size starts over.
     val guidancePadding = remember(screenHeight) { GuidancePadding() }
     val guiding = state.guidance == GuidanceState.ACTIVE
-    LaunchedEffect(screenHeight, guiding, topPanelTop, maneuverPanelBottom, bottomPanelTop) {
-        val top = guidancePadding.topInset(guiding, panelBottom = maneuverPanelBottom, restTop = topPanelTop)
+    val thenBand = with(density) { THEN_CHIP_BAND.roundToPx() }
+    LaunchedEffect(screenHeight, guiding, topPanelTop, maneuverPanelBottom, bottomPanelTop, thenBand) {
+        val top = guidancePadding.topInset(guiding, panelBottom = maneuverPanelBottom, restTop = topPanelTop, band = thenBand)
         val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
         phoneMap.setViewportPadding(ViewportPadding(panelMargin, top + panelMargin, panelMargin, bottom + panelMargin))
     }
@@ -338,13 +343,14 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
 }
 
 /**
- * The maneuver card once guidance has its first progress. It reads the progress itself, and
- * reports where its bottom edge is, 0 while it is not shown, for the camera's padding.
+ * The maneuver panel once guidance has its first progress. It reads the progress itself, and
+ * reports where its bottom edge is, 0 while it is not shown, for the camera's padding. The panel
+ * is as large as the maneuver card alone: the Then chip under it is not measured.
  */
 @Composable
 private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, onBottomChanged: (Int) -> Unit) {
     progress.value?.let { current ->
-        ManeuverCard(
+        ManeuverPanel(
             progress = current,
             modifier = Modifier.onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) },
         )
