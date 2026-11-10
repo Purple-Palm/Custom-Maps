@@ -897,8 +897,12 @@ and the arrival.
 - **After the maneuver** the frame shows the road beyond it. The camera keeps the zoom the
   junction had for as long as the view is held over it, and lets it go along the same eased curve
   as the tilt comes back up (`ManeuverFocus.afterManeuver`).
-- **Close turns** keep the view down and close, as they keep the tilt down: the SDK frames them
-  together, so the zoom between them is a little farther out, not a jump back to the road.
+- **Close turns** keep the view down and close, as they keep the tilt down. Turns within 150 m
+  of each other the SDK frames together, so the zoom for both is a little farther out. A turn a
+  little farther on, near enough that the tilt stays down for it but not yet framed, leaves a
+  stretch where the frame is of the open road again: there the camera keeps the zoom the first
+  junction had until the SDK frames the second, and then eases to that frame. It does not go out
+  to the road's zoom and back in.
 
 Simulated with the compiled camera at 60 frames a second, against a model of the data source (the
 car on its focal point on the road; from 180 m a flat fit of the rest of the step and the road
@@ -921,8 +925,9 @@ after it into the padded height). The road is made up and lies on the equator, w
 | 111 m after | 45° | 16.35 | 3.9 dp |
 
 In the same model two turns 100 m apart stay flat with a lane no narrower than 13.5 dp between
-them, a roundabout with its way out 45 m on stays at 22.6 dp or wider, and the arrival ends at
-28 dp with the car standing. The real frames of the SDK can differ from the model by a few tenths
+them, two turns 200 m apart with 10.6 dp, a roundabout with its way out 45 m on stays at 22.6 dp
+or wider, and the arrival ends at 28 dp with the car standing. Two turns 300 m apart get the
+road's view back in between. The real frames of the SDK can differ from the model by a few tenths
 of a zoom level.
 
 ### The lane-choice zoom on freeways
@@ -1179,7 +1184,7 @@ Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
 jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
-For the lane zoom, `LaneZoomTest` in `:core-nav` (34 tests, on example latitudes and made-up
+For the lane zoom, `LaneZoomTest` in `:core-nav` (37 tests, on example latitudes and made-up
 routes). Among them:
 
 - Zoom and lane width are each other's inverse, with 18.89 for 28 dp and 17.89 for 14 dp at 35°.
@@ -1191,9 +1196,10 @@ routes). Among them:
 - Two lane choices 900 m apart keep the view in; 2.5 km apart let it out between them.
 - A reroute during the hold does not keep the view in, and a point at a distance that is no number
   never holds it.
-- Default returns the frame's zoom. Large on the road is Default; it takes the junction frame's
-  zoom up to 28 dp, lets it go along the tilt's curve after the turn, and goes to 14 dp near a lane
-  choice.
+- Default returns the frame's zoom. Large on the road is Default, and a frame of the open road
+  counts no closer than that; it takes the junction frame's zoom up to 28 dp, lets it go along the
+  tilt's curve after the turn, keeps it between two junctions the view stays down for, and goes to
+  14 dp near a lane choice.
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
@@ -1207,9 +1213,10 @@ The cameras themselves touch Android and Mapbox types and have no JVM tests. Whi
 `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by frame
 through a made-up drive: the browsing map, the preview, Start, a turn, a red light, a drag,
 Recenter, the background and back (also after the road turned meanwhile), a teleport, the overview
-and the end. For the lane zoom the same was done with a model of the data source: a turn, two
-close turns, a roundabout, the arrival and a freeway with lane choices in Large, a change of the
-setting and of the style on the approach, a reroute and the background inside a lane window. With
+and the end. For the lane zoom the same was done with a model of the data source: a turn, turns
+100 to 300 m apart, a roundabout, the arrival and a freeway with lane choices in Large, a change
+of the setting and of the style on the approach, a reroute and the background inside a lane
+window. With
 Default, every frame of the older runs came out the same as before the lane zoom was built, and
 the same with lane choices fed as without. Those checks are not part of the build; the simulated
 drive below is the first real one.
