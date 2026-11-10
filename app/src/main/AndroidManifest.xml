@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        The network monitor follows the app's default network and reads the Mobile data switch.
+        Mapbox declares it too; declared here because the app now uses it itself.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:name=".CustomMapsApplication"
         android:allowBackup="true"

@@ -18,6 +18,7 @@ import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.network.NetworkMonitor
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
 import io.github.purplepalm.custommaps.token.DataStoreTokenStore
@@ -81,6 +82,9 @@ class AppGraph(private val application: Application) {
     /** The phone's state: on screen, screen, power, heat, memory; a sample a minute during guidance. */
     private val deviceLog = DeviceLog(application, debugLog, applicationScope)
 
+    /** This app's network as Android reports it: logged on every change. */
+    val network = NetworkMonitor(application, debugLog, applicationScope)
+
     /** Sets up the navigator; starts no trip session. */
     val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog)
 
@@ -113,6 +117,10 @@ class AppGraph(private val application: Application) {
             mapOf("guidance" to engine.navigation.guidanceState.value, "visible" to deviceLog.visible.value)
         }
         deviceLog.start()
+        network.start()
+        network.logPolicy("app start")
+        // Back from system settings the driver may have changed what the app may use.
+        deviceLog.onActivityResumed = { network.logPolicy("resume") }
         applicationScope.launch(Dispatchers.IO) { processHistory.logOnStart() }
         // Kept by Android with this process and handed back in its exit record.
         applicationScope.launch {

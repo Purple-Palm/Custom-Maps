@@ -1,10 +1,8 @@
 package io.github.purplepalm.custommaps.diagnostics
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.Application
-import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks2
 import android.content.Context
@@ -56,6 +54,12 @@ internal class DeviceLog(
 
     /** True while one of the app's activities is started, that is, on screen. */
     val visible: StateFlow<Boolean> = _visible.asStateFlow()
+
+    /**
+     * Called on the main thread whenever an activity resumes, for instance back from system
+     * settings, where the driver may have changed what the app is allowed to do.
+     */
+    var onActivityResumed: () -> Unit = {}
 
     fun start() {
         logAfterReading("device_state") { stateFields() }
@@ -110,8 +114,8 @@ internal class DeviceLog(
         "locationPowerSave" to locationPowerSave(),
         "ignoresBatteryOptimizations" to powerManager?.isIgnoringBatteryOptimizations(application.packageName),
         "backgroundRestricted" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) activityManager?.isBackgroundRestricted else null,
-        "standbyBucket" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) standbyBucket() else null,
-        "dataSaver" to dataSaverName(connectivity?.restrictBackgroundStatus),
+        "standbyBucket" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) SystemNames.standbyBucket(application) else null,
+        "dataSaver" to SystemNames.dataSaverName(connectivity?.restrictBackgroundStatus),
         "thermal" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) thermalName(powerManager?.currentThermalStatus) else null,
         // Without it, a low memory kill is reported as SIGNALED with signal 9.
         "lowMemoryKillReported" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ActivityManager.isLowMemoryKillReportSupported() else null,
@@ -119,11 +123,6 @@ internal class DeviceLog(
 
     private fun locationPowerSave(): String? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) locationPowerSaveName(powerManager?.locationPowerSaveMode) else null
-
-    /** How often Android lets the app run in the background: ACTIVE is best, RESTRICTED worst. */
-    @RequiresApi(Build.VERSION_CODES.P)
-    private fun standbyBucket(): String? =
-        application.getSystemService(UsageStatsManager::class.java)?.appStandbyBucket?.let(::standbyBucketName)
 
     private val activities = object : Application.ActivityLifecycleCallbacks {
         private var started = 0
@@ -137,7 +136,10 @@ internal class DeviceLog(
             _visible.value = started > 0
         }
 
-        override fun onActivityResumed(activity: Activity) = logActivity(activity, "resumed")
+        override fun onActivityResumed(activity: Activity) {
+            logActivity(activity, "resumed")
+            onActivityResumed()
+        }
 
         override fun onActivityPaused(activity: Activity) = logActivity(activity, "paused")
 
@@ -226,25 +228,6 @@ internal class DeviceLog(
             PowerManager.LOCATION_MODE_FOREGROUND_ONLY -> "FOREGROUND_ONLY"
             PowerManager.LOCATION_MODE_THROTTLE_REQUESTS_WHEN_SCREEN_OFF -> "THROTTLED_WHEN_SCREEN_OFF"
             else -> "MODE_$mode"
-        }
-
-        // The constants are compiled in; phones that predate a bucket never report it.
-        @SuppressLint("InlinedApi")
-        fun standbyBucketName(bucket: Int): String = when (bucket) {
-            UsageStatsManager.STANDBY_BUCKET_ACTIVE -> "ACTIVE"
-            UsageStatsManager.STANDBY_BUCKET_WORKING_SET -> "WORKING_SET"
-            UsageStatsManager.STANDBY_BUCKET_FREQUENT -> "FREQUENT"
-            UsageStatsManager.STANDBY_BUCKET_RARE -> "RARE"
-            UsageStatsManager.STANDBY_BUCKET_RESTRICTED -> "RESTRICTED"
-            else -> "BUCKET_$bucket"
-        }
-
-        fun dataSaverName(status: Int?): String? = when (status) {
-            null -> null
-            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED -> "OFF"
-            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED -> "ON_APP_EXEMPT"
-            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED -> "ON"
-            else -> "STATUS_$status"
         }
 
         fun pluggedName(plugged: Int): String? = when (plugged) {
