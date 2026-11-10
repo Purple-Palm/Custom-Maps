@@ -117,6 +117,7 @@ internal fun RouteProgress.debugFields(): Map<String, Any?> {
         "step" to step?.stepIndex,
         "road" to step?.step?.name(),
         "stepMetersLeft" to step?.distanceRemaining,
+        "stepSecondsLeft" to step?.durationRemaining,
         "metersLeft" to distanceRemaining,
         "secondsLeft" to durationRemaining,
         "metersDone" to distanceTraveled,
@@ -126,6 +127,16 @@ internal fun RouteProgress.debugFields(): Map<String, Any?> {
                 "modifier" to it.maneuver().modifier(),
                 "road" to it.name(),
                 "instruction" to it.maneuver().instruction(),
+            )
+        },
+        // The maneuver after the next one, which the Then chip shows when the two are close.
+        "after" to followingManeuver()?.let {
+            mapOf(
+                "type" to it.maneuver.type,
+                "modifier" to it.maneuver.modifier,
+                "road" to it.maneuver.primaryText,
+                "metersAfterNext" to it.distanceAfterNext.meters,
+                "secondsAfterNext" to it.durationAfterNext.inWholeMilliseconds / MILLIS_PER_SECOND,
             )
         },
         "banner" to bannerInstructions?.primary()?.text(),
@@ -174,6 +185,7 @@ private fun Location.ageMillis(): Long {
 }
 
 private const val NANOS_PER_MILLI = 1_000_000L
+private const val MILLIS_PER_SECOND = 1_000.0
 
 /** A failed route request. The request URL is left out on purpose: it contains the token. */
 internal fun RouterFailure.debugFields(): Map<String, Any?> = mapOf(
