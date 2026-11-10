@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav
 
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import kotlinx.coroutines.flow.StateFlow
 
 /** Draws the map and the route and moves the camera, on the phone or in the car. */
@@ -11,6 +12,12 @@ interface MapRenderer {
 
     /** Screen area covered by UI, which the camera must keep the route out of. */
     fun setViewportPadding(padding: ViewportPadding)
+
+    /**
+     * How the camera moves during guidance and in the route preview. A change applies at once, also
+     * during a drive: the camera goes on with what it was doing, in the new style.
+     */
+    fun setCameraStyle(style: CameraStyle)
 }
 
 /** Insets in pixels from each edge of the map surface. */

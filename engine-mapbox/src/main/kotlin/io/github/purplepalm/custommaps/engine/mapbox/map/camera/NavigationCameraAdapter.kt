@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
 import android.animation.ValueAnimator
+import android.os.SystemClock
 import com.mapbox.common.location.Location
 import com.mapbox.maps.MapboxMap
 import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
@@ -15,25 +16,44 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserve
 import com.mapbox.navigation.ui.maps.camera.lifecycle.NavigationBasicGesturesHandler
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraState
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraStateChangedObserver
+import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 
 /**
- * The navigation SDK's own camera as a [GuidanceCamera]: [NavigationCamera] with its default options
- * and [NavigationBasicGesturesHandler], which turns it idle when anything else moves the map.
+ * The navigation SDK's own camera as a [GuidanceCamera]: [NavigationCamera] with
+ * [NavigationBasicGesturesHandler], which turns it idle when anything else moves the map. It serves
+ * two camera styles.
  *
- * The data source is evaluated on the location and again on the route progress of each update of
- * the navigator, and each evaluation starts a new animation of the camera of about a second.
+ * Mapbox standard is the camera as it comes. The data source is evaluated on the location and again
+ * on the route progress of each update of the navigator, and each evaluation starts a new animation
+ * of the camera of one second.
+ *
+ * Mapbox tuned ([tuned]) is the same camera with calmer moves:
+ * - The data source is evaluated once for each update of the navigator, on the route progress, so
+ *   every frame is computed from the location and the progress of the same update, and no animation
+ *   is started only to be replaced a moment later.
+ * - Following frames are reached with the longer animations of [FollowingTransition].
+ * - A jump of the matched position moves the camera there at once.
  */
 internal class NavigationCameraAdapter(
     mapboxMap: MapboxMap,
     private val cameraPlugin: CameraAnimationsPlugin,
     private val dataSource: MapboxNavigationViewportDataSource,
+    private val tuned: Boolean,
     private val listener: GuidanceCamera.Listener,
 ) : GuidanceCamera {
 
     private val source = DetachableSource(dataSource)
-    private val navigationCamera = NavigationCamera(mapboxMap, cameraPlugin, source)
+    private val navigationCamera =
+        if (tuned) {
+            NavigationCamera(mapboxMap, cameraPlugin, source, FollowingTransition(mapboxMap, cameraPlugin))
+        } else {
+            NavigationCamera(mapboxMap, cameraPlugin, source)
+        }
     private val gesturesHandler = NavigationBasicGesturesHandler(navigationCamera)
+
+    /** For the tuned style: which message of an update the frame is computed on. */
+    private val pacing = OncePerUpdate()
 
     // For the camera line: the camera's frame updates, and the ones cut short by the next.
     private var frameUpdates = 0
@@ -84,7 +104,14 @@ internal class NavigationCameraAdapter(
 
     override val state: String get() = navigationCamera.state.name
 
-    override fun requestFollowing() = navigationCamera.requestNavigationCameraToFollowing()
+    override fun requestFollowing() {
+        if (tuned) {
+            // Start and Recenter both come through here, so both get the tuned frames.
+            navigationCamera.requestNavigationCameraToFollowing(frameTransitionOptions = FollowingTransition.FRAME_OPTIONS)
+        } else {
+            navigationCamera.requestNavigationCameraToFollowing()
+        }
+    }
 
     override fun requestOverview() = navigationCamera.requestNavigationCameraToOverview()
 
@@ -92,12 +119,20 @@ internal class NavigationCameraAdapter(
 
     override fun onLocation(location: Location, isTeleport: Boolean) {
         dataSource.onLocationChanged(location)
-        dataSource.evaluate()
+        if (!tuned) {
+            dataSource.evaluate()
+            return
+        }
+        // The route progress of this update comes right after the location and evaluates.
+        if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
+        // The puck jumps on a teleport, and the camera with it: neither slides across the map.
+        if (isTeleport) navigationCamera.resetFrame()
     }
 
     override fun onRouteProgress(progress: RouteProgress) {
         dataSource.onRouteProgressChanged(progress)
         dataSource.evaluate()
+        if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
     }
 
     // This camera keeps nothing for a drive.

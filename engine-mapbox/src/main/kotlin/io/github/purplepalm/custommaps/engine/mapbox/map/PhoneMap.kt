@@ -60,6 +60,7 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -139,8 +140,20 @@ class PhoneMap internal constructor(
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
 
-    /** Moves the map during guidance and in the route preview. */
-    private val camera: GuidanceCamera
+    /** How the camera moves; Mapbox standard until [setCameraStyle] says otherwise. */
+    private var cameraStyle = CameraStyle.MAPBOX_STANDARD
+
+    /** Moves the map during guidance and in the route preview, in the way of [cameraStyle]. */
+    private var camera: GuidanceCamera
+
+    /**
+     * The puck position the data source was last given outside guidance; null once the navigator's
+     * positions have replaced it.
+     */
+    private var fedPuck: Point? = null
+
+    /** When the route preview last compared the puck with [fedPuck], in milliseconds since boot. */
+    private var puckCheckedAt = 0L
 
     private val _cameraMode = MutableStateFlow(CameraMode.IDLE)
     override val cameraMode: StateFlow<CameraMode> = _cameraMode.asStateFlow()
@@ -243,7 +256,7 @@ class PhoneMap internal constructor(
             val now = SystemClock.elapsedRealtime()
             val tookMs = if (transitionStartedAt != 0L && !moving) now - transitionStartedAt else null
             transitionStartedAt = if (moving) now else 0L
-            debugLog.log("camera_state", mapOf("state" to state, "ms" to tookMs).filterValues { it != null })
+            debugLog.log("camera_state", mapOf("state" to state, "ms" to tookMs, "style" to cameraStyle).filterValues { it != null })
         }
 
         // Says why the camera stopped following: a gesture, the compass, or something else.
@@ -275,7 +288,7 @@ class PhoneMap internal constructor(
         mapView.location.addOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.addOnIndicatorBearingChangedListener(puckBearingListener)
 
-        camera = NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, cameraListener)
+        camera = createCamera(cameraStyle)
         // Called on the render thread, about once a second while the map draws.
         mapView.setOnFpsChangedListener { fps ->
             renderFps = fps
@@ -311,6 +324,22 @@ class PhoneMap internal constructor(
         viewportDataSource.overviewPadding = insets
         viewportDataSource.evaluate()
         mapView.compass.updateSettings { marginTop = padding.top + ORNAMENT_MARGIN_DP * density }
+    }
+
+    override fun setCameraStyle(style: CameraStyle) {
+        if (style == cameraStyle) return
+        // What the camera was doing is asked of the new one again, so a drive goes on being followed.
+        val mode = _cameraMode.value
+        camera.destroy()
+        cameraStyle = style
+        // The new camera starts idle; a transition the old one was in ends with it.
+        transitionStartedAt = 0L
+        camera = createCamera(style)
+        when (mode) {
+            CameraMode.FOLLOWING -> camera.requestFollowing()
+            CameraMode.OVERVIEW -> camera.requestOverview()
+            CameraMode.IDLE -> Unit
+        }
     }
 
     /**
@@ -373,11 +402,15 @@ class PhoneMap internal constructor(
                 drawRoutes(routes)
                 clearArrows()
                 viewportDataSource.onRouteChanged(routes.first())
+                // The car may have moved since the map last centered on it.
+                if (tracksPuckInPreview) lastPuck?.let(::feedPuck)
                 viewportDataSource.evaluate()
                 camera.requestOverview()
             }
             GuidanceState.ACTIVE -> {
                 useLocationProvider(guidance = true)
+                // From here on the data source gets the navigator's positions.
+                fedPuck = null
                 // Also brings back the route when the map is created again during a drive.
                 showNavigatorRoutes()
                 camera.requestFollowing()
@@ -412,7 +445,28 @@ class PhoneMap internal constructor(
         } else if (!centeredOnFirstFix && guidanceState == GuidanceState.IDLE) {
             centeredOnFirstFix = true
             centerOnPuck()
+        } else if (guidanceState == GuidanceState.PREVIEW && tracksPuckInPreview) {
+            trackPuckInPreview(point)
         }
+    }
+
+    /**
+     * Outside guidance the data source learns where the car is only when the map centers on the puck.
+     * A preview opened somewhere else would frame that old place, and Start would fly there before it
+     * found the car. So in the preview the data source gets the puck's position: when the preview
+     * opens, and then whenever the car has moved. Mapbox standard goes without, as it always has.
+     */
+    private val tracksPuckInPreview: Boolean get() = cameraStyle != CameraStyle.MAPBOX_STANDARD
+
+    /** Called on every frame of the puck: looks once a second, and acts only when the car has moved. */
+    private fun trackPuckInPreview(point: Point) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - puckCheckedAt < PREVIEW_TRACK_MS) return
+        puckCheckedAt = now
+        val fed = fedPuck
+        if (fed != null && Geo.meters(fed.latitude(), fed.longitude(), point.latitude(), point.longitude()) < PREVIEW_TRACK_METERS) return
+        feedPuck(point)
+        viewportDataSource.evaluate()
     }
 
     /**
@@ -477,9 +531,27 @@ class PhoneMap internal constructor(
             MapAnimationOptions.Builder().duration(CAMERA_EASE_MS).build(),
         )
         // Keeps the following camera's data fresh for when guidance starts.
+        feedPuck(point)
+    }
+
+    /** Tells the data source where the car is, outside guidance. */
+    private fun feedPuck(point: Point) {
+        fedPuck = point
         viewportDataSource.onLocationChanged(
             Location.Builder().latitude(point.latitude()).longitude(point.longitude()).bearing(lastBearing).build(),
         )
+    }
+
+    /**
+     * The camera of a style, and the puck that goes with it: Mapbox standard keeps the SDK's puck,
+     * the other styles glide it a little longer and let it jump when the matched position jumps.
+     * Smooth follow has no camera of its own yet and gets the tuned one.
+     */
+    private fun createCamera(style: CameraStyle): GuidanceCamera {
+        val standard = style == CameraStyle.MAPBOX_STANDARD
+        guidancePuck.glideMillis = if (standard) GuidancePuck.STANDARD_GLIDE_MS else GuidancePuck.SMOOTH_GLIDE_MS
+        guidancePuck.jumpOnTeleport = !standard
+        return NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, tuned = !standard, cameraListener)
     }
 
     /** Starts the once-a-second camera line; does nothing if it is already running. */
@@ -528,6 +600,7 @@ class PhoneMap internal constructor(
      * "to" is where the navigation camera is taking the camera; "frameUpdatesCut" counts camera
      * animations restarted before they finished. "renderFps" is the map's own frame rate against the
      * screen's refresh; "animatorsEnabled" is false when Android's animations are switched off.
+     * "style" is the camera style in use, so drives in different styles can be compared.
      */
     private fun cameraSample(): Map<String, Any?> {
         val now = SystemClock.elapsedRealtimeNanos()
@@ -541,6 +614,7 @@ class PhoneMap internal constructor(
         val puckMoves = puckCadence.take(now)
         val fps = renderFps.takeIf { renderFpsAt != 0L && now - renderFpsAt <= FPS_FRESH_NANOS }
         val sample = mapOf(
+            "style" to cameraStyle,
             "state" to camera.state,
             "zoom" to Motion.round(shown.zoom, 2),
             "pitch" to Motion.round(shown.pitch, 1),
@@ -634,6 +708,10 @@ class PhoneMap internal constructor(
         private const val BROWSE_ZOOM = 15.5
         private const val BROWSE_PITCH = 40.0
         private const val CAMERA_SAMPLE_MS = 1_000L
+
+        /** In the preview the data source follows the puck: it looks this often and acts past this distance. */
+        private const val PREVIEW_TRACK_MS = 1_000L
+        private const val PREVIEW_TRACK_METERS = 5.0
         private const val NANOS_PER_MILLI = 1_000_000L
 
         /** The map reports its frame rate about once a second; an older value means it stopped drawing. */
