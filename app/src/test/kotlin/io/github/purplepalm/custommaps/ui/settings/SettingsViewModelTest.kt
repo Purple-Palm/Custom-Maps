@@ -4,9 +4,8 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
-import io.github.purplepalm.custommaps.settings.AppSettings
+import io.github.purplepalm.custommaps.settings.FakeAppSettings
 import java.io.File
-import java.io.IOException
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
@@ -42,16 +41,7 @@ class SettingsViewModelTest {
         }
     }
 
-    private val settings = object : AppSettings {
-        val simulate = MutableStateFlow(false)
-        var storageFull = false
-        override val simulateDrive = simulate
-
-        override suspend fun setSimulateDrive(enabled: Boolean) {
-            if (storageFull) throw IOException("No space left on device")
-            simulate.value = enabled
-        }
-    }
+    private val settings = FakeAppSettings()
 
     private val archive = object : DebugLogArchive {
         var bytes = 1_234L
@@ -149,7 +139,7 @@ class SettingsViewModelTest {
         val viewModel = viewModel()
         viewModel.setSimulateDrive(true)
         runCurrent()
-        assertTrue(settings.simulate.value)
+        assertTrue(settings.simulateDrive.value)
         assertTrue(viewModel.debug.value.simulateDrive)
     }
 }

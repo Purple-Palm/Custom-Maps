@@ -12,7 +12,7 @@ import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
-import io.github.purplepalm.custommaps.settings.AppSettings
+import io.github.purplepalm.custommaps.settings.FakeAppSettings
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -41,14 +41,14 @@ class MapViewModelTest {
 
     private lateinit var navigation: FakeNavigationEngine
     private lateinit var search: FakeSearchProvider
-    private lateinit var settings: FakeSettings
+    private lateinit var settings: FakeAppSettings
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(dispatcher)
         navigation = FakeNavigationEngine()
         search = FakeSearchProvider(listOf(suggestion), place)
-        settings = FakeSettings(simulate = false)
+        settings = FakeAppSettings()
     }
 
     @AfterEach
@@ -355,14 +355,6 @@ class MapViewModelTest {
             val result = place
             resolveGate?.await()
             return result
-        }
-    }
-
-    private class FakeSettings(simulate: Boolean) : AppSettings {
-        override val simulateDrive = MutableStateFlow(simulate)
-
-        override suspend fun setSimulateDrive(enabled: Boolean) {
-            simulateDrive.value = enabled
         }
     }
 }
