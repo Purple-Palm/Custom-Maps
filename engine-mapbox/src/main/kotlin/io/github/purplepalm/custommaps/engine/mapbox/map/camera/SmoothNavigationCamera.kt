@@ -433,18 +433,26 @@ internal class SmoothNavigationCamera(
         toLat = if (puckLat.isNaN()) mapLat else lerp(mapLat, puckLat, weight)
         toLng = if (puckLng.isNaN()) mapLng else lerp(mapLng, puckLng, weight)
 
-        val zoomGoal = if (zoomRamp.ready) zoomRamp.lead(now, tuning.zoomTau * tuning.rampLead) else zoom.value
-        val bearingGoal = if (bearingRamp.ready) {
-            Angles.nearest(bearingRamp.lead(now, tuning.bearingTau * tuning.rampLead), bearing.value)
-        } else {
-            bearing.value
+        // Within a mode the springs aim ahead of the ramps, which keeps them close behind. During a
+        // change of mode the fading offset moves the targets as well, and a frame that comes then may
+        // differ much from the one before: aiming ahead of it would first take the camera the wrong way.
+        val steady = transitionSeconds <= 0.0 && !lastZoomTarget.isNaN()
+        val zoomGoal = when {
+            !zoomRamp.ready -> zoom.value
+            steady -> zoomRamp.lead(now, tuning.zoomTau * tuning.rampLead)
+            else -> zoomRamp.value(now)
+        }
+        val bearingGoal = when {
+            !bearingRamp.ready -> bearing.value
+            steady -> Angles.nearest(bearingRamp.lead(now, tuning.bearingTau * tuning.rampLead), bearing.value)
+            else -> Angles.nearest(bearingRamp.value(now), bearing.value)
         }
         // A map that still shows the whole world, as one does that was never moved, has nothing to
         // glide from: the camera is put on its target with the next frame.
         val fromWorld = zoom.value < WORLD_ZOOM && zoomGoal - zoom.value > FAR_ZOOM_LEVELS
         if (fromWorld) snapOnNextFrame = true
         // A change of mode may move as fast as it needs; within a mode zoom and bearing have a top speed.
-        if (transitionSeconds > 0.0 || lastZoomTarget.isNaN() || fromWorld) {
+        if (!steady || fromWorld) {
             toZoom = zoomGoal
             toBearing = bearingGoal
         } else {

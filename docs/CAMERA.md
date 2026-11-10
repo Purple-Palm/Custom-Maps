@@ -422,8 +422,10 @@ While anything moves:
 3. Targets:
    - centre: between the world-centre ramp and the drawn puck, by the on-puck weight. The drawn
      puck comes from `OnIndicatorPositionChangedListener`;
-   - zoom and bearing: the ramp plus its lead (its rate × τ), outside mode changes at most 1 zoom
-     level and 60° per second;
+   - zoom and bearing: within a mode the ramp plus its lead (its rate × τ), at most 1 zoom level
+     and 60° per second; during a change of mode the plain ramp, as fast as it goes. A frame that
+     comes during the change, as the navigator's first one after Start does, can differ much from
+     the one before, and aiming ahead of it would first take the camera the wrong way;
    - tilt: `ManeuverFocus` at this moment; in the overview, the frame's tilt;
    - padding: the ramps.
 4. During a mode change, the remaining start offset is added (see
