@@ -131,21 +131,39 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
             )
             continuation.invokeOnCancellation { task.cancel() }
         }
-        val place = result?.toPlace()
+        val stop = result?.let { StopPoints.choose(it.stopCandidates(), it.point()) }
+        val place = result?.toPlace(stop)
         debugLog.log(
             "search_result",
             mapOf(
                 "name" to place?.name,
                 "address" to place?.address,
                 "at" to place?.let { listOf(it.point.latitude, it.point.longitude) },
+                // Where routes to the place will end: the one of "routablePoints" that was taken, by
+                // its place in that list. Null when none was, and routes then go to "at".
+                "stopPoint" to stop?.let {
+                    mapOf(
+                        "index" to it.index,
+                        "name" to it.name,
+                        "at" to listOf(it.point.latitude, it.point.longitude),
+                        "metersFromPoint" to Motion.round(it.metersFromPlace, 1),
+                    )
+                },
             ) + result?.debugFields().orEmpty(),
         )
         return place
     }
 
+    private fun SearchResult.point() = GeoPoint(coordinate.latitude(), coordinate.longitude())
+
+    /** The result's routable points as plain values, in the order the search service gave them. */
+    private fun SearchResult.stopCandidates(): List<StopPoints.Candidate>? =
+        routablePoints?.map { StopPoints.Candidate(it.name, it.point.latitude(), it.point.longitude()) }
+
     /**
      * How exact the result's point is (rooftop, parcel, interpolated, street...), what kind of place
      * it is, and the points where a car can reach it, with how far each is from the result's point.
+     * "mapboxId" is what the place keeps as its provider id.
      */
     private fun SearchResult.debugFields(): Map<String, Any?> = mapOf(
         "accuracy" to accuracy?.debugName(),
@@ -207,10 +225,13 @@ internal class MapboxSearchProvider(private val debugLog: DebugLog) : SearchProv
     private fun Exception.withAccessDenied(): Exception =
         if (this is SearchRequestException && AccessErrors.isAccessDenied(code)) AccessDeniedException(message) else this
 
-    private fun SearchResult.toPlace() = Place(
+    /** The place of a result, with [stop] as the point routes go to when the result has one. */
+    private fun SearchResult.toPlace(stop: StopPoints.Choice?) = Place(
         name = name,
         address = fullAddress ?: address?.formattedAddress(),
-        point = GeoPoint(coordinate.latitude(), coordinate.longitude()),
+        point = point(),
+        stopPoint = stop?.point,
+        providerId = mapboxId?.takeIf { it.isNotBlank() },
     )
 
     private companion object {
