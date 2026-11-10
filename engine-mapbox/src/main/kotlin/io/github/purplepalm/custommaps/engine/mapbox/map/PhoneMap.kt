@@ -50,9 +50,11 @@ import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCameraAdapter
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -78,10 +80,11 @@ import kotlinx.coroutines.launch
  *
  * Before guidance the puck comes from the platform location provider, so no trip session (and no
  * free drive billing) is needed just to see where you are. The view's lifecycle follows the hosting
- * activity; call [release] when the view leaves the composition.
+ * activity; say with [setVisible] when the map is on screen, and call [release] when the view
+ * leaves the composition.
  *
  * During guidance, while the map is on screen, it writes a "camera" line to the debug log once a
- * second: where the camera is and where the navigation camera is taking it, how smoothly the camera
+ * second: where the camera is and where the viewport data source wants it, how smoothly the camera
  * and the puck moved, and how fast the map rendered (see [cameraSample]).
  */
 class PhoneMap internal constructor(
@@ -145,6 +148,9 @@ class PhoneMap internal constructor(
 
     /** Moves the map during guidance and in the route preview, in the way of [cameraStyle]. */
     private var camera: GuidanceCamera
+
+    /** Whether the map is on screen, as the hosting screen says with [setVisible]. */
+    private var visible = false
 
     /**
      * The puck position the data source was last given outside guidance; null once the navigator's
@@ -377,6 +383,16 @@ class PhoneMap internal constructor(
         if (guidanceState != GuidanceState.ACTIVE) mapView.location.setLocationProvider(defaultLocationProvider)
     }
 
+    /**
+     * Call with false while the map is not on screen, as when the hosting activity is stopped, and
+     * with true when it is again. A camera that draws its own frames draws none in between. The map
+     * starts as not on screen.
+     */
+    fun setVisible(visible: Boolean) {
+        this.visible = visible
+        camera.setVisible(visible)
+    }
+
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {
         stopCameraSampling()
@@ -550,13 +566,19 @@ class PhoneMap internal constructor(
     /**
      * The camera of a style, and the puck that goes with it: Mapbox standard keeps the SDK's puck,
      * the other styles glide it a little longer and let it jump when the matched position jumps.
-     * Smooth follow has no camera of its own yet and gets the tuned one.
      */
     private fun createCamera(style: CameraStyle): GuidanceCamera {
         val standard = style == CameraStyle.MAPBOX_STANDARD
         guidancePuck.glideMillis = if (standard) GuidancePuck.STANDARD_GLIDE_MS else GuidancePuck.SMOOTH_GLIDE_MS
         guidancePuck.jumpOnTeleport = !standard
-        return NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, tuned = !standard, cameraListener)
+        val created = when (style) {
+            CameraStyle.MAPBOX_STANDARD, CameraStyle.MAPBOX_TUNED ->
+                NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, tuned = !standard, cameraListener)
+            CameraStyle.SMOOTH_FOLLOW ->
+                SmoothNavigationCamera(mapboxMap, mapView.location, mapView.camera, viewportDataSource, CameraTuning.PHONE, cameraListener)
+        }
+        created.setVisible(visible)
+        return created
     }
 
     /** Starts the once-a-second camera line; does nothing if it is already running. */
@@ -602,10 +624,17 @@ class PhoneMap internal constructor(
      * The camera line, about 500 bytes a second (1.8 MB an hour of driving). Lags and steps are in
      * meters, gaps in milliseconds. A smooth camera moves on every frame ("camUpdates" close to
      * "render.frames", "camGapMs" near one frame); a stepping one shows long gaps and large "steps".
-     * "to" is where the navigation camera is taking the camera; "frameUpdatesCut" counts camera
-     * animations restarted before they finished. "renderFps" is the map's own frame rate against the
-     * screen's refresh; "animatorsEnabled" is false when Android's animations are switched off.
-     * "style" is the camera style in use, so drives in different styles can be compared.
+     * "to" is the frame the viewport data source asks for. "renderFps" is the map's own frame rate
+     * against the screen's refresh; "animatorsEnabled" is false when Android's animations are
+     * switched off. "style" is the camera style in use, so drives in different styles can be compared.
+     *
+     * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
+     * animations started, and "frameUpdatesCut", those restarted before they finished. Smooth follow:
+     * "camFps", "camMaxGapMs" and "camWrites" (its frames, the longest time between two of them and
+     * how many set the map's camera), "focus" and "focusGoal" (how far the view is tilted onto the
+     * next maneuver, from 0 to 1, and where that is going), "zoomTarget", "bearingError" (the bearing
+     * still to turn) and "onPuck" (1 while the camera centers on the drawn car, 0 while it frames a
+     * maneuver or the route).
      */
     private fun cameraSample(): Map<String, Any?> {
         val now = SystemClock.elapsedRealtimeNanos()

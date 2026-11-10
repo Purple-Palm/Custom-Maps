@@ -60,6 +60,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -94,6 +95,11 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
 
     val phoneMap = remember { engine.createPhoneMap(context) }
     DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
+    // While the activity is stopped nothing is on screen, and the camera draws no frames.
+    LifecycleStartEffect(phoneMap) {
+        phoneMap.setVisible(true)
+        onStopOrDispose { phoneMap.setVisible(false) }
+    }
     val cameraMode by phoneMap.cameraMode.collectAsStateWithLifecycle()
 
     var locationAccess by remember { mutableStateOf(context.locationAccess()) }
