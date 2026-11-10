@@ -114,7 +114,11 @@ camera uses nothing else: no trip session and no request.
 - **Smooth follow** goes after the drawn puck on its frame loop and springs, as during guidance. It
   comes to the car over 0.8 s, or 2.2 s from more than two screens away. Its loop stops while the
   car stands.
-- **Any gesture** hands the map to the driver, and so does the compass. A plain tap does not.
+- **Any gesture** hands the map to the driver, and so does the compass. A plain tap does not. In
+  the two Mapbox styles a tap still cancels the ease that is running, as it does with the SDK's
+  camera during guidance: the camera stands until the phone's next position starts a new ease, at
+  most a second while driving. **My location** takes it to the car at once, also while it follows
+  already.
 - **The data source** gets every position of the phone's location while the camera follows, in
   every style. Nothing is computed from it until a route is shown; the preview's overview and
   the Start flight then begin from where the car is, not from where it was when following began.

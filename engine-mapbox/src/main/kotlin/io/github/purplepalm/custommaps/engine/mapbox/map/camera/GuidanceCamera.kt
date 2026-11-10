@@ -33,7 +33,8 @@ internal interface GuidanceCamera {
      * where the car is drawn, at the browsing zoom and tilt, and stays on the car from then on.
      * The padding is none, so the car sits in the middle of the map whatever panels are shown. To
      * the screen this still counts as idle; the camera's own state name for it is [IDLE_FOLLOW].
-     * It ends with the next request, or when the driver moves the map.
+     * It ends with the next request, or when the driver moves the map. Asked again while it
+     * follows, the camera goes to the car again.
      */
     fun requestIdleFollow(puck: Point)
 

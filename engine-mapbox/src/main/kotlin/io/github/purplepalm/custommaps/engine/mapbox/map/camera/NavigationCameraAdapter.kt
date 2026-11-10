@@ -148,13 +148,16 @@ internal class NavigationCameraAdapter(
     }
 
     override fun requestIdleFollow(puck: Point) {
-        if (idleFollowing) return
-        // The navigation camera lets go of the map; what is reported is the following, not that.
-        quiet = true
-        navigationCamera.requestNavigationCameraToIdle()
-        quiet = false
-        idleFollowing = true
-        listener.onCameraState(CameraMode.IDLE, state, moving = false)
+        if (!idleFollowing) {
+            // The navigation camera lets go of the map; what is reported is the following, not that.
+            quiet = true
+            navigationCamera.requestNavigationCameraToIdle()
+            quiet = false
+            idleFollowing = true
+            listener.onCameraState(CameraMode.IDLE, state, moving = false)
+        }
+        // Also while it follows already. A plain tap on the map cancels the running ease and starts
+        // nothing, so the camera can stand short of the car until the phone has a new position.
         easeToCar(puck, ARRIVE_MS, steady = false)
     }
 
