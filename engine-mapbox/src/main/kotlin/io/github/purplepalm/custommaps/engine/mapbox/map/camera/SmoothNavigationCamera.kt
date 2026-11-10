@@ -20,20 +20,28 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserve
 import io.github.purplepalm.custommaps.nav.camera.Angles
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
+import io.github.purplepalm.custommaps.nav.camera.LaneChoice
+import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFocus
+import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.camera.SampleRamp
 import io.github.purplepalm.custommaps.nav.camera.Spring
+import io.github.purplepalm.custommaps.nav.camera.ZoomPlanner
+import io.github.purplepalm.custommaps.nav.camera.centerLeadSeconds
 import io.github.purplepalm.custommaps.nav.camera.easeInOut
 import io.github.purplepalm.custommaps.nav.camera.lerp
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.log2
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -49,6 +57,14 @@ import kotlin.math.sin
  * damped springs. While following it goes after the puck as it is drawn, not after the latest
  * position, so it trails the car a little and comes to rest on it when the car stops. The tilt
  * before a maneuver comes from [ManeuverFocus].
+ *
+ * With the Large lane zoom ([setLaneZoom]) the camera also goes close. Toward a maneuver it takes
+ * the zoom of the frame the data source fits around the car and the junction, which may then be
+ * fitted closer than before, and after the maneuver it lets that zoom go along the curve of the
+ * tilt. Near a lane choice on a freeway it goes close with the tilt kept ([ZoomPlanner],
+ * [LaneFocus]). Close in, its center aims a little ahead of the moving car, so the car stays near
+ * its usual place on the screen. On the open road Large is the Default view, and with Default
+ * none of this runs.
  *
  * On the browsing map, before guidance, it follows the drawn puck in the same way, at a fixed zoom
  * and tilt and without the data source.
@@ -162,6 +178,34 @@ internal class SmoothNavigationCamera(
 
     /** How far the view has moved onto the next maneuver, from 0 to 1. */
     private val maneuverFocus = ManeuverFocus(tuning)
+
+    /** Settings, Lane zoom. */
+    private var laneZoom = LaneZoom.DEFAULT
+
+    /**
+     * How far the view has moved in for a lane choice on a freeway, from 0 to 1. It is fed with
+     * either lane zoom, so a change to Large near a lane choice finds it where it should be.
+     */
+    private val laneFocus = LaneFocus(tuning)
+
+    /** What Large makes of the zoom of the data source's frames. */
+    private val zoomPlanner = ZoomPlanner(tuning)
+
+    /** The points with lanes ahead at the last progress update, for the camera line. */
+    private var laneChoices: List<LaneChoice> = emptyList()
+
+    // How fast the drawn puck moves, in degrees a second, and where it was on the frame before.
+    // Followed only while Large follows the car, for the center's aim ahead of it.
+    private var puckSeenLat = Double.NaN
+    private var puckSeenLng = Double.NaN
+    private var puckSpeedLat = 0.0
+    private var puckSpeedLng = 0.0
+
+    /** How many seconds ahead of the drawn car the center aims on this frame. */
+    private var centerLead = 0.0
+
+    /** Whether Large acts on this frame: only while the camera follows the car on a drive. */
+    private val largeFollowing: Boolean get() = laneZoom == LaneZoom.LARGE && mode == Mode.FOLLOWING
 
     /**
      * Every frame of the puck's glide, right after the puck was drawn at its new place. During
@@ -292,7 +336,7 @@ internal class SmoothNavigationCamera(
         if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
     }
 
-    override fun onRouteProgress(progress: RouteProgress) {
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>) {
         val now = now()
         val leg = progress.currentLegProgress
         val step = leg?.currentStepProgress
@@ -307,6 +351,11 @@ internal class SmoothNavigationCamera(
                 speedMps = speedMps,
             )
         }
+        this.laneChoices = laneChoices
+        laneFocus.onProgress(now, progress.distanceTraveled.toDouble(), laneChoices, speedMps)
+        // Near a lane choice Large keeps the lanes at the car close to upright: the view turns
+        // less toward the road ahead. The data source reads this with every frame it computes.
+        setBearingLead(if (laneZoom == LaneZoom.LARGE && laneFocus.goal > 0.0) tuning.laneMaxBearingLead else LaneZoomFrames.SDK_BEARING_LEAD)
         // The data source fits the zoom and the frame around a maneuver for the tilt it is told.
         // It gets the tilt the camera will have when this frame has been reached.
         dataSource.followingPitchPropertyOverride(maneuverFocus.pitchAt(now + tuning.sampleHoldSeconds))
@@ -317,16 +366,33 @@ internal class SmoothNavigationCamera(
         requestFrame()
     }
 
+    override fun setLaneZoom(mode: LaneZoom) {
+        if (mode == laneZoom) return
+        laneZoom = mode
+        // Each mode starts with nothing of the other: no junction remembered, and a puck whose
+        // speed is not known yet. The zoom itself glides to where the new mode wants it.
+        zoomPlanner.reset()
+        forgetPuckSpeed()
+        if (mode == LaneZoom.DEFAULT) setBearingLead(LaneZoomFrames.SDK_BEARING_LEAD)
+        requestFrame()
+    }
+
     override fun onGuidanceEnded() {
-        maneuverFocus.reset(now())
+        val now = now()
+        maneuverFocus.reset(now)
+        laneFocus.reset(now)
+        zoomPlanner.reset()
+        laneChoices = emptyList()
         speedMps = null
         teleportUntil = 0.0
         dataSource.clearFollowingOverrides()
+        setBearingLead(LaneZoomFrames.SDK_BEARING_LEAD)
     }
 
     override fun diagnostics(): Map<String, Any?> {
         val now = now()
         val seconds = (now - statsSince).takeIf { statsSince > 0.0 && it > 0.0 }
+        val holding = laneFocus.current
         val fields = mapOf(
             "camFps" to seconds?.let { Motion.round(frames / it, 1) },
             "camMaxGapMs" to Motion.round(maxGapMs, 1),
@@ -336,6 +402,14 @@ internal class SmoothNavigationCamera(
             "zoomTarget" to Motion.round(toZoom, 2),
             "bearingError" to Motion.round(Angles.wrap180(toBearing - bearing.value), 1),
             "onPuck" to Motion.round(onPuck.value, 2),
+            "laneZoom" to laneZoom,
+            // What sets the zoom while the camera follows the car; the overview has no such plan.
+            "zoomPlan" to zoomPlanner.kind.takeIf { mode == Mode.FOLLOWING },
+            "laneFocus" to Motion.round(laneFocus.focusAt(now), 2),
+            "laneGoal" to laneFocus.goal,
+            "laneAheadM" to nearestLaneChoiceMeters()?.let { Motion.round(it, 0) },
+            "laneChoice" to holding?.let { mapOf("lanes" to it.laneCount, "usable" to it.usableLanes, "atManeuver" to it.atManeuver) },
+            "centerLeadS" to Motion.round(centerLead, 2),
         )
         statsSince = now
         frames = 0
@@ -354,6 +428,8 @@ internal class SmoothNavigationCamera(
         dataSource.unregisterUpdateObserver(dataObserver)
         cameraPlugin.removeCameraAnimationsLifecycleListener(otherAnimations)
         dataSource.clearFollowingOverrides()
+        // The frames were fitted for this camera; the map sets them up again for the next one.
+        LaneZoomFrames.resetLimits(dataSource, tuning)
     }
 
     override fun doFrame(frameTimeNanos: Long) {
@@ -366,6 +442,7 @@ internal class SmoothNavigationCamera(
         } else {
             ((frameTimeNanos - lastFrameNanos) / NANOS_PER_SECOND).coerceIn(0.0, LONGEST_FRAME_SECONDS)
         }
+        if (largeFollowing) trackPuckSpeed(if (lastFrameNanos == 0L) 0.0 else (frameTimeNanos - lastFrameNanos) / NANOS_PER_SECOND)
         lastFrameNanos = frameTimeNanos
         frames += 1
         maxGapMs = maxOf(maxGapMs, dt * MILLIS_PER_SECOND)
@@ -426,7 +503,6 @@ internal class SmoothNavigationCamera(
 
     private fun applySample(data: ViewportData, now: Double) {
         val target = if (mode == Mode.FOLLOWING) data.cameraForFollowing else data.cameraForOverview
-        target.zoom?.let { zoomRamp.push(it, now) }
         target.bearing?.let { value ->
             // The short way round from where the bearing is.
             bearingRamp.push(Angles.nearest(value, if (bearingRamp.ready) bearingRamp.value(now) else bearing.value), now)
@@ -448,6 +524,13 @@ internal class SmoothNavigationCamera(
         // data source frames the road around it, and the overview frames the route: a point of the map.
         val carOnFocalPoint = mode == Mode.FOLLOWING && padding != null && leavesOnePoint(padding)
         onPuckRamp.push(if (carOnFocalPoint) 1.0 else 0.0, now)
+        target.zoom?.let { fitted ->
+            // With Large the data source may fit its frames closer than before. That is meant for
+            // the frame of a maneuver, which holds the car and the junction. A frame of the road
+            // is fitted to the stretch of road ahead, short or long, and says nothing of the
+            // junction: it counts no closer than it always could.
+            zoomRamp.push(if (carOnFocalPoint && laneZoom == LaneZoom.LARGE) min(fitted, tuning.defaultMaxZoom) else fitted, now)
+        }
     }
 
     private fun computeTargets(now: Double, dt: Double) {
@@ -455,17 +538,43 @@ internal class SmoothNavigationCamera(
         val weight = onPuck.value.coerceIn(0.0, 1.0)
         val mapLat = if (latRamp.ready) latRamp.value(now) else lat.value
         val mapLng = if (lngRamp.ready) lngRamp.value(now) else lng.value
-        toLat = if (puckLat.isNaN()) mapLat else lerp(mapLat, puckLat, weight)
-        toLng = if (puckLng.isNaN()) mapLng else lerp(mapLng, puckLng, weight)
+        if (largeFollowing && !puckLat.isNaN()) {
+            // The center trails a moving car by a set time, which close in is a long way on the
+            // screen. So it aims ahead of the car, by as much as keeps it within a set width of
+            // it: at the zoom the camera has, or the one it is going in to, whichever is closer.
+            val metersPerSecond = hypot(puckSpeedLat, puckSpeedLng * cos(Math.toRadians(puckLat))) * METERS_PER_DEGREE
+            val closest = if (lastZoomTarget.isNaN()) zoom.value else max(zoom.value, lastZoomTarget)
+            centerLead = centerLeadSeconds(tuning.centerTau, metersPerSecond, MapScale.metersPerDp(closest, puckLat), tuning.maxPuckLagDp)
+            toLat = lerp(mapLat, puckLat + puckSpeedLat * centerLead, weight)
+            toLng = lerp(mapLng, puckLng + puckSpeedLng * centerLead, weight)
+        } else {
+            centerLead = 0.0
+            toLat = if (puckLat.isNaN()) mapLat else lerp(mapLat, puckLat, weight)
+            toLng = if (puckLng.isNaN()) mapLng else lerp(mapLng, puckLng, weight)
+        }
 
         // Within a mode the springs aim ahead of the ramps, which keeps them close behind. During a
         // change of mode the fading offset moves the targets as well, and a frame that comes then may
         // differ much from the one before: aiming ahead of it would first take the camera the wrong way.
         val steady = transitionSeconds <= 0.0 && !lastZoomTarget.isNaN()
-        val zoomGoal = when {
+        val frameZoom = when {
             !zoomRamp.ready -> zoom.value
             steady -> zoomRamp.lead(now, tuning.zoomTau * tuning.rampLead)
             else -> zoomRamp.value(now)
+        }
+        // With Large the frames may be fitted closer than before. The camera then holds the open
+        // road at the zoom it always had, and goes closer toward a maneuver and near a lane choice.
+        val zoomGoal = if (largeFollowing) {
+            zoomPlanner.target(
+                mode = laneZoom,
+                frameZoom = frameZoom,
+                latitude = if (puckLat.isNaN()) lat.value else puckLat,
+                junctionFocus = maneuverFocus.focusAt(now),
+                afterManeuver = maneuverFocus.afterManeuver,
+                laneFocus = laneFocus.focusAt(now),
+            )
+        } else {
+            frameZoom
         }
         val bearingGoal = when {
             !bearingRamp.ready -> bearing.value
@@ -656,6 +765,8 @@ internal class SmoothNavigationCamera(
         // The puck counts only while the camera is on it, the tilt before a maneuver only during guidance.
         if (mode.onPuck && now - puckSeenAt < PUCK_AWAKE_SECONDS) return true
         if (mode == Mode.FOLLOWING && maneuverFocus.isAnimating(now)) return true
+        // The view going close for a lane choice, or coming back, moves the zoom only with Large.
+        if (largeFollowing && laneFocus.isAnimating(now)) return true
         for (index in ramps.indices) if (ramps[index].isMoving(now, rampRest[index])) return true
         for (side in 0 until SIDES) if (!pad[side].isSettled(toPad[side], PAD_REST)) return true
         return !(
@@ -665,6 +776,54 @@ internal class SmoothNavigationCamera(
                 pitch.isSettled(toPitch, ANGLE_REST) &&
                 onPuck.isSettled(if (onPuckRamp.ready) onPuckRamp.value(now) else 0.0, ON_PUCK_REST)
             )
+    }
+
+    /**
+     * Follows how fast the drawn puck moves, from one frame to the next, smoothed over
+     * [PUCK_SPEED_SECONDS]. The puck's glide and this camera run on the same frames, so the time
+     * between two frames is the time the puck took.
+     *
+     * @param seconds since the frame before; 0 for the first frame after a rest
+     */
+    private fun trackPuckSpeed(seconds: Double) {
+        if (puckLat.isNaN() || puckSeenLat.isNaN() || seconds <= 0.0 || seconds > LONGEST_PUCK_GAP_SECONDS) {
+            // Nothing to measure from: after a rest the car starts from standing.
+            puckSpeedLat = 0.0
+            puckSpeedLng = 0.0
+        } else {
+            val speedLat = (puckLat - puckSeenLat) / seconds
+            val speedLng = (puckLng - puckSeenLng) / seconds
+            // A puck that was put on another place at once did not drive there.
+            if (abs(speedLat) < FASTEST_PUCK_DEGREES && abs(speedLng) < FASTEST_PUCK_DEGREES) {
+                val share = (seconds / PUCK_SPEED_SECONDS).coerceAtMost(1.0)
+                puckSpeedLat += (speedLat - puckSpeedLat) * share
+                puckSpeedLng += (speedLng - puckSpeedLng) * share
+            }
+        }
+        puckSeenLat = puckLat
+        puckSeenLng = puckLng
+    }
+
+    private fun forgetPuckSpeed() {
+        puckSeenLat = Double.NaN
+        puckSeenLng = Double.NaN
+        puckSpeedLat = 0.0
+        puckSpeedLng = 0.0
+    }
+
+    /** How far the data source may turn the view from the car's heading toward the road ahead, in degrees. */
+    private fun setBearingLead(degrees: Double) {
+        val smoothing = dataSource.options.followingFrameOptions.bearingSmoothing
+        if (smoothing.maxBearingAngleDiff != degrees) smoothing.maxBearingAngleDiff = degrees
+    }
+
+    /** How far ahead the nearest lane choice is that the view goes close for; null when there is none. */
+    private fun nearestLaneChoiceMeters(): Double? {
+        var nearest: Double? = null
+        for (choice in laneChoices) {
+            if (choice.isAhead && choice.counts(tuning) && (nearest == null || choice.metersAhead < nearest)) nearest = choice.metersAhead
+        }
+        return nearest
     }
 
     private fun requestFrame() {
@@ -744,6 +903,18 @@ internal class SmoothNavigationCamera(
 
         /** The width of one point of the map at zoom 0 on the equator, with 512-point tiles. */
         const val METERS_PER_POINT_AT_ZOOM_0 = 78_271.517
+
+        /** One degree of latitude on the ground. */
+        const val METERS_PER_DEGREE = 111_319.49
+
+        /** The drawn puck's speed is an average over about this long. */
+        const val PUCK_SPEED_SECONDS = 0.3
+
+        /** Two frames farther apart than this say nothing about the puck's speed. */
+        const val LONGEST_PUCK_GAP_SECONDS = 0.25
+
+        /** Faster than any car, in degrees a second: about 220 m/s along a meridian. A jump of the puck, not a drive. */
+        const val FASTEST_PUCK_DEGREES = 2e-3
 
         /** The data source's one-point padding adds up to the map's size within this many pixels. */
         const val FOCAL_SLACK_PX = 2.0

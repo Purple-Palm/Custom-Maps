@@ -3,7 +3,9 @@ package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 
 /**
  * The camera of one map: it shows the route in the preview, follows the car during guidance, and
@@ -55,11 +57,21 @@ internal interface GuidanceCamera {
      */
     fun onLocation(location: Location, isTeleport: Boolean)
 
-    /** The route progress of the same update of the navigator; it comes right after the location. */
-    fun onRouteProgress(progress: RouteProgress)
+    /**
+     * The route progress of the same update of the navigator; it comes right after the location.
+     * [laneChoices] are the points with lanes ahead of the car at this update, as the engine reads
+     * them from the route; the Large lane zoom goes close for the ones that count.
+     */
+    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>)
 
     /** There is no guidance, or no longer: whatever the camera kept for the drive is dropped. */
     fun onGuidanceEnded()
+
+    /**
+     * How close the view goes before turns and lane choices. A change during a drive is glided to.
+     * The map sets up the data source's frames for the mode ([LaneZoomFrames]) before it calls this.
+     */
+    fun setLaneZoom(mode: LaneZoom)
 
     /** False while the map is not on screen; a camera that draws its own frames stops them then. */
     fun setVisible(visible: Boolean)

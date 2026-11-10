@@ -49,6 +49,7 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.LaneZoomFrames
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCameraAdapter
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
@@ -57,6 +58,7 @@ import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
+import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -66,6 +68,7 @@ import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -155,8 +158,17 @@ class PhoneMap internal constructor(
      */
     private var cameraStyle = CameraStyle.DEFAULT
 
+    /** How close the camera goes before turns and lane choices; Settings brings the stored choice. */
+    private var laneZoom = LaneZoom.DEFAULT
+
     /** Moves the map during guidance and in the route preview, in the way of [cameraStyle]. */
     private var camera: GuidanceCamera
+
+    /** The route the data source frames: the first of the preview, or the navigator's; null without one. */
+    private var framedRoute: NavigationRoute? = null
+
+    /** The latest route progress of the drive; null outside guidance. */
+    private var lastProgress: RouteProgress? = null
 
     /** Whether the map is on screen, as the hosting screen says with [setVisible]. */
     private var visible = false
@@ -394,8 +406,10 @@ class PhoneMap internal constructor(
         // What the camera was doing is asked of the new one again, so a drive goes on being followed.
         val mode = _cameraMode.value
         camera.destroy()
-        // The old camera took back what it had set on the data source, but the frame the data source
-        // holds was computed with it. The new camera gets a frame of its own to start from.
+        // The old camera took back what it had set on the data source, and the frames are set up
+        // for the new style and the lane zoom. The frame the data source holds was computed for
+        // the old camera: the new one gets a frame of its own to start from.
+        LaneZoomFrames.apply(viewportDataSource, style, laneZoom, CameraTuning.PHONE, framedRoute, lastProgress)
         viewportDataSource.evaluate()
         cameraStyle = style
         // The new camera starts idle; a transition the old one was in ends with it.
@@ -407,6 +421,16 @@ class PhoneMap internal constructor(
             // On the browsing map the new camera stays on the car if the old one did.
             CameraMode.IDLE -> if (idleFollow.following) followCar()
         }
+    }
+
+    override fun setLaneZoom(mode: LaneZoom) {
+        if (mode == laneZoom) return
+        laneZoom = mode
+        // First the frames of the data source, then the camera, then a frame computed for both.
+        // During a drive the camera glides to it.
+        LaneZoomFrames.apply(viewportDataSource, cameraStyle, mode, CameraTuning.PHONE, framedRoute, lastProgress)
+        camera.setLaneZoom(mode)
+        viewportDataSource.evaluate()
     }
 
     /**
@@ -487,7 +511,7 @@ class PhoneMap internal constructor(
                 if (routes.isEmpty()) return
                 drawRoutes(routes)
                 clearArrows()
-                viewportDataSource.onRouteChanged(routes.first())
+                frameRoute(routes.first())
                 // The car may have moved since the map last centered on it.
                 if (tracksPuckInPreview) lastPuck?.let(::feedPuck)
                 viewportDataSource.evaluate()
@@ -528,7 +552,9 @@ class PhoneMap internal constructor(
         val style = style ?: return
         routeLineApi.updateWithRouteProgress(progress) { update -> routeLineView.renderRouteLineUpdate(style, update) }
         routeArrowView.renderManeuverUpdate(style, routeArrowApi.addUpcomingManeuverArrow(progress))
-        camera.onRouteProgress(progress)
+        lastProgress = progress
+        // The engine reads the lane choices once for each update; its own observer got the same list.
+        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress))
     }
 
     private fun onPuckMoved(point: Point) {
@@ -583,8 +609,14 @@ class PhoneMap internal constructor(
         val routes = navigatorRoutes
         if (routes.isEmpty()) return
         drawRoutes(routes)
-        viewportDataSource.onRouteChanged(routes.first())
+        frameRoute(routes.first())
         viewportDataSource.evaluate()
+    }
+
+    /** Gives the data source the route to frame; a route it has already changes nothing. */
+    private fun frameRoute(route: NavigationRoute) {
+        framedRoute = route
+        viewportDataSource.onRouteChanged(route)
     }
 
     private fun drawRoutes(routes: List<NavigationRoute>) {
@@ -596,6 +628,8 @@ class PhoneMap internal constructor(
         val style = style ?: return
         routeLineApi.clearRouteLine { value -> routeLineView.renderClearRouteLineValue(style, value) }
         clearArrows()
+        framedRoute = null
+        lastProgress = null
         viewportDataSource.clearRouteData()
         viewportDataSource.evaluate()
     }
@@ -645,10 +679,11 @@ class PhoneMap internal constructor(
         guidancePuck.jumpOnTeleport = !standard
         val created = when (style) {
             CameraStyle.MAPBOX_STANDARD, CameraStyle.MAPBOX_TUNED ->
-                NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, tuned = !standard, cameraListener)
+                NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, tuned = !standard, CameraTuning.PHONE, cameraListener)
             CameraStyle.SMOOTH_FOLLOW ->
                 SmoothNavigationCamera(mapboxMap, mapView.location, mapView.camera, viewportDataSource, CameraTuning.PHONE, cameraListener)
         }
+        created.setLaneZoom(laneZoom)
         created.setVisible(visible)
         return created
     }
@@ -693,20 +728,27 @@ class PhoneMap internal constructor(
     }
 
     /**
-     * The camera line, about 500 bytes a second (1.8 MB an hour of driving). Lags and steps are in
+     * The camera line, about 600 bytes a second (2.2 MB an hour of driving). Lags and steps are in
      * meters, gaps in milliseconds. A smooth camera moves on every frame ("camUpdates" close to
      * "render.frames", "camGapMs" near one frame); a stepping one shows long gaps and large "steps".
-     * "to" is the frame the viewport data source asks for. "renderFps" is the map's own frame rate
-     * against the screen's refresh; "animatorsEnabled" is false when Android's animations are
-     * switched off. "style" is the camera style in use, so drives in different styles can be compared.
+     * "to" is the frame the viewport data source asks for. "laneDp" is how wide a lane of 3.7 m is
+     * on the screen at the camera's center. "renderFps" is the map's own frame rate against the
+     * screen's refresh; "animatorsEnabled" is false when Android's animations are switched off.
+     * "style" is the camera style in use, so drives in different styles can be compared.
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
-     * animations started, and "frameUpdatesCut", those restarted before they finished. Smooth follow:
-     * "camFps", "camMaxGapMs" and "camWrites" (its frames, the longest time between two of them and
-     * how many set the map's camera), "focus" and "focusGoal" (how far the view is tilted onto the
-     * next maneuver, from 0 to 1, and where that is going), "zoomTarget", "bearingError" (the bearing
+     * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
+     * (the setting), "laneGoal" (1 while the view is close for a lane choice) and "maxZoom" and
+     * "minZoom", the limits the data source fits its frames within. Smooth follow: "camFps",
+     * "camMaxGapMs" and "camWrites" (its frames, the longest time between two of them and how many
+     * set the map's camera), "focus" and "focusGoal" (how far the view is tilted onto the next
+     * maneuver, from 0 to 1, and where that is going), "zoomTarget", "bearingError" (the bearing
      * still to turn) and "onPuck" (1 while the camera centers on the drawn car, 0 while it frames a
-     * maneuver or the route).
+     * maneuver or the route); "laneZoom", "zoomPlan" (what sets the zoom: ROAD, JUNCTION,
+     * AFTER_JUNCTION or LANES), "laneFocus" and "laneGoal" (how far the view is in for a lane
+     * choice, and where that is going), "laneAheadM" (meters to the nearest lane choice that
+     * counts), "laneChoice" (the one that holds the view) and "centerLeadS" (how many seconds ahead
+     * of the car the center aims).
      */
     private fun cameraSample(): Map<String, Any?> {
         val now = SystemClock.elapsedRealtimeNanos()
@@ -725,6 +767,7 @@ class PhoneMap internal constructor(
             "zoom" to Motion.round(shown.zoom, 2),
             "pitch" to Motion.round(shown.pitch, 1),
             "bearing" to Motion.round(shown.bearing, 1),
+            "laneDp" to Motion.round(MapScale.laneDp(shown.zoom, shown.center.latitude()), 1),
             "to" to mapOf(
                 "zoom" to target.zoom?.let { Motion.round(it, 2) },
                 "pitch" to target.pitch?.let { Motion.round(it, 1) },

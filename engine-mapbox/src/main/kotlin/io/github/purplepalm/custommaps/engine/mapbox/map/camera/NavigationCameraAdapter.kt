@@ -22,9 +22,13 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserve
 import com.mapbox.navigation.ui.maps.camera.lifecycle.NavigationBasicGesturesHandler
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraState
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraStateChangedObserver
+import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
+import io.github.purplepalm.custommaps.nav.camera.LaneChoice
+import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 
 /**
  * The navigation SDK's own camera as a [GuidanceCamera]: [NavigationCamera] with
@@ -41,6 +45,10 @@ import io.github.purplepalm.custommaps.nav.model.CameraMode
  *   is started only to be replaced a moment later.
  * - Following frames are reached with the longer animations of [FollowingTransition].
  * - A jump of the matched position moves the camera there at once.
+ * - The Large lane zoom applies: before each frame is computed, the limits of the data source are
+ *   moved so that the frame of a maneuver may be fitted close, and the frame near a lane choice on
+ *   a freeway is close ([LaneZoomFrames.beforeTunedEvaluate]). The camera's animations glide there.
+ *   Mapbox standard keeps its own zoom whatever the lane zoom is.
  *
  * On the browsing map, before guidance, [NavigationCamera] has nothing to follow the car with. Both
  * styles then move the map with plain eases of the camera plugin: one to the car, and one with every
@@ -52,6 +60,7 @@ internal class NavigationCameraAdapter(
     private val cameraPlugin: CameraAnimationsPlugin,
     private val dataSource: MapboxNavigationViewportDataSource,
     private val tuned: Boolean,
+    private val tuning: CameraTuning,
     private val listener: GuidanceCamera.Listener,
 ) : GuidanceCamera {
 
@@ -66,6 +75,16 @@ internal class NavigationCameraAdapter(
 
     /** For the tuned style: which message of an update the frame is computed on. */
     private val pacing = OncePerUpdate()
+
+    /** Settings, Lane zoom. Only the tuned style acts on it. */
+    private var laneZoom = LaneZoom.DEFAULT
+
+    /** For the tuned style: whether the view is close for a lane choice on a freeway. */
+    private val laneFocus = LaneFocus(tuning)
+
+    // For the tuned style: the car's speed and latitude at the latest position.
+    private var speedMps: Double? = null
+    private var latitude = Double.NaN
 
     // For the camera line: the camera's frame updates, and the ones cut short by the next.
     private var frameUpdates = 0
@@ -179,26 +198,52 @@ internal class NavigationCameraAdapter(
             dataSource.evaluate()
             return
         }
+        speedMps = location.speed ?: speedMps
+        latitude = location.latitude
         // The route progress of this update comes right after the location and evaluates.
         if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
         // The puck jumps on a teleport, and the camera with it: neither slides across the map.
         if (isTeleport) navigationCamera.resetFrame()
     }
 
-    override fun onRouteProgress(progress: RouteProgress) {
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>) {
         dataSource.onRouteProgressChanged(progress)
+        if (tuned) {
+            laneFocus.onProgress(nowSeconds(), progress.distanceTraveled.toDouble(), laneChoices, speedMps)
+            LaneZoomFrames.beforeTunedEvaluate(dataSource, laneZoom, tuning, progress, laneWindow = laneFocus.goal > 0.0, latitude)
+        }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
     }
 
-    // This camera keeps nothing for a drive.
-    override fun onGuidanceEnded() = Unit
+    override fun setLaneZoom(mode: LaneZoom) {
+        // The limits follow with the next progress update.
+        laneZoom = mode
+    }
+
+    override fun onGuidanceEnded() {
+        // Mapbox standard keeps nothing for a drive.
+        if (!tuned) return
+        laneFocus.reset(nowSeconds())
+        speedMps = null
+        LaneZoomFrames.resetLimits(dataSource, tuning)
+    }
 
     // It draws no frames of its own that would have to stop.
     override fun setVisible(visible: Boolean) = Unit
 
     override fun diagnostics(): Map<String, Any?> {
-        val fields = mapOf("frameUpdates" to frameUpdates, "frameUpdatesCut" to frameUpdatesCut)
+        val limits = dataSource.options.followingFrameOptions
+        val fields = mapOf(
+            "frameUpdates" to frameUpdates,
+            "frameUpdatesCut" to frameUpdatesCut,
+            // The setting, whether the view is close for a lane choice, and the limits the data
+            // source fits its frames within. Mapbox standard keeps the SDK's limits whatever is set.
+            "laneZoom" to laneZoom,
+            "laneGoal" to laneFocus.goal,
+            "maxZoom" to limits.maxZoom,
+            "minZoom" to limits.minZoom,
+        )
         frameUpdates = 0
         frameUpdatesCut = 0
         return fields
@@ -212,7 +257,8 @@ internal class NavigationCameraAdapter(
         // Cancels the animation it is running, on the browsing map and with a route.
         stopIdleFollow()
         navigationCamera.requestNavigationCameraToIdle()
-        // Neither style of this camera sets anything on the data source, so nothing is taken back.
+        // The tuned style moved the limits of the data source; Mapbox standard set nothing on it.
+        if (tuned) LaneZoomFrames.resetLimits(dataSource, tuning)
         source.detach()
     }
 
@@ -237,6 +283,9 @@ internal class NavigationCameraAdapter(
         idleEase?.cancel()
         idleEase = null
     }
+
+    /** The clock of [laneFocus], in seconds. */
+    private fun nowSeconds(): Double = SystemClock.elapsedRealtime() / MILLIS_PER_SECOND
 
     private fun NavigationCameraState.isTransition(): Boolean =
         this == NavigationCameraState.TRANSITION_TO_FOLLOWING || this == NavigationCameraState.TRANSITION_TO_OVERVIEW
@@ -277,6 +326,7 @@ internal class NavigationCameraAdapter(
         /** Who the eases on the browsing map belong to, as the camera plugin reports it. */
         const val IDLE_FOLLOW_OWNER = "CUSTOM_MAPS_IDLE_FOLLOW"
         const val ARRIVE_MS = (IdleFollow.ARRIVE_SECONDS * 1_000).toLong()
+        const val MILLIS_PER_SECOND = 1_000.0
         val STEADY = LinearInterpolator()
         val NO_PADDING = EdgeInsets(0.0, 0.0, 0.0, 0.0)
     }
