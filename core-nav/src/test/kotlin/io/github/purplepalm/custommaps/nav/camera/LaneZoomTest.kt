@@ -413,18 +413,51 @@ class LaneZoomTest {
     fun `large zooms in to the lane width before a lane choice`() {
         val plan = ZoomPlanner(tuning)
         val lanes = MapScale.zoomForLaneDp(14.0, 35.0)
-        assertEquals(lanes, plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, false), 1e-9)
-        assertEquals(lerp(14.0, lanes, 0.5), plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 0.5, false), 1e-9)
+        assertEquals(lanes, plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, roadFrame = true), 1e-9)
+        assertEquals(lerp(14.0, lanes, 0.5), plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 0.5, roadFrame = true), 1e-9)
         assertEquals(ZoomPlanner.Kind.LANES, plan.kind)
         // The same lane width takes a closer zoom nearer the equator.
-        assertTrue(plan.target(LaneZoom.LARGE, 14.0, 25.0, 0.0, false, 1.0, false) > lanes)
+        assertTrue(plan.target(LaneZoom.LARGE, 14.0, 25.0, 0.0, false, 1.0, roadFrame = true) > lanes)
+    }
+
+    @Test
+    fun `in the frame of a maneuver a lane choice goes no closer than the frame`() {
+        val lanes = MapScale.zoomForLaneDp(14.0, 35.0)
+        val cap = MapScale.zoomForLaneDp(28.0, 35.0)
+        // An exit that was a lane choice, and its ramp ends in a turn: the lane choice still holds
+        // the view when the turn is framed. The frame is fitted around the car and the junction.
+        for (frameZoom in listOf(15.0, 16.35, 17.26, 17.62, lanes - 0.01)) {
+            val plan = ZoomPlanner(tuning)
+            assertEquals(frameZoom, plan.target(LaneZoom.LARGE, frameZoom, 35.0, 1.0, false, 1.0, roadFrame = false), 1e-9, "frame $frameZoom")
+            // Also while the tilt has only begun to go down and the lane choice is on its way out.
+            for (junctionFocus in listOf(0.0, 0.3, 1.0)) {
+                for (laneFocus in listOf(0.2, 0.7, 1.0)) {
+                    val zoom = ZoomPlanner(tuning).target(LaneZoom.LARGE, frameZoom, 35.0, junctionFocus, false, laneFocus, roadFrame = false)
+                    assertTrue(zoom <= frameZoom + 1e-9, "frame $frameZoom, focus $junctionFocus and $laneFocus: $zoom")
+                }
+            }
+        }
+        // With both at the frame's zoom, the log names the junction.
+        val plan = ZoomPlanner(tuning)
+        plan.target(LaneZoom.LARGE, 17.26, 35.0, 1.0, false, 1.0, roadFrame = false)
+        assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
+        // Before the tilt has begun, the lane choice alone goes up to the frame.
+        assertEquals(17.26, plan.target(LaneZoom.LARGE, 17.26, 35.0, 0.0, false, 1.0, roadFrame = false), 1e-9)
+        assertEquals(ZoomPlanner.Kind.LANES, plan.kind)
+        // A frame fitted closer than the lane choice asks for: the lane choice keeps its own zoom
+        // and the junction goes on to the frame's, up to its cap.
+        assertEquals(lanes, ZoomPlanner(tuning).target(LaneZoom.LARGE, 18.5, 35.0, 0.0, false, 1.0, roadFrame = false), 1e-9)
+        assertEquals(18.5, ZoomPlanner(tuning).target(LaneZoom.LARGE, 18.5, 35.0, 1.0, false, 1.0, roadFrame = false), 1e-9)
+        assertEquals(cap, ZoomPlanner(tuning).target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 1.0, roadFrame = false), 1e-9)
+        // A frame of the open road has the car on its own place: there the lane choice is not held back.
+        assertEquals(lanes, ZoomPlanner(tuning).target(LaneZoom.LARGE, 14.2, 35.0, 0.0, false, 1.0, roadFrame = true), 1e-9)
     }
 
     @Test
     fun `large never goes closer than its limit`() {
         val close = ZoomPlanner(tuning.copy(maxZoom = 18.0))
         assertEquals(18.0, close.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, false), 1e-9)
-        assertEquals(17.89, close.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, false), 0.01)
+        assertEquals(17.89, close.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, roadFrame = true), 0.01)
     }
 
     @Test

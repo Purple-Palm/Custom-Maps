@@ -241,7 +241,10 @@ class LaneFocus(private val tuning: CameraTuning) {
  *   curve as the tilt;
  * - after the maneuver, the zoom the junction had, let go along that curve as the tilt comes back.
  *   Where the view stays down for a next maneuver, it is kept until that one is framed;
- * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve.
+ * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve. In
+ *   the frame of a maneuver that is no closer than the frame was fitted: its center is the
+ *   frame's own point, not the car, and closer than its fit the car and the junction would be
+ *   pushed off the map.
  *
  * Called on every frame; it allocates nothing.
  */
@@ -290,11 +293,14 @@ class ZoomPlanner(private val tuning: CameraTuning) {
             if (junctionFocus > 0.0 && !roadFrame) junctionZoom = full
             lerp(road, full, junctionFocus)
         }
-        val lanes = lerp(road, max(road, closest(tuning.freewayLaneDp, latitude)), laneFocus)
+        val lanesGoal = max(road, closest(tuning.freewayLaneDp, latitude))
+        // A lane choice that still holds the view when a maneuver is framed stays within that frame.
+        val lanes = lerp(road, if (roadFrame) lanesGoal else min(lanesGoal, max(road, frameZoom)), laneFocus)
         val zoom = max(junction, lanes)
         kind = when {
             zoom <= road + SAME_ZOOM -> Kind.ROAD
-            lanes >= junction -> Kind.LANES
+            // In the frame of a maneuver both may stand at the frame's zoom: the junction decides it.
+            lanes > junction || (roadFrame && lanes >= junction) -> Kind.LANES
             afterManeuver || keeps -> Kind.AFTER_JUNCTION
             else -> Kind.JUNCTION
         }

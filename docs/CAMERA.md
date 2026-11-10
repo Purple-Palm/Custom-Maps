@@ -983,6 +983,13 @@ would show only a few seconds of road at freeway speed. While a point holds the 
 may lead the car's heading toward the road ahead by at most 20° instead of the SDK's 45°, so the
 lanes at the car stay close to upright on a curving freeway. Elsewhere the early turn is unchanged.
 
+**Where a turn follows closely**, as on a short exit ramp that ends in one, the lane choice can
+still hold the view when the SDK starts to frame the turn. That frame is centred on its own point,
+not on the car, and closer than its fit the car would slide under the bottom panel and the
+junction under the card. So in the frame of a maneuver the lane zoom goes no closer than the
+frame: the view eases out to the frame, about half a zoom level in the simulation, and goes in
+again with it as the junction zoom takes over.
+
 In the simulation at 105 km/h (window 730 m, zoom 18.18 for 14 dp on the equator, the road's frame
 at 14.2): the zoom starts in 675 m before a split where 2 of 5 lanes leave, a lane is 14 dp from
 483 m before it, the view stays in to a second split 964 m on, starts out 114 m past that and is
@@ -1204,7 +1211,8 @@ routes). Among them:
 - Default returns the frame's zoom. Large on the road is Default, and a frame of the open road
   counts no closer than that; it takes the junction frame's zoom up to 28 dp, lets it go along the
   tilt's curve after the turn, keeps it between two junctions the view stays down for, and goes to
-  14 dp near a lane choice.
+  14 dp near a lane choice. In the frame of a maneuver a lane choice goes no closer than the
+  frame.
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
