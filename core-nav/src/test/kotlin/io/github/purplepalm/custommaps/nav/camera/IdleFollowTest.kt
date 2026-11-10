@@ -32,7 +32,9 @@ class IdleFollowTest {
         follow.onMapMoved()
         assertTrue(follow.onMyLocation())
         assertTrue(follow.following)
+        // The camera is on its way already, and the car's next positions keep it following.
         assertFalse(follow.onCarLocated())
+        assertTrue(follow.following)
     }
 
     @Test
@@ -56,6 +58,8 @@ class IdleFollowTest {
         assertFalse(follow.onCarLocated())
         assertFalse(follow.following)
         assertTrue(follow.onMyLocation())
+        assertFalse(follow.onCarLocated())
+        assertTrue(follow.following)
     }
 
     @Test
