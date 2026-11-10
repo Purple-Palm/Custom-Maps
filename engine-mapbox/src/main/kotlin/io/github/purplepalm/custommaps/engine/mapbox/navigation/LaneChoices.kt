@@ -75,12 +75,15 @@ internal class LaneChoices(
     }
 
     private fun read(progress: RouteProgress): List<LaneChoice> {
-        // Off the route its lanes are not the car's, and its distances are stale until a new route comes.
-        if (progress.currentState == RouteProgressState.OFF_ROUTE) return emptyList()
         val leg = progress.currentLegProgress ?: return emptyList()
         val stepProgress = leg.currentStepProgress ?: return emptyList()
-        val key = "${progress.navigationRoute.id}/${leg.legIndex}/${stepProgress.stepIndex}"
-        if (key != stepKey) {
+        return update(
+            offRoute = progress.currentState == RouteProgressState.OFF_ROUTE,
+            stepKey = "${progress.navigationRoute.id}/${leg.legIndex}/${stepProgress.stepIndex}",
+            metersOnStep = stepProgress.distanceTraveled.toDouble(),
+            metersToManeuver = stepProgress.distanceRemaining.toDouble(),
+            maneuverType = progress.bannerInstructions?.primary()?.type(),
+        ) { key ->
             load(
                 stepKey = key,
                 intersections = stepProgress.step?.intersections().orEmpty(),
@@ -88,11 +91,30 @@ internal class LaneChoices(
                 maneuver = leg.upcomingStep?.intersections()?.firstOrNull(),
             )
         }
-        return choices(
-            metersOnStep = stepProgress.distanceTraveled.toDouble(),
-            metersToManeuver = stepProgress.distanceRemaining.toDouble(),
-            maneuverIsChoice = isLaneChoiceManeuver(progress.bannerInstructions?.primary()?.type()),
-        )
+    }
+
+    /**
+     * One update of the route progress, in plain values: the points ahead of the car, nearest
+     * first. The lanes of a step are read when the car enters it, through [loadStep], and not
+     * again while it stays on that step. Off the route there are no points: the route's lanes are
+     * not the car's then, and its distances are stale until a new route comes. The step stays as
+     * it was read meanwhile.
+     *
+     * @param stepKey the route, leg and step, as in the progress snapshot
+     * @param maneuverType the type of the maneuver that ends the step, as the route's banner names it
+     * @param loadStep reads the lanes of the step with the given key, with [load]
+     */
+    fun update(
+        offRoute: Boolean,
+        stepKey: String,
+        metersOnStep: Double,
+        metersToManeuver: Double,
+        maneuverType: String?,
+        loadStep: (String) -> Unit,
+    ): List<LaneChoice> {
+        if (offRoute) return emptyList()
+        if (stepKey != this.stepKey) loadStep(stepKey)
+        return choices(metersOnStep, metersToManeuver, maneuverIsChoice = isLaneChoiceManeuver(maneuverType))
     }
 
     /**

@@ -423,6 +423,74 @@ class LaneChoicesTest {
         assertEquals(1, lanes.entering(listOf(beforeSplit(lanes, 300.0)), 29.0).size)
     }
 
+    /** Reads the usual split for whatever step is asked for, and counts how often. */
+    private class StepLoader(private val lanes: LaneChoices, private val read: (String) -> Unit) : (String) -> Unit {
+        var loads = 0
+        val keys = ArrayList<String>()
+
+        override fun invoke(stepKey: String) {
+            loads++
+            keys.add(stepKey)
+            read(stepKey)
+        }
+    }
+
+    private fun loaderOf(lanes: LaneChoices, maneuver: StepIntersection? = null) = StepLoader(lanes) { key ->
+        lanes.load(key, listOf(intersection(0), intersection(4), intersection(7, splitLanes)), points, maneuver)
+    }
+
+    @Test
+    fun `the lanes of a step are read once and each of its points is reported once`() {
+        val lanes = LaneChoices()
+        val loader = loaderOf(lanes)
+        val first = lanes.update(offRoute = false, "r/0/2", metersOnStep = 0.0, metersToManeuver = 1_000.0, "turn", loader)
+        assertEquals(listOf("r/0/2"), loader.keys)
+        assertEquals(listOf("r/0/2/2"), lanes.entering(first, 29.0).map { it.key })
+        // The next updates on the same step measure the distance again and read nothing.
+        for (t in 1..5) {
+            val next = lanes.update(offRoute = false, "r/0/2", metersOnStep = 29.0 * t, metersToManeuver = 1_000.0 - 29.0 * t, "turn", loader)
+            assertEquals(7 * spacing - 29.0 * t, next.single().metersAhead, 1e-6)
+            assertTrue(lanes.entering(next, 29.0).isEmpty(), "reported already, update $t")
+        }
+        assertEquals(1, loader.loads)
+        // A new step, and the same step of a new route, are read anew and report their points afresh.
+        lanes.update(offRoute = false, "r/0/3", 0.0, 1_000.0, "turn", loader)
+        val rerouted = lanes.update(offRoute = false, "r2/0/3", 0.0, 1_000.0, "turn", loader)
+        assertEquals(listOf("r/0/2", "r/0/3", "r2/0/3"), loader.keys)
+        assertEquals(listOf("r2/0/3/2"), lanes.entering(rerouted, 29.0).map { it.key })
+    }
+
+    @Test
+    fun `off the route there are no lane choices and the step stays as it was read`() {
+        val lanes = LaneChoices()
+        val loader = loaderOf(lanes)
+        val before = lanes.update(offRoute = false, "r/0/2", 100.0, 900.0, "turn", loader)
+        assertEquals(1, lanes.entering(before, 29.0).size)
+        // Off the route the progress still names the step the car left, or any other.
+        assertTrue(lanes.update(offRoute = true, "r/0/2", 100.0, 900.0, "turn", loader).isEmpty())
+        assertTrue(lanes.update(offRoute = true, "r/0/5", 0.0, 400.0, "turn", loader).isEmpty())
+        assertEquals(1, loader.loads, "nothing is read off the route")
+        // Back on the route on the same step: the point is there again, and is not reported twice.
+        val back = lanes.update(offRoute = false, "r/0/2", 150.0, 850.0, "turn", loader)
+        assertEquals(listOf("r/0/2/2"), back.map { it.key })
+        assertTrue(lanes.entering(back, 29.0).isEmpty())
+        assertEquals(1, loader.loads)
+    }
+
+    @Test
+    fun `the kind of the next maneuver decides at each update whether its lanes are a lane choice`() {
+        val lanes = LaneChoices()
+        val exit = listOf(lane(false), lane(false), lane(true))
+        val loader = loaderOf(lanes, maneuver = intersection(10, exit))
+        val keysFor = { type: String? -> lanes.update(offRoute = false, "r/0/2", 0.0, 1_000.0, type, loader).map { it.key } }
+        assertEquals(listOf("r/0/2/2", "r/0/2/end"), keysFor("off ramp"))
+        assertEquals(listOf("r/0/2/2"), keysFor("turn"))
+        // While the navigator has no banner the maneuver is of no known kind.
+        assertEquals(listOf("r/0/2/2"), keysFor(null))
+        assertEquals(listOf("r/0/2/2", "r/0/2/end"), keysFor("fork"))
+        assertEquals(1, loader.loads)
+    }
+
     @Test
     fun `the log line of a lane choice has its counts and no place`() {
         // One more lane goes on than at the usual split, so that no two of the counts are the same.
