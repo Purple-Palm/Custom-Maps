@@ -5,48 +5,76 @@ import java.io.FileOutputStream
 import java.io.IOException
 
 /**
- * Remembers, in [file], the time of the newest record already written to the debug log, so that
- * records Android keeps across many starts and app updates (how earlier processes ended) are
- * logged once each.
- *
- * The file holds that time in epoch milliseconds as decimal text. A new mark is written to a
- * temporary file next to it and renamed over it, so a write cut short by the process dying leaves
- * the previous mark in place. A missing or unreadable mark counts as nothing logged yet: every
- * record Android still holds is logged once more.
+ * Identifies one of Android's records of how a process ended: the process's pid and the wall-clock
+ * time it died. Neither alone is enough: pids come back, and the phone's clock can move back, so a
+ * record that is new can carry an older time than one already logged.
  */
-class LoggedUpTo(private val file: File) {
+data class ExitKey(val pid: Int, val timeMillis: Long) {
+
+    /** One line of the [LoggedExits] file. */
+    override fun toString(): String = "$pid$SEPARATOR$timeMillis"
+
+    companion object {
+        private const val SEPARATOR = ':'
+
+        /** The key written by [toString], or null for any other text. */
+        fun parse(text: String): ExitKey? {
+            val pid = text.substringBefore(SEPARATOR, "").toIntOrNull() ?: return null
+            val time = text.substringAfter(SEPARATOR, "").toLongOrNull() ?: return null
+            return ExitKey(pid, time)
+        }
+    }
+}
+
+/**
+ * Remembers, in [file], which of the records Android keeps across many starts and app updates (how
+ * earlier processes ended) are already in the debug log, so that each is logged once.
+ *
+ * The file holds the [ExitKey] of every record Android still held at the last start, one per line;
+ * Android keeps only a few records per app, so the file stays small. A new list is written to a
+ * temporary file next to it and renamed over it, so a write cut short by the process dying leaves
+ * the previous list in place. A missing or unreadable file counts as nothing logged yet: every record Android
+ * still holds is logged once more.
+ */
+class LoggedExits(private val file: File) {
 
     private val temporary = File(file.path + TEMPORARY_SUFFIX)
 
-    /** The records newer than the last one logged, oldest first. */
-    fun <T> unseen(records: List<T>, timeOf: (T) -> Long): List<T> {
-        val upTo = read()
-        return records.filter { timeOf(it) > upTo }.sortedBy(timeOf)
+    /** The records not in the log yet, oldest first. */
+    fun <T> unseen(records: List<T>, keyOf: (T) -> ExitKey): List<T> {
+        val logged = read()
+        return records.filter { keyOf(it) !in logged }.sortedBy { keyOf(it).timeMillis }
     }
 
-    /** Stores [millis] unless the same or a newer time is already stored. */
-    fun markLogged(millis: Long) {
-        if (millis <= read()) return
+    /**
+     * Stores [keys] as the records that are in the log, in place of the ones stored so far: records
+     * Android no longer holds never come back, so their keys can go. Nothing is written when the
+     * same keys are stored already, or when [keys] is empty: right after a reboot Android lists no
+     * records until it has read its own back from storage.
+     */
+    fun markLogged(keys: Collection<ExitKey>) {
+        val logged = keys.toSet()
+        if (logged.isEmpty() || logged == read()) return
+        val text = logged.joinToString(separator = "") { "$it\n" }
         try {
             file.parentFile?.mkdirs()
             FileOutputStream(temporary).use { out ->
-                out.write(millis.toString().toByteArray(Charsets.US_ASCII))
+                out.write(text.toByteArray(Charsets.US_ASCII))
                 // On disk before the rename, so the renamed file is never empty after a power loss.
                 out.fd.sync()
             }
-            if (!temporary.renameTo(file)) file.writeText(millis.toString())
+            if (!temporary.renameTo(file)) file.writeText(text)
         } catch (e: IOException) {
             // The same records come up again at the next start; nothing worse.
         }
     }
 
-    private fun read(): Long =
+    /** Lines that are not keys are skipped: their records are logged once more. */
+    private fun read(): Set<ExitKey> =
         try {
-            if (file.exists()) file.readText().trim().toLong() else 0L
+            if (file.exists()) file.readLines().mapNotNullTo(HashSet()) { ExitKey.parse(it.trim()) } else emptySet()
         } catch (e: IOException) {
-            0L
-        } catch (e: NumberFormatException) {
-            0L
+            emptySet()
         }
 
     private companion object {

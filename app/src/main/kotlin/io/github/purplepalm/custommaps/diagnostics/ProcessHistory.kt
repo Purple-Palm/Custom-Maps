@@ -10,7 +10,8 @@ import android.os.Process
 import androidx.annotation.RequiresApi
 import io.github.purplepalm.custommaps.nav.debug.AnrTrace
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
-import io.github.purplepalm.custommaps.nav.debug.LoggedUpTo
+import io.github.purplepalm.custommaps.nav.debug.ExitKey
+import io.github.purplepalm.custommaps.nav.debug.LoggedExits
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
 import io.github.purplepalm.custommaps.nav.debug.error
 import java.io.File
@@ -27,7 +28,7 @@ internal class ProcessHistory(private val context: Context, private val debugLog
     private val activityManager: ActivityManager? = context.getSystemService(ActivityManager::class.java)
 
     /** Not backed up: on another phone the records it points to do not exist. */
-    private val exitsLogged = LoggedUpTo(File(context.noBackupFilesDir, EXITS_LOGGED_FILE))
+    private val exitsLogged = LoggedExits(File(context.noBackupFilesDir, EXITS_LOGGED_FILE))
 
     fun logOnStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) logEarlierExits()
@@ -58,10 +59,12 @@ internal class ProcessHistory(private val context: Context, private val debugLog
             debugLog.log("process_exits_unavailable", mapOf("error" to e.toString()))
             return
         }
-        val unseen = exitsLogged.unseen(exits) { it.timestamp }
-        unseen.forEach { debugLog.log("process_exit", it.debugFields()) }
-        unseen.lastOrNull()?.let { exitsLogged.markLogged(it.timestamp) }
+        exitsLogged.unseen(exits) { it.key() }.forEach { debugLog.log("process_exit", it.debugFields()) }
+        exitsLogged.markLogged(exits.map { it.key() })
     }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun ApplicationExitInfo.key() = ExitKey(pid, timestamp)
 
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private fun logThisStart() {

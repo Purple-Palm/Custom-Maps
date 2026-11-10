@@ -16,68 +16,125 @@ class ProcessRecordsTest {
     private val midnight = Instant.parse("2000-01-01T00:00:00Z").toEpochMilli()
     private fun at(seconds: Int) = midnight + seconds * 1_000L
 
+    /** Stands in for Android's exit record; the pids are made up. */
+    private data class Exit(val pid: Int, val diedAt: Long)
+
+    private fun exit(seconds: Int, pid: Int = 4_200 + seconds) = Exit(pid, at(seconds))
+    private val key = { exit: Exit -> ExitKey(exit.pid, exit.diedAt) }
+    private fun keys(vararg exits: Exit) = exits.map(key)
+
     @Test
     fun `records are logged once each, oldest first`() {
-        val loggedUpTo = LoggedUpTo(File(temp, "state/exits-logged"))
+        val logged = LoggedExits(File(temp, "state/exits-logged"))
         // Android lists exits newest first.
-        val exits = listOf(at(3), at(2), at(1))
+        val exits = listOf(exit(3), exit(2), exit(1))
 
-        assertEquals(listOf(at(1), at(2), at(3)), loggedUpTo.unseen(exits) { it })
-        loggedUpTo.markLogged(at(3))
+        assertEquals(listOf(exit(1), exit(2), exit(3)), logged.unseen(exits, key))
+        logged.markLogged(exits.map(key))
 
-        assertEquals(listOf(at(4)), loggedUpTo.unseen(listOf(at(4), at(3), at(2))) { it })
+        assertEquals(listOf(exit(4)), logged.unseen(listOf(exit(4), exit(3), exit(2)), key))
     }
 
     @Test
-    fun `after a restart or an app update only records after the mark are new`() {
+    fun `after a restart or an app update the records already logged stay logged`() {
         val file = File(temp, "exits-logged")
-        LoggedUpTo(file).markLogged(at(3))
+        LoggedExits(file).markLogged(keys(exit(3), exit(2), exit(1)))
 
         // Android keeps its records across app updates; the next process sees the same ones again.
-        val afterUpdate = LoggedUpTo(file)
+        val afterUpdate = LoggedExits(file)
 
-        assertEquals(emptyList<Long>(), afterUpdate.unseen(listOf(at(3), at(2), at(1))) { it })
-        assertEquals(listOf(at(5)), afterUpdate.unseen(listOf(at(5), at(3), at(1))) { it })
+        assertEquals(emptyList<Exit>(), afterUpdate.unseen(listOf(exit(3), exit(2), exit(1)), key))
+        assertEquals(listOf(exit(5)), afterUpdate.unseen(listOf(exit(5), exit(3), exit(1)), key))
     }
 
     @Test
-    fun `an older mark never replaces a newer one`() {
-        val loggedUpTo = LoggedUpTo(File(temp, "exits-logged"))
-        loggedUpTo.markLogged(at(5))
-        loggedUpTo.markLogged(at(4))
+    fun `a record older than one already logged is still new`() {
+        val logged = LoggedExits(File(temp, "exits-logged"))
+        logged.markLogged(keys(exit(10)))
 
-        assertEquals(emptyList<Long>(), loggedUpTo.unseen(listOf(at(5))) { it })
+        // The phone's clock moved back before this process died.
+        val afterClockChange = exit(5, pid = 4_305)
+
+        assertEquals(listOf(afterClockChange), logged.unseen(listOf(exit(10), afterClockChange), key))
     }
 
     @Test
-    fun `the mark is the time as decimal text`() {
+    fun `a pid that comes back is a new record`() {
+        val logged = LoggedExits(File(temp, "exits-logged"))
+        logged.markLogged(keys(exit(1, pid = 4_242)))
+
+        assertEquals(listOf(exit(2, pid = 4_242)), logged.unseen(listOf(exit(2, pid = 4_242), exit(1, pid = 4_242)), key))
+    }
+
+    @Test
+    fun `the file lists the records Android still holds, one pid and time per line`() {
         val file = File(temp, "exits-logged")
+        val logged = LoggedExits(file)
+        logged.markLogged(keys(exit(2), exit(1)))
 
-        LoggedUpTo(file).markLogged(at(7))
+        // The oldest record dropped out of Android's list.
+        logged.markLogged(keys(exit(3), exit(2)))
 
-        assertEquals(at(7).toString(), file.readText())
+        assertEquals(setOf("4203:${at(3)}", "4202:${at(2)}"), file.readLines().toSet())
+        assertEquals(listOf(file.name), temp.list().orEmpty().toList())
+        assertEquals(listOf(exit(1)), logged.unseen(listOf(exit(1)), key))
+    }
+
+    @Test
+    fun `an empty list from Android keeps what is stored`() {
+        val file = File(temp, "exits-logged")
+        val logged = LoggedExits(file)
+        logged.markLogged(keys(exit(1)))
+
+        // Right after a reboot Android lists nothing until it has read its records back.
+        logged.markLogged(emptyList())
+
+        assertEquals(emptyList<Exit>(), logged.unseen(listOf(exit(1)), key))
+    }
+
+    @Test
+    fun `a write that fails keeps the previous list`() {
+        val file = File(temp, "exits-logged")
+        LoggedExits(file).markLogged(keys(exit(3)))
+        // The temporary file cannot be opened, so the new list is never written.
+        File(temp, "exits-logged.new").mkdirs()
+
+        LoggedExits(file).markLogged(keys(exit(9), exit(3)))
+
+        assertEquals(listOf("4203:${at(3)}"), file.readLines())
+        assertEquals(listOf(exit(9)), LoggedExits(file).unseen(listOf(exit(9), exit(3)), key))
+    }
+
+    @Test
+    fun `a half-written temporary file from a dead process is ignored and replaced`() {
+        val file = File(temp, "exits-logged")
+        LoggedExits(file).markLogged(keys(exit(3)))
+        // The process died while writing the next list: only the temporary file is half written.
+        File(temp, "exits-logged.new").writeText("4209:${at(9)}".take(6))
+
+        val afterRestart = LoggedExits(file)
+
+        assertEquals(listOf(exit(4)), afterRestart.unseen(listOf(exit(4), exit(3)), key))
+        afterRestart.markLogged(keys(exit(4), exit(3)))
+        assertEquals(setOf("4204:${at(4)}", "4203:${at(3)}"), file.readLines().toSet())
         assertEquals(listOf(file.name), temp.list().orEmpty().toList())
     }
 
     @Test
-    fun `a write cut short keeps the previous mark`() {
-        val file = File(temp, "exits-logged")
-        LoggedUpTo(file).markLogged(at(3))
-        // The process died while writing the next mark: only the temporary file is half written.
-        File(temp, "exits-logged.new").writeText(at(9).toString().take(4))
+    fun `lines that are not keys are skipped and their records logged again`() {
+        val file = File(temp, "exits-logged").apply { writeText("not a key\n4201:${at(1)}\n4202\n") }
 
-        val afterRestart = LoggedUpTo(file)
-
-        assertEquals(listOf(at(4)), afterRestart.unseen(listOf(at(4), at(3))) { it })
-        afterRestart.markLogged(at(4))
-        assertEquals(at(4).toString(), file.readText())
+        assertEquals(listOf(exit(2)), LoggedExits(file).unseen(listOf(exit(2), exit(1)), key))
     }
 
     @Test
-    fun `an unreadable mark starts over`() {
-        val file = File(temp, "exits-logged").apply { writeText("not a number") }
+    fun `a key reads back from its text`() {
+        val exitKey = ExitKey(4_242, at(7))
 
-        assertEquals(listOf(at(1)), LoggedUpTo(file).unseen(listOf(at(1))) { it })
+        assertEquals(exitKey, ExitKey.parse(exitKey.toString()))
+        assertNull(ExitKey.parse("4242"))
+        assertNull(ExitKey.parse("pid:${at(7)}"))
+        assertNull(ExitKey.parse(at(7).toString()))
     }
 
     @Test
