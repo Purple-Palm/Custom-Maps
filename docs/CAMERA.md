@@ -535,6 +535,8 @@ A **camera** line about once a second during guidance:
 - The log records the active camera style, so drives in different styles can be compared.
 - The two Mapbox styles do not run the controller. For them the line holds the map's zoom, tilt and
   bearing against the data source's targets, and the frame rate.
+- On the phone the line is written only while the map is on screen; the `activity` and `screen`
+  lines show when it was not.
 - A **camera_state** line on every mode change. For the Mapbox styles it should also record how
   long each transition took: one that should take 673 ms or more and ends within a few ms means
   animations are off.
