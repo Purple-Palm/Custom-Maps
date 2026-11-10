@@ -55,8 +55,10 @@ class FileDebugLog(
     /**
      * Guards the files and the open writer. A thread lock rather than a coroutine mutex, because
      * [logNow] runs on a thread that cannot suspend; it is never held across a suspension point.
+     * Fair, so the background writer, which takes it again for every event, queues behind a waiting
+     * [logNow] instead of getting ahead of it each time.
      */
-    private val files = ReentrantLock()
+    private val files = ReentrantLock(true)
     private var writer: Writer? = null
     private var writerDay: LocalDate? = null
     private var linesSinceTrim = 0

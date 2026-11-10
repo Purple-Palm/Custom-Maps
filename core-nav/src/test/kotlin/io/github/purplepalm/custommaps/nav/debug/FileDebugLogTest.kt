@@ -6,6 +6,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -297,8 +298,59 @@ class FileDebugLogTest {
         )
     }
 
+    @Test
+    fun `logNow waits only for the event being written, not for the ones queued behind it`() {
+        val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val encoding = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            val log = FileDebugLog(logDirectory, exportDirectory, scope, dispatcher, clock)
+            // The background writer holds the files while it encodes this one.
+            val slow = object {
+                override fun toString(): String {
+                    encoding.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                    return "slow"
+                }
+            }
+            val encodedOn = CopyOnWriteArrayList<String>()
+            val queued = object {
+                override fun toString(): String {
+                    encodedOn.add(Thread.currentThread().name)
+                    return "queued"
+                }
+            }
+            log.log("slow", mapOf("value" to slow))
+            assertTrue(encoding.await(5, TimeUnit.SECONDS))
+            repeat(QUEUED_BEHIND) { log.log("queued", mapOf("value" to queued)) }
+            var written = false
+            val crashing = thread(name = "crashing") { written = log.logNow("crash", emptyMap(), timeoutMillis = 5_000) }
+            // Parked means it is in line for the files, which is what the writer has to respect.
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (crashing.state != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) Thread.sleep(1)
+            assertEquals(Thread.State.TIMED_WAITING, crashing.state)
+
+            release.countDown()
+            crashing.join()
+
+            assertTrue(written)
+            // The writer did not take the files again: logNow wrote the rest of the queue itself.
+            assertEquals(List(QUEUED_BEHIND) { "crashing" }, encodedOn.toList())
+            assertEquals(
+                listOf("slow") + List(QUEUED_BEHIND) { "queued" } + "crash",
+                firstDay.readLines().map { it.substringAfter("\"type\":\"").substringBefore('"') },
+            )
+        } finally {
+            release.countDown()
+            scope.cancel()
+            dispatcher.close()
+        }
+    }
+
     private companion object {
         const val RACE_RUNS = 200
+        const val QUEUED_BEHIND = 5
     }
 
     private class MutableClock(var now: Instant, private val zone: ZoneId) : Clock() {
