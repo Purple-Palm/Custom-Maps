@@ -2,7 +2,9 @@ package io.github.purplepalm.custommaps.ui.guidance
 
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.EaseInCubic
 import androidx.compose.animation.core.EaseOutCubic
@@ -98,6 +100,13 @@ private val THEN_ENTER = expandVertically(tween(THEN_ENTER_MS, easing = EaseOutC
 /** The same way back up. */
 private val THEN_EXIT = shrinkVertically(tween(THEN_EXIT_MS, easing = EaseInCubic), shrinkTowards = Alignment.Bottom)
 
+/** Inside a chip that stays: the old arrow or road is gone before the new one comes, and the chip's width follows. */
+private val THEN_FADE: AnimatedContentTransitionScope<Maneuver>.() -> ContentTransform = {
+    fadeIn(tween(THEN_FADE_MS, delayMillis = THEN_FADE_MS / 2)) togetherWith
+        fadeOut(tween(THEN_FADE_MS / 2)) using
+        SizeTransform(clip = false) { _, _ -> tween(THEN_FADE_MS) }
+}
+
 /**
  * The maneuver card with the Then chip hanging under it. The panel is only as large as the card:
  * the chip lies over the map in [THEN_CHIP_BAND], which the camera keeps free during guidance, so
@@ -165,50 +174,56 @@ private fun ThenChip(maneuver: Maneuver) {
                 maxLines = 1,
             )
             Spacer(Modifier.width(10.dp))
-            // A new maneuver after a step change fades in; the chip's background stays put.
+            // After a step change that keeps the chip, only what is new fades in: the same arrow
+            // again stays put, and so does the chip's background.
             AnimatedContent(
                 targetState = maneuver,
-                transitionSpec = {
-                    fadeIn(tween(THEN_FADE_MS, delayMillis = THEN_FADE_MS / 2)) togetherWith
-                        fadeOut(tween(THEN_FADE_MS / 2)) using
-                        SizeTransform(clip = false) { _, _ -> tween(THEN_FADE_MS) }
-                },
-                label = "then maneuver",
-            ) { shown -> ThenManeuver(shown) }
+                transitionSpec = THEN_FADE,
+                label = "then arrow",
+                contentKey = { glyphKey(it.type, it.modifier, it.roundaboutExitDegrees) },
+            ) { shown ->
+                // Platinum, not amber: amber stays for what the driver does now.
+                ManeuverGlyph(
+                    type = shown.type,
+                    turn = shown.modifier,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(THEN_GLYPH),
+                    roundaboutExitDegrees = shown.roundaboutExitDegrees,
+                )
+            }
+            AnimatedContent(
+                targetState = maneuver,
+                transitionSpec = THEN_FADE,
+                // The side of the destination may be smaller than a road name: both keep to the middle.
+                contentAlignment = Alignment.CenterStart,
+                label = "then label",
+                contentKey = { it.labelKey() },
+            ) { shown -> ThenLabel(shown) }
         }
     }
 }
 
+/** The road after the arrow, or the side the destination is on; nothing at all without either. */
 @Composable
-private fun ThenManeuver(maneuver: Maneuver) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        // Platinum, not amber: amber stays for what the driver does now.
-        ManeuverGlyph(
-            type = maneuver.type,
-            turn = maneuver.modifier,
+private fun ThenLabel(maneuver: Maneuver) {
+    val label = thenLabel(maneuver)
+    if (label != null) {
+        val style = MaterialTheme.typography.titleMedium
+        Text(
+            text = label,
+            modifier = Modifier.padding(start = 8.dp),
+            style = style,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.size(THEN_GLYPH),
-            roundaboutExitDegrees = maneuver.roundaboutExitDegrees,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            // A long road name is cut. The side of the destination is the whole message, so it
+            // shrinks to fit first.
+            autoSize = if (maneuver.type == ManeuverType.ARRIVE) {
+                TextAutoSize.StepBased(minFontSize = LocalDensity.current.thenSideMinFont(), maxFontSize = style.fontSize)
+            } else {
+                null
+            },
         )
-        val label = thenLabel(maneuver)
-        if (label != null) {
-            Spacer(Modifier.width(8.dp))
-            val style = MaterialTheme.typography.titleMedium
-            Text(
-                text = label,
-                style = style,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                // A long road name is cut. The side of the destination is the whole message, so it
-                // shrinks to fit first.
-                autoSize = if (maneuver.type == ManeuverType.ARRIVE) {
-                    TextAutoSize.StepBased(minFontSize = LocalDensity.current.thenSideMinFont(), maxFontSize = style.fontSize)
-                } else {
-                    null
-                },
-            )
-        }
     }
 }
 
@@ -226,6 +241,14 @@ private fun thenLabel(maneuver: Maneuver): String? =
     } else {
         maneuver.primaryText.takeIf { it.isNotBlank() }
     }
+
+/**
+ * What [thenLabel] says, as a value that needs no resource: two maneuvers with equal keys have the
+ * same label. The side of the destination is a string resource, a road is its name, and a
+ * maneuver without a label has none.
+ */
+internal fun Maneuver.labelKey(): Any? =
+    if (type == ManeuverType.ARRIVE) arrivalSideRes(modifier) else primaryText.takeIf { it.isNotBlank() }
 
 /** What a screen reader says, for example "Then: right, Pine Street". */
 @Composable

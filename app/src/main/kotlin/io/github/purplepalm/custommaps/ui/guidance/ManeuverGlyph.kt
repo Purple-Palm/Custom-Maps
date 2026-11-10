@@ -40,6 +40,17 @@ fun ManeuverGlyph(
     }
 }
 
+/**
+ * What [ManeuverGlyph] draws, as a value: two maneuvers with equal keys get the same arrow. It
+ * follows the glyph's own choice above, case by case, so the kind of maneuver only counts for the
+ * destination and for roundabouts.
+ */
+internal fun glyphKey(type: ManeuverType, turn: TurnModifier?, roundaboutExitDegrees: Double?): Any = when {
+    type == ManeuverType.ARRIVE -> ManeuverType.ARRIVE
+    type in ROUNDABOUTS -> roundaboutArmAngle(roundaboutExitDegrees, turn)
+    else -> turn ?: TurnModifier.STRAIGHT
+}
+
 /** One lane: every arrow painted on it, the one the route takes highlighted. */
 @Composable
 fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, modifier: Modifier = Modifier) {
