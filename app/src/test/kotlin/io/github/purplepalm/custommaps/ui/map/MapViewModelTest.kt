@@ -365,6 +365,43 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a screen opened during a drive puts the pin on the drive's destination`() = runTest(dispatcher) {
+        // The drive went on without a screen. The new screen has picked no place of its own.
+        navigation.destination.value = place
+        navigation.guidanceState.value = GuidanceState.ACTIVE
+        val viewModel = viewModel()
+
+        assertNull(viewModel.state.value.selectedPlace)
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+    }
+
+    @Test
+    fun `the pin stays on the place reached while the next search is typed or cleared`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        viewModel.onSuggestionPicked(suggestion)
+        advanceUntilIdle()
+        viewModel.onDirections()
+        advanceUntilIdle()
+        viewModel.onStart()
+        navigation.guidanceState.value = GuidanceState.ARRIVED
+        advanceUntilIdle()
+
+        // The search bar shows at the arrival; typing in it forgets the picked place.
+        viewModel.onSearchTextChange("pi")
+        runCurrent()
+        assertNull(viewModel.state.value.selectedPlace)
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+        viewModel.clearSearch()
+        runCurrent()
+        assertNull(viewModel.state.value.selectedPlace)
+        assertEquals(place, viewModel.state.value.pinnedPlace)
+
+        viewModel.onDismissArrival()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.pinnedPlace)
+    }
+
+    @Test
     fun `typing a new search takes the pin off the picked place`() = runTest(dispatcher) {
         val viewModel = viewModel()
         viewModel.onSuggestionPicked(suggestion)
