@@ -37,6 +37,10 @@ class CrashRecorder internal constructor(
     private var firstCrashThread: Thread? = null
 
     override fun uncaughtException(thread: Thread, error: Throwable) {
+        // A thread can die with its interrupt flag set, and a wait on such a thread gives up at once:
+        // the write's wait for the files and the wait for the first crash's line alike. The flag is
+        // taken off for the waits and put back for the previous handler.
+        val wasInterrupted = Thread.interrupted()
         try {
             // Only the first crash is written. A second thread failing at the same moment waits until
             // that line is in the file, because the previous handler ends the process; the thread
@@ -56,6 +60,7 @@ class CrashRecorder internal constructor(
         } catch (ignored: Throwable) {
             // Nothing more can be saved; the crash still has to reach the previous handler.
         } finally {
+            if (wasInterrupted) Thread.currentThread().interrupt()
             if (previous != null) previous.uncaughtException(thread, error) else error.printStackTrace()
         }
     }

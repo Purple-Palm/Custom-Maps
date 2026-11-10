@@ -78,6 +78,29 @@ class CrashRecorderTest {
     }
 
     @Test
+    fun `a thread that crashes interrupted still gets its crash written, and stays interrupted`() = runTest {
+        val log = FileDebugLog(File(temp, "log"), File(temp, "export"), backgroundScope, StandardTestDispatcher(testScheduler), clock)
+        val previous = PreviousHandler()
+        var linesWhenPreviousRan = emptyList<String>()
+        var interruptedWhenPreviousRan = false
+        previous.onCrash = {
+            linesWhenPreviousRan = if (logFile.exists()) logFile.readLines() else emptyList()
+            interruptedWhenPreviousRan = Thread.currentThread().isInterrupted
+        }
+        val recorder = CrashRecorder(log, previous)
+
+        // On a thread of its own: the flag is still set when the handler returns.
+        thread {
+            Thread.currentThread().interrupt()
+            recorder.uncaughtException(Thread.currentThread(), RuntimeException("boom"))
+        }.join(5_000)
+
+        assertEquals(1, linesWhenPreviousRan.size)
+        assertTrue(linesWhenPreviousRan.single().contains("\"error\":\"java.lang.RuntimeException: boom\""))
+        assertTrue(interruptedWhenPreviousRan)
+    }
+
+    @Test
     fun `the previous handler still runs when writing fails`() {
         val failing = object : UrgentDebugLog {
             override fun log(type: String, fields: Map<String, Any?>) = Unit
@@ -138,6 +161,31 @@ class CrashRecorderTest {
 
         val second = thread { recorder.uncaughtException(Thread.currentThread(), RuntimeException("second")) }
         // Without the wait, the second thread would reach the previous handler, which ends the process.
+        second.join(200)
+        assertTrue(second.isAlive)
+        log.release.countDown()
+        first.join(5_000)
+        second.join(5_000)
+
+        assertEquals("written: java.lang.RuntimeException: first", log.steps.first())
+        assertEquals(
+            setOf("passed on: java.lang.RuntimeException: first", "passed on: java.lang.RuntimeException: second"),
+            log.steps.drop(1).toSet(),
+        )
+    }
+
+    @Test
+    fun `a second thread that crashes interrupted waits for the first crash all the same`() {
+        val log = SlowLog()
+        val recorder = CrashRecorder(log, Passing(log.steps), firstCrashWaitMillis = 10_000)
+        val first = thread { recorder.uncaughtException(Thread.currentThread(), RuntimeException("first")) }
+        assertTrue(log.writing.await(5, TimeUnit.SECONDS))
+
+        val second = thread {
+            Thread.currentThread().interrupt()
+            recorder.uncaughtException(Thread.currentThread(), RuntimeException("second"))
+        }
+        // A wait on an interrupted thread ends at once, so the flag has to be off while it waits.
         second.join(200)
         assertTrue(second.isAlive)
         log.release.countDown()
