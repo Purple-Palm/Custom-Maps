@@ -678,7 +678,7 @@ Smooth follow adds its controller's own numbers:
 | `laneFocus`, `laneGoal` | the lane choices' schedule: how far the view is in for one, 0 to 1, and where that is going. It runs with Default too, without moving the zoom | 0 on most freeway seconds |
 | `laneAheadM` | metres to the nearest lane choice ahead that counts; left out when there is none on the step | |
 | `laneChoice` | the lane choice that holds the view: `lanes`, `usable`, `atManeuver`; left out on the road | |
-| `centerLeadS` | how many seconds ahead of the drawn car the centre aims | 0 with Default, and with Large up to about zoom 17 |
+| `centerLeadS` | how many seconds ahead of the drawn car the centre aims. It is logged also while `onPuck` is 0, in the frame of a maneuver, where it does not move the centre | 0 with Default, and with Large up to about zoom 17; closer in, up to about 0.3 |
 
 The two Mapbox styles do not run the controller. They add `frameUpdates`, the frame animations
 `NavigationCamera` started that second, and `frameUpdatesCut`, those cancelled before they
@@ -1287,9 +1287,11 @@ exit and, if the data has one, a split:
   about 25 s before the exit (and a split), where it goes close with the tilt unchanged and comes
   back after.
 - The camera line: `laneDp` about 28 at junctions and 14 in lane windows, `zoomPlan` `ROAD` on
-  most seconds, `centerLeadS` 0 in town, and no `steps.zoom` above about 0.02 outside a change of
-  mode. The `lane_choice` lines: one for each point with lanes, with `skipped` on those the rule
-  passed over.
+  most seconds, and no `steps.zoom` above about 0.02 outside a change of mode. `centerLeadS` is 0
+  on the road between turns and on the open freeway, and above 0 only while the view is closer
+  than about zoom 17: up to about 0.25 around a town turn, from about 140 m before it to about
+  60 m after it, and about 0.3 in a lane window at freeway speed. The `lane_choice` lines: one for
+  each point with lanes, with `skipped` on those the rule passed over.
 - Lane zoom to Default and back during the drive, near a turn and away from one: a glide each
   time, never a cut.
 - Mapbox tuned with Large: close at turns too, with its zoom coming back at the step change.
