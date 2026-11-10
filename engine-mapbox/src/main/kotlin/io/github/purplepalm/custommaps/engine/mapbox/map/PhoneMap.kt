@@ -498,6 +498,8 @@ class PhoneMap internal constructor(
         puckCadence.reset()
         cameraSteps.reset()
         fixes = 0
+        lastFixAt = 0L
+        lastKeyPoints = 0
         frameUpdates = 0
         frameUpdatesCut = 0
         // The first line says what the padding is.
@@ -541,6 +543,9 @@ class PhoneMap internal constructor(
         val target = viewportDataSource.getViewportData().cameraForFollowing
         val puck = lastPuck
         val fix = navigationLocationProvider.lastLocation
+        // False until this guidance has had a fix: until then the location provider holds the last
+        // fix of the guidance before, if there was one.
+        val hasFix = lastFixAt != 0L
         val cameraMoves = cameraCadence.take(now)
         val puckMoves = puckCadence.take(now)
         val fps = renderFps.takeIf { renderFpsAt != 0L && now - renderFpsAt <= FPS_FRESH_NANOS }
@@ -556,9 +561,10 @@ class PhoneMap internal constructor(
                 "m" to target.center?.let { metersBetween(camera.center, it) },
             ).filterValues { it != null },
             // How far the puck trails the latest map-matched fix (it glides there over a second), how
-            // long ago that fix came, and how far the camera center is from the puck.
-            "puckLagM" to if (puck != null && fix != null) metersBetween(puck, Point.fromLngLat(fix.longitude, fix.latitude)) else null,
-            "sinceFixMs" to if (lastFixAt != 0L) (now - lastFixAt) / NANOS_PER_MILLI else null,
+            // long ago that fix came, and how far the camera center is from the puck. The first two
+            // and "keyPoints" are left out until this guidance has had a fix.
+            "puckLagM" to if (hasFix && puck != null && fix != null) metersBetween(puck, Point.fromLngLat(fix.longitude, fix.latitude)) else null,
+            "sinceFixMs" to if (hasFix) (now - lastFixAt) / NANOS_PER_MILLI else null,
             "camLagM" to puck?.let { metersBetween(camera.center, it) },
             "camUpdates" to cameraMoves.count,
             "camGapMs" to cameraMoves.longestGapMillis,
@@ -566,7 +572,7 @@ class PhoneMap internal constructor(
             "puckGapMs" to puckMoves.longestGapMillis,
             "steps" to cameraSteps.take(),
             "fixes" to fixes,
-            "keyPoints" to lastKeyPoints,
+            "keyPoints" to lastKeyPoints.takeIf { hasFix },
             "frameUpdates" to frameUpdates,
             "frameUpdatesCut" to frameUpdatesCut,
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
