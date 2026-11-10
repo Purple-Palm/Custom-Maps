@@ -2,6 +2,9 @@ package io.github.purplepalm.custommaps.nav.guidance
 
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
+import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
+import io.github.purplepalm.custommaps.nav.model.LanesAhead
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
@@ -46,6 +49,10 @@ class ThenTrackerTest {
         val decided = ThenTracker().decide(at(390.0))
         assertEquals(at(390.0).copy(showThen = true), decided)
         assertEquals(at(390.0).following, decided.thenManeuver)
+        // What the engine adds after the rule is not the tracker's: it comes back as it went in.
+        val lanesAhead = LanesAhead(Distance.meters(600.0), LaneInfo(listOf(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true))))
+        assertSame(lanesAhead, ThenTracker().decide(at(390.0).copy(laneChoiceAhead = lanesAhead)).laneChoiceAhead)
+        assertNull(decided.laneChoiceAhead)
     }
 
     @Test

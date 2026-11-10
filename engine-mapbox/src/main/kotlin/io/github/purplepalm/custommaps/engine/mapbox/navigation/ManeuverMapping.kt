@@ -46,6 +46,28 @@ internal object ManeuverMapping {
         return Lane(indications, isRecommended = isActive, activeIndication = active)
     }
 
+    /**
+     * One lane at a point the route goes straight through, for the maneuver card. A lane the route
+     * can be followed from is lit with the arrow the route takes there: the one the route names,
+     * else the lane's arrow that turns least, which is its straight arrow where it has one. A lane
+     * without arrows is drawn with a straight one, and that one is lit. A lane that leaves the
+     * route is not recommended and has no lit arrow.
+     */
+    fun laneAhead(directions: List<String?>, usable: Boolean, usedDirection: String?): Lane {
+        val indications = directions.mapNotNull(::modifier).toSet()
+        val active = if (usable) modifier(usedDirection) ?: indications.minByOrNull(::sharpness) ?: TurnModifier.STRAIGHT else null
+        return Lane(indications, isRecommended = usable, activeIndication = active)
+    }
+
+    /** How far an arrow turns away from straight on, left or right alike. */
+    private fun sharpness(turn: TurnModifier): Int = when (turn) {
+        TurnModifier.STRAIGHT -> 0
+        TurnModifier.SLIGHT_LEFT, TurnModifier.SLIGHT_RIGHT -> 1
+        TurnModifier.LEFT, TurnModifier.RIGHT -> 2
+        TurnModifier.SHARP_LEFT, TurnModifier.SHARP_RIGHT -> 3
+        TurnModifier.U_TURN -> 4
+    }
+
     fun isRoundabout(type: ManeuverType): Boolean = type in ROUNDABOUT_TYPES
 
     /** The way out of a roundabout, which routes carry as a maneuver of its own. */

@@ -99,7 +99,7 @@ internal class MapboxNavigationEngine(
      * The points with lanes ahead of the car, read from the route once for each step. The engine
      * owns the one copy; the map's camera reads the same list, so both see the same lane choices.
      */
-    internal val laneChoices = LaneChoices { error -> debugLog.error("laneChoices", error) }
+    internal val laneChoices = LaneChoices(onError = { error -> debugLog.error("laneChoices", error) })
 
     /**
      * Where the debug lines that describe whole routes are put together: off the main thread, since
@@ -385,10 +385,18 @@ internal class MapboxNavigationEngine(
         if (snapshot != null) _routeProgress.value = snapshot
     }
 
-    /** The UI's view of [progress], with the Then rule applied; null when the maneuver API has nothing. */
+    /**
+     * The UI's view of [progress], with the Then rule applied and the lanes of a lane choice ahead;
+     * null when the maneuver API has nothing.
+     */
     private fun snapshotOf(progress: RouteProgress): RouteProgressSnapshot? {
         val next = maneuverApi.getManeuvers(progress).value?.firstOrNull() ?: return null
-        return thenTracker.decide(progress.toSnapshot(next))
+        val decided = thenTracker.decide(progress.toSnapshot(next))
+        // The speed the camera gets with this update, so the card's lanes and the close view come together.
+        val lanes = laneChoices.lanesAhead(laneChoices.ahead(progress), lastMatch?.enhancedLocation?.speed)
+        // Added onto what the tracker decided: a copy of a fresh snapshot would lose the rule's
+        // answer and the following maneuver's remembered object.
+        return if (lanes == null) decided else decided.copy(laneChoiceAhead = lanes)
     }
 
     private val locationObserver = object : LocationObserver {

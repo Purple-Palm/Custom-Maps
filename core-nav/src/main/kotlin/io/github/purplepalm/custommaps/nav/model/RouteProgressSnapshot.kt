@@ -22,6 +22,12 @@ data class RouteProgressSnapshot(
     val offRoute: Boolean = false,
     /** Whether the Then chip shows [following], as decided by the Then rule. */
     val showThen: Boolean = false,
+    /**
+     * A lane choice the car reaches before the next maneuver, where the route goes straight on while
+     * some lanes leave it; null on most of the road. While it is set, the card shows its lanes in
+     * place of [lanes], with its distance.
+     */
+    val laneChoiceAhead: LanesAhead? = null,
 ) {
     /** The maneuver the Then chip shows, or null. The phone and the car screen both read this. */
     val thenManeuver: FollowingManeuver? get() = if (showThen) following else null
@@ -34,4 +40,15 @@ data class FollowingManeuver(
     val distanceAfterNext: Distance,
     /** Expected time from the next maneuver to this one at the route's speeds; zero when unknown. */
     val durationAfterNext: Duration,
+)
+
+/**
+ * The lanes of a lane choice ahead of the next maneuver, and how far ahead it is. The lanes are
+ * the same object from one progress update to the next for as long as it is the same choice.
+ */
+data class LanesAhead(
+    /** Along the route, from the car to the choice. */
+    val distance: Distance,
+    /** Every lane that reaches the choice, from the leftmost; the ones to use are the recommended ones. */
+    val lanes: LaneInfo,
 )

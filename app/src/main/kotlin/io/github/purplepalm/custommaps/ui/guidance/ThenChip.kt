@@ -50,6 +50,7 @@ import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
+import io.github.purplepalm.custommaps.nav.model.LanesAhead
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
@@ -325,6 +326,43 @@ private fun ManeuverPanelPreview() {
                         durationAfterNext = 10.seconds,
                     ),
                     showThen = true,
+                ),
+            )
+        }
+    }
+}
+
+/**
+ * A lane choice ahead of the exit, and the turn after the exit: the lanes row with its distance
+ * stands in the card, right above the chip. The distance belongs to the lanes, not to the chip.
+ */
+@Preview(name = "lane choice and Then", widthDp = 360)
+@Composable
+private fun ManeuverPanelLaneChoicePreview() {
+    val on = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
+    val off = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
+    CustomMapsTheme {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+                .background(Color(0xFF2B3036))
+                .padding(12.dp),
+        ) {
+            ManeuverPanel(
+                RouteProgressSnapshot(
+                    nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Oak Street"),
+                    distanceToNextManeuver = Distance.miles(0.5),
+                    lanes = null,
+                    distanceRemaining = Distance.miles(3.4),
+                    durationRemaining = 6.minutes,
+                    following = FollowingManeuver(
+                        Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street"),
+                        distanceAfterNext = Distance.meters(300.0),
+                        durationAfterNext = 20.seconds,
+                    ),
+                    showThen = true,
+                    laneChoiceAhead = LanesAhead(Distance.miles(0.3), LaneInfo(listOf(on, on, on, off, off))),
                 ),
             )
         }

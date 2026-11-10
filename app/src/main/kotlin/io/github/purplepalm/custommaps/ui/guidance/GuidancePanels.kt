@@ -1,6 +1,5 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,10 +20,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
@@ -32,6 +33,7 @@ import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
+import io.github.purplepalm.custommaps.nav.model.LanesAhead
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.Place
@@ -39,6 +41,7 @@ import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import java.time.ZonedDateTime
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 
 private const val TABULAR_DIGITS = "tnum"
@@ -104,9 +107,12 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
                     }
                 }
             }
-            progress.lanes?.let { lanes ->
+            // A lane choice the car reaches before the maneuver takes the row, with its distance:
+            // those lanes come first on the road. After it the row is the maneuver's again.
+            val ahead = progress.laneChoiceAhead
+            (ahead?.lanes ?: progress.lanes)?.let { lanes ->
                 Spacer(Modifier.height(12.dp))
-                LanesRow(lanes)
+                LanesRow(lanes, distanceLabel = ahead?.let { ImperialFormat.distance(it.distance).toString() })
             }
         }
     }
@@ -115,24 +121,68 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
 /**
  * Lanes from left to right; the ones to use are amber, the others dim. Every lane is shown: when
  * there are more than fit, all of them get narrower, since the lane to take is often the last one.
+ *
+ * With a [distanceLabel], for lanes that are not the next maneuver's, the label stands at the start
+ * of the row in small type. The lanes stay in the middle of the row while there is room for that
+ * beside the label, and move over, and get narrower, when there is not. The row is as high as one
+ * lane, with or without the label, so the label never makes the card taller.
  */
 @Composable
-fun LanesRow(lanes: LaneInfo, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val slot = minOf(LANE_SLOT, maxWidth / lanes.lanes.size)
-        Row {
-            lanes.lanes.forEach { lane ->
-                LaneGlyph(
-                    lane = lane,
-                    highlight = MaterialTheme.colorScheme.primary,
-                    dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                    modifier = Modifier
-                        .size(slot)
-                        .padding(slot * LANE_GAP_SHARE),
-                )
-            }
+fun LanesRow(lanes: LaneInfo, modifier: Modifier = Modifier, distanceLabel: String? = null) {
+    val highlight = MaterialTheme.colorScheme.primary
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    val count = lanes.lanes.size
+    Layout(
+        content = {
+            lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim) }
+            if (distanceLabel != null) LaneDistanceLabel(distanceLabel)
+        },
+        modifier = modifier.fillMaxWidth(),
+    ) { measurables, constraints ->
+        val fullSlot = LANE_SLOT.roundToPx()
+        // The card gives the row a width. Without one, every lane is as wide as it likes to be.
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else fullSlot * (count + 2)
+        // The label keeps to a share of the row and to the height of a lane; its text shrinks to fit.
+        val label = measurables.getOrNull(count)?.measure(
+            Constraints(maxWidth = (width * LANE_LABEL_MAX_WIDTH_SHARE).roundToInt(), maxHeight = fullSlot),
+        )
+        val reserved = if (label != null) label.width + LANE_LABEL_GAP.roundToPx() else 0
+        val row = planLaneRow(width, count, fullSlot, reserved)
+        val gap = (row.slot * LANE_GAP_SHARE).roundToInt()
+        val arrows = (row.slot - 2 * gap).coerceAtLeast(0)
+        val glyphs = List(count) { measurables[it].measure(Constraints.fixed(arrows, arrows)) }
+        layout(width, row.slot) {
+            label?.placeRelative(0, (row.slot - label.height) / 2)
+            glyphs.forEachIndexed { index, glyph -> glyph.placeRelative(row.start + index * row.slot + gap, gap) }
         }
     }
+}
+
+/** Where the lanes of a row go: how wide each lane is, gap included, and where the first one starts. */
+internal data class LaneRowPlan(val slot: Int, val start: Int)
+
+/**
+ * Lays [lanes] lanes into a row [width] wide, of which the first [reserved] belong to the distance
+ * label, all in pixels. A lane is [fullSlot] wide, or narrower when that many do not fit beside
+ * the label. The lanes stand in the middle of the whole row, where they are without a label, as
+ * long as that keeps them clear of the label; otherwise they start right after it.
+ */
+internal fun planLaneRow(width: Int, lanes: Int, fullSlot: Int, reserved: Int): LaneRowPlan {
+    val slot = minOf(fullSlot, (width - reserved).coerceAtLeast(0) / lanes)
+    return LaneRowPlan(slot, start = maxOf(reserved, (width - slot * lanes) / 2))
+}
+
+/** How far ahead the lanes of the row are, for example "0.4 mi". */
+@Composable
+private fun LaneDistanceLabel(text: String) {
+    val style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_DIGITS)
+    Text(
+        text = text,
+        style = style,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = style.fontSize),
+    )
 }
 
 /** Leaves the arrival time more room than the default button padding would. */
@@ -143,6 +193,12 @@ private val LANE_SLOT = 44.dp
 
 /** Share of a lane's width left empty on each side. */
 private const val LANE_GAP_SHARE = 4f / 44f
+
+/** Between the distance label and the first lane. */
+private val LANE_LABEL_GAP = 8.dp
+
+/** The most of the row the distance label may take, whatever the font size: the lanes are what the row is for. */
+private const val LANE_LABEL_MAX_WIDTH_SHARE = 0.3f
 
 /**
  * Arrival time, time and distance left, and the controls to change view or end guidance. The texts
@@ -246,6 +302,31 @@ fun ArrivedCard(destination: Place?, onDone: () -> Unit, modifier: Modifier = Mo
                 Text(stringResource(R.string.guidance_done))
             }
         }
+    }
+}
+
+/**
+ * A lane choice before the exit: the row shows the lanes of the split 0.4 miles ahead, not the
+ * exit's own. On a narrow phone, and with the largest font, where the label takes more of the row.
+ */
+@Preview(name = "lane choice ahead", widthDp = 360)
+@Preview(name = "lane choice ahead, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun ManeuverCardLaneChoicePreview() {
+    val on = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
+    val off = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
+    val exit = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+    CustomMapsTheme {
+        ManeuverCard(
+            RouteProgressSnapshot(
+                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Oak Street"),
+                distanceToNextManeuver = Distance.miles(2.3),
+                lanes = LaneInfo(listOf(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false), exit)),
+                distanceRemaining = Distance.miles(12.3),
+                durationRemaining = 18.minutes,
+                laneChoiceAhead = LanesAhead(Distance.miles(0.4), LaneInfo(listOf(on, on, on, off, off))),
+            ),
+        )
     }
 }
 

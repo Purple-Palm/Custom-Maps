@@ -8,9 +8,13 @@ import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoiceSkip
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotSame
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -22,11 +26,18 @@ class LaneChoicesTest {
     /** The length between two points of the step, about 100 m. */
     private val spacing = Geo.meters(0.0, 0.0, 0.0009, 0.0)
 
-    private fun lane(valid: Boolean?, active: Boolean? = valid, designated: List<String>? = null): IntersectionLanes =
+    private fun lane(
+        valid: Boolean?,
+        active: Boolean? = valid,
+        designated: List<String>? = null,
+        arrows: List<String> = listOf("straight"),
+        used: String? = null,
+    ): IntersectionLanes =
         IntersectionLanes.builder()
             .valid(valid)
             .active(active)
-            .indications(listOf("straight"))
+            .indications(arrows)
+            .validIndication(used)
             .access(designated?.let { IntersectionLaneAccess.builder().designated(it).build() })
             .build()
 
@@ -222,6 +233,123 @@ class LaneChoicesTest {
         lanes.load("r/0/2", listOf(intersection(0), intersection(5, split)), offTheGlobe, maneuver = null)
         assertTrue(lanes.choices(0.0, 1_000.0, false).isEmpty())
         assertTrue(errors.isEmpty())
+    }
+
+    /** A split at the eighth point of the step, where two of five lanes leave and a car pool lane runs on the left. */
+    private val splitLanes = listOf(
+        lane(true, designated = listOf("hov")),
+        lane(true),
+        lane(true, arrows = listOf("straight", "slight right"), used = "straight"),
+        lane(false, arrows = listOf("slight right")),
+        lane(false, arrows = listOf("slight right")),
+    )
+
+    /** The split loaded, and the choice it is with the car [metersAhead] before it. */
+    private fun beforeSplit(lanes: LaneChoices, metersAhead: Double) =
+        lanes.choices(0.0, 1_000.0, false).single { it.key == "r/0/2/2" }.copy(metersAhead = metersAhead)
+
+    private fun split() = loaded(listOf(intersection(0), intersection(4), intersection(7, splitLanes)))
+
+    @Test
+    fun `the card shows the lanes of a choice from where its window starts`() {
+        // At 29 m/s the window is 725 m.
+        val inside = split()
+        val shown = requireNotNull(inside.lanesAhead(listOf(beforeSplit(inside, 725.0)), speedMps = 29.0))
+        assertEquals(Distance.meters(725.0), shown.distance)
+        assertEquals(5, shown.lanes.lanes.size)
+        val outside = split()
+        assertNull(outside.lanesAhead(listOf(beforeSplit(outside, 725.5)), speedMps = 29.0))
+        // A car that stands, or whose speed is unknown, gets the shortest window.
+        assertNull(outside.lanesAhead(listOf(beforeSplit(outside, 400.5)), speedMps = null))
+        assertEquals(Distance.meters(400.0), outside.lanesAhead(listOf(beforeSplit(outside, 400.0)), speedMps = 0.0)?.distance)
+    }
+
+    @Test
+    fun `once shown the lanes stay until the car has passed the choice`() {
+        val lanes = split()
+        assertEquals(Distance.meters(700.0), lanes.lanesAhead(listOf(beforeSplit(lanes, 700.0)), 29.0)?.distance)
+        // Braking to 10 m/s shortens the window to 400 m; the choice is still 650 m ahead.
+        assertEquals(Distance.meters(650.0), lanes.lanesAhead(listOf(beforeSplit(lanes, 650.0)), 10.0)?.distance)
+        // Passed: the choice is no longer ahead.
+        assertNull(lanes.lanesAhead(emptyList(), 10.0))
+        // What was shown is forgotten with it.
+        assertNull(lanes.lanesAhead(listOf(beforeSplit(lanes, 650.0)), 10.0))
+    }
+
+    @Test
+    fun `a distance that is no number shows nothing and ends nothing`() {
+        val lanes = split()
+        assertNull(lanes.lanesAhead(listOf(beforeSplit(lanes, Double.NaN)), 29.0))
+        // Also for a choice the card already shows.
+        assertEquals(Distance.meters(300.0), lanes.lanesAhead(listOf(beforeSplit(lanes, 300.0)), 29.0)?.distance)
+        assertNull(lanes.lanesAhead(listOf(beforeSplit(lanes, Double.POSITIVE_INFINITY)), 29.0))
+    }
+
+    @Test
+    fun `the lanes to use are lit and the leaving and designated ones are dim`() {
+        val lanes = split()
+        val shown = requireNotNull(lanes.lanesAhead(listOf(beforeSplit(lanes, 300.0)), 29.0)).lanes.lanes
+        assertEquals(listOf(false, true, true, false, false), shown.map { it.isRecommended })
+        assertEquals(listOf(null, TurnModifier.STRAIGHT, TurnModifier.STRAIGHT, null, null), shown.map { it.activeIndication })
+        assertEquals(setOf(TurnModifier.STRAIGHT), shown[0].indications, "the car pool lane keeps its arrow, dim")
+        assertEquals(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), shown[2].indications)
+        assertEquals(setOf(TurnModifier.SLIGHT_RIGHT), shown[4].indications)
+    }
+
+    @Test
+    fun `only a lane choice where the route goes straight on gets the card's row`() {
+        val oneLeaves = listOf(lane(true), lane(true), lane(true), lane(false))
+        val lanes = loaded(listOf(intersection(0), intersection(3, oneLeaves), intersection(6, splitLanes)), maneuver = intersection(10, splitLanes))
+        val ahead = lanes.choices(0.0, 1_000.0, maneuverIsChoice = true)
+        assertEquals(listOf("r/0/2/1", "r/0/2/2", "r/0/2/end"), ahead.map { it.key })
+        // The first is passed over by the rule; the second counts, 600 m ahead.
+        assertEquals(Distance.meters(ahead[1].metersAhead), lanes.lanesAhead(ahead, 29.0)?.distance)
+        // The maneuver's own lanes are the card's usual row: no lane choice ahead of the maneuver.
+        assertTrue(ahead[2].counts(tuning))
+        assertNull(lanes.lanesAhead(listOf(ahead[0], ahead[2]), 29.0))
+        // On a road that is no freeway nothing counts.
+        val street = loaded(listOf(intersection(0, freeway = false), intersection(6, splitLanes, freeway = false)))
+        assertNull(street.lanesAhead(street.choices(0.0, 1_000.0, false), 29.0))
+    }
+
+    @Test
+    fun `of two lane choices inside their window the card shows the nearer`() {
+        val wide = splitLanes + lane(false, arrows = listOf("slight right"))
+        val lanes = loaded(listOf(intersection(0), intersection(3, splitLanes), intersection(6, wide)))
+        val ahead = lanes.choices(0.0, 1_000.0, false)
+        assertEquals(2, ahead.size)
+        assertEquals(5, lanes.lanesAhead(ahead, 29.0)?.lanes?.lanes?.size)
+        assertEquals(5, lanes.lanesAhead(ahead.reversed(), 29.0)?.lanes?.lanes?.size)
+        // Past the first one the second takes the row.
+        assertEquals(6, lanes.lanesAhead(lanes.choices(400.0, 600.0, false), 29.0)?.lanes?.lanes?.size)
+    }
+
+    @Test
+    fun `the card gets the same objects for as long as nothing changes`() {
+        val lanes = split()
+        val first = requireNotNull(lanes.lanesAhead(listOf(beforeSplit(lanes, 300.0)), 29.0))
+        // A car that stands: the same distance, the same object.
+        assertSame(first, lanes.lanesAhead(listOf(beforeSplit(lanes, 300.0)), 0.0))
+        // A car that moves: a new distance, and the lanes are the same object still.
+        val nearer = requireNotNull(lanes.lanesAhead(listOf(beforeSplit(lanes, 270.0)), 29.0))
+        assertNotSame(first, nearer)
+        assertEquals(Distance.meters(270.0), nearer.distance)
+        assertSame(first.lanes, nearer.lanes)
+    }
+
+    @Test
+    fun `the end of a drive forgets what the card showed`() {
+        val lanes = split()
+        val choice = beforeSplit(lanes, 650.0)
+        assertEquals(Distance.meters(650.0), lanes.lanesAhead(listOf(choice), 29.0)?.distance)
+        lanes.clear()
+        // The same step again, for a slow car whose window is 400 m: the choice is outside it, and
+        // it is not kept from the drive before.
+        lanes.load("r/0/2", listOf(intersection(0), intersection(4), intersection(7, splitLanes)), points, maneuver = null)
+        assertNull(lanes.lanesAhead(listOf(choice), 10.0))
+        // And with nothing loaded there are no lanes to show at all.
+        lanes.clear()
+        assertNull(lanes.lanesAhead(listOf(choice), 29.0))
     }
 
     @Test

@@ -1,13 +1,20 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import com.mapbox.api.directions.v5.models.IntersectionLanes
 import com.mapbox.api.directions.v5.models.StepIntersection
 import com.mapbox.api.directions.v5.models.StepManeuver
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.trip.model.RouteProgressState
+import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
+import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.Polyline
+import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
+import io.github.purplepalm.custommaps.nav.model.LanesAhead
 
 /**
  * The points with lanes ahead of the car, read from the lane data the route carries for its
@@ -17,15 +24,25 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  * straight through has lanes of its own, for example where a freeway splits or where two lanes
  * turn into an exit; those are read here, and so is the next maneuver where it is an exit or a
  * fork. Whether a point is worth a close view is [LaneChoice.skipReason]'s decision: every point
- * with lanes is handed out, so the ones passed over can be logged with their lane counts.
+ * with lanes is handed out, so the ones passed over can be logged with their lane counts. The
+ * maneuver card gets the lanes of a lane choice ahead from here as well ([lanesAhead]).
  *
  * The engine owns one. The lanes of a step are read once, when the car enters it; an update of the
  * route progress only measures how far ahead each point is. Called on the main thread.
  */
-internal class LaneChoices(private val onError: (RuntimeException) -> Unit = {}) {
+internal class LaneChoices(
+    private val tuning: CameraTuning = CameraTuning.PHONE,
+    private val onError: (RuntimeException) -> Unit = {},
+) {
 
-    /** One intersection of the current step that has lanes. */
-    private class LanePoint(val key: String, val metersFromStepStart: Double, val counts: LaneCounts, val onFreeway: Boolean)
+    /** One intersection of the current step that has lanes; [lanes] is how the card draws them. */
+    private class LanePoint(
+        val key: String,
+        val metersFromStepStart: Double,
+        val counts: LaneCounts,
+        val onFreeway: Boolean,
+        val lanes: LaneInfo?,
+    )
 
     private var stepKey: String? = null
     private var points: List<LanePoint> = emptyList()
@@ -35,6 +52,10 @@ internal class LaneChoices(private val onError: (RuntimeException) -> Unit = {})
 
     private var lastProgress: RouteProgress? = null
     private var lastAhead: List<LaneChoice> = emptyList()
+
+    /** The choice whose lanes the card shows, and what was handed out for it at the last update. */
+    private var cardKey: String? = null
+    private var cardLanes: LanesAhead? = null
 
     /**
      * The points with lanes ahead on the current step, nearest first, and the next maneuver where
@@ -82,12 +103,15 @@ internal class LaneChoices(private val onError: (RuntimeException) -> Unit = {})
         points = emptyList()
         maneuverPoint = null
         try {
-            points = stepLanes(intersections, stepPoints).map { LanePoint("$stepKey/${it.index}", it.metersFromStepStart, it.counts, it.onFreeway) }
+            points = stepLanes(intersections, stepPoints).map {
+                LanePoint("$stepKey/${it.index}", it.metersFromStepStart, it.counts, it.onFreeway, intersections[it.index]?.lanesAhead())
+            }
             val counts = maneuver?.laneCounts()
             if (counts != null) {
-                // The road that leads to the maneuver leaves the step's last intersection.
+                // The road that leads to the maneuver leaves the step's last intersection. The card
+                // has the maneuver's lanes already, so none are kept for it here.
                 val approach = intersections.lastOrNull() ?: maneuver
-                maneuverPoint = LanePoint("$stepKey/end", Double.NaN, counts, approach.isFreeway())
+                maneuverPoint = LanePoint("$stepKey/end", Double.NaN, counts, approach.isFreeway(), lanes = null)
             }
         } catch (e: RuntimeException) {
             onError(e)
@@ -113,6 +137,42 @@ internal class LaneChoices(private val onError: (RuntimeException) -> Unit = {})
         return ahead
     }
 
+    /**
+     * The lanes the maneuver card shows ahead of the next maneuver: those of the nearest lane
+     * choice among [choices] where the route goes straight on, with its distance. A choice is
+     * shown from where the camera's close view starts for it ([LaneFocus.windowMeters]), in either
+     * lane zoom, and then until the car has passed it, also when the car slows down and the window
+     * gets shorter. Null on most of the road.
+     *
+     * The same object is handed out for as long as nothing in it changes, and its lanes are the
+     * same object for the whole choice, so a screen can skip what did not change.
+     *
+     * @param choices the points ahead at this update, as [ahead] gave them
+     * @param speedMps the car's speed, the one the camera gets
+     */
+    fun lanesAhead(choices: List<LaneChoice>, speedMps: Double?): LanesAhead? {
+        val window = LaneFocus.windowMeters(tuning, speedMps)
+        var nearest: LaneChoice? = null
+        for (i in choices.indices) {
+            val choice = choices[i]
+            // The lanes of the maneuver itself are the card's own row.
+            if (choice.atManeuver || !choice.counts(tuning) || !choice.metersAhead.isFinite()) continue
+            if (choice.metersAhead > window && choice.key != cardKey) continue
+            if (nearest == null || choice.metersAhead < nearest.metersAhead) nearest = choice
+        }
+        val lanes = nearest?.let { shown -> points.firstOrNull { it.key == shown.key }?.lanes }
+        if (nearest == null || lanes == null) {
+            cardKey = null
+            cardLanes = null
+            return null
+        }
+        cardKey = nearest.key
+        val distance = Distance.meters(nearest.metersAhead.coerceAtLeast(0.0))
+        val last = cardLanes
+        if (last == null || last.lanes !== lanes || last.distance != distance) cardLanes = LanesAhead(distance, lanes)
+        return cardLanes
+    }
+
     /** A drive ended or a new one begins: nothing is kept of the last step. */
     fun clear() {
         stepKey = null
@@ -120,6 +180,8 @@ internal class LaneChoices(private val onError: (RuntimeException) -> Unit = {})
         maneuverPoint = null
         lastProgress = null
         lastAhead = emptyList()
+        cardKey = null
+        cardLanes = null
     }
 
     private fun LanePoint.toChoice(metersAhead: Double, atManeuver: Boolean) = LaneChoice(
@@ -175,17 +237,38 @@ internal fun StepIntersection.laneCounts(): LaneCounts? {
     var designated = 0
     for (lane in all) {
         if (lane == null) continue
-        if (!lane.access()?.designated().isNullOrEmpty()) {
+        if (lane.isDesignated()) {
             designated++
             continue
         }
         lanes++
-        // Where the route does not say which lanes it can be followed from, the preferred ones count.
-        if (lane.valid() ?: lane.active() ?: false) usable++
+        if (lane.isUsable()) usable++
         if (lane.active() == true) active++
     }
     return if (lanes + designated == 0) null else LaneCounts(lanes, usable, active, designated)
 }
+
+/**
+ * The lanes of an intersection the route goes straight through, as the maneuver card draws them:
+ * every lane from the leftmost, the ones the route can be followed from lit, the ones that leave
+ * the route and the designated ones dim. Null when the route has no lanes for it.
+ */
+internal fun StepIntersection.lanesAhead(): LaneInfo? {
+    val all = lanes() ?: return null
+    val lanes = ArrayList<Lane>(all.size)
+    for (lane in all) {
+        if (lane == null) continue
+        val usable = !lane.isDesignated() && lane.isUsable()
+        lanes.add(ManeuverMapping.laneAhead(lane.indications().orEmpty(), usable, lane.validIndication()))
+    }
+    return if (lanes.isEmpty()) null else LaneInfo(lanes)
+}
+
+/** A lane kept for buses, car pools, taxis and the like. */
+private fun IntersectionLanes.isDesignated(): Boolean = !access()?.designated().isNullOrEmpty()
+
+/** Where the route does not say which lanes it can be followed from, the preferred ones count. */
+private fun IntersectionLanes.isUsable(): Boolean = valid() ?: active() ?: false
 
 /** One intersection of a step that has lanes. */
 internal class StepLanes(

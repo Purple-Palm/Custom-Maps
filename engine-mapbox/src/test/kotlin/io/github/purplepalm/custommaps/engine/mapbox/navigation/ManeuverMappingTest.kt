@@ -72,6 +72,40 @@ class ManeuverMappingTest {
     }
 
     @Test
+    fun `a lane the route goes straight on from is lit with the arrow the route names`() {
+        val lane = ManeuverMapping.laneAhead(listOf("straight", "slight left"), usable = true, usedDirection = "slight left")
+        assertEquals(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_LEFT), lane.indications)
+        assertTrue(lane.isRecommended)
+        assertEquals(TurnModifier.SLIGHT_LEFT, lane.activeIndication)
+    }
+
+    @Test
+    fun `without a named arrow a usable lane is lit with the arrow that turns least`() {
+        fun lit(vararg arrows: String?) = ManeuverMapping.laneAhead(arrows.toList(), usable = true, usedDirection = null).activeIndication
+        assertEquals(TurnModifier.STRAIGHT, lit("straight"))
+        assertEquals(TurnModifier.LEFT, lit("left"), "its only arrow")
+        assertEquals(TurnModifier.STRAIGHT, lit("right", "straight"))
+        assertEquals(TurnModifier.STRAIGHT, lit("slight left", "straight", "slight right"))
+        assertEquals(TurnModifier.SLIGHT_RIGHT, lit("right", "slight right"))
+        assertEquals(TurnModifier.SLIGHT_LEFT, lit("sharp left", "slight left", "left"))
+        assertEquals(TurnModifier.LEFT, lit("uturn", "left", "sharp left"))
+        assertEquals(TurnModifier.RIGHT, lit("sharp right", "right"))
+        assertEquals(TurnModifier.SHARP_RIGHT, lit("uturn", "sharp right"))
+        // A lane without arrows is drawn with a straight one, and that one is lit.
+        assertEquals(TurnModifier.STRAIGHT, lit())
+        assertEquals(TurnModifier.STRAIGHT, lit("none", null))
+        assertTrue(ManeuverMapping.laneAhead(listOf("none", null), usable = true, usedDirection = null).indications.isEmpty())
+    }
+
+    @Test
+    fun `a lane that leaves the route has no lit arrow`() {
+        val lane = ManeuverMapping.laneAhead(listOf("slight right"), usable = false, usedDirection = "slight right")
+        assertEquals(setOf(TurnModifier.SLIGHT_RIGHT), lane.indications)
+        assertFalse(lane.isRecommended)
+        assertNull(lane.activeIndication)
+    }
+
+    @Test
     fun `roundabouts and rotaries are recognised`() {
         assertTrue(ManeuverMapping.isRoundabout(ManeuverType.ROTARY))
         assertFalse(ManeuverMapping.isRoundabout(ManeuverType.TURN))
