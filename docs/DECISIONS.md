@@ -234,7 +234,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Every start logs Android's record of earlier exits (crash, native crash, ANR, low memory, the user) on Android 11 and newer, with the short state summary the app left with the process, and on Android 15 and newer why this start happened.
   - One network monitor, the app's only network callback, logs every change of the app's network and the settings that can cut off only this app; its state is plain data the offline chip can read.
   - The log also records device state, whether Android's animations run, one camera line a second with the frame rate, and repeated map errors as one line a minute.
-  - All of it goes into the debug log and nothing goes to a third party: in this stage the log stays on the phone and the owner shares it by hand (20); from stage 2 each trip's log also goes to the owner's private repository (35).
+  - All of it goes into the debug log: in this stage the log stays on the phone and the owner shares it by hand (20); from stage 2 each trip's log is also uploaded to the owner's private GitHub repository (35).
 - **Alternatives:** logcat only, which is lost and needs a computer; a crash reporting service, which sends data to a third party.
 - **Why:** the app restarted once on the first drive and the log could not say why.
 
