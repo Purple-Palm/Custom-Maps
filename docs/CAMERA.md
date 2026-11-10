@@ -301,7 +301,7 @@ critically damped springs. The navigator's once-a-second data only moves the tar
 following, the camera chases the drawn puck. It never restarts animators (unlike A) and is not
 bolted to the puck (unlike B). A simulation of the compiled code on the JVM showed:
 
-- A steady 5°/s curve turns at 4.83 to 5.17°/s with the drive's fix-interval jitter. A plain spring
+- A steady 5°/s curve turns at 4.93 to 5.07°/s with the drive's fix-interval jitter. A plain spring
   on the same input gives 2.6 to 6.6°/s.
 - At 50 km/h the camera's speed stays within 0.23 m/s of the car's, while the puck itself loses a
   whole frame at each fix.
@@ -356,8 +356,8 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
   the same thread and frame as the puck animation.
 - The navigator's data, once a second, only moves targets. Each sample ramps in over 1.1 s, so no
   input stops between samples.
-- Critically damped springs follow the targets. They never overshoot, and their step is exact for
-  any frame time.
+- Critically damped springs follow the targets. Their step is exact for any frame time, and they
+  come up to a target that stops without swinging past it.
 - While following, the centre chases the drawn puck, not the raw fix. The camera trails the car a
   little and settles onto it when the car stops.
 - `MapboxNavigationViewportDataSource` stays as the source of targets. The look-ahead bearing (the
@@ -371,8 +371,8 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | Class | Where | What it does |
 |---|---|---|
 | `CameraTuning` | `:core-nav`, `nav/camera/CameraMotion.kt` | Every constant, in seconds, degrees and metres, with `PHONE` and `CAR` presets. One place to tune after a drive. |
-| `Spring` | same file | Critically damped spring with an exact closed-form step. Never overshoots. |
-| `SampleRamp` | same file | Moves from where it is to each new sample at a constant rate over 1.1 s, plus a lead of rate × 2τ that cancels the spring's lag. |
+| `Spring` | same file | Critically damped spring with an exact closed-form step. From rest it never passes its target. |
+| `SampleRamp` | same file | Moves from where it is to each new sample at a constant rate over 1.1 s. Its lead, rate × τ, is what a spring aims at: the spring then trails the ramp by τ × rate and stops on the last sample, not past it. |
 | `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). Stage 4's junction zoom reads the same curve. |
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
 | `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
@@ -422,8 +422,8 @@ While anything moves:
 3. Targets:
    - centre: between the world-centre ramp and the drawn puck, by the on-puck weight. The drawn
      puck comes from `OnIndicatorPositionChangedListener`;
-   - zoom and bearing: the ramp plus its lead, outside mode changes at most 1 zoom level and 60°
-     per second;
+   - zoom and bearing: the ramp plus its lead (its rate × τ), outside mode changes at most 1 zoom
+     level and 60° per second;
    - tilt: `ManeuverFocus` at this moment; in the overview, the frame's tilt;
    - padding: the ramps.
 4. During a mode change, the remaining start offset is added (see
@@ -449,6 +449,7 @@ While anything moves:
 | Tilt spring τ | 0.12 s | 0.12 s |
 | Padding and on-puck weight τ | 0.35 s | 0.35 s |
 | Sample ramp | 1.1 s | 1.1 s |
+| Lead of zoom and bearing ahead of their ramps (`rampLead`) | 1 τ | 1 τ |
 | Fastest zoom and bearing change (outside transitions) | 1 level/s, 60°/s | same |
 | Puck glide per fix | 1.1 s | the same puck |
 
@@ -465,9 +466,11 @@ From the compiled code, simulated at 60 frames a second:
 - **Puck.** It glides 1.1 s per fix. 98 % of the fix intervals on the drive were 0.98 to 1.02 s and
   the slowest 1.07 s, so the puck never stops between fixes. With the default 1.0 s it stopped
   briefly at the 16 % of fixes that came later than 1000 ms.
-- **Bearing.** A steady 5°/s curve turns at 4.83 to 5.17°/s. The camera is about 1.1 s behind the
-  data source's bearing; today's linear second is 1.0 s. The early turn stays: the camera still
-  turns hundreds of metres before the bend.
+- **Bearing.** A steady 5°/s curve turns at 4.93 to 5.07°/s. The camera is about 1.45 s behind the
+  data source's bearing, 1.1 s of ramp and 0.35 s of spring; today's linear second is 1.0 s. When
+  a turn ends, the map comes up to the road's bearing and does not swing past it. With a lead of
+  2 τ the camera would be 1.1 s behind and swing up to 6° past after a sharp turn. The early turn
+  stays: the camera still turns hundreds of metres before the bend.
 - **Tilt.** At most 27°/s, with zero speed and acceleration at both ends. Today: 45°/s with a hard
   start and stop.
 
@@ -756,11 +759,13 @@ Steps 1 to 4 are done.
 
 ### JVM tests, no device
 
-`CameraMotionTest` in `:core-nav` (JUnit 6), 19 tests. Among them:
+`CameraMotionTest` in `:core-nav` (JUnit 6), 21 tests. Among them:
 
-- The spring is exact for any frame time and never overshoots.
+- The spring is exact for any frame time and, from rest, never passes its target.
 - Ramp, spring and lead hold a steady 5°/s curve within 4.8 to 5.2°/s, also with fix intervals
-  between 0.977 and 1.016 s.
+  between 0.977 and 1.016 s. The spring trails the ramp by one time constant there.
+- At the end of a turn, and of a change of zoom, the spring comes up to the last sample without
+  passing it or turning back.
 - A ramp ends exactly on its sample, and one that is given the same sample every second comes to
   rest within a tolerance.
 - At 50 km/h the tilt is below 3° at 180 m, 0° at the junction and back at 45° after it, and peaks
@@ -838,11 +843,12 @@ only while stopped:
 - a tunnel or GPS loss: the puck stops, then resumes without a jump;
 - a reroute.
 
-The owner rates the overall smoothness and three things that each have one knob in `CameraTuning`:
+The owner rates the overall smoothness and four things that each have one knob in `CameraTuning`:
 
 | What | Knob |
 |---|---|
 | How far the camera trails the car | `centerTau`, 0.15 to 0.3 s |
+| Whether the map turns late in curves | `rampLead`, 1 to 2; above 1 the map swings a few degrees past the end of a sharp turn |
 | When the tilt goes down | `descentSeconds` or `maneuverFramingMeters` |
 | When it comes back up | `holdAfterManeuverMeters` and `holdAfterManeuverSeconds` |
 

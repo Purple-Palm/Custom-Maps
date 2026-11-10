@@ -31,6 +31,13 @@ data class CameraTuning(
      * samples and equal to the puck's glide, so no input stops between samples.
      */
     val sampleHoldSeconds: Double = 1.1,
+    /**
+     * How far ahead of the ramp between two samples the zoom and the bearing aim, in time constants
+     * of their springs. With 1 the camera trails the ramp by one time constant and comes up to the
+     * sample a ramp stops at, never past it. With 2 it stays on a steady ramp, and swings a few
+     * degrees past the bearing a turn ends on.
+     */
+    val rampLead: Double = 1.0,
     /** Spring time constants. The camera center trails a moving puck by 2 × [centerTau] × speed. */
     val centerTau: Double = 0.20,
     val zoomTau: Double = 0.45,
@@ -58,8 +65,10 @@ data class CameraTuning(
 }
 
 /**
- * A critically damped spring with an exact step: it never overshoots, and the result does not depend
- * on how the time is cut into frames.
+ * A critically damped spring with an exact step: the result does not depend on how the time is cut
+ * into frames. From rest it comes up to a target that holds still and never passes it. One that is
+ * still moving when its target stops can run past, which is why a ramp is led by no more than one
+ * time constant (see [SampleRamp.lead]).
  */
 class Spring(private val tau: Double) {
     var value = 0.0
@@ -135,10 +144,13 @@ class SampleRamp(private val holdSeconds: Double) {
     fun rate(now: Double) = if (now - start < holdSeconds) (to - from) / holdSeconds else 0.0
 
     /**
-     * The value moved ahead by what a spring of time constant [tau] lags behind a steady ramp
-     * (2 × tau × rate): a spring that follows this stays on the ramp itself.
+     * The value moved ahead by its change over the next [seconds], for a spring to aim at. A spring
+     * of time constant tau lags a steady ramp by 2 × tau × rate. Aimed one tau ahead it trails the
+     * ramp by tau × rate and moves as the ramp smoothed once does, so it comes up to the sample the
+     * ramp stops at and not past it. Aimed two ahead it stays on a steady ramp, but still has the
+     * ramp's full speed when the ramp stops, and runs past.
      */
-    fun lead(now: Double, tau: Double) = value(now) + rate(now) * 2.0 * tau
+    fun lead(now: Double, seconds: Double) = value(now) + rate(now) * seconds
 
     /**
      * Whether the value is still on its way, more than [tolerance] from the newest sample. A sample

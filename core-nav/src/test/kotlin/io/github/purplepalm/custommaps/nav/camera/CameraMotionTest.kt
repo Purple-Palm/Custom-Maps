@@ -34,8 +34,16 @@ class CameraMotionTest {
 
     @Test
     fun `ramp with lead keeps a steady curve at a steady rotation rate`() {
-        val rates = turnRates { 1.0 }
-        assertTrue(rates.start > 4.8 && rates.endInclusive < 5.2, "rate $rates")
+        val curve = steadyCurve { 1.0 }
+        assertTrue(curve.slowest > 4.8 && curve.fastest < 5.2, "$curve")
+    }
+
+    @Test
+    fun `in a steady curve the spring trails the ramp by one time constant`() {
+        // Not on the ramp, as with a lead of two time constants, and not two behind, as with none.
+        val curve = steadyCurve { 1.0 }
+        val oneTau = tuning.bearingTau * 5.0
+        assertTrue(curve.leastLag > oneTau - 0.1 && curve.mostLag < oneTau + 0.1, "$curve")
     }
 
     @Test
@@ -44,13 +52,24 @@ class CameraMotionTest {
         // cover the spread a drive log showed, 0.977 to 1.016 s.
         for (seed in 1L..5L) {
             val random = Random(seed)
-            val rates = turnRates { 0.977 + (1.016 - 0.977) * random.nextDouble() }
-            assertTrue(rates.start > 4.8 && rates.endInclusive < 5.2, "seed $seed: rate $rates")
+            val curve = steadyCurve { 0.977 + (1.016 - 0.977) * random.nextDouble() }
+            assertTrue(curve.slowest > 4.8 && curve.fastest < 5.2, "seed $seed: $curve")
         }
         val extremes = doubleArrayOf(0.977, 1.016, 1.016, 0.977, 0.977, 0.977, 1.016, 1.016, 1.016, 0.977)
         var next = 0
-        val rates = turnRates { extremes[next++ % extremes.size] }
-        assertTrue(rates.start > 4.8 && rates.endInclusive < 5.2, "extremes: rate $rates")
+        val curve = steadyCurve { extremes[next++ % extremes.size] }
+        assertTrue(curve.slowest > 4.8 && curve.fastest < 5.2, "extremes: $curve")
+    }
+
+    @Test
+    fun `the end of a turn is reached and not passed`() {
+        // A corner that takes three updates, one that starts late, and a bend. Then the road is straight.
+        assertStopsOnLastSample(tuning.bearingTau, 0.0, 30.0, 60.0, 90.0)
+        assertStopsOnLastSample(tuning.bearingTau, 0.0, 0.0, 45.0, 90.0)
+        assertStopsOnLastSample(tuning.bearingTau, 0.0, 15.0, 30.0, 45.0)
+        // The same for a zoom that stops changing, in and out.
+        assertStopsOnLastSample(tuning.zoomTau, 15.0, 15.5, 16.2)
+        assertStopsOnLastSample(tuning.zoomTau, 16.35, 15.8, 15.15)
     }
 
     @Test
@@ -261,33 +280,69 @@ class CameraMotionTest {
         assertEquals(CameraTuning.PHONE.copy(centerTau = CameraTuning.CAR.centerTau), CameraTuning.CAR)
     }
 
+    /** How a spring took a steady curve: its turn in degrees a second, and how far it was behind the ramp. */
+    private data class Curve(val slowest: Double, val fastest: Double, val leastLag: Double, val mostLag: Double)
+
     /**
      * A bearing that turns 5 degrees a second, sampled at the times [interval] gives and followed by
-     * a ramp and a spring with the ramp's lead. Returns the slowest and the fastest turn of the
-     * spring, in degrees a second, once it has caught up.
+     * a ramp and a spring with the ramp's lead, as the camera follows it. Measured once the spring
+     * has caught up.
      */
-    private fun turnRates(interval: () -> Double): ClosedFloatingPointRange<Double> {
+    private fun steadyCurve(interval: () -> Double): Curve {
         val ramp = SampleRamp(tuning.sampleHoldSeconds)
         val spring = Spring(tuning.bearingTau)
         var t = 0.0
         var next = 0.0
-        var lo = Double.MAX_VALUE
-        var hi = -Double.MAX_VALUE
+        var slowest = Double.MAX_VALUE
+        var fastest = -Double.MAX_VALUE
+        var leastLag = Double.MAX_VALUE
+        var mostLag = -Double.MAX_VALUE
         while (t < 60.0) {
             if (t >= next) {
                 ramp.push(5.0 * next, t)
                 next += interval()
             }
             val before = spring.value
-            spring.step(ramp.lead(t, tuning.bearingTau), frame)
+            spring.step(ramp.lead(t, tuning.bearingTau * tuning.rampLead), frame)
             if (t > 10.0) {
                 val rate = (spring.value - before) / frame
-                lo = minOf(lo, rate)
-                hi = maxOf(hi, rate)
+                slowest = minOf(slowest, rate)
+                fastest = maxOf(fastest, rate)
+                val lag = ramp.value(t + frame) - spring.value
+                leastLag = minOf(leastLag, lag)
+                mostLag = maxOf(mostLag, lag)
             }
             t += frame
         }
-        return lo..hi
+        return Curve(slowest, fastest, leastLag, mostLag)
+    }
+
+    /**
+     * Feeds [samples] once a second, and then the last of them for ten seconds more, to a ramp and
+     * a spring of time constant [tau] that follows the ramp's lead, as the camera does. The spring
+     * has to come up to the last sample without ever passing it or turning back.
+     */
+    private fun assertStopsOnLastSample(tau: Double, vararg samples: Double) {
+        val ramp = SampleRamp(tuning.sampleHoldSeconds)
+        val spring = Spring(tau).apply { snap(samples.first()) }
+        val last = samples.last()
+        val up = last >= samples.first()
+        var t = 0.0
+        var next = 0
+        while (t < samples.size + 10.0) {
+            if (t >= next) {
+                ramp.push(samples[minOf(next, samples.size - 1)], t)
+                next += 1
+            }
+            val before = spring.value
+            spring.step(ramp.lead(t, tau * tuning.rampLead), frame)
+            val past = if (up) spring.value - last else last - spring.value
+            val back = if (up) before - spring.value else spring.value - before
+            assertTrue(past < 1e-6, "at $t s: $past past $last")
+            assertTrue(back < 1e-9, "at $t s: turned back by $back")
+            t += frame
+        }
+        assertEquals(last, spring.value, 0.01)
     }
 
     /** No jump in the tilt and no turn faster than 30 degrees a second, frame by frame. */

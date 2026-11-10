@@ -431,9 +431,12 @@ internal class SmoothNavigationCamera(
         toLat = if (puckLat.isNaN()) mapLat else lerp(mapLat, puckLat, weight)
         toLng = if (puckLng.isNaN()) mapLng else lerp(mapLng, puckLng, weight)
 
-        val zoomGoal = if (zoomRamp.ready) zoomRamp.lead(now, tuning.zoomTau) else zoom.value
-        val bearingGoal =
-            if (bearingRamp.ready) Angles.nearest(bearingRamp.lead(now, tuning.bearingTau), bearing.value) else bearing.value
+        val zoomGoal = if (zoomRamp.ready) zoomRamp.lead(now, tuning.zoomTau * tuning.rampLead) else zoom.value
+        val bearingGoal = if (bearingRamp.ready) {
+            Angles.nearest(bearingRamp.lead(now, tuning.bearingTau * tuning.rampLead), bearing.value)
+        } else {
+            bearing.value
+        }
         // A map that still shows the whole world, as one does that was never moved, has nothing to
         // glide from: the camera is put on its target with the next frame.
         val fromWorld = zoom.value < WORLD_ZOOM && zoomGoal - zoom.value > FAR_ZOOM_LEVELS
