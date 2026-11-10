@@ -24,6 +24,8 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.ui.map.MapScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
+import io.github.purplepalm.custommaps.ui.settings.crashNow
+import io.github.purplepalm.custommaps.ui.settings.isDebuggable
 import io.github.purplepalm.custommaps.ui.settings.shareDebugLog
 import io.github.purplepalm.custommaps.ui.token.TokenSetupScreen
 import io.github.purplepalm.custommaps.ui.token.TokenViewModel
@@ -86,6 +88,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 },
                 onClearLog = settingsViewModel::clearLog,
                 onBack = { showSettings = false },
+                onCrashNow = if (context.isDebuggable()) ::crashNow else null,
             )
         }
     }

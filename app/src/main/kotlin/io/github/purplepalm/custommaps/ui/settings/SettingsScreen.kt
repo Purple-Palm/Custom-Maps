@@ -63,6 +63,8 @@ fun SettingsScreen(
     onClearLog: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Null hides Crash now: release builds never offer it. */
+    onCrashNow: (() -> Unit)? = null,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -91,7 +93,7 @@ fun SettingsScreen(
 
             TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
             SectionDivider()
-            DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog)
+            DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow)
             SectionDivider()
 
             SectionTitle(R.string.about_title)
@@ -165,6 +167,7 @@ private fun DebugSection(
     onSimulateDriveChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
+    onCrashNow: (() -> Unit)?,
 ) {
     val uriHandler = LocalUriHandler.current
     SectionTitle(R.string.debug_title)
@@ -227,6 +230,41 @@ private fun DebugSection(
 
     Spacer(Modifier.height(16.dp))
     DebugLogBlock(debug.logBytes, onShareLog, onClearLog)
+
+    if (onCrashNow != null) {
+        Spacer(Modifier.height(16.dp))
+        CrashNowBlock(onCrashNow)
+    }
+}
+
+/** Debug builds only: a deliberate crash, to check the crash record on the phone. */
+@Composable
+private fun CrashNowBlock(onCrashNow: () -> Unit) {
+    var confirm by remember { mutableStateOf(false) }
+    Text(
+        text = stringResource(R.string.debug_crash_now_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    TextButton(onClick = { confirm = true }) { Text(stringResource(R.string.debug_crash_now)) }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text(stringResource(R.string.debug_crash_now_title)) },
+            text = { Text(stringResource(R.string.debug_crash_now_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirm = false
+                        onCrashNow()
+                    },
+                ) { Text(stringResource(R.string.debug_crash_now)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+    }
 }
 
 @Composable
@@ -322,6 +360,7 @@ private fun SettingsScreenPreview() {
             onShareLog = {},
             onClearLog = {},
             onBack = {},
+            onCrashNow = {},
         )
     }
 }
