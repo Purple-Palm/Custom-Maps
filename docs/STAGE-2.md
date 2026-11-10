@@ -408,7 +408,9 @@ Other notes:
 - `setStyleImportConfigProperties` is not used. It replaces the import's whole config and resets
   every key it does not name to the style default (Maps 11.34.1). One such key is the Navigation
   SDK's `showHdRoads=false`, which `MapHdRoadsVisibilityController` (ui-maps 3.34.1) sets only when a
-  style loads.
+  style loads. Since stage 1.1 it is also the app's own setting for lane details on the map
+  ([DECISIONS.md](DECISIONS.md), 39). The car map will set it the way the phone map does:
+  `MapRenderer` has `setLaneZoom` and `setLaneDetails` for both.
 - The first mode is applied in the STYLE data-loaded callback, from `isDarkMode`, so there is no frame
   in the wrong mode.
 - Unverified: whether the light preset change animates. Check with the DHU's `day` and `night`
@@ -513,7 +515,9 @@ Other notes:
   `RoutingInfo.setNextStep` (`thenManeuver`, set when the Then rule shows it, so the car shows the
   next step at the same moment as the phone), times per step for the `TravelEstimate` that
   `Trip.Builder.addStep` needs (`durationToNextManeuver`, and `following.durationAfterNext`), and
-  `offRoute` as the reroute signal for `setLoading(true)`.
+  `offRoute` as the reroute signal for `setLoading(true)`. Since the lane zoom was built (38) it
+  also has `laneChoiceAhead`: the lanes of a lane choice the route goes straight through, with its
+  distance, which the car's lanes image can show on a freeway.
 
 ## The guidance bridge to NavigationManager
 

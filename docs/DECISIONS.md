@@ -208,7 +208,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Chosen (owner):** Settings offers three camera styles, applied at once, also mid-drive, and on the car screen from stage 2:
   - **Mapbox standard:** the NavigationCamera of the first drives with its camera behaviour unchanged, kept for comparison.
-  - **Mapbox tuned:** the same camera with calmer settings: one camera update per navigator update instead of two, longer moves from frame to frame, a gradual tilt before turns and a puck that glides 1.1 s per update. It gets no higher zoom cap: its extra zoom at turns comes with the Lane zoom setting.
+  - **Mapbox tuned:** the same camera with calmer settings: one camera update per navigator update instead of two, longer moves from frame to frame, a gradual tilt before turns and a puck that glides 1.1 s per update. It gets no higher zoom cap on the road: its extra zoom at turns comes from the Large lane zoom (38).
   - **Smooth follow:** the per-frame camera of decision 27, the default.
 - The choice is stored with the app settings as `camera_style`; a missing or unknown value reads as Smooth follow.
 - What is not camera behaviour is the same in every style: the top padding that only grows during guidance, the band it keeps free for the Then chip (37), the route line fix, a fresh puck for every drive, and following the car before guidance ([CAMERA.md](CAMERA.md)).
@@ -300,3 +300,36 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The chip inside the measured panel. The camera would frame the road again whenever the chip first showed, and with a top padding that only grows it would then keep the lost space for the rest of the drive.
   - The chip over the framed map with no band. It would cover the road just after the turn, the very road the chip names.
 - **Cost:** the framed area is 56 dp shorter during guidance. Below the zoom cap that is a slightly wider view; at the cap, which is most frames in town, nothing changes.
+
+## 38. Lane zoom, Default and Large
+
+- **Chosen (owner):** Settings, Guidance has a **Lane zoom** with two choices, applied at once, also mid-drive, and on the car screen from stage 2.
+  - **Default** is the zoom guidance has had so far, never closer than 16.35. It is what a phone starts with; a missing or unknown stored value reads as Default.
+  - **Large** is Default on the open road plus two close views. Before every turn the view goes onto the junction until a lane is 28 dp wide on the screen, about 4.4 mm. On a freeway, before a point where lanes leave the route, it goes in until a lane is 14 dp wide, with the tilt kept, about 25 s ahead. It comes back out after each.
+- **Large is set by the lane's width on the screen, not by a zoom number,** so it looks the same at every latitude. It needs no tiles beyond those Default uses: Mapbox's tiles end at zoom 16, and a closer view draws them larger, online and offline.
+- **The frame stays the navigation SDK's.** At a junction Large lets the SDK fit its own frame of the car and the junction closer and with less road after the turn. The camera takes that frame's zoom from where the SDK starts to frame the maneuver, and holds the open road at 16.35 itself.
+- **Which freeway points count is one rule in `:core-nav`,** read from the lanes the route already carries, with no request: at least 3 lanes reach the point and lanes leave the route; where the route goes straight on, at least 2. A wide freeway where every lane goes on, and a single lane that turns into an exit, do not zoom, so the long freeway view the owner likes stays the rule. Both numbers are a first setting: every point with lanes is written to the debug log with its lane counts, counted or passed over, to tune them after a drive. The maneuver card shows the lanes of the same point.
+- **Smooth follow and Mapbox tuned carry Large; Mapbox standard keeps its own zoom,** as the comparison style it is (26). Settings says so under the row.
+- **Alternatives:**
+  - A fixed higher zoom limit. It brings the whole town drive closer, not the approach to a turn, and the view jumps to it whenever only the car's position is framed.
+  - A zoom that follows the speed. It has nothing to do with where a lane has to be chosen.
+  - Going close on every wide freeway. It ends the long view ahead for no lane choice.
+  - Mapbox's Electronic Horizon for lane counts. It is a beta whose pricing may change; the route's own data is free and says more.
+  - Large as what a phone starts with. The owner chose Default, with Large one tap away.
+- **Why:** the lanes are large exactly where a lane has to be chosen, and nowhere else.
+- **Cost:** at a junction the view is only about 55 m wide; what comes after the turn is left to the Then chip (37). None of it has been on a drive yet; the numbers are in [CAMERA.md](CAMERA.md), Lane zoom.
+
+## 39. Lane details on the map, no lane position
+
+- **Chosen:** Settings, Guidance has a switch **Lane details on the map**, off unless turned on. It turns on Mapbox Standard's lane details: lane lines, the arrows painted in each lane, stop lines and crosswalks, where Mapbox has them, which is on major highways and in some cities.
+- **The navigation SDK turns lane details off** at every style load. The app sets them after the style load, in a later message of the main thread, so nothing turns them off again and nothing fades out and in. It looks once a second during guidance and sets them again if something changed them; the debug log counts that. Only the public style setting is used.
+- **The car is never drawn in a lane, and nothing moves its icon sideways.** Phone GPS is typically within about 5 m and a lane is 3.5 to 3.7 m wide. The navigator's position lies on the line of the road and has no lane. The public SDK has no lane geometry: the route says which lanes can be used, not where they are on the map. An icon drawn in the lane the route needs would show the driver in the right lane whether they are in it or not.
+- **What the driver gets in its place:** the close view of the Large lane zoom (38), lane markings on the map where Mapbox has them, and the lane arrows in the maneuver card, also at lane choices where the route goes straight on. The switch's text says that the car shows where it is on the road, not which lane it is in.
+- **While the switch is on, the route line stays thin close in,** at the width it has at zoom 16.5. The SDK's line grows to about a lane's width at the junction zoom and would cover a lane's markings and read as "this lane".
+- **Off unless turned on,** because two things could not be checked without a device in an area that has lane details: whether the route line and the maneuver arrow, which have no height, hide under a bridge drawn in 3D, and the frame rate. The switch's text says the route line can hide under bridges. Turning it on for everyone later is a one-line change.
+- **Alternatives:**
+  - The SDK's own switch that stops it from turning lane details off. It is restricted to Mapbox's modules; calling it would claim a module that is not there.
+  - Setting them within the style load. The SDK turns them off again, with a visible fade.
+  - Moving the car's icon or the route line into a lane. There is no lane position to move it by.
+- **Why:** public, reversible and honest about what the phone knows.
+- **Cost:** the order of events the setting relies on is read from the SDK's source, not promised by it. Check it with each SDK upgrade ([ROADMAP.md](ROADMAP.md), watch list).

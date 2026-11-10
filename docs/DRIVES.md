@@ -23,7 +23,7 @@ Both drives: the owner's Samsung phone with Android 15, a stage 1 build.
 |---|---|---|---|
 | The car and the map moved in steps, once a second | Android's animations were off; the SDK camera also moves in 1 s linear pieces | Camera styles with a new Smooth follow; the owner checks system animations | Built in stage 1.1 |
 | The view switched abruptly near turns | The SDK's framing flips the tilt within 180 m of most turns and again at each step change | The tilt goes down and back up gradually | Built in stage 1.1 |
-| Lanes too small before a turn | The following camera stops at zoom 16.35 | More zoom at turns | Next build; full junction zoom in stage 4 |
+| Lanes too small before a turn | The following camera stops at zoom 16.35 | A Lane zoom setting: with Large the view goes close onto the junction | Built in stage 1.1 |
 | The camera turned into a gentle curve well before the car (liked) | The SDK aims the camera at the far end of the road ahead | Kept | Built in stage 1.1, in every style |
 | The first drive's routes all ended behind the store | The route went to the middle of the building, and the router took the nearest road | Routes end at Mapbox's stop point for the place | Next build |
 | No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Next build; the network lines and the folded map errors are built |
@@ -183,8 +183,9 @@ view at three points, while the camera stays in following mode:
   at that cap, so there is no zoom left to add at a turn. The flat frame near a turn would need
   about 16.6 to 17.6 and is clamped too.
 - At zoom 16.35 a 3.7 m lane is about 5 dp wide on screen.
-- The map itself draws no lane markings (HD roads are off; see the watch list in ROADMAP.md), so
-  the lanes come only from the maneuver card.
+- The map itself drew no lane markings (HD roads were off; see the watch list in ROADMAP.md), so
+  the lanes came only from the maneuver card. Since stage 1.1 a switch in Settings turns lane
+  markings on where Mapbox has them.
 
 #### The early turn the owner liked
 
@@ -286,9 +287,9 @@ view at three points, while the camera stays in following mode:
 ### What changes
 
 The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). It is being built in steps: the
-diagnostics and the camera below are built, and so is the Then chip the owner asked for
-([DECISIONS.md](DECISIONS.md), 37); the rest is designed and not built yet. Stage 2 is the Android
-Auto stage.
+diagnostics and the camera below are built, and so are the Then chip the owner asked for
+([DECISIONS.md](DECISIONS.md), 37) and the Lane zoom setting with lane details on the map (38,
+39); the rest is designed and not built yet. Stage 2 is the Android Auto stage.
 
 #### Camera
 
@@ -299,7 +300,9 @@ The reasons and numbers behind each style are in [CAMERA.md](CAMERA.md).
 | Camera styles in Settings: **Mapbox standard** (the camera of the first drives, for comparison), **Mapbox tuned** (the same camera with calmer settings) and **Smooth follow** (new, the default) | Steps and abrupt switches | Built in stage 1.1 |
 | Smooth follow moves the camera on every display frame and glides after the drawn car. Its own motion does not depend on Android's animation setting; the drawn car's glide does | Steps | Built in stage 1.1 |
 | The tilt goes down onto the junction gradually before a turn and back up after it | Abrupt switches | Built in stage 1.1 |
-| More zoom at turns, so the junction and its lanes are larger | Small lanes | Next build, with the Lane zoom setting; the full junction zoom stays in stage 4 |
+| **Lane zoom** in Settings: **Default** (today's zoom, what a phone starts with) and **Large**. With Large the view goes close onto the junction before every turn, until a lane is about 4.4 mm wide, and on freeways before a point where lanes leave the route, also where the route goes straight on; it comes back out after each. Mapbox standard keeps its own zoom | Small lanes | Built in stage 1.1 |
+| **Lane details on the map** in Settings, off unless turned on: lane markings, painted arrows and crosswalks where Mapbox has them. The car is shown on the road, not in a lane | Small lanes | Built in stage 1.1 |
+| At a lane choice where the route goes straight on, the card's lane row shows that point's lanes with its distance | Small lanes | Built in stage 1.1 |
 | The early turn into curves stays | The owner liked it | Kept in every style |
 | During guidance the top padding comes from the maneuver card alone and only grows, so the lanes row no longer reframes the view. It also holds a constant band under the card for the Then chip, which therefore never moves the view. In Smooth follow padding changes glide anyway | Secondary switches | Built in stage 1.1 |
 | The route line is updated only when the SDK accepts the point | Main-thread waste | Built in stage 1.1 |
@@ -414,10 +417,11 @@ Built in stage 1.1. New lines in the debug log:
 | Device state | On screen or not; screen on, off, unlocked; charging; Power saving and Doze; heat; memory pressure. Once per start: battery limits, background restriction, standby bucket, Data saver, location power saving. During guidance, one line a minute: battery level and temperature, thermal status and headroom, Power saving, memory | Phone conditions |
 | Connectivity | Every change of the app's network: Wi-Fi or mobile, internet reached or not, blocked or not, metered, roaming, suspended, and which networks the app can see. At start, on every return to the app and after each change, the settings that can cut off only this app: Data saver, the Mobile data switch, the SIM, background restriction, battery limits | The missing internet |
 | Animations | Whether Android's animations run and the animator duration scale, when the first screen opens, when guidance starts and whenever the scale changes. Logged only; the app never changes the setting | Steps |
-| Camera | Once a second during guidance while the map is on screen (the `activity` and `screen` lines show when it was not): zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
+| Camera | Once a second during guidance while the map is on screen (the `activity` and `screen` lines show when it was not): zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. Also how wide a lane is on the screen, what sets the zoom with the Large lane zoom, and whether lane details are on. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
+| Lane choices | Once for each point of the route with lanes, when it comes as near as the close view would start: its lanes, how many can be used and how many leave the route, whether the road is a freeway, and the reason when the rule passes it over. Each route also lists, step by step, its intersections with lanes | How often Large goes close on a freeway, and how often a looser rule would |
 | Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
 | Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it, the result's types, categories and Mapbox id | Behind the store |
-| Routes | How far the Directions API moved each requested point: about 71 m for the store | Behind the store |
+| Routes | How far the Directions API moved each requested point: about 71 m for the store. The lines that describe whole routes are put together off the main thread, so they are written a moment after the lines that follow them | Behind the store |
 | Fix age | Every matched location carries the age of its fix in ms and the number of points the drawn car glides through | GPS delay; old fixes, as at the second drive's Start |
 
 - Folded, the first drive's 2337 map error lines become at most a few dozen, and the file about
@@ -512,8 +516,8 @@ On the drive:
    one of them and note where the arrival is and which side it names.
 2. **Camera styles.** Compare Mapbox standard, Mapbox tuned and Smooth follow on the same kinds of
    road: a gently curving road (the early turn must stay), ordinary turns, and a freeway entry and
-   exit. Note smoothness, how the tilt changes before and after turns, whether the lanes are large
-   enough, and whether the freeway view zooms out too far. Change the style only while stopped.
+   exit. Note smoothness, how the tilt changes before and after turns, and whether the freeway
+   view zooms out too far. Change the style only while stopped.
 3. **Offline.** If the network drops, the offline chip should appear within about 3 s, and the map
    along the route should stay complete.
 4. **Old routes (optional).** Leave the routes open for more than 5 minutes before Start; the log
@@ -524,6 +528,24 @@ On the drive:
    only the arrow or the road that changes fading (the same arrow again should not blink), whether
    it shows early enough before a freeway exit with a turn at the ramp's end, and whether it ever
    flashes or moves the map.
+
+6. **Lane zoom, Large.** In Settings, Guidance, set Lane zoom to Large (Default is what the build
+   starts with) and drive ordinary turns, two close turns and a freeway with exits. Before a turn
+   the view should first go flat and then close, until the junction fills the map, and ease back
+   out after it. Note whether the lanes are large enough or the view too close, and whether the
+   car and the junction both stay on screen. On the freeway the view should stay far ahead and go
+   close only about 25 s before an exit or a split where lanes leave the route. Note every exit
+   where it went close and should not have, or did not and should have, and whether the road moves
+   too fast when close. Compare one stretch in Default, and one in Mapbox tuned with Large. Changing
+   Lane zoom while moving should glide, never cut.
+7. **Lane details on the map.** Turn the switch on. Where Mapbox has them (major highways and some
+   cities) lane lines and painted arrows should appear close in, without fading out and in when
+   the map opens. Do the painted arrows match the card's? Is the route line ever lost on or under a
+   bridge, and where does the car's icon sit there? The answers decide whether the switch can be
+   on for everyone.
+8. **Lanes in the card on a freeway.** Before a split or an exit with two exit lanes that the
+   route passes going straight on, the card's lane row should show that point's lanes with its
+   distance, and go back to the next maneuver's lanes after it.
 
 Then share the debug log. What to read in it:
 
@@ -539,6 +561,9 @@ Then share the debug log. What to read in it:
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
 | Start plan | What Start did with the routes |
 | Progress: `after`, `thenShown`, `stepMetersLeft`, `stepSecondsLeft` | Where the Then chip showed, and for which pairs of maneuvers, to tune its distances |
+| Camera: `laneDp`, `zoomPlan`, `laneFocus`, `centerLeadS` | Whether Large reached about 28 dp at junctions and 14 dp before lane choices, and how much of the freeway stayed in the long view |
+| `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
+| Camera: `laneDetails`, `hdRoads`, `hdRoadsReapplied`; `lane_details` | Whether lane details stayed on once set |
 
 Reading the connectivity lines:
 

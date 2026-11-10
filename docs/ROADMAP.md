@@ -59,10 +59,12 @@ zoom setting and the trip history with prediction.
   goes down onto the junction gradually before a turn and back up after it; the early turn on
   curving roads stays.
 - The map follows the car before Start too, until the driver moves the map.
-- **Lane zoom** in Settings: **Default** (today's zoom) and **Large**, a very close view where the
-  junction fills the screen and the lanes are clearly visible; Large also zooms in on freeways where
-  lanes split off while the route goes straight on. Lane markings on the map where Mapbox has them,
-  behind a switch. The car stays on the road line: the phone cannot tell which lane it is in.
+- **Lane zoom** in Settings: **Default** (today's zoom, what a phone starts with) and **Large**, a
+  very close view where the junction fills the screen and the lanes are clearly visible; Large also
+  zooms in on freeways where lanes leave the route, also where it goes straight on. Lane markings on
+  the map where Mapbox has them, behind a switch that is off unless turned on. The car stays on the
+  road line: the phone cannot tell which lane it is in. Built; not yet on a drive
+  ([CAMERA.md](CAMERA.md), Lane zoom).
 - A **Then** chip that slides out under the maneuver card on the approach, with the arrow of the
   maneuver after the next one.
 - Routes end where a car stops for the place: Mapbox Search's stop point for cars is the route's
@@ -130,7 +132,8 @@ The full design is in [STAGE-2.md](STAGE-2.md).
 
 - Overview by default, following before maneuvers (distance threshold from speed, hysteresis, manual
   touch pauses automation for 20 s), the same on phone and car, settings on the phone, scenario tests.
-- A strong zoom into the junction before each maneuver, so the lanes fill the screen.
+- The strong zoom into the junction before each maneuver, once planned here, is the Large lane zoom
+  of stage 1.1.
 
 ## Stage 5: 3D navigation and visual polish (planned)
 
@@ -180,11 +183,18 @@ Mapbox logo and attribution rules apply in every view.
 ## Watch list
 
 - **Lane-level magic carpet:** Mapbox 3D Lanes (lane geometry, in private preview since January 2026)
-  is promised for mobile apps in 2027. With it, the stage 5 ribbon can move onto the exact lane. Mapbox's
-  detailed lane markings in the map (Standard "lane details", HD roads) are off by default and cover
-  about 70 major cities; on top of that, Navigation SDK 3.34's camera data source switches them off
-  on every style load unless Mapbox's non-public coordination module is attached. To be checked
-  with each SDK upgrade.
+  is promised for mobile apps in 2027. With it, the stage 5 ribbon can move onto the exact lane.
+  The car's icon stays on the line of the road: phone GPS is not lane-accurate, the navigator's
+  position has no lane, and the public SDK has no lane geometry ([DECISIONS.md](DECISIONS.md), 39).
+  Lane geometry alone would not change that; a lane position for the car would.
+- **Lane details in the map:** Mapbox's detailed lane markings (Standard "lane details", HD roads)
+  are off by default and cover about 70 major cities. Navigation SDK 3.34's camera data source
+  switches them off on every style load unless Mapbox's non-public coordination module is attached.
+  The app now shows them behind a switch, off unless turned on: it sets them after the style load,
+  when the SDK has already looked, and checks once a second during guidance. With each SDK upgrade,
+  check that the SDK still turns them off only at a style load (the debug log's `hdRoadsReapplied`
+  stays 0), and whether the route line follows 3D bridges, which would allow the switch to be on
+  for everyone.
 
 - **Sideloading:** Android developer verification will require apps installed outside Google Play to be
   registered to a verified developer. Enforcement starts outside the US in 2026 and worldwide in 2027;

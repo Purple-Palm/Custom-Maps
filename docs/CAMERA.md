@@ -5,11 +5,11 @@ camera behaved that way, the designs considered, the one chosen, and how it will
 references are to Maps SDK 11.34.1 and Navigation SDK 3.34.1 (ui-maps 3.34.1). The drives are
 described in [DRIVES.md](DRIVES.md); stages are in [ROADMAP.md](ROADMAP.md).
 
-**Status:** built in stage 1.1 (2026-11-10). The three camera styles, the setting that chooses one
-and [following before guidance](#following-the-car-before-guidance) are in the app, and the motion
-math has JVM tests. None of it has been on a simulated or a real drive yet, so every number is
-still the one from simulation. The extra zoom at turns is not built; it comes with the Lane zoom
-setting. The owner answered the camera questions; the answers are
+**Status:** built in stage 1.1 (2026-11-10). The three camera styles, the setting that chooses one,
+[following before guidance](#following-the-car-before-guidance) and the
+[Lane zoom](#lane-zoom) setting with its Large mode are in the app, and the motion math has JVM
+tests. None of it has been on a simulated or a real drive yet, so every number is still the one
+from simulation. The owner answered the camera questions; the answers are
 [at the end](#the-owners-answers).
 
 ## What the owner reported
@@ -59,8 +59,9 @@ are starting points for tuning.
   Whenever only the location is framed (before the first progress after Start, after every
   reroute), the zoom target would jump to the cap for about a second, on a freeway from about 14 to
   17.5 and back. And the whole town drive would get closer, about 350 to 500 m ahead, not only the
-  approach to turns. Tuned keeps 16.35 and sets nothing on the data source; its extra zoom at turns
-  comes with the Lane zoom setting.
+  approach to turns. Tuned keeps 16.35 on the road; its extra zoom at turns comes from the Large
+  [lane zoom](#mapbox-tuned-and-mapbox-standard), which raises the limit only while the SDK frames a
+  maneuver.
 - **The 1.1 s puck** (see `GuidancePuck` below). It trails the fix by about 0.1 s more, about 3 m
   at 65 mph.
 - **The preview knows where the car is.** In the route preview the data source gets the puck's
@@ -91,9 +92,12 @@ taking over, and `NavigationCamera` moves the map with animators. So `PhoneMap` 
 `NavigationBasicGesturesHandler`, for the two Mapbox styles, and `SmoothNavigationCamera` for
 Smooth follow. The design below was drawn up with `NavigationCamera` removed; the style setting
 keeps it. On a style change the old camera lets go of the map and takes back what it set on the
-data source (Smooth follow's tilt override, with `clearFollowingOverrides`; the Mapbox styles set
-nothing). The data source then computes a fresh frame, and the new camera is asked for what the
-old one was doing: following, the overview, or following on the browsing map.
+data source: Smooth follow its tilt override (`clearFollowingOverrides`), and both it and Mapbox
+tuned the limits the Large lane zoom moved. Mapbox standard sets nothing. `PhoneMap` then sets up
+the data source's frames for the new style and the lane zoom
+([Lane zoom](#changing-the-setting-or-the-style-during-a-drive)), the data source computes a fresh
+frame, and the new camera is asked for what the old one was doing: following, the overview, or
+following on the browsing map.
 
 ## Following the car before guidance
 
@@ -221,6 +225,10 @@ move.
 The sizes use Mapbox's zoom levels with 512-pixel tiles
 ([zoom level glossary](https://docs.mapbox.com/help/glossary/zoom-level/)) at the latitude of the
 drives.
+
+This is how the first drives were. Stage 1.1 answers it with the [Lane zoom](#lane-zoom) setting,
+whose Large mode goes close at junctions, and with a switch for
+[lane details on the map](#lane-details-on-the-map).
 
 ### Where the early turn comes from
 
@@ -385,8 +393,8 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 - While following, the centre chases the drawn puck, not the raw fix. The camera trails the car a
   little and settles onto it when the car stops.
 - `MapboxNavigationViewportDataSource` stays as the source of targets. The look-ahead bearing (the
-  early turn), the zoom, the maneuver framing and the overview are unchanged; the next build's
-  extra zoom at turns comes on top (see [Hooks for stages 4 and 5](#hooks-for-stages-4-and-5)).
+  early turn), the zoom, the maneuver framing and the overview are unchanged; with the Large lane
+  zoom the camera adds its close views on top (see [Lane zoom](#lane-zoom)).
 - A timed, eased schedule (`ManeuverFocus`) replaces the 45°/0° tilt switch.
 - When nothing moves, the loop stops: no frames, no camera writes.
 
@@ -397,19 +405,23 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `CameraTuning` | `:core-nav`, `nav/camera/CameraMotion.kt` | Every constant, in seconds, degrees and metres, with `PHONE` and `CAR` presets. One place to tune after a drive. |
 | `Spring` | same file | Critically damped spring with an exact closed-form step. From rest it never passes its target. |
 | `SampleRamp` | same file | Moves from where it is to each new sample at a constant rate over 1.1 s. Its lead, rate × τ, is what a spring aims at: the spring then trails the ramp by τ × rate and stops on the last sample, not past it. |
-| `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). Stage 4's junction zoom reads the same curve. |
+| `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). After a maneuver the Large lane zoom lets the junction's zoom go along the same curve. |
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
 | `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
 | `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt and the distance from which a new position is a jump. |
 | `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, only growing during guidance, plus a constant band under the card for the Then chip. |
-| `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress`, `onPuckGlide`, `onGuidanceEnded`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
+| `MapScale`, `LaneChoice`, `LaneFocus`, `ZoomPlanner`, `centerLeadSeconds` | `:core-nav`, `nav/camera/LaneZoomPlan.kt` | The Large lane zoom's math: a lane's width on the screen at a zoom, which points of a route count as a lane choice, when the view goes close for one, the zoom the camera aims at, and how far ahead of the car its centre aims. See [Lane zoom](#lane-zoom). |
+| `LaneChoices` | `:engine-mapbox`, `navigation/LaneChoices.kt` | The points with lanes ahead of the car, read from the route once for each step. The engine owns the one copy; the cameras and the maneuver card read from it. |
+| `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress` (with the lane choices ahead), `onPuckGlide`, `onGuidanceEnded`, `setLaneZoom`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
+| `LaneZoomFrames` | `:engine-mapbox`, `map/camera/LaneZoomFrames.kt` | What the lane zoom changes on the viewport data source for each camera style, and the way a change of it reaches a route the data source already has. |
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
 | `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. |
 | `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport; for Mapbox standard it glides 1.0 s and never jumps. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
 | `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
-| `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update, and writes the camera line to the debug log. |
-| `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
+| `LaneDetails`, `RouteLineWidths` | `:engine-mapbox`, `map/LaneDetails.kt`, `map/RouteLineWidths.kt` | Lane markings on the map, set after the SDK has turned them off, and the route line that stays thin close in while they are on. |
+| `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log. |
+| `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, the lane zoom and the lane details switch, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
 | `CarNavigationMap` (stage 2) | `:engine-mapbox`, `car/CarNavigationMap.kt` | The same camera on the car's map surface. |
 
 The math is pure Kotlin on the Java 8 API in `:core-nav` (DECISIONS 4) and is tested on the JVM.
@@ -532,7 +544,9 @@ Distances at the drawn puck:
 - The tilt is 0° at the junction.
 
 The SDK's maneuver framing stays: from 180 m the frame covers the rest of the step and 100 m after
-the turn. It glides in over about 1.5 s through the on-puck weight instead of jumping.
+the turn (30 m with the Large lane zoom, which also lets that frame be fitted closer; see
+[The junction zoom](#the-junction-zoom)). It glides in over about 1.5 s through the on-puck weight
+instead of jumping.
 
 ### Modes and transitions
 
@@ -579,8 +593,9 @@ the turn. It glides in over about 1.5 s through the on-puck weight instead of ju
 
 ### End of guidance
 
-- `onGuidanceEnded()` resets the tilt schedule and clears the data source's following overrides
-  (`clearFollowingOverrides`).
+- `onGuidanceEnded()` resets the tilt schedule and the lane zoom's schedules, clears the data
+  source's following overrides (`clearFollowingOverrides`) and sets the limits Large moved during
+  the drive back to where a drive starts.
 - If the camera still showed the route, it goes back to the car on the browsing map and follows it
   there (see [Following the car before guidance](#following-the-car-before-guidance)). If the
   driver had taken the map, it stays where it is.
@@ -626,6 +641,7 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `style` | the camera style: `MAPBOX_STANDARD`, `MAPBOX_TUNED` or `SMOOTH_FOLLOW` | |
 | `state` | what the camera is doing: `FOLLOWING`, `OVERVIEW`, `IDLE`, and `TRANSITION_TO_FOLLOWING` or `TRANSITION_TO_OVERVIEW` on the way there | |
 | `zoom`, `pitch`, `bearing` | the map's camera | |
+| `laneDp` | how wide a lane of 3.7 m is on the screen at the camera's centre, in dp | about 4 to 6 on a town road; with Large about 28 at a junction and 14 near a lane choice |
 | `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre | |
 | `puckLagM` | how far the drawn puck trails the latest matched position | below speed × the puck's glide |
 | `sinceFixMs` | how long ago that position came | up to about 1000 |
@@ -640,6 +656,9 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `renderFps` | the renderer's own rate (`MapView.setOnFpsChangedListener`, called on the render thread); left out while the map draws nothing | at least 55 at 60 Hz |
 | `animatorsEnabled` | `ValueAnimator.areAnimatorsEnabled()` | false: the animator scale is 0 and the puck jumps |
 | `hz` | the display's refresh rate | |
+| `laneDetails` | the switch for lane details on the map | |
+| `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
+| `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
 
 `puckLagM`, `sinceFixMs` and `keyPoints` are left out until the guidance has had its first position.
 
@@ -654,11 +673,20 @@ Smooth follow adds its controller's own numbers:
 | `zoomTarget` | the zoom the camera is going to | |
 | `bearingError` | target bearing minus camera bearing | within a few degrees |
 | `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview |
+| `laneZoom` | the Lane zoom setting: `DEFAULT` or `LARGE` | |
+| `zoomPlan` | what sets the zoom with Large: `ROAD`, `JUNCTION`, `AFTER_JUNCTION` or `LANES`; left out in the overview | `ROAD` on most seconds, and always with Default |
+| `laneFocus`, `laneGoal` | the lane choices' schedule: how far the view is in for one, 0 to 1, and where that is going. It runs with Default too, without moving the zoom | 0 on most freeway seconds |
+| `laneAheadM` | metres to the nearest lane choice ahead that counts; left out when there is none on the step | |
+| `laneChoice` | the lane choice that holds the view: `lanes`, `usable`, `atManeuver`; left out on the road | |
+| `centerLeadS` | how many seconds ahead of the drawn car the centre aims | 0 with Default, and with Large up to about zoom 17 |
 
 The two Mapbox styles do not run the controller. They add `frameUpdates`, the frame animations
 `NavigationCamera` started that second, and `frameUpdatesCut`, those cancelled before they
 finished because the next one came. While the car moves, Mapbox standard starts about two a second
-and Mapbox tuned one.
+and Mapbox tuned one. They also add `laneZoom` (the setting, which Mapbox standard does not act
+on), `laneGoal` (1 while a lane choice holds the view in Mapbox tuned) and `maxZoom` and `minZoom`,
+the limits the data source fits its frames within: 16.35 and 10.5, but for Mapbox tuned with Large
+near a maneuver and near a lane choice.
 
 Other lines:
 
@@ -673,7 +701,25 @@ Other lines:
 - A **camera_request** line when **Recenter**, **Overview** or **My location** is tapped: `mode`,
   `from` and `guidance`.
 - A **settings** line on every change of a setting: `key`, `value` as stored, and `guidance`. A
-  change of `camera_style` during a drive shows there.
+  change of `camera_style`, `lane_zoom` (`default` or `large`) or `lane_details` (true or false)
+  during a drive shows there.
+- A **lane_choice** line once for each point with lanes, when it comes as near as the close view
+  would start for it, with every camera style and either lane zoom: `kind` (`straight` where the
+  route goes straight on, `maneuver` at an exit or a fork), `metersAhead`, `window` (the distance
+  at which the close view starts at this speed), `lanes` (not counting `designated` ones),
+  `usable`, `leaving`, `designated`, `freeway`, `speed` in m/s (left out while unknown) and, when
+  the rule passes the point over, `skipped` with the reason: `NOT_A_FREEWAY`, `TOO_FEW_LANES`,
+  `NO_USABLE_LANE`, `NO_LANE_LEAVES` or `TOO_FEW_LEAVING`. The lines without `skipped` are where
+  Large goes close; the others show what a looser rule would add.
+- A **lane_details** line each time the app sets lane details on the map: `reason` (`setting`,
+  `style_loaded` or `reapplied`), `wanted`, `read` (what the style says afterwards) and `error` if
+  the style refused.
+- The **route_response** and **routes_updated** lines carry, for each step with any, the
+  intersections that have lanes (`laneIntersections`): `meters` from the start of the step,
+  `lanes`, `usable`, `active`, `designated`, the `classes` of the road that leaves it, and
+  `freeway`, whether the road that leads to it counts as one. With these the rule can be tried with
+  other numbers after a drive. These two lines are put together off the main thread and are
+  written a moment after the lines that follow them in the code.
 - An **animations** line: `reason`, `enabled` (`areAnimatorsEnabled()`), `durationScale` (the
   setting `Settings.Global.ANIMATOR_DURATION_SCALE`) and `powerSave`. It is written when the first
   activity starts and at every Start, not at app start: a process learns the real scale only when
@@ -691,17 +737,17 @@ Other lines:
 
 Stage 4, smart camera:
 
-- **Junction zoom.** Where the targets are computed, raise the zoom target and pull the centre
-  toward the maneuver point by `maneuverFocus.focusAt(now)`, the same eased curve as the tilt,
-  through the existing blend of world point and puck. The controller sets the zoom itself, so the
-  data source's 16.35 cap does not limit it. Because it reads the tilt's curve, close turns get one
-  zoom-in, as they get one tilt. The roadmap brings a first part of this, more zoom at turns, into
-  the next build as the Lane zoom setting ([answer 2](#the-owners-answers)).
+- **Junction zoom: done in stage 1.1** by the Large lane zoom ([Lane zoom](#lane-zoom)). It takes
+  the zoom of the SDK's own maneuver frame, fitted closer, so the hook once planned here, pulling
+  the centre toward the maneuver point, was not needed: that frame already holds the car and the
+  junction. Stage 4 may still use the tilt's curve for a view centred on a complex junction.
+  Its automatic following would start where the two schedules start, the tilt's and the lane
+  choices'.
 - **Keep the early turn.** If stage 4 shortens the framed geometry near turns or overrides the
   bearing (`followingBearingPropertyOverride` bypasses the data source's bearing smoothing), it must
   keep that smoothing or rebuild it. Otherwise the early turn disappears near junctions.
-- More tiles load at zoom 18 to 19. Where the phone is offline, the map stretches tiles from lower
-  zooms.
+- No tiles load for a closer view: Mapbox's tiles end at zoom 16, and above it the map draws the
+  zoom 16 tiles larger, online and offline ([No new tiles](#no-new-tiles)).
 - **Automatic overview and following** call `requestOverview()` and `requestFollowing()`. The
   transitions chase a live target, so they end without a surge.
 - The **20 s pause after a touch** is a timer started when the mode changes to IDLE.
@@ -753,6 +799,325 @@ Stage 5, 3D:
   at most 60°/s instead of a cut (animations off) or a one-second linear move (animations on).
 - **The constants** come from simulation and need drives to tune.
 
+For the Large lane zoom and lane details:
+
+- **The SDK's maneuver frame at close zoom** is untried on a device. The model in the simulation
+  fits it flat; the real one can differ by a few tenths of a zoom level, and a junction wider than
+  the view never reaches 28 dp. The log's `laneDp` shows what a drive gets.
+- **Little around the junction.** At 28 dp the view is about 55 m wide on a phone. The Then chip
+  and the 30 m after the turn carry what comes next. One constant, `junctionLaneDp`.
+- **Fast ground near a lane choice.** At 14 dp and 105 km/h the road moves about 110 dp a second.
+  If that tires the eyes, lower `freewayLaneDp`.
+- **The lane-choice rule is a guess** until a drive: 3 lanes, 2 leaving, 25 s. Lane data may also
+  be thin on intersections the route goes straight through; then the rule fires only at exits and
+  forks. The `lane_choice` lines show both.
+- **The bearing lead of 20°** changes the early turn on curves inside a lane window. Setting
+  `laneMaxBearingLead` to 45 brings the SDK's back.
+- **The centre lead** makes the camera follow the drawn car's changes of speed more closely when
+  close in. If the car's icon shows a hitch, raise `maxPuckLagDp`.
+- **Mapbox tuned** takes its zoom back at the step change, not with the tilt, and its limits move
+  in steps that only its animations smooth. It is a comparison style.
+- **Lane details rest on an order of events** read from the SDK's source: the SDK turns them off
+  only at a style load. A later SDK may add another moment; the look once a second sets them again,
+  and `hdRoadsReapplied` counts it. Check with each SDK upgrade, as the three behaviours above.
+- **The route line under 3D bridges** with lane details on is not checked; nor is the car's icon,
+  which may seem to float over a bridge or sit on the road under it.
+- **The route line's widths** with lane details on are the SDK's own stops, copied. A new SDK with
+  other widths fails a unit test (`RouteLineWidthsTest`) instead of leaving the held line behind.
+
+## Lane zoom
+
+**Settings → Guidance → Lane zoom** has two choices. They are stored under `lane_zoom` as `default`
+and `large`; a missing or unknown value reads as Default.
+
+- **Default** is the zoom guidance has had so far, never closer than 16.35. A phone starts with it.
+  With Default nothing in this section runs, and every camera style moves exactly as before.
+- **Large** is Default on the open road plus two close views: onto the junction before every turn,
+  and before a lane choice on a freeway. It comes back out after each. Smooth follow and Mapbox
+  tuned carry it. Mapbox standard keeps its own zoom, and Settings says so under the row while that
+  style is chosen.
+
+A change applies at once, also during a drive, and the view glides to it. The reasons are in
+[DECISIONS.md](DECISIONS.md), 38.
+
+None of this has been on a simulated or a real drive. Every threshold below is a first setting from
+reasoning: the drive logs they were to be tuned from have not arrived. Each is one constant in
+`CameraTuning` ([Constants of the lane zoom](#constants-of-the-lane-zoom)).
+
+### How wide a lane is
+
+Large is set by how wide a lane is on the screen, not by a zoom number, so it looks the same at
+every latitude. Mapbox zoom levels use 512-dp tiles: at zoom z and latitude φ one dp covers
+40,075,016.686 m / 512 × cos φ / 2^z (`MapScale` in `:core-nav`). A lane of 3.7 m on the screen, in
+dp, at three example latitudes:
+
+| Zoom | 25° | 35° | 45° | What it is |
+|---|---|---|---|---|
+| 14.0 | 0.9 | 0.9 | 1.1 | a freeway frame, several kilometres ahead |
+| 16.35 | 4.4 | 4.8 | 5.6 | the closest Default goes, and Large on the open road |
+| 17.5 | 9.7 | 10.7 | 12.4 | |
+| 17.9 | 12.8 | 14.1 | 16.4 | |
+| 18.9 | 25.5 | 28.2 | 32.7 | |
+
+Large asks for a lane of **28 dp** at a junction, about 4.4 mm: zoom 19.03 at 25°, 18.89 at 35° and
+18.68 at 45°. Before a lane choice on a freeway it asks for **14 dp**, about 2.2 mm, one zoom level
+less. It never goes closer than zoom 20. In a tilted view the zoom is the scale at the camera's
+centre, the car's place near the bottom; lanes farther up the screen are narrower.
+
+### No new tiles
+
+- Mapbox's map tiles end at zoom 16. A closer view draws the zoom 16 tiles larger: shapes stay
+  sharp, and labels are placed for the camera's zoom. That is the same online and offline.
+- So Large loads no tiles that Default does not, and it works offline wherever the street map at
+  zoom 16 is on the phone. A closer view covers less ground, so fewer tiles are on screen.
+- Not checked: whether [lane details](#lane-details-on-the-map) have map data of their own, and
+  whether that is among what gets saved for offline use.
+
+### The junction zoom
+
+It runs for the maneuvers the tilt goes down for
+([The tilt before a turn](#the-tilt-before-a-turn)): turns, ends of roads, roundabouts, U-turns
+and the arrival.
+
+- **What Large changes on the data source** (Smooth follow, `LaneZoomFrames.applySmoothFollow`):
+  its frames may be fitted as close as zoom 20 instead of 16.35, and the frame of a maneuver holds
+  30 m of road after the turn instead of 100 m. The SDK still fits that frame, flat and within the
+  padding, around the car, the rest of the step and any maneuver that follows within 150 m. So the
+  car and the junction are both on screen all the way, and the frame gets closer as the car does.
+- **The camera takes the zoom of that frame**, up to the zoom at which a lane is 28 dp wide
+  (`ZoomPlanner`). It moves there over the 1.1 s of a sample and never faster than 1 zoom level a
+  second.
+- **The open road stays at 16.35.** A frame of the road counts no closer than that, however close
+  the data source fitted it. The SDK fits such a frame to the road ahead of the car, the rest of
+  the step or seven times the mean distance between intersections, not to the junction. Its zoom
+  says nothing about the junction, and the SDK's own source notes that such fits can fail at high
+  zoom. So the view goes close from where the SDK starts to frame the maneuver, 180 m before it,
+  when the tilt is already down: first the tilt, then the zoom. The first design blended the zoom
+  in while the tilt went down; that would have followed the road frame's zoom.
+- **After the maneuver** the frame shows the road beyond it. The camera keeps the zoom the
+  junction had for as long as the view is held over it, and lets it go along the same eased curve
+  as the tilt comes back up (`ManeuverFocus.afterManeuver`).
+- **Close turns** keep the view down and close, as they keep the tilt down: the SDK frames them
+  together, so the zoom between them is a little farther out, not a jump back to the road.
+
+Simulated with the compiled camera at 60 frames a second, against a model of the data source (the
+car on its focal point on the road; from 180 m a flat fit of the rest of the step and the road
+after it into the padded height). The road is made up and lies on the equator, where 28 dp is zoom
+19.18 and 16.35 shows a lane 3.9 dp wide. A turn approached at 50 km/h, braking over the last
+120 m to 20 km/h:
+
+| Where | Tilt | Zoom | Lane on screen |
+|---|---|---|---|
+| 240 m before | 45° | 16.35 | 3.9 dp |
+| 183 m before | 3° | 16.35 | 3.9 dp |
+| 141 m before | 0° | 17.37 | 8.0 dp |
+| 101 m before | 0° | 17.99 | 12.3 dp |
+| 67 m before | 0° | 18.40 | 16.4 dp |
+| 31 m before | 0° | 19.03 | 25.2 dp |
+| 17 m before, to 33 m after | 0° | 19.18 | 28 dp |
+| 43 m after | 5° | 19.09 | 26.3 dp |
+| 56 m after | 30° | 18.44 | 16.8 dp |
+| 84 m after | 45° | 16.67 | 4.9 dp |
+| 111 m after | 45° | 16.35 | 3.9 dp |
+
+In the same model two turns 100 m apart stay flat with a lane no narrower than 13.5 dp between
+them, a roundabout with its way out 45 m on stays at 22.6 dp or wider, and the arrival ends at
+28 dp with the car standing. The real frames of the SDK can differ from the model by a few tenths
+of a zoom level.
+
+### The lane-choice zoom on freeways
+
+On a freeway the next maneuver can be many kilometres away while lanes leave the route in between:
+a split, or lanes that turn into an exit. Large goes close for those too, also where the route
+goes straight on.
+
+**Where the lanes come from.** The route carries lanes for its intersections, also for those it
+goes straight through, with a mark on each lane the route can be followed from. `LaneChoices` in
+the engine reads them once for each step, with the distance of each along the step, and adds the
+next maneuver's own lanes where that maneuver is one the view stays up for (an exit, a fork, a
+merge, an on ramp or a continue). No request is made for this and no other service is asked: the
+data is in every route. Mapbox's Electronic Horizon also knows lane counts; it is a beta whose
+pricing may change and is not used.
+
+**Which points count** (`LaneChoice.skipReason`):
+
+- the road that leads to the point is a freeway: the class `motorway`, or the road class motorway
+  or trunk where the route names one;
+- at least **3 lanes** reach it, not counting lanes kept for buses, car pools, taxis and the like;
+- at least one lane can be used and at least one cannot;
+- at an exit or a fork that is the next maneuver, that is enough;
+- where the route goes straight on, at least **2 lanes** leave it. One lane that turns into an
+  exit is what nearly every exit looks like, and the view would go close at each of them.
+
+A wide freeway where every lane goes on, a single exit lane, and every road that is no freeway do
+not count: lane choices in town come with a turn, which has the junction zoom. So on most freeway
+kilometres the long view ahead stays, as the owner asked.
+
+Both thresholds are a first setting. Every point with lanes that comes as near as the close view
+would start is written to the debug log once, counted or passed over, with its lane counts and the
+reason (the `lane_choice` line under [Logging](#logging)). A drive then shows how often the rule
+fires and how often a looser one would.
+
+**When** (`LaneFocus`):
+
+- In over 6 s, from 25 s of driving before the point, no nearer than 400 m and no farther than
+  1,200 m: 556 m at 80 km/h, 729 m at 105 km/h, 833 m at 120 km/h. Once a point holds the view it
+  keeps it, also when the car brakes and the distance shrinks.
+- Held past the point for at least 30 m and 2 s, then out over 6 s.
+- A next point no more than 10 s of driving from its own start keeps the view in: no zoom out and
+  in again between a split and the next exit.
+- A reroute starts the route's metres again; the point that held the view is then held by its time
+  only. Off the route there are no lane choices.
+
+**The view.** The zoom goes to a lane of 14 dp and the tilt stays at 45°: straight down, that zoom
+would show only a few seconds of road at freeway speed. While a point holds the view, the bearing
+may lead the car's heading toward the road ahead by at most 20° instead of the SDK's 45°, so the
+lanes at the car stay close to upright on a curving freeway. Elsewhere the early turn is unchanged.
+
+In the simulation at 105 km/h (window 730 m, zoom 18.18 for 14 dp on the equator, the road's frame
+at 14.2): the zoom starts in 675 m before a split where 2 of 5 lanes leave, a lane is 14 dp from
+483 m before it, the view stays in to a second split 964 m on, starts out 114 m past that and is
+back about 300 m past it. A point where one of four lanes leaves does not move the zoom. The 4
+zoom levels take about 7 s, not 6, because of the limit of 1 level a second.
+
+**The maneuver card shows the same point.** From where the close view would start until the car
+has passed it, the card's lane row shows the lanes of a straight-on lane choice with its distance,
+in every camera style and with either lane zoom (`RouteProgressSnapshot.laneChoiceAhead`, filled
+by the engine from the same `LaneChoices`).
+
+**Limits.** Lane choices are read for the current step only, so one that follows right after a
+maneuver gets a shorter start. What kind the next maneuver is comes from the route's banner; while
+the navigator has none, an exit or a fork is not taken as a lane choice.
+
+### The centre at close zoom
+
+The centre trails the drawn car by 2τ × speed: 5.4 m at 50 km/h. At zoom 16.35 that is about 7 dp.
+Close in the same metres are many more dp, and the car would ride visibly above its usual place.
+
+So with Large, while it follows the car, the centre aims ahead of the car along the car's own
+motion by `max(0, 2τ − 12 dp × metres per dp ÷ speed)` seconds (`centerLeadSeconds`): it then
+trails the car by no more than 12 dp. The car's motion is read from the drawn puck, from one frame
+to the next and smoothed over 0.3 s, and the lead is worked out for the closer of the camera's zoom
+and the zoom it is going in to. At 16.35 and town speeds the lead is 0. In the frame of a maneuver
+the centre is the frame's point, not the car, and the lead does not act. With Default there is no
+lead at all. In the simulation the centre is at most 11.1 dp behind the car in a lane window at
+105 km/h, with a lead of 0.29 s.
+
+### Mapbox tuned and Mapbox standard
+
+**Mapbox tuned** has no camera of its own that could hold the road at 16.35, so with Large the
+limits of the data source move with the drive. Before the frame of each navigator update is
+computed (`LaneZoomFrames.beforeTunedEvaluate`):
+
+- while the SDK frames a maneuver, by its own rule within 180 m of it, the frame may be fitted
+  until a lane is 28 dp wide; elsewhere the limit is 16.35;
+- while a lane choice holds the view (the same `LaneFocus`), the frame is no farther out than a
+  lane of 14 dp, and the bearing leads by at most 20°;
+- the frame of a maneuver holds 30 m after the turn, as for Smooth follow.
+
+The camera's own animations (zoom 2.5 s, restarted by each update) turn these steps into glides.
+Its zoom back out after a turn starts when the step changes, not with the tilt. With Default the
+limits are the SDK's on every update. In the model above the limit is zoom 19.18 from 175 m before
+the turn and the frame reaches 28 dp from 32 m before it.
+
+**Mapbox standard** keeps the SDK's values whatever the setting: 16.35, 10.5, 45° and 100 m.
+
+### Changing the setting or the style during a drive
+
+- `PhoneMap.setLaneZoom` sets up the data source for the camera style and the new mode
+  (`LaneZoomFrames.apply`), tells the camera, and has a frame computed.
+- The data source works out the road after each maneuver when it is given a route, and ignores a
+  route it already has. So when the 30 m or 100 m change, the route is taken out and given back
+  together with the latest progress, within one call on the main thread. No frame is computed in
+  between, so none shows a data source without its route.
+- Smooth follow glides to the new frame: the sample ramps in over 1.1 s, the zoom target moves at
+  most 1 level a second, and the spring smooths the rest. Both schedules, the tilt's and the lane
+  choices', run with either mode, so a change to Large near a maneuver or a lane choice picks up
+  where they are. After a maneuver a change to Large does not zoom in late.
+- Mapbox tuned gets its limits with the next navigator update, and its animations glide there.
+- A change of camera style runs the same set-up for the new style, after the old camera has taken
+  back the limits it moved and before the new one is made. Mapbox standard gets the SDK's values
+  and the 100 m back.
+
+In the simulation a change to Large 100 m before a turn, back to Default 40 m before it, and both
+inside a lane window, stayed within 1 zoom level a second, and the centre never moved more than
+3.2 dp from one frame to the next.
+
+### Lane details on the map
+
+**Settings → Guidance → Lane details on the map** is a switch, stored under `lane_details` and off
+unless turned on. It turns on Mapbox Standard's lane details (the style setting `showHdRoads`):
+lane lines, the arrows painted in each lane, stop lines, crosswalks and the road surface, where
+Mapbox has them, which is on major highways and in some cities. They are drawn from about zoom
+16, so with Default they are small and with Large they are large at every close view. Outside
+those areas the map is as before. The reasons are in [DECISIONS.md](DECISIONS.md), 39.
+
+- **The navigation SDK turns them off.** Every viewport data source looks at the setting when the
+  style is first ready and on every style load, and sets it to false if it is true; at no other
+  time. A switch in the SDK stops that, but it is for Mapbox's own modules and is not used.
+- **So the app sets it after the style load, never within it** (`LaneDetails`). From the callback
+  of the style load it only leaves a message for the main thread. By the time that message runs,
+  everything that listens for the style load has run and found nothing to turn off. Set within the
+  callback, the SDK would turn the lane details off again and the map would show them fade out.
+- **It looks again** once a second during guidance, with the camera line, and once a second after
+  a style load, and makes the setting again if something changed it. The camera line counts that
+  (`hdRoadsReapplied`): the order above is read from the SDK's source, not promised by it.
+- **The colour** of the road surface under lane details is set with the night palette
+  (`colorHdRoads`, the grey of the trunk roads).
+- **The route line stays thin close in** while the switch is on (`RouteLineWidths`). The SDK's line
+  grows with the zoom: at the junction zoom its casing is about as wide as a lane, and over lane
+  markings it would hide a lane and look like a claim about which lane to take. With the switch on,
+  the line and its casing keep the widths they have at zoom 16.5 for every closer zoom, about 10
+  and 15.5 dp, and the routes on the map are drawn again. Up to 16.5 nothing changes.
+- **Not checked on a device**, which is why the switch ships off: whether the route line and the
+  maneuver arrow, which have no height, hide under a bridge that lane details draw in 3D (the
+  Settings text says they can); the frame rate with lane details on; and whether they draw offline.
+
+### Why the car is not drawn in a lane
+
+The owner asked to see the car in the lane it should be in. Nothing the app has can say which lane
+the car is in:
+
+- **Phone GPS is not lane-accurate.** A phone is typically within about 5 m under open sky and
+  worse between buildings; a lane is 3.5 to 3.7 m wide.
+- **The navigator's position has no lane.** It lies on the line of the road in Mapbox's road
+  data, which on a divided freeway is the middle of the carriageway.
+- **The public SDK has no lane geometry.** The route says how many lanes reach an intersection and
+  which can be used, not where each lane is on the map. Lane details are a drawing with nothing
+  that ties a painted lane to a lane number.
+
+So nothing moves the car's icon sideways, with or without lane details. An icon drawn in the lane
+the route needs would show the driver in the right lane whether they are in it or not, and a
+driver who sees that does not change lanes. With lane details on, the icon will often sit on a
+middle lane or on a lane line; that is its place on the road, not a lane, and Settings says so.
+
+What the owner gets in its place:
+
+1. **Large:** the junction fills the map with a lane about 4.4 mm wide, and before a lane choice
+   on a freeway a lane is about 2.2 mm wide.
+2. **Lane details on the map** where Mapbox has them, with the arrows painted in each lane.
+3. **The lane arrows in the card**, the lanes to use lit, now also at lane choices where the route
+   goes straight on.
+
+### Constants of the lane zoom
+
+All in `CameraTuning`, the same for the phone and the car.
+
+| Constant | Value |
+|---|---|
+| Closest zoom with Default, and on the open road with Large (`defaultMaxZoom`) | 16.35 |
+| Closest zoom Large ever goes (`maxZoom`) | 20 |
+| Lane width at a junction (`junctionLaneDp`) | 28 dp |
+| Lane width near a lane choice (`freewayLaneDp`) | 14 dp |
+| Road kept after a maneuver in its frame (`largeMetersAfterManeuver`) | 30 m (the SDK: 100 m) |
+| Lanes a lane choice takes, and lanes that must leave where the route goes straight on (`laneChoiceMinLanes`, `laneChoiceMinLeaving`) | 3 and 2 |
+| Start of the close view before a lane choice (`laneLeadSeconds`, `laneMinWindowMeters`, `laneMaxWindowMeters`) | 25 s of driving, within 400 to 1,200 m |
+| In and out (`laneInSeconds`, `laneOutSeconds`) | 6 s each |
+| Held after a lane choice (`laneHoldMeters`, `laneHoldSeconds`) | 30 m and 2 s |
+| A next lane choice this near keeps the view in (`laneCoalesceSeconds`) | 10 s of driving from its own start |
+| Bearing lead near a lane choice (`laneMaxBearingLead`) | 20° (the SDK: 45°) |
+| The centre trails the car by no more than (`maxPuckLagDp`) | 12 dp |
+
 ## System animations
 
 - **The Smooth follow camera does not depend on the system animation setting.** Its frames come from
@@ -775,7 +1140,7 @@ Stage 5, 3D:
 
 ### Build order
 
-Steps 1 to 4 are done.
+Steps 1 to 4 are done, and so is the Lane zoom setting with lane details on top of them.
 
 1. `:core-nav`: `CameraMotion.kt` and `CameraMotionTest`.
 2. `:engine-mapbox`: `GuidancePuck` and `SmoothNavigationCamera`.
@@ -814,12 +1179,40 @@ Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
 jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
-The classes in `:engine-mapbox` touch Android and Mapbox types and have no JVM tests. While it was
-written, `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by
-frame through a made-up drive: the browsing map, the preview, Start, a turn, a red light, a drag,
+For the lane zoom, `LaneZoomTest` in `:core-nav` (34 tests, on example latitudes and made-up
+routes). Among them:
+
+- Zoom and lane width are each other's inverse, with 18.89 for 28 dp and 17.89 for 14 dp at 35°.
+- Only freeway points with at least 3 lanes and lanes that leave count; at the maneuver one
+  leaving lane is enough, straight on it takes two; each reason for passing a point over.
+- The start of the close view grows with the speed between 400 and 1,200 m.
+- A lane choice 1.5 km ahead at 105 km/h: in from 725 m, fully in 6 s later, held at least 2 s and
+  30 m past it, out over 6 s. Braking does not let the view out before the point.
+- Two lane choices 900 m apart keep the view in; 2.5 km apart let it out between them.
+- A reroute during the hold does not keep the view in, and a point at a distance that is no number
+  never holds it.
+- Default returns the frame's zoom. Large on the road is Default; it takes the junction frame's
+  zoom up to 28 dp, lets it go along the tilt's curve after the turn, and goes to 14 dp near a lane
+  choice.
+- The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
+
+In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
+`LaneChoicesTest` (31 tests: the points ahead with their distances and lane counts, designated
+lanes, the maneuver as a lane choice, the card's lanes, and each point reported to the log once),
+`LaneDetailsTest` (12: nothing is set within the callback of a style load, the setting is made
+after it and made again when something changed it, and nothing after the map is gone) and
+`RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own).
+
+The cameras themselves touch Android and Mapbox types and have no JVM tests. While it was written,
+`SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by frame
+through a made-up drive: the browsing map, the preview, Start, a turn, a red light, a drag,
 Recenter, the background and back (also after the road turned meanwhile), a teleport, the overview
-and the end. That check is not part of
-the build; the simulated drive below is the first real one.
+and the end. For the lane zoom the same was done with a model of the data source: a turn, two
+close turns, a roundabout, the arrival and a freeway with lane choices in Large, a change of the
+setting and of the style on the approach, a reroute and the background inside a lane window. With
+Default, every frame of the older runs came out the same as before the lane zoom was built, and
+the same with lane choices fed as without. Those checks are not part of the build; the simulated
+drive below is the first real one.
 
 ### Build
 
@@ -845,6 +1238,31 @@ Watch for:
 - At 180 m the junction framing glides in over about 1.5 s, with no jump.
 - Before the two close turns the Then chip slides out from under the maneuver card. The map does
   not move when it comes or goes, and the camera line shows no new `padding`.
+
+With **Lane zoom** on **Large**, in Smooth follow, on a route that also has a freeway with an
+exit and, if the data has one, a split:
+
+- Before each turn the view first goes flat and then close: from about 180 m the junction grows
+  until it fills the map's width, and the car and the junction both stay on screen all the way.
+  After the turn the zoom eases back out as the tilt comes up.
+- The two close turns stay flat and close, with at most a small step out between them. The
+  roundabout fits; the arrival ends close on the destination.
+- Between maneuvers the view is the one Default has. On the freeway it stays far ahead, except
+  about 25 s before the exit (and a split), where it goes close with the tilt unchanged and comes
+  back after.
+- The camera line: `laneDp` about 28 at junctions and 14 in lane windows, `zoomPlan` `ROAD` on
+  most seconds, `centerLeadS` 0 in town, and no `steps.zoom` above about 0.02 outside a change of
+  mode. The `lane_choice` lines: one for each point with lanes, with `skipped` on those the rule
+  passed over.
+- Lane zoom to Default and back during the drive, near a turn and away from one: a glide each
+  time, never a cut.
+- Mapbox tuned with Large: close at turns too, with its zoom coming back at the step change.
+  Mapbox standard: its usual zoom, and `maxZoom` 16.35 in its camera line.
+- With **Lane details on the map** on, in an area that has them: lane markings appear without a
+  fade out and in at the start, `hdRoads` is true in every camera line and `hdRoadsReapplied`
+  stays 0, the route line is thinner close in with the markings visible beside it, and the switch
+  fades them out and in during the drive. Look at a bridge: is the route line on it, and where is
+  the car's icon?
 
 Before Start, in each style:
 
@@ -893,6 +1311,16 @@ The owner rates the overall smoothness and four things that each have one knob i
 | When the tilt goes down | `descentSeconds` or `maneuverFramingMeters` |
 | When it comes back up | `holdAfterManeuverMeters` and `holdAfterManeuverSeconds` |
 
+With Large, and Lane details on where the area has them, the owner also notes:
+
+| What | Knob |
+|---|---|
+| Whether the lanes are large enough at turns, or the view too close | `junctionLaneDp`, 24 to 32 dp |
+| Whether exits and splits go close early enough | `laneLeadSeconds` and the two window distances |
+| An exit where it went close and should not, or did not and should | `laneChoiceMinLanes`, `laneChoiceMinLeaving`, with the `lane_choice` lines |
+| Whether the ground moves too fast close in on a freeway | `freewayLaneDp`, 12 to 14 dp |
+| Whether the car rides above its usual place close in | `maxPuckLagDp` |
+
 Tuning uses the shared debug log.
 
 ### Desktop Head Unit (stage 2)
@@ -914,6 +1342,12 @@ rate. If it collapses, the main thread's frames are being held back: try the fal
 - `renderFps` is at least 55 at 60 Hz.
 - No visible steps.
 - The tilt peaks at 30°/s or less, and is 0° at each counted junction.
+- With Large, `laneDp` reaches at least 24 at every counted maneuver whose junction is smaller
+  than the view, and at least 12 at every lane choice that counts.
+- With Large, the zoom never changes faster than 1 level a second outside a change of mode.
+- On a freeway, seconds with `zoomPlan` `ROAD` outnumber `LANES` by far: the long view stays the
+  rule.
+- With Lane details on, `hdRoads` equals `laneDetails` in every camera line.
 
 ## The owner's answers
 
@@ -927,5 +1361,6 @@ Answered on 2026-11-10.
    wide on screen, zoom about 18.75 and closer). Large also zooms in on freeways where lanes split
    off while the route goes straight on. The map cannot show which lane the car is in: phone GPS is
    not lane-accurate and the public SDK has no lane geometry, so the car stays on the road line and
-   the lanes to use stay in the maneuver card.
+   the lanes to use stay in the maneuver card. Built as [Lane zoom](#lane-zoom); Default is what a
+   phone starts with, and Large is one tap away in Settings.
 3. **Freeways.** The long view ahead stays as it is: no minimum zoom of 14.
