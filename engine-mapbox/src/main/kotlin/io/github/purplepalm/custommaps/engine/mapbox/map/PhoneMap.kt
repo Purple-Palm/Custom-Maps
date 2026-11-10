@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import com.mapbox.common.Cancelable
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
@@ -229,13 +230,11 @@ class PhoneMap internal constructor(
         )
     }
 
-    /** Every camera frame while the camera line is being sampled: how often it moved, and its largest step. */
-    private val cameraChanges = mapboxMap.subscribeCameraChanged { event ->
-        if (cameraSampling == null) return@subscribeCameraChanged
-        cameraCadence.tick(SystemClock.elapsedRealtimeNanos())
-        val camera = event.cameraState
-        cameraSteps.onCamera(camera.center.latitude(), camera.center.longitude(), camera.zoom, camera.bearing, camera.pitch)
-    }
+    /**
+     * Every camera frame while the camera line is being sampled: how often it moved, and its largest
+     * step. Subscribed only then, so browsing the map costs no call per frame.
+     */
+    private var cameraChanges: Cancelable? = null
 
     /**
      * Counts the navigation camera's frame updates (each one a new animation of about a second) and
@@ -375,7 +374,6 @@ class PhoneMap internal constructor(
     fun release() {
         stopCameraSampling()
         mapErrors.cancel()
-        cameraChanges.cancel()
         // The counts of the current minute, before the windows' timers go with the scope.
         mapErrorFolder.flush()
         scope.cancel()
@@ -505,6 +503,11 @@ class PhoneMap internal constructor(
         // The first line says what the padding is.
         paddingChanges = 1
         startFrameStats()
+        cameraChanges = mapboxMap.subscribeCameraChanged { event ->
+            cameraCadence.tick(SystemClock.elapsedRealtimeNanos())
+            val camera = event.cameraState
+            cameraSteps.onCamera(camera.center.latitude(), camera.center.longitude(), camera.zoom, camera.bearing, camera.pitch)
+        }
         cameraSampling = scope.launch {
             while (true) {
                 delay(CAMERA_SAMPLE_MS)
@@ -519,6 +522,8 @@ class PhoneMap internal constructor(
     private fun stopCameraSampling() {
         cameraSampling?.cancel() ?: return
         cameraSampling = null
+        cameraChanges?.cancel()
+        cameraChanges = null
         stopFrameStats()
     }
 
