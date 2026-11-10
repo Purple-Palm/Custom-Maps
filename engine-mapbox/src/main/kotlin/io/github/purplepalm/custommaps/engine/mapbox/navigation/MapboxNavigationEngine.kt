@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.navigation
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.mapbox.api.directions.v5.models.RouteOptions
@@ -12,6 +13,7 @@ import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.route.NavigationRouterCallback
 import com.mapbox.navigation.base.route.RouterFailure
 import com.mapbox.navigation.base.route.RouterFailureType
+import com.mapbox.navigation.base.route.RouterOrigin
 import com.mapbox.navigation.base.trip.model.RouteLegProgress
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.core.MapboxNavigation
@@ -22,7 +24,10 @@ import com.mapbox.navigation.core.formatter.MapboxDistanceFormatter
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
 import com.mapbox.navigation.core.replay.route.ReplayRouteSession
+import com.mapbox.navigation.core.reroute.RerouteController
 import com.mapbox.navigation.core.reroute.RerouteOptionsAdapter
+import com.mapbox.navigation.core.reroute.RerouteState
+import com.mapbox.navigation.core.routerefresh.ImmediateRouteRefreshResult
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.NavigationSessionState
@@ -34,12 +39,16 @@ import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
+import io.github.purplepalm.custommaps.nav.guidance.StartFreshness
+import io.github.purplepalm.custommaps.nav.guidance.StartPlan
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
+import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
@@ -52,6 +61,7 @@ import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,7 +73,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /**
  * [NavigationEngine] on the Mapbox Navigation SDK. Every trip session start and stop goes through
  * [GuidanceStateMachine], which is the single place that decides when a billed session runs.
- * All methods are called on the main thread, like the SDK callbacks.
+ * Inside a running trip, routes are refreshed or replaced only through [StartRefresher], which
+ * keeps the trip the same billed trip. All methods are called on the main thread, like the SDK
+ * callbacks.
  */
 @OptIn(ExperimentalPreviewMapboxNavigationAPI::class)
 internal class MapboxNavigationEngine(
@@ -113,6 +125,16 @@ internal class MapboxNavigationEngine(
     /** Writes the request of every reroute to the debug log, and changes none of them. */
     private val rerouteOptionsLogger = RerouteOptionsLogger(debugLog) { _destination.value }
 
+    /**
+     * When the routes of the preview arrived, on the clock that also runs while the phone sleeps,
+     * and where they were requested from. Set together with each preview that opens.
+     */
+    private var previewedAt = 0L
+    private var previewOrigin: Point? = null
+
+    /** The plan of the start that is under way: made by [startGuidance], taken by the trip it starts. */
+    private var startPlan = StartPlan.AS_PREVIEWED
+
     private val _guidanceState = MutableStateFlow(GuidanceState.IDLE)
     override val guidanceState: StateFlow<GuidanceState> = _guidanceState.asStateFlow()
 
@@ -133,6 +155,100 @@ internal class MapboxNavigationEngine(
     /** Latest position of the map's location puck, used when the location service has no fix yet. */
     var lastPuckPosition: Point? = null
 
+    /**
+     * The navigator as [StartRefresher] uses it inside a running trip. Nothing here decides
+     * anything: the refresher calls these only when [io.github.purplepalm.custommaps.nav.guidance.InTripRefresh]
+     * allows it, which is after the first progress of the trip and never once guidance has ended.
+     */
+    private val tripRoutes = object : TripRoutes<NavigationRoute> {
+
+        override fun refresh(done: (RefreshOutcome) -> Unit) {
+            val navigation = navigation ?: return done(RefreshOutcome.NOT_STARTED)
+            // A refresh of the routes in use, inside the trip: fresh traffic, times and closures on
+            // the same roads. An experimental call of the SDK, which this class opts in to.
+            navigation.routeRefreshController.requestImmediateRouteRefresh { result ->
+                done(
+                    when (result) {
+                        is ImmediateRouteRefreshResult.Success -> RefreshOutcome.SUCCESS
+                        is ImmediateRouteRefreshResult.Failure -> RefreshOutcome.FAILURE
+                        is ImmediateRouteRefreshResult.NotStarted -> RefreshOutcome.NOT_STARTED
+                        is ImmediateRouteRefreshResult.Cancelled -> RefreshOutcome.CANCELLED
+                    },
+                )
+            }
+        }
+
+        override fun request(done: (ReplanAnswer<NavigationRoute>) -> Unit): Long? {
+            val navigation = navigation ?: return null
+            val destination = _destination.value ?: return null
+            // Where the navigator has the car on the road, and the way it drives there.
+            val from = lastMatch?.enhancedLocation?.let(DeviceFix::of) ?: return null
+            // The request of the preview again: to the same stop point, with the same arrival target.
+            val options = routeOptions(from.point, destination, from.originBearing())
+            logRouteRequest(from.point, "navigator", from, destination, options, inTrip = true)
+            // One request inside the running trip, which Mapbox counts as part of the trip.
+            return navigation.requestRoutes(
+                options,
+                object : NavigationRouterCallback {
+                    override fun onRoutesReady(routes: List<NavigationRoute>, routerOrigin: String) {
+                        logRouteResponse(routes, options, routerOrigin, inTrip = true)
+                        done(ReplanAnswer.Routes(routes, online = routerOrigin == RouterOrigin.ONLINE))
+                    }
+
+                    override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
+                        val message = reasons.firstOrNull()?.message ?: "Route request failed"
+                        debugLog.log(
+                            "route_failure",
+                            mapOf("message" to message, "reasons" to reasons.map { it.debugFields() }, "inTrip" to true),
+                        )
+                        done(ReplanAnswer.Failed(message))
+                    }
+
+                    override fun onCanceled(routeOptions: RouteOptions, routerOrigin: String) {
+                        // After the refresher's own cancel it has moved on and takes no notice.
+                        done(ReplanAnswer.Failed("Route request cancelled"))
+                    }
+                },
+            )
+        }
+
+        override fun cancel(requestId: Long) {
+            navigation?.cancelRouteRequest(requestId)
+        }
+
+        override fun set(routes: List<NavigationRoute>) {
+            // Mapbox bills a second trip for routes set while the navigator has no progress, or
+            // that end more than 100 m from where the trip goes. The refresher calls this from
+            // inside a progress update, with a list that is not empty and ends where the trip ends.
+            navigation?.setNavigationRoutes(routes) { result ->
+                val error = result.error ?: return@setNavigationRoutes
+                // The navigator keeps the routes it had; the drive goes on with them.
+                debugLog.log("routes_rejected", mapOf("message" to error.message, "inTrip" to true))
+            }
+        }
+
+        override fun summary(route: NavigationRoute): String? = route.directionsRoute.legs()?.firstOrNull()?.summary()
+
+        override fun destination(route: NavigationRoute): Point? = soleDestination(route.waypoints?.map { it.location() })
+    }
+
+    /** Refreshes or replaces the routes of a started trip, as the plan of its start asks. */
+    private val startRefresher = StartRefresher(
+        routes = tripRoutes,
+        debugLog = debugLog,
+        // The session can stop a moment before guidance hears of it, from the trip notification.
+        guidanceActive = { _guidanceState.value == GuidanceState.ACTIVE && tripSessionRunning },
+        elapsedMillis = SystemClock::elapsedRealtime,
+    )
+
+    /**
+     * The navigator's own reroute, heard from its first moment: while it fetches a route, and when
+     * it has one. From then on the start plan leaves the routes alone.
+     */
+    private val rerouteStateObserver = RerouteController.RerouteStateObserver { state ->
+        if (state is RerouteState.FetchingRoute || state is RerouteState.RouteFetched) startRefresher.onReroute()
+    }
+
     init {
         MapboxNavigationApp.registerObserver(this)
     }
@@ -145,6 +261,7 @@ internal class MapboxNavigationEngine(
         mapboxNavigation.registerLocationObserver(locationObserver)
         mapboxNavigation.registerOffRouteObserver(offRouteObserver)
         mapboxNavigation.registerRoutesObserver(routesObserver)
+        mapboxNavigation.getRerouteController()?.registerRerouteStateObserver(rerouteStateObserver)
         setRerouteOptionsAdapter(mapboxNavigation, rerouteOptionsLogger)
         debugLog.log("navigator_attached")
     }
@@ -156,7 +273,10 @@ internal class MapboxNavigationEngine(
         mapboxNavigation.unregisterLocationObserver(locationObserver)
         mapboxNavigation.unregisterOffRouteObserver(offRouteObserver)
         mapboxNavigation.unregisterRoutesObserver(routesObserver)
+        mapboxNavigation.getRerouteController()?.unregisterRerouteStateObserver(rerouteStateObserver)
         setRerouteOptionsAdapter(mapboxNavigation, null)
+        // Without a navigator nothing can be refreshed or set any more.
+        startRefresher.end()
         navigation = null
         lastMatch = null
         debugLog.log("navigator_detached")
@@ -192,21 +312,7 @@ internal class MapboxNavigationEngine(
         // To the place's stop point when it has one, with the place itself as the arrival target.
         // A car that is moving sends its direction along, so the routes start the way it drives.
         val options = routeOptions(origin, destination, deviceFix?.originBearing())
-        debugLog.log(
-            "route_request",
-            mapOf(
-                "origin" to origin.debugFields(),
-                "originSource" to if (deviceFix != null) "device" else "map puck",
-                "originFix" to deviceFix?.debugFields(),
-                "destination" to mapOf(
-                    "name" to destination.name,
-                    "address" to destination.address,
-                    "at" to listOf(destination.point.latitude, destination.point.longitude),
-                ),
-                "profile" to options.profile(),
-                "alternatives" to options.alternatives(),
-            ) + routeRequestFields(destination, options),
-        )
+        logRouteRequest(origin, if (deviceFix != null) "device" else "map puck", deviceFix, destination, options, inTrip = false)
         val request = ++routeRequestCount
         // Billed per request (Directions API); no trip session is involved.
         val response = navigation.requestRoutesAwait(options)
@@ -220,19 +326,14 @@ internal class MapboxNavigationEngine(
                 if (response.accessDenied) RouteRequestResult.AccessDenied else RouteRequestResult.Failed(response.message)
             }
             is RouteResponse.Routes -> {
-                val routes = response.routes
-                logRoutes("route_response") {
-                    mapOf(
-                        "count" to routes.size,
-                        // The same for every route of a response.
-                        "waypoints" to routes.firstOrNull()?.waypointsDebugFields(options.coordinatesList()),
-                        "routes" to routes.map { it.debugFields() },
-                    )
-                }
+                logRouteResponse(response.routes, options, response.routerOrigin, inTrip = false)
                 if (response.routes.isEmpty()) {
                     RouteRequestResult.NoRoute
                 } else {
                     _destination.value = destination
+                    // What Start looks at to tell fresh routes from old ones.
+                    previewedAt = SystemClock.elapsedRealtime()
+                    previewOrigin = origin
                     showPreview(response.routes)
                     dispatch(GuidanceEvent.RoutesReady(response.routes.size))
                     RouteRequestResult.Success
@@ -268,7 +369,39 @@ internal class MapboxNavigationEngine(
             debugLog.log("start_refused", mapOf("reason" to missing))
             return
         }
+        // Only a start from the preview begins a trip; any other press changes no plan.
+        if (_guidanceState.value == GuidanceState.PREVIEW) startPlan = planStart(simulated)
         dispatch(GuidanceEvent.StartRequested(simulated))
+    }
+
+    /**
+     * What this start does about routes that may be old, from what is at hand at this moment: the
+     * time since the routes arrived, and how far the car is from where they were requested. The
+     * car's position is the map's puck, which moves while the map shows, or else the location
+     * service's last answer when that is fresh. Nothing is asked and nothing is waited for: the
+     * drive begins at once on the previewed routes, and the plan is carried out inside the trip.
+     */
+    private fun planStart(simulated: Boolean): StartPlan {
+        val ageMillis = SystemClock.elapsedRealtime() - previewedAt
+        val puck = lastPuckPosition
+        val here = puck ?: deviceLocation.lastFix()?.point
+        val moved = metersBetween(previewOrigin, here)
+        val plan = StartFreshness.plan(ageMillis.milliseconds, moved?.let(Distance::meters), simulated)
+        debugLog.log(
+            "start_plan",
+            mapOf(
+                "plan" to plan,
+                "ageSeconds" to ageMillis / MILLIS_PER_SECOND,
+                "movedMeters" to moved?.let { Motion.round(it, 1) },
+                "position" to when {
+                    here == null -> null
+                    puck != null -> "map puck"
+                    else -> "device"
+                },
+                "simulated" to simulated,
+            ),
+        )
+        return plan
     }
 
     private fun isGranted(permission: String): Boolean =
@@ -310,6 +443,47 @@ internal class MapboxNavigationEngine(
         }
     }
 
+    /** The "route_request" line of every route request the app sends, before a trip or inside one. */
+    private fun logRouteRequest(
+        origin: Point,
+        originSource: String,
+        originFix: DeviceFix?,
+        destination: Place,
+        options: RouteOptions,
+        inTrip: Boolean,
+    ) {
+        debugLog.log(
+            "route_request",
+            mapOf(
+                "origin" to origin.debugFields(),
+                "originSource" to originSource,
+                "originFix" to originFix?.debugFields(),
+                "destination" to mapOf(
+                    "name" to destination.name,
+                    "address" to destination.address,
+                    "at" to listOf(destination.point.latitude, destination.point.longitude),
+                ),
+                "profile" to options.profile(),
+                "alternatives" to options.alternatives(),
+                "inTrip" to inTrip,
+            ) + routeRequestFields(destination, options),
+        )
+    }
+
+    /** The "route_response" line with every route of an answer, put together off the main thread. */
+    private fun logRouteResponse(routes: List<NavigationRoute>, options: RouteOptions, routerOrigin: String?, inTrip: Boolean) {
+        logRoutes("route_response") {
+            mapOf(
+                "count" to routes.size,
+                "router" to routerOrigin,
+                "inTrip" to inTrip,
+                // The same for every route of a response.
+                "waypoints" to routes.firstOrNull()?.waypointsDebugFields(options.coordinatesList()),
+                "routes" to routes.map { it.debugFields() },
+            )
+        }
+    }
+
     private fun dispatch(event: GuidanceEvent) {
         val from = _guidanceState.value
         val transition = GuidanceStateMachine.reduce(from, event)
@@ -338,6 +512,15 @@ internal class MapboxNavigationEngine(
                 thenTracker.reset()
                 laneChoices.clear()
                 val commit = ++commitCount
+                // What follows inside the trip waits for its first progress; a start that made no
+                // plan is as previewed.
+                startRefresher.begin(
+                    trip = commit,
+                    plan = startPlan,
+                    routeId = _previewRoutes.value.firstOrNull()?.id,
+                    chosenSummary = _routeOptions.value.firstOrNull()?.summary,
+                )
+                startPlan = StartPlan.AS_PREVIEWED
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
                 navigation?.setNavigationRoutes(_previewRoutes.value) { result ->
@@ -374,6 +557,9 @@ internal class MapboxNavigationEngine(
             }
             GuidanceCommand.StopTripSession -> {
                 commitCount++
+                // Before the session stops: a refresh or a request still under way is given up,
+                // and its answer finds no trip to change.
+                startRefresher.end()
                 tripSessionRunning = false
                 if (replaying) {
                     navigation?.let(replay::onDetached)
@@ -404,6 +590,8 @@ internal class MapboxNavigationEngine(
         )
         if (active) logLaneChoices(progress)
         if (snapshot != null) _routeProgress.value = snapshot
+        // The first progress of a trip, and the first one after an answer to its replan.
+        if (active && startRefresher.awaitsProgress) startRefresher.onProgress(progress.toTripMoment())
     }
 
     /**
@@ -442,12 +630,17 @@ internal class MapboxNavigationEngine(
 
     private val offRouteObserver = OffRouteObserver { offRoute ->
         debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to lastMatch?.debugFields()))
+        // The navigator reroutes a car that left the route; the start plan steps back for it.
+        if (offRoute) startRefresher.onReroute()
     }
 
     /** Route changes inside the navigator: the committed route, reroutes, refreshes and the final clean-up. */
     private val routesObserver = RoutesObserver { result ->
         val routes = result.navigationRoutes
         val reason = result.reason
+        // A reroute, or any other route the navigator put in place of the one the trip started on.
+        if (reason == RoutesExtra.ROUTES_UPDATE_REASON_REROUTE) startRefresher.onReroute()
+        startRefresher.onRoutesChanged(routes.firstOrNull()?.id)
         logRoutes("routes_updated") {
             mapOf(
                 "reason" to reason,
@@ -518,7 +711,7 @@ internal class MapboxNavigationEngine(
                 options,
                 object : NavigationRouterCallback {
                     override fun onRoutesReady(routes: List<NavigationRoute>, routerOrigin: String) {
-                        if (continuation.isActive) continuation.resume(RouteResponse.Routes(routes))
+                        if (continuation.isActive) continuation.resume(RouteResponse.Routes(routes, routerOrigin))
                     }
 
                     override fun onFailure(reasons: List<RouterFailure>, routeOptions: RouteOptions) {
@@ -537,7 +730,7 @@ internal class MapboxNavigationEngine(
         }
 
     private sealed interface RouteResponse {
-        data class Routes(val routes: List<NavigationRoute>) : RouteResponse
+        data class Routes(val routes: List<NavigationRoute>, val routerOrigin: String) : RouteResponse
 
         data class Failure(
             val message: String,
@@ -548,5 +741,6 @@ internal class MapboxNavigationEngine(
 
     private companion object {
         const val TAG = "TripSession"
+        const val MILLIS_PER_SECOND = 1_000L
     }
 }
