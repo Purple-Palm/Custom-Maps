@@ -26,6 +26,12 @@ interface MapRenderer {
      * its own zoom whatever is set here.
      */
     fun setLaneZoom(mode: LaneZoom)
+
+    /**
+     * Whether the map draws lane markings, painted arrows and crosswalks where the map data has
+     * them. A change applies at once. The car is drawn where it is on the road, never in a lane.
+     */
+    fun setLaneDetails(enabled: Boolean)
 }
 
 /** Insets in pixels from each edge of the map surface. */

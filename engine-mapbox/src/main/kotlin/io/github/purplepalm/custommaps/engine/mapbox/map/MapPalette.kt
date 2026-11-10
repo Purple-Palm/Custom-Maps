@@ -20,6 +20,9 @@ internal object MapPalette {
         "colorMotorways" to Value.valueOf("#5A5F67"),
         "colorTrunks" to Value.valueOf("#4A4F57"),
         "colorRoads" to Value.valueOf("#3B4047"),
+        // The road surface where lane details are drawn. Only the color is set here: whether they
+        // are drawn at all is LaneDetails' to set, and never while the style loads.
+        "colorHdRoads" to Value.valueOf("#4A4F57"),
         "colorWater" to Value.valueOf("#0B151D"),
         "colorGreenspace" to Value.valueOf("#101A15"),
         "colorPlaceLabels" to Value.valueOf("#D6D7D9"),

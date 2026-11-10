@@ -93,6 +93,11 @@ import kotlinx.coroutines.launch
  * During guidance, while the map is on screen, it writes a "camera" line to the debug log once a
  * second: where the camera is and where the viewport data source wants it, how smoothly the camera
  * and the puck moved, and how fast the map rendered (see [cameraSample]).
+ *
+ * Lane details, the lane markings Mapbox Standard can draw, are off unless [setLaneDetails] turns
+ * them on ([LaneDetails]). The puck stays where the navigator puts the car, on the line of the
+ * road: nothing here moves it sideways into a lane, since no position the phone has says which
+ * lane the car is in.
  */
 class PhoneMap internal constructor(
     context: Context,
@@ -149,6 +154,12 @@ class PhoneMap internal constructor(
 
     /** When the traveled part of the route line last took the puck's position, in nanoseconds. */
     private var routeLineUpdatedAt = 0L
+
+    /** Lane markings on the map where Mapbox has them; off until Settings says otherwise. */
+    private val laneDetails = LaneDetails.on(mapboxMap, debugLog)
+
+    /** Whether the route line view was told to stay thin close in; that follows [laneDetails]. */
+    private var routeLineHeld = false
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
 
@@ -334,6 +345,9 @@ class PhoneMap internal constructor(
         mapboxMap.loadStyle(Style.STANDARD) { loaded ->
             debugLog.log("map_style_loaded", mapOf("refreshHz" to mapView.display?.refreshRate))
             style = loaded
+            // Lane details are set a moment after this callback, never within it (see LaneDetails).
+            laneDetails.onStyleLoaded()
+            applyRouteLineWidths()
             mapView.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             render(guidanceState)
         }
@@ -433,6 +447,11 @@ class PhoneMap internal constructor(
         viewportDataSource.evaluate()
     }
 
+    override fun setLaneDetails(enabled: Boolean) {
+        laneDetails.setEnabled(enabled)
+        applyRouteLineWidths()
+    }
+
     /**
      * Puts the Mapbox logo and the attribution button in a fixed strip at the bottom left of the map,
      * just above [bottomInset] pixels of navigation bar or keyboard. The screen keeps that strip free
@@ -483,6 +502,7 @@ class PhoneMap internal constructor(
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {
         stopCameraSampling()
+        laneDetails.release()
         mapErrors.cancel()
         // The counts of the current minute, before the windows' timers go with the scope.
         mapErrorFolder.flush()
@@ -639,6 +659,22 @@ class PhoneMap internal constructor(
         routeArrowView.render(style, routeArrowApi.clearArrows())
     }
 
+    /**
+     * Gives the route line the widths that go with lane details: on, the line stays thin close in,
+     * so the lane markings beside it show ([RouteLineWidths]). The view keeps the widths for the
+     * routes it draws later; routes on the map are drawn again with them.
+     */
+    private fun applyRouteLineWidths() {
+        val style = style ?: return
+        // The view starts with the SDK's widths.
+        val held = laneDetails.enabled
+        if (held == routeLineHeld) return
+        routeLineHeld = held
+        val widths = if (held) RouteLineWidths.heldCloseIn else RouteLineWidths.sdk
+        routeLineView.updateDynamicOptions(style) { scaleExpressions(widths) }
+        if (framedRoute != null) routeLineApi.getRouteDrawData { value -> routeLineView.renderRouteDrawData(style, value) }
+    }
+
     private fun selectRouteNear(point: Point) {
         routeLineApi.findClosestRoute(point, mapboxMap, ROUTE_TAP_RADIUS_DP * density) { result ->
             result.value?.navigationRoute?.id?.let(engine::selectRoute)
@@ -711,6 +747,8 @@ class PhoneMap internal constructor(
         cameraSampling = scope.launch {
             while (true) {
                 delay(CAMERA_SAMPLE_MS)
+                // Lane details are looked at with each line, and set again if something turned them off.
+                laneDetails.check()
                 // Taken even when hidden, so every logged line covers one second. In the background
                 // the map draws nothing; the "activity" lines say when that was.
                 val sample = cameraSample()
@@ -749,6 +787,10 @@ class PhoneMap internal constructor(
      * choice, and where that is going), "laneAheadM" (meters to the nearest lane choice that
      * counts), "laneChoice" (the one that holds the view) and "centerLeadS" (how many seconds ahead
      * of the car the center aims).
+     *
+     * "laneDetails" is the switch for lane markings on the map, "hdRoads" what the style says about
+     * them, and "hdRoadsReapplied" how often they had to be set again since the map was made: 0
+     * unless something keeps turning them off.
      */
     private fun cameraSample(): Map<String, Any?> {
         val now = SystemClock.elapsedRealtimeNanos()
@@ -787,7 +829,7 @@ class PhoneMap internal constructor(
             "steps" to cameraSteps.take(),
             "fixes" to fixes,
             "keyPoints" to lastKeyPoints.takeIf { hasFix },
-        ) + camera.diagnostics() + mapOf(
+        ) + camera.diagnostics() + laneDetails.diagnostics() + mapOf(
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "paddingChanges" to paddingChanges.takeIf { it > 0 },
             "render" to takeFrameStats(),
