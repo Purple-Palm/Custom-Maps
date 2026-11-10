@@ -97,13 +97,11 @@ internal class DeviceLocation {
     }
 
     /**
-     * The position of the service's last answer, when it is no older than [maxAge] now; otherwise
-     * null. Returns at once and asks nobody: it is as new as the last [refresh].
+     * The position of the service's last answer with its age now, however old; null before the
+     * first answer and when the service had no position. Returns at once and asks nobody: it is as
+     * new as the last [refresh]. [DeviceFix.live] says whether it still tells where the car is.
      */
-    fun lastFix(maxAge: Duration = MAX_AGE): DeviceFix? {
-        val location = last ?: return null
-        return DeviceFix.of(location).takeIf { it.ageMillis <= maxAge.inWholeMilliseconds }
-    }
+    fun lastFix(): DeviceFix? = last?.let(DeviceFix::of)
 
     companion object {
         /** A position older than this says little about where a car is now. */

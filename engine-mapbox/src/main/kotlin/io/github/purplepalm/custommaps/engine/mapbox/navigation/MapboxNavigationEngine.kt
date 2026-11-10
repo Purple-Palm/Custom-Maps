@@ -60,7 +60,6 @@ import java.io.IOException
 import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -152,7 +151,10 @@ internal class MapboxNavigationEngine(
     /** Routes of the preview, the selected one first. Only the map reads them; they are not in the navigator yet. */
     val previewRoutes: StateFlow<List<NavigationRoute>> = _previewRoutes.asStateFlow()
 
-    /** Latest position of the map's location puck, used when the location service has no fix yet. */
+    /**
+     * Latest position of the map's location puck. A route request starts there when the location
+     * service has no fix yet, and Start measures from it how far the car has moved.
+     */
     var lastPuckPosition: Point? = null
 
     /**
@@ -306,7 +308,7 @@ internal class MapboxNavigationEngine(
         }
         deviceLocation.refresh()
         // Of any age: an old position is a better start than none, as it always was.
-        val deviceFix = deviceLocation.lastFix(maxAge = Duration.INFINITE)
+        val deviceFix = deviceLocation.lastFix()
         val origin = deviceFix?.point ?: lastPuckPosition ?: return RouteRequestResult.NoLocation.also {
             debugLog.log("route_request_refused", mapOf("reason" to "no location"))
         }
@@ -378,14 +380,15 @@ internal class MapboxNavigationEngine(
     /**
      * What this start does about routes that may be old, from what is at hand at this moment: the
      * time since the routes arrived, and how far the car is from where they were requested. The
-     * car's position is the map's puck, which moves while the map shows, or else the location
-     * service's last answer when that is fresh. Nothing is asked and nothing is waited for: the
-     * drive begins at once on the previewed routes, and the plan is carried out inside the trip.
+     * car's position is the map's puck, which moves while the map shows. The location service's
+     * last answer is no second source: it is only asked for a route request, so at Start it still
+     * is the position the routes were requested from. Without a puck nothing is measured and only
+     * the age counts. Nothing is asked and nothing is waited for: the drive begins at once on the
+     * previewed routes, and the plan is carried out inside the trip.
      */
     private fun planStart(simulated: Boolean): StartPlan {
         val ageMillis = SystemClock.elapsedRealtime() - previewedAt
-        val puck = lastPuckPosition
-        val here = puck ?: deviceLocation.lastFix()?.point
+        val here = lastPuckPosition
         val moved = metersBetween(previewOrigin, here)
         val plan = StartFreshness.plan(ageMillis.milliseconds, moved?.let(Distance::meters), simulated)
         debugLog.log(
@@ -394,11 +397,8 @@ internal class MapboxNavigationEngine(
                 "plan" to plan,
                 "ageSeconds" to ageMillis / MILLIS_PER_SECOND,
                 "movedMeters" to moved?.let { Motion.round(it, 1) },
-                "position" to when {
-                    here == null -> null
-                    puck != null -> "map puck"
-                    else -> "device"
-                },
+                // What the distance was measured to; null when the map has shown no position yet.
+                "position" to if (here != null) "map puck" else null,
                 "simulated" to simulated,
             ),
         )
