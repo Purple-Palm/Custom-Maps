@@ -297,6 +297,26 @@ class LaneChoicesTest {
     }
 
     @Test
+    fun `every lane the route can be followed from is lit, not only the preferred one`() {
+        // As routes mark them: the lanes that go on are valid and one of them is the preferred one.
+        val marked = listOf(
+            lane(valid = true, active = false),
+            lane(valid = true, active = true),
+            lane(valid = null, active = true),
+            lane(valid = false, active = true),
+            lane(valid = false, active = false),
+            lane(valid = null, active = false),
+            lane(valid = null, active = null),
+        )
+        val shown = requireNotNull(intersection(3, marked).lanesAhead()).lanes
+        assertEquals(listOf(true, true, true, false, false, false, false), shown.map { it.isRecommended })
+        // The card's row for the same point, through the engine's cache.
+        val lanes = loaded(listOf(intersection(0), intersection(7, marked)))
+        val row = requireNotNull(lanes.lanesAhead(lanes.choices(0.0, 1_000.0, false), 29.0)).lanes.lanes
+        assertEquals(shown, row)
+    }
+
+    @Test
     fun `only a lane choice where the route goes straight on gets the card's row`() {
         val oneLeaves = listOf(lane(true), lane(true), lane(true), lane(false))
         val lanes = loaded(listOf(intersection(0), intersection(3, oneLeaves), intersection(6, splitLanes)), maneuver = intersection(10, splitLanes))
@@ -405,15 +425,16 @@ class LaneChoicesTest {
 
     @Test
     fun `the log line of a lane choice has its counts and no place`() {
-        val lanes = split()
+        // One more lane goes on than at the usual split, so that no two of the counts are the same.
+        val lanes = loaded(listOf(intersection(0), intersection(4), intersection(7, splitLanes + lane(true))))
         val fields = lanes.debugFields(beforeSplit(lanes, 612.4), speedMps = 29.04)
         assertEquals(
             mapOf(
                 "kind" to "straight",
                 "metersAhead" to 612L,
                 "window" to 726L,
-                "lanes" to 4,
-                "usable" to 2,
+                "lanes" to 5,
+                "usable" to 3,
                 "leaving" to 2,
                 "designated" to 1,
                 "freeway" to true,
