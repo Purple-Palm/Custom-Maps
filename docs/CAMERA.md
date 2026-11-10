@@ -5,8 +5,12 @@ camera behaved that way, the designs considered, the one chosen, and how it will
 references are to Maps SDK 11.34.1 and Navigation SDK 3.34.1 (ui-maps 3.34.1). The drives are
 described in [DRIVES.md](DRIVES.md); stages are in [ROADMAP.md](ROADMAP.md).
 
-**Status:** being built in stage 1.1 (from 2026-11-10). The owner answered the camera questions;
-the answers are [at the end](#the-owners-answers).
+**Status:** built in stage 1.1 (2026-11-10). The three camera styles, the setting that chooses one
+and [following before guidance](#following-the-car-before-guidance) are in the app, and the motion
+math has JVM tests. None of it has been on a simulated or a real drive yet, so every number is
+still the one from simulation. The extra zoom at turns is not built; it comes with the Lane zoom
+setting. The owner answered the camera questions; the answers are
+[at the end](#the-owners-answers).
 
 ## What the owner reported
 
@@ -30,9 +34,13 @@ the answers are [at the end](#the-owners-answers).
 
 | Style | What it is | Needs system animations? |
 |---|---|---|
-| **Mapbox standard** | Today's camera, unchanged, for comparison: `NavigationCamera` with its default options, two evaluations per navigator update, the 1.0 s puck. | Yes |
-| **Mapbox tuned** | The same camera with calmer settings: one update per navigator update, a gradual tilt, more zoom at turns, the 1.1 s puck. | Yes |
+| **Mapbox standard** | The camera of the first drives, kept for comparison: `NavigationCamera` with its default options, two evaluations per navigator update, the 1.0 s puck. | Yes |
+| **Mapbox tuned** | The same camera with calmer settings: one update per navigator update, longer moves from frame to frame, a gradual tilt, the 1.1 s puck. | Yes |
 | **Smooth follow** (default) | The new camera: it moves the map on every display frame and glides after the drawn car. Described from [Smooth follow](#smooth-follow-the-chosen-design) on. | The camera no, the puck yes (see [System animations](#system-animations)) |
+
+The style is chosen in **Settings → Guidance → Camera style** and stored under `camera_style` as
+`mapbox_standard`, `mapbox_tuned` or `smooth_follow`; a missing or unknown value reads as Smooth
+follow.
 
 Mapbox tuned is built from changes the drive analysis proposed for the standard camera. Its numbers
 are starting points for tuning.
@@ -47,13 +55,17 @@ are starting points for tuning.
   act like a low-pass filter: zoom and tilt changes settle over 2 to 4 s instead of 1 s.
 - **A gradual tilt.** The view still goes flat near a turn, as the owner wants, but through the 2 s
   tilt animator instead of one second at 45°/s.
-- **More zoom at turns.** A higher `maxZoom` than today's 16.35; 17.5 was suggested. Side effects:
-  whenever only the location is framed (before the first progress after Start, after every
-  reroute), the zoom target jumps to the cap for about a second, on a freeway from about 14 to 17.5
-  and back. And the whole town drive gets closer, about 350 to 500 m ahead, not only the approach
-  to turns.
+- **No higher zoom cap.** A `maxZoom` of 17.5 instead of 16.35 was suggested and is not built.
+  Whenever only the location is framed (before the first progress after Start, after every
+  reroute), the zoom target would jump to the cap for about a second, on a freeway from about 14 to
+  17.5 and back. And the whole town drive would get closer, about 350 to 500 m ahead, not only the
+  approach to turns. Tuned keeps 16.35 and sets nothing on the data source; its extra zoom at turns
+  comes with the Lane zoom setting.
 - **The 1.1 s puck** (see `GuidancePuck` below). It trails the fix by about 0.1 s more, about 3 m
   at 65 mph.
+- **The preview knows where the car is.** In the route preview the data source gets the puck's
+  position when the preview opens and then whenever the car has moved 5 m, at most once a second
+  (see "Also found" under [Smaller causes](#smaller-causes)). Smooth follow does the same.
 - **Limits.** It still runs on once-a-second updates, so it can be calmer but not continuous (see
   [the verdict](#the-verdict-on-once-a-second-updates)). It helps only while system animations run.
   Its animators must carry `NavigationCamera.NAVIGATION_CAMERA_OWNER`, or
@@ -62,16 +74,50 @@ are starting points for tuning.
   skips the own transition. Start and **Recenter** must pass the same transition options, or
   **Recenter** falls back to 1000 ms.
 
+**What Mapbox standard shares.** Its camera behaviour stays as it was: two evaluations per
+navigator update, the SDK's one-second moves, the 1.0 s puck that slides also when the matched
+position jumps, and no position from the puck during the preview. What is not camera behaviour
+applies to every style: the route line fix, the released data source, the top padding that only
+grows during guidance, a fresh puck for every drive, following before guidance, and the camera
+line (see [Smaller causes](#smaller-causes) and [Logging](#logging)).
+
 The chosen style applies at once, also mid-drive, and on the car screen from stage 2. The debug log
 records the active style, so drives can be compared ([DECISIONS.md](DECISIONS.md), 26).
 
 Only one camera may move the map at a time. Smooth follow treats any camera animator as the driver
-taking over, and `NavigationCamera` moves the map with animators. So `PhoneMap` keeps
-`NavigationCamera` and `NavigationBasicGesturesHandler` for the two Mapbox styles and connects only
-the camera of the chosen style. The design below was drawn up with `NavigationCamera` removed; the
-style setting keeps it. A style change mid-drive also undoes what the previous style set on the
-data source: Mapbox tuned's `maxZoom`, or Smooth follow's tilt override
-(`clearFollowingOverrides`).
+taking over, and `NavigationCamera` moves the map with animators. So `PhoneMap` talks to one
+`GuidanceCamera` at a time: `NavigationCameraAdapter`, which is `NavigationCamera` with
+`NavigationBasicGesturesHandler`, for the two Mapbox styles, and `SmoothNavigationCamera` for
+Smooth follow. The design below was drawn up with `NavigationCamera` removed; the style setting
+keeps it. On a style change the old camera lets go of the map and takes back what it set on the
+data source (Smooth follow's tilt override, with `clearFollowingOverrides`; the Mapbox styles set
+nothing). The data source then computes a fresh frame, and the new camera is asked for what the
+old one was doing: following, the overview, or following on the browsing map.
+
+## Following the car before guidance
+
+Before guidance, with no route on the map, the camera stays on the car in every style. The map
+shows the car from the phone's own location, as before ([DECISIONS.md](DECISIONS.md), 14), and the
+camera uses nothing else: no trip session and no request.
+
+- **When.** From the car's first position until the driver pans, zooms or rotates the map, and
+  again after **My location**. A route on the map, in the preview and during guidance, has the
+  cameras described below. When the route goes, the camera returns to the car and follows it if the
+  route's camera still had the map, and stays where it is if the driver had taken the map. The rule
+  is `IdleFollow` in `:core-nav`, tested on the JVM.
+- **The view.** Zoom 15.5, tilt 40°, the bearing the map has, and no padding: the car sits in the
+  middle of the map, and no panel, chip or list moves it.
+- **The two Mapbox styles** ease to the car over 0.8 s. Then every new position of the phone's
+  location starts one more ease to that position, linear and 1.0 s long like the puck's own glide,
+  so the camera and the car move together. The eases carry an owner name of their own
+  (`CUSTOM_MAPS_IDLE_FOLLOW`); an animation of any other owner is the driver's.
+- **Smooth follow** goes after the drawn puck on its frame loop and springs, as during guidance. It
+  comes to the car over 0.8 s, or 2.2 s from more than two screens away. Its loop stops while the
+  car stands.
+- **Any gesture** hands the map to the driver, and so does the compass. A plain tap does not.
+- **At Start** the camera is already on the car, so the move into following is short.
+- **In the log** the `camera_state` line says `IDLE_FOLLOW` while the camera is on the car and
+  `IDLE` once the driver has the map. A `camera_taken` line says who took it.
 
 ## Why the camera behaved that way
 
@@ -180,25 +226,30 @@ drives.
 
 ### Smaller causes
 
-- **The maneuver card resizes the frame.** The top padding follows the card's bottom edge, and each
-  change evaluates the camera again. The card grows by 56 dp when lanes appear (a 12 dp gap and a
-  44 dp lane row) and by a line when the instruction wraps. The car stays put, but the zoom (below
-  the cap) and the flat frames near a turn change. Proposed: during guidance the top padding only
-  grows. In Smooth follow padding changes glide in any case.
-- **Not the cause, but wasteful.** On every frame of the puck animation `PhoneMap` updates the
+- **The maneuver card resized the frame.** The top padding followed the card's bottom edge, and
+  each change evaluated the camera again. The card grows by 56 dp when lanes appear (a 12 dp gap
+  and a 44 dp lane row) and by a line when the instruction wraps. The car stays put, but the zoom
+  (below the cap) and the flat frames near a turn change. Fixed for every style: the top padding
+  comes from the maneuver card alone and only grows during guidance (`GuidancePadding` in
+  `:core-nav`); the search bar and its suggestions no longer count. In Smooth follow padding
+  changes glide in any case.
+- **Not the cause, but wasteful.** On every frame of the puck animation `PhoneMap` updated the
   travelled part of the route line. The SDK accepts a point only every 62.5 ms; each rejected call
   reads the style URI through a regex and logs an error, about 45 to 105 times a second once
-  animations run. Fix: render only the accepted updates. The burst of map errors while the phone was
-  offline (2337 lines) also ran regexes on the main thread, a few ms per second at worst. Updates
-  kept arriving every 1.00 ± 0.02 s, so neither delayed them.
+  animations run. Fixed: `PhoneMap` asks only when a point is due and renders only an accepted
+  update. The burst of map errors while the phone was offline (2337 lines) also ran regexes on the
+  main thread, a few ms per second at worst. Updates kept arriving every 1.00 ± 0.02 s, so neither
+  delayed them.
 - **Unknown:** whether Standard with night lighting and 3D buildings is too heavy for the phone. The
   log has no frame times, and with animations off the map redrew mostly once a second. Once
   animations run it renders continuously, at up to 120 Hz. Measure frame times before changing the
   style.
-- **Also found:** outside guidance the data source learns the location only from `centerOnPuck`
-  (the first fix after launch, or a tap on my location). The preview's overview and the Start
-  flight use that point, so a preview built in one place and started elsewhere starts from the old
-  spot and then jumps. Fix: feed the data source from puck updates during the preview.
+- **Also found:** outside guidance the data source learned the location only when the map centred
+  on the puck (the first fix after launch, or a tap on my location). The preview's overview and the
+  Start flight use that point, so a preview built in one place and started elsewhere starts from
+  the old spot and then jumps. Fixed for Mapbox tuned and Smooth follow: in the preview the data
+  source gets the puck's position when the preview opens, and then whenever the car has moved 5 m,
+  at most once a second. Mapbox standard goes without, as before.
 
 ## Designs considered
 
@@ -324,10 +375,17 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `SampleRamp` | same file | Moves from where it is to each new sample at a constant rate over 1.1 s, plus a lead of rate × 2τ that cancels the spring's lag. |
 | `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). Stage 4's junction zoom reads the same curve. |
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
-| `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider` with a 1.1 s glide (the default is 1.0 s). `newDrive()` swaps in a fresh inner provider; a teleport jumps. |
-| `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | The controller, a `Choreographer.FrameCallback` with modes IDLE, FOLLOWING and OVERVIEW. Calls: `requestFollowing`, `requestOverview`, `requestIdle`, `onUserGesture`, `setVisible`, `onLocation`, `onRouteProgress`, `onGuidanceEnded`, `diagnostics`, `destroy`. |
-| `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Feeds the controller once per navigator update and writes the camera line to the debug log. |
-| `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Turns the camera on when the activity starts and off when it stops (`LifecycleStartEffect`). |
+| `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
+| `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt. |
+| `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, and only growing during guidance. |
+| `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress`, `onPuckGlide`, `onGuidanceEnded`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
+| `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
+| `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
+| `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. |
+| `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport; for Mapbox standard it glides 1.0 s and never jumps. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
+| `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, and a report of each new position for the cameras that follow with eases. |
+| `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update, and writes the camera line to the debug log. |
+| `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
 | `CarNavigationMap` (stage 2) | `:engine-mapbox`, `car/CarNavigationMap.kt` | The same camera on the car's map surface. |
 
 The math is pure Kotlin on the Java 8 API in `:core-nav` (DECISIONS 4) and is tested on the JVM.
@@ -338,10 +396,10 @@ Everything that touches Mapbox types stays in `:engine-mapbox` (DECISIONS 12).
 The navigator delivers the location and then the progress of the same update, on the main thread
 (`MapboxTripSession`, navigation 3.34.1).
 
-1. **Location.** `GuidancePuck.onFix` starts the puck's glide. The data source gets the new location.
-   `onLocation` stores the speed and whether the fix was a teleport. The data source is evaluated
-   here only if no evaluation ran for 1.5 s, because the navigator drops progress while it replaces
-   routes.
+1. **Location.** `GuidancePuck.onFix` starts the puck's glide. `onLocation` stores the speed and
+   whether the fix was a teleport, and gives the data source the new location. The data source is
+   evaluated here only if no progress came for 1.5 s, because the navigator drops progress while
+   it replaces routes, or if the position jumped (`OncePerUpdate`).
 2. **Progress.** `onRouteProgress` feeds `ManeuverFocus` with the step key (route id, leg, step), the
    metres to the maneuver and along the step (`RouteStepProgress.distanceRemaining` and
    `distanceTraveled`), the banner's maneuver type, the data source's excluded maneuver types and
@@ -374,7 +432,12 @@ While anything moves:
 6. One `setCamera` with centre, zoom, bearing, tilt and padding, skipped when nothing moved. While
    the camera moves, `MapboxMap.setUserAnimationInProgress(true)` keeps label placement steadier.
 7. The loop asks for the next frame while a transition, a ramp, the tilt or a spring is still
-   moving, or the puck moved in the last 250 ms. Otherwise it stops. Any input wakes it.
+   moving, or the puck moved in the last 250 ms. Otherwise it stops. Any input wakes it. Two
+   details keep it stopped while the car stands. The puck's animation reports on every frame
+   during guidance, so the puck counts only when it has moved more than about a centimetre, and
+   only while the camera is on it. And a ramp that is given the same sample every second only comes
+   ever closer to it, so it counts as arrived within a small tolerance. A parked car costs one or
+   two frames a second, from the navigator's updates.
 
 ### Constants
 
@@ -446,9 +509,11 @@ the turn. It glides in over about 1.5 s through the on-puck weight instead of ju
 
 - `CameraMode` works as today. A change is reported at once with the mode it goes to; asking for the
   current mode does nothing.
-- A transition starts from wherever the camera is. After idle, the springs start from the map's
-  current camera (`MapboxMap.cameraState`), so **Recenter** flies from where the driver left the
-  map.
+- A transition starts from wherever the camera is. After idle, camera animations still running,
+  such as the end of a fling, are cancelled, and the springs start from the map's current camera
+  (`MapboxMap.cameraState`), so **Recenter** flies from where the driver left the map.
+- While a change of mode is on its way, the state in the debug log is `TRANSITION_TO_FOLLOWING` or
+  `TRANSITION_TO_OVERVIEW`, as with the Mapbox styles.
 - The offset between the camera and the live target fades out on a smootherstep curve. A moving
   target is chased from the first frame, and a still one is reached without a jolt. So stage 4's
   frequent switches end without a catch-up surge.
@@ -461,6 +526,9 @@ the turn. It glides in over about 1.5 s through the on-puck weight instead of ju
 - While the activity is stopped (phone) or the surface is detached (car), no frames run. When the
   phone's activity starts again, the first frame snaps to the targets, since the map was not on
   screen. The car builds a new controller for each new surface.
+- A map that still shows the whole world (zoom below 3), as one does that was never moved, is not
+  flown from either: the camera is put on its target with the next frame. That is the first
+  position after launch, and a map created again during a drive.
 
 ### Gestures hand the camera to the driver
 
@@ -480,8 +548,9 @@ the turn. It glides in over about 1.5 s through the on-puck weight instead of ju
 
 - `onGuidanceEnded()` resets the tilt schedule and clears the data source's following overrides
   (`clearFollowingOverrides`).
-- If the camera was not idle yet, it goes idle and `PhoneMap` eases to the browsing view as today:
-  zoom 15.5, tilt 40°, 0.8 s.
+- If the camera still showed the route, it goes back to the car on the browsing map and follows it
+  there (see [Following the car before guidance](#following-the-car-before-guidance)). If the
+  driver had taken the map, it stays where it is.
 - At the next Start, `GuidancePuck.newDrive()` swaps in a fresh provider, so the puck does not jump
   from where the last drive ended.
 
@@ -508,7 +577,7 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   the stable area's rectangle and the surface size on every attach.
 - **Gestures:** car scroll and scale call `setCamera` directly, without animators. A double-tap zoom
   eases with an animator, which the hand-over rule catches anyway, and Mapbox's default handler
-  does nothing on a fling. The gesture handler calls `onUserGesture()` before passing on scroll,
+  does nothing on a fling. The gesture handler calls `requestIdle()` before passing on scroll,
   fling and scale. **Recenter** comes from the map's action strip.
 - **One puck for both maps:** `GuidancePuck` and the navigator feed move into the engine. Each fix
   then reaches the phone and car maps once, and `newDrive()` runs when guidance starts. Mapbox's
@@ -516,42 +585,71 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
 
 ### Logging
 
-A **camera** line about once a second during guidance:
+A **camera** line once a second during guidance. `PhoneMap` writes it, in every camera style, and
+only while its map view is shown; the `activity` and `screen` lines show when it was not.
 
 | Field | Meaning | Expected |
 |---|---|---|
-| `camMode` | IDLE, FOLLOWING or OVERVIEW | |
-| `camFps` | controller frames per second | about the display rate while moving; low when parked, because the loop stops |
-| `camMaxGapMs` | worst gap between two frames that second | under 25 ms at 60 Hz; spikes mean dropped frames |
-| `camWrites` | `setCamera` calls that second | about `camFps` while moving, 0 while parked |
-| `puckLagM` | how far the camera centre trails the drawn puck | about 2τ × speed: 0.4 s × speed on the phone, 0.5 s × speed on the car |
-| `pitch`, `focus`, `focusGoal` | the tilt and the schedule behind it | |
-| `zoom`, `zoomTarget` | the zoom and its target | |
-| `bearingError` | target bearing minus camera bearing | within a few degrees |
-| `onPuck` | the on-puck weight | 1 on the road, 0 in junction framing and overview |
+| `style` | the camera style: `MAPBOX_STANDARD`, `MAPBOX_TUNED` or `SMOOTH_FOLLOW` | |
+| `state` | what the camera is doing: `FOLLOWING`, `OVERVIEW`, `IDLE`, and `TRANSITION_TO_FOLLOWING` or `TRANSITION_TO_OVERVIEW` on the way there | |
+| `zoom`, `pitch`, `bearing` | the map's camera | |
+| `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre | |
+| `puckLagM` | how far the drawn puck trails the latest matched position | below speed × the puck's glide |
+| `sinceFixMs` | how long ago that position came | up to about 1000 |
+| `camLagM` | how far the camera centre is from the drawn puck | Smooth follow on the road: about 2τ × speed, 0.4 s × speed on the phone; larger in maneuver framing and in the overview |
+| `camUpdates`, `camGapMs` | how often the map's camera changed that second, and the longest time between two changes | close to `render.frames` and to one frame while moving |
+| `puckUpdates`, `puckGapMs` | the same for the drawn puck | |
+| `steps` | the largest change from one camera frame to the next: `m`, `zoom`, `bearing`, `pitch` | small and even; a jump shows as one large step |
+| `fixes` | matched positions that second | 1 |
+| `keyPoints` | the points the navigator sent with the latest position, which the puck glides through | |
+| `padding`, `paddingChanges` | the map's padding in pixels (top, left, bottom, right) and how often it changed; in the first line and whenever it changed | rare, since the top padding only grows |
+| `render` | the render thread that second: `frames`, `fps`, `missedVsync`, `p50Ms`, `p95Ms`, `maxMs` | |
+| `renderFps` | the renderer's own rate (`MapView.setOnFpsChangedListener`, called on the render thread); left out while the map draws nothing | at least 55 at 60 Hz |
 | `animatorsEnabled` | `ValueAnimator.areAnimatorsEnabled()` | false: the animator scale is 0 and the puck jumps |
-| `renderFps` | the renderer's own rate (`MapView.setOnFpsChangedListener`, called on the render thread) | at least 55 at 60 Hz |
+| `hz` | the display's refresh rate | |
 
-- The log records the active camera style, so drives in different styles can be compared.
-- The two Mapbox styles do not run the controller. For them the line holds the map's zoom, tilt and
-  bearing against the data source's targets, and the frame rate.
-- On the phone the line is written only while the map is on screen; the `activity` and `screen`
-  lines show when it was not.
-- A **camera_state** line on every mode change. For the Mapbox styles it should also record how
-  long each transition took: one that should take 673 ms or more and ends within a few ms means
-  animations are off.
-- A **camera_taken** line when something else takes the camera, with the owner of the animator that
-  took it (`Maps-Gestures` for a touch), and a **camera_request** line when **Recenter** or
-  **Overview** is tapped. The first drive's log could not say why the camera went idle about 22 s
+`puckLagM`, `sinceFixMs` and `keyPoints` are left out until the guidance has had its first position.
+
+Smooth follow adds its controller's own numbers:
+
+| Field | Meaning | Expected |
+|---|---|---|
+| `camFps` | controller frames per second | about the display rate while moving; 1 or 2 when parked, because the loop stops |
+| `camMaxGapMs` | the longest time between two frames in a row that second; a longer gap counts as 100 | under 25 ms at 60 Hz; spikes mean dropped frames |
+| `camWrites` | `setCamera` calls that second | about `camFps` while moving, 0 or 1 while parked |
+| `focus`, `focusGoal` | the tilt schedule: how far the view is tilted onto the next maneuver, 0 to 1, and where that is going | |
+| `zoomTarget` | the zoom the camera is going to | |
+| `bearingError` | target bearing minus camera bearing | within a few degrees |
+| `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview |
+
+The two Mapbox styles do not run the controller. They add `frameUpdates`, the frame animations
+`NavigationCamera` started that second, and `frameUpdatesCut`, those cancelled before they
+finished because the next one came. While the car moves, Mapbox standard starts about two a second
+and Mapbox tuned one.
+
+Other lines:
+
+- A **camera_state** line on every change of the camera's state, with `state`, `style` and, once a
+  change has arrived, `ms`: how long it took. Besides the states above there is `IDLE_FOLLOW`, the
+  camera on the car before guidance. For the Mapbox styles a transition that should take 673 ms or
+  more and ends within a few ms means animations are off.
+- A **camera_taken** line when something else takes the camera: `owner`, who started the animator
+  (`Maps-Gestures` for a touch, `Maps-Compass` for the compass), `animator`, its kind, and `from`,
+  the camera's state. The first drive's log could not say why the camera went idle about 22 s
   before End.
-- An **animations** line: `areAnimatorsEnabled()`, the animator duration scale setting
-  (`Settings.Global.ANIMATOR_DURATION_SCALE`) and power saving. It is written at Start, after the
-  first activity exists, not at app start: a process learns the real scale only when its first
-  activity launches and reports the default 1.0 until then, so a value read in
+- A **camera_request** line when **Recenter**, **Overview** or **My location** is tapped: `mode`,
+  `from` and `guidance`.
+- A **settings** line on every change of a setting: `key`, `value` as stored, and `guidance`. A
+  change of `camera_style` during a drive shows there.
+- An **animations** line: `reason`, `enabled` (`areAnimatorsEnabled()`), `durationScale` (the
+  setting `Settings.Global.ANIMATOR_DURATION_SCALE`) and `powerSave`. It is written when the first
+  activity starts and at every Start, not at app start: a process learns the real scale only when
+  its first activity launches and reports the default 1.0 until then, so a value read in
   `Application.onCreate` says "enabled" even with animations off. On Android 13 and newer a
-  duration-scale listener logs changes, and a receiver does the same for power saving. The scale
-  setting shows the developer and accessibility switches but not a phone maker's battery-saver
-  override; `areAnimatorsEnabled()` shows the effective state.
+  duration-scale listener writes the line again with `newScale` when the scale changes. Power
+  saving turned on or off is a **power** line. The scale setting shows the developer and
+  accessibility switches but not a phone maker's battery-saver override; `areAnimatorsEnabled()`
+  shows the effective state.
 - Optional Perfetto trace: the controller's frame should take under 0.2 ms; the data source's
   `MapboxNavigationViewportDataSource#evaluateImpl` should run once a second; no
   `CameraAnimations#commitChanges` while following, which proves nothing else writes the camera.
@@ -644,6 +742,8 @@ Stage 5, 3D:
 
 ### Build order
 
+Steps 1 to 4 are done.
+
 1. `:core-nav`: `CameraMotion.kt` and `CameraMotionTest`.
 2. `:engine-mapbox`: `GuidancePuck` and `SmoothNavigationCamera`.
 3. `PhoneMap` wiring, the style setting with the Mapbox tuned transition, and the
@@ -656,25 +756,36 @@ Stage 5, 3D:
 
 ### JVM tests, no device
 
-`CameraMotionTest` in `:core-nav` (JUnit 6): seven tests, all passing against the draft code.
+`CameraMotionTest` in `:core-nav` (JUnit 6), 19 tests. Among them:
 
 - The spring is exact for any frame time and never overshoots.
-- Ramp, spring and lead hold a steady 5°/s curve within 4.8 to 5.2°/s.
+- Ramp, spring and lead hold a steady 5°/s curve within 4.8 to 5.2°/s, also with fix intervals
+  between 0.977 and 1.016 s.
+- A ramp ends exactly on its sample, and one that is given the same sample every second comes to
+  rest within a tolerance.
 - At 50 km/h the tilt is below 3° at 180 m, 0° at the junction and back at 45° after it, and peaks
   below 30°/s.
 - Braking never tilts the view up before the turn.
 - Excluded maneuver types keep 45°.
 - A second turn 120 m later keeps the view down.
 - A reroute that reuses the step numbers is still a new step.
+- Guidance that ends halfway down turns the tilt back from where it is.
 
-Worth adding: a reversal halfway down, and a ramp fed with the fix-interval jitter from the log.
+Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the frame),
+`IdleFollowTest` (12: when the camera follows the car before guidance) and `GuidancePaddingTest`
+(7: the top inset that only grows).
+
+The classes in `:engine-mapbox` touch Android and Mapbox types and have no JVM tests. While it was
+written, `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by
+frame through a made-up drive: the browsing map, the preview, Start, a turn, a red light, a drag,
+Recenter, the background and back, a teleport, the overview and the end. That check is not part of
+the build; the simulated drive below is the first real one.
 
 ### Build
 
-CI runs the debug build, lint and the unit tests. So far the draft code was compiled with Kotlin
-2.4.21, warnings as errors, against the class jars of Maps 11.34.1, Navigation 3.34.1 and Android 37
-(the `:core-nav` part also against the Java 8 API), and the car observer against maps-androidauto
-11.34.1 and car-app 1.8.0-rc01. It has not been through Gradle yet.
+CI runs the debug build, lint and the unit tests on every push. The car observer of stage 2 is
+not in the build yet; its draft was compiled against maps-androidauto 11.34.1 and car-app
+1.8.0-rc01.
 
 ### Simulated drive
 
@@ -693,10 +804,19 @@ Watch for:
 - The two close turns stay flat throughout.
 - At 180 m the junction framing glides in over about 1.5 s, with no jump.
 
+Before Start, in each style:
+
+- With the app open and no route, the camera stays on the car as it moves.
+- A pan, a pinch or a rotation leaves the map where the driver put it; **My location** brings the
+  camera back to the car and it follows again.
+- The search bar, its suggestions and the place card do not move the car on the screen.
+- From there, Start is a short move into following.
+
 Try:
 
 - Pan, pinch, rotate, tilt, double-tap and the compass: each switches to idle at once, and
   **Recenter** appears.
+- Changing the camera style in Settings during the drive: the new camera takes over in one glide.
 - **Recenter**: one smooth flight back.
 - **Overview** on and off while moving: the camera tracks the moving target, with no surge at the
   end.

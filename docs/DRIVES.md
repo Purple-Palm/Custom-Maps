@@ -286,8 +286,8 @@ view at three points, while the camera stays in following mode:
 ### What changes
 
 The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). It is being built in steps: the
-diagnostics below are built, the rest is designed and not built yet. Stage 2 is the Android Auto
-stage.
+diagnostics and the camera below are built, the rest is designed and not built yet. Stage 2 is the
+Android Auto stage.
 
 #### Camera
 
@@ -295,13 +295,16 @@ The reasons and numbers behind each style are in [CAMERA.md](CAMERA.md).
 
 | Change | For | Stage |
 |---|---|---|
-| Camera styles in Settings: **Mapbox standard** (today's camera, unchanged, for comparison), **Mapbox tuned** (the same camera with calmer settings) and **Smooth follow** (new, the default) | Steps and abrupt switches | Next build |
-| Smooth follow moves the camera on every display frame and glides after the drawn car. Its own motion does not depend on Android's animation setting; the drawn car's glide does | Steps | Next build |
-| The tilt goes down onto the junction gradually before a turn and back up after it | Abrupt switches | Next build |
-| More zoom at turns, so the junction and its lanes are larger | Small lanes | Next build; the full junction zoom stays in stage 4 |
-| The early turn into curves stays | The owner liked it | Next build |
-| Proposed: during guidance the top padding only grows, so the lanes row no longer reframes the view. In Smooth follow padding changes glide anyway | Secondary switches | Next build |
-| The route line is updated only when the SDK accepts the point | Main-thread waste | Next build |
+| Camera styles in Settings: **Mapbox standard** (the camera of the first drives, for comparison), **Mapbox tuned** (the same camera with calmer settings) and **Smooth follow** (new, the default) | Steps and abrupt switches | Built in stage 1.1 |
+| Smooth follow moves the camera on every display frame and glides after the drawn car. Its own motion does not depend on Android's animation setting; the drawn car's glide does | Steps | Built in stage 1.1 |
+| The tilt goes down onto the junction gradually before a turn and back up after it | Abrupt switches | Built in stage 1.1 |
+| More zoom at turns, so the junction and its lanes are larger | Small lanes | Next build, with the Lane zoom setting; the full junction zoom stays in stage 4 |
+| The early turn into curves stays | The owner liked it | Kept in every style |
+| During guidance the top padding comes from the maneuver card alone and only grows, so the lanes row no longer reframes the view. In Smooth follow padding changes glide anyway | Secondary switches | Built in stage 1.1 |
+| The route line is updated only when the SDK accepts the point | Main-thread waste | Built in stage 1.1 |
+| Before Start the camera follows the car, from the phone's own location, until the driver moves the map and again after My location | A long camera move at Start | Built in stage 1.1 |
+
+None of the camera changes has been on a drive yet.
 
 #### Destination
 

@@ -381,8 +381,8 @@ Other notes:
 - Pan and zoom reach the app only when the map action strip contains `Action.PAN`. Touch screens do
   not show the pan button. A double-tap arrives as a scale, and rotary nudges in pan mode arrive as
   a scroll. Some head units never send a fling or a scale, so the strip also has zoom buttons.
-- Gestures go through a subclass of `DefaultMapboxCarMapGestureHandler`, which calls `onUserGesture()`
-  before passing each one on. The camera goes IDLE, so the car shows Recenter. A scroll moves the
+- Gestures go through a subclass of `DefaultMapboxCarMapGestureHandler`, which calls the camera's
+  `requestIdle()` before passing each one on. The camera goes IDLE, so the car shows Recenter. A scroll moves the
   camera and a scale zooms around its focal point; the default handler does not implement a fling.
 - The zoom buttons step by 0.5 and the zoom stays between 6 and 20, as in Mapbox's
   `CarNavigationCamera`.

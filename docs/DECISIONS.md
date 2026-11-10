@@ -112,6 +112,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 ## 14. Location before guidance comes from the platform
 
 - **Chosen:** before Start, the puck uses the Maps SDK's platform location provider; during guidance it switches to the navigator's map-matched location.
+- The camera follows the car before Start from that same location, until the driver moves the map and again after My location. It takes no trip session and no request ([CAMERA.md](CAMERA.md), "Following the car before guidance").
 - **Alternative:** free drive for map-matched location at all times. It is billed as a trip.
 - **Cost:** no snapping to roads before Start.
 
@@ -206,10 +207,12 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 ## 26. Camera styles chosen in Settings
 
 - **Chosen (owner):** Settings offers three camera styles, applied at once, also mid-drive, and on the car screen from stage 2:
-  - **Mapbox standard:** today's NavigationCamera, unchanged, kept for comparison.
-  - **Mapbox tuned:** the same camera with calmer settings: one camera update per navigator update instead of two, a gradual tilt before turns, more zoom at turns and a puck that glides 1.1 s per update.
+  - **Mapbox standard:** the NavigationCamera of the first drives with its camera behaviour unchanged, kept for comparison.
+  - **Mapbox tuned:** the same camera with calmer settings: one camera update per navigator update instead of two, longer moves from frame to frame, a gradual tilt before turns and a puck that glides 1.1 s per update. It gets no higher zoom cap: its extra zoom at turns comes with the Lane zoom setting.
   - **Smooth follow:** the per-frame camera of decision 27, the default.
-- The debug log records the active style, so drives can be compared.
+- The choice is stored with the app settings as `camera_style`; a missing or unknown value reads as Smooth follow.
+- What is not camera behaviour is the same in every style: the top padding that only grows during guidance, the route line fix, a fresh puck for every drive, and following the car before guidance ([CAMERA.md](CAMERA.md)).
+- The debug log records the active style on every camera line and every change of the setting, so drives can be compared.
 - **Alternative:** a single camera. Comparing styles on the same roads is the quickest way to tune them.
 
 ## 27. A per-frame follow camera
