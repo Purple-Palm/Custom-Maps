@@ -59,7 +59,8 @@ internal class ProcessHistory(private val context: Context, private val debugLog
             debugLog.log("process_exits_unavailable", mapOf("error" to e.toString()))
             return
         }
-        // Written on this thread, so each record is on disk before it is marked as logged.
+        // Written on this thread, so each record has been handed to the operating system before it
+        // is marked as logged.
         exitsLogged.logNew(exits, { it.key() }) { debugLog.logNow("process_exit", it.debugFields(), WRITE_TIMEOUT_MILLIS) }
     }
 

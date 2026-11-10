@@ -30,13 +30,13 @@ data class ExitKey(val pid: Int, val timeMillis: Long) {
  * Remembers, in [file], which of the records Android keeps across many starts and app updates (how
  * earlier processes ended) are already in the debug log, so that each is logged once.
  *
- * The file holds one [ExitKey] per line: the records Android listed when the file was last
- * written, and before them the last few it had stopped listing by then. Those stay because they can
- * come back: Android saves its records only about every half hour and not when the phone shuts
- * down, so after a reboot it lists again the ones it dropped since its last save. A new list is
- * written to a temporary file next to it and renamed over it, so a write cut short by the process
- * dying leaves the previous list in place. A missing or unreadable file counts as nothing logged
- * yet: every record Android still holds is logged once more.
+ * The file holds one [ExitKey] per line: of the records Android listed when the file was last
+ * written, the ones in the log by then, and before them the last few it had stopped listing. Those
+ * few stay because they can come back: Android saves its records only about every half hour and not
+ * when the phone shuts down, so after a reboot it lists again the ones it dropped since its last
+ * save. A new list is written to a temporary file next to it and renamed over it, so a write cut
+ * short by the process dying leaves the previous list in place. A missing or unreadable file counts
+ * as nothing logged yet: every record Android still holds is logged once more.
  */
 class LoggedExits(private val file: File) {
 
@@ -50,10 +50,11 @@ class LoggedExits(private val file: File) {
 
     /**
      * Hands each of [records] not in the log yet to [write], oldest first, then stores the keys of
-     * the records that are in the log. [write] returns true once its record is on disk: a record is
-     * never marked as logged before that, so one lost with a process that dies right after this
-     * comes up again at the next start. The first false stops the writing, and the records left come
-     * up again too. Returns how many were written.
+     * the records that are in the log. [write] returns true once its record has been handed to the
+     * operating system: a record is never marked as logged before that, so one lost with a process
+     * that dies right after this comes up again at the next start. A power loss can still take the
+     * line and keep the mark: the keys are forced to storage, the log line is not. The first false
+     * stops the writing, and the records left come up again too. Returns how many were written.
      */
     fun <T> logNew(records: List<T>, keyOf: (T) -> ExitKey, write: (T) -> Boolean): Int {
         val unseen = unseen(records, keyOf)

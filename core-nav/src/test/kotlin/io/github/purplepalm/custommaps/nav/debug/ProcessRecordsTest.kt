@@ -65,7 +65,7 @@ class ProcessRecordsTest {
         val file = File(temp, "exits-logged")
         val tried = mutableListOf<Exit>()
 
-        // The second write times out: it and the third are not on disk.
+        // The second write times out: it and the third are not written.
         val count = LoggedExits(file).logNew(listOf(exit(3), exit(2), exit(1)), key) { tried.add(it); it != exit(2) }
 
         assertEquals(1, count)
