@@ -156,7 +156,7 @@ internal class LaneChoices(
         for (i in choices.indices) {
             val choice = choices[i]
             // The lanes of the maneuver itself are the card's own row.
-            if (choice.atManeuver || !choice.counts(tuning) || !choice.metersAhead.isFinite()) continue
+            if (choice.atManeuver || !choice.counts(tuning) || !choice.isAhead) continue
             if (choice.metersAhead > window && choice.key != cardKey) continue
             if (nearest == null || choice.metersAhead < nearest.metersAhead) nearest = choice
         }
@@ -167,7 +167,7 @@ internal class LaneChoices(
             return null
         }
         cardKey = nearest.key
-        val distance = Distance.meters(nearest.metersAhead.coerceAtLeast(0.0))
+        val distance = Distance.meters(nearest.metersAhead)
         val last = cardLanes
         if (last == null || last.lanes !== lanes || last.distance != distance) cardLanes = LanesAhead(distance, lanes)
         return cardLanes

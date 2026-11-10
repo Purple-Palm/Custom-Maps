@@ -62,6 +62,12 @@ data class LaneChoice(
     val leavingLanes: Int get() = laneCount - usableLanes
 
     /**
+     * Whether the point lies ahead of the car at a distance that is a number. A point behind the
+     * car, or one whose distance could not be worked out, is no choice to show or to zoom in for.
+     */
+    val isAhead: Boolean get() = metersAhead >= 0.0 && metersAhead < Double.POSITIVE_INFINITY
+
+    /**
      * Why the view stays as it is for this point; null when the point counts as a lane choice. The
      * view goes close on a freeway with enough lanes where some lanes leave the route: at an exit
      * or a fork one leaving lane is enough, and where the route goes straight on it takes
@@ -158,7 +164,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         var soon = false
         for (i in choices.indices) {
             val choice = choices[i]
-            if (!(choice.metersAhead >= 0.0) || !choice.counts(tuning)) continue
+            if (!choice.isAhead || !choice.counts(tuning)) continue
             if (choice.metersAhead <= window && (inWindow == null || choice.metersAhead < inWindow.metersAhead)) inWindow = choice
             if (choice.key == currentKey) held = choice
             if (choice.metersAhead <= reach) soon = true

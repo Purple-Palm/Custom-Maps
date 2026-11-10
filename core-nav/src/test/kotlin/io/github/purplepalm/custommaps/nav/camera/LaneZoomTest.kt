@@ -234,6 +234,23 @@ class LaneZoomTest {
         focus.onProgress(0.0, 500.0, listOf(choice(5, 3, ahead = -5.0), choice(5, 3, ahead = Double.NaN, key = "r/0/3/3")), 29.0)
         assertEquals(0.0, focus.goal)
         assertNull(focus.current)
+        assertFalse(choice(5, 3, ahead = -5.0).isAhead)
+        assertFalse(choice(5, 3, ahead = Double.NaN).isAhead)
+        assertFalse(choice(5, 3, ahead = Double.POSITIVE_INFINITY).isAhead)
+        assertTrue(choice(5, 3, ahead = 0.0).isAhead)
+    }
+
+    @Test
+    fun `a choice whose distance stops being a number does not keep the view close for good`() {
+        val focus = LaneFocus(tuning)
+        focus.onProgress(0.0, 1_000.0, listOf(choice(5, 3, ahead = 300.0)), 29.0)
+        assertEquals(1.0, focus.goal)
+        // The same choice at an endless distance counts as gone: the hold runs out as after any
+        // other, 30 m past where the choice last was, at 1,300 m of the route.
+        for (t in 1..11) focus.onProgress(t.toDouble(), 1_000.0 + 29.0 * t, listOf(choice(5, 3, ahead = Double.POSITIVE_INFINITY)), 29.0)
+        assertEquals(1.0, focus.goal)
+        focus.onProgress(12.0, 1_348.0, listOf(choice(5, 3, ahead = Double.POSITIVE_INFINITY)), 29.0)
+        assertEquals(0.0, focus.goal)
     }
 
     @Test
