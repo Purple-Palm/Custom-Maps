@@ -295,8 +295,15 @@ class PhoneMap internal constructor(
             render(guidanceState)
         }
 
-        // On the browsing map the two Mapbox styles move the camera with the puck's own updates.
-        platformPuck.onGlide = { target -> if (idleFollow.following) camera.onPuckGlide(target, PlatformPuck.GLIDE_MS) }
+        // While the camera follows on the browsing map, the two Mapbox styles move it with the puck's
+        // own updates, and the data source learns each position, in every style: the route's camera
+        // then starts from where the car is. Nothing is computed from it before a route is shown.
+        platformPuck.onGlide = { target ->
+            if (idleFollow.following) {
+                camera.onPuckGlide(target, PlatformPuck.GLIDE_MS)
+                feedPuck(target)
+            }
+        }
         mapView.location.setLocationProvider(platformPuck)
         mapView.location.updateSettings {
             enabled = true
@@ -506,11 +513,11 @@ class PhoneMap internal constructor(
     }
 
     /**
-     * Outside guidance the data source learns where the car is only when the camera goes to the car
-     * to follow it. A preview opened somewhere else would frame that old place, and Start would fly
-     * there before it found the car. So in the preview the data source gets the puck's position:
-     * when the preview opens, and then whenever the car has moved. Mapbox standard goes without, as
-     * it always has.
+     * Outside guidance the data source learns where the car is only while the camera follows the
+     * car. A preview opened after the driver had taken the map would frame the place where that
+     * was, and so would one the car drives on in; Start would fly there before it found the car. So
+     * in the preview the data source gets the puck's position: when the preview opens, and then
+     * whenever the car has moved. Mapbox standard goes without, as it always has.
      */
     private val tracksPuckInPreview: Boolean get() = cameraStyle != CameraStyle.MAPBOX_STANDARD
 
@@ -584,7 +591,7 @@ class PhoneMap internal constructor(
     private fun followCar() {
         val puck = lastPuck ?: return
         camera.requestIdleFollow(puck)
-        // Keeps the following camera's data fresh for when guidance starts.
+        // The data source learns where the car is now, and then with every position while this lasts.
         feedPuck(puck)
     }
 

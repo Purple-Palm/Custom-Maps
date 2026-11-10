@@ -115,7 +115,9 @@ camera uses nothing else: no trip session and no request.
   comes to the car over 0.8 s, or 2.2 s from more than two screens away. Its loop stops while the
   car stands.
 - **Any gesture** hands the map to the driver, and so does the compass. A plain tap does not.
-- **At Start** the camera is already on the car, so the move into following is short.
+- **The data source** gets every position of the phone's location while the camera follows, in
+  every style. Nothing is computed from it until a route is shown; the preview's overview and
+  the Start flight then begin from where the car is, not from where it was when following began.
 - **In the log** the `camera_state` line says `IDLE_FOLLOW` while the camera is on the car and
   `IDLE` once the driver has the map. A `camera_taken` line says who took it.
 
@@ -247,9 +249,12 @@ drives.
 - **Also found:** outside guidance the data source learned the location only when the map centred
   on the puck (the first fix after launch, or a tap on my location). The preview's overview and the
   Start flight use that point, so a preview built in one place and started elsewhere starts from
-  the old spot and then jumps. Fixed for Mapbox tuned and Smooth follow: in the preview the data
-  source gets the puck's position when the preview opens, and then whenever the car has moved 5 m,
-  at most once a second. Mapbox standard goes without, as before.
+  the old spot and then jumps. Fixed in two parts. While the camera follows the car on the browsing
+  map, the data source gets every position, in every style. And for Mapbox tuned and Smooth
+  follow, in the preview the data source gets the puck's position when the preview opens, and then
+  whenever the car has moved 5 m, at most once a second. Mapbox standard goes without that second
+  part, as before: there a preview opened after the driver had taken the map, or one the car
+  drives on in, still starts from the old spot.
 
 ## Designs considered
 
@@ -826,7 +831,8 @@ Before Start, in each style:
 - A pan, a pinch or a rotation leaves the map where the driver put it; **My location** brings the
   camera back to the car and it follows again.
 - The search bar, its suggestions and the place card do not move the car on the screen.
-- From there, Start is a short move into following.
+- From there, a preview and Start, also after driving on with the app open: the flight into
+  following goes straight to the car, with no detour to where the car was earlier.
 
 Try:
 
