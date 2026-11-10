@@ -47,6 +47,22 @@ class LoggedExits(private val file: File) {
     }
 
     /**
+     * Hands each of [records] not in the log yet to [write], oldest first, then stores the keys of
+     * the records that are in the log. [write] returns true once its record is on disk: a record is
+     * never marked as logged before that, so one lost with a process that dies right after this
+     * comes up again at the next start. The first false stops the writing, and the records left come
+     * up again too. Returns how many were written.
+     */
+    fun <T> logNew(records: List<T>, keyOf: (T) -> ExitKey, write: (T) -> Boolean): Int {
+        val unseen = unseen(records, keyOf)
+        var written = 0
+        while (written < unseen.size && write(unseen[written])) written += 1
+        val left = unseen.subList(written, unseen.size).mapTo(HashSet(), keyOf)
+        markLogged(records.map(keyOf).filterNot { it in left })
+        return written
+    }
+
+    /**
      * Stores [keys] as the records that are in the log, in place of the ones stored so far: records
      * Android no longer holds never come back, so their keys can go. Nothing is written when the
      * same keys are stored already, or when [keys] is empty: right after a reboot Android lists no

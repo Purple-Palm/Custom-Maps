@@ -48,6 +48,41 @@ class ProcessRecordsTest {
     }
 
     @Test
+    fun `logNew writes the new records oldest first and marks them`() {
+        val logged = LoggedExits(File(temp, "exits-logged"))
+        logged.markLogged(keys(exit(1)))
+        val written = mutableListOf<Exit>()
+
+        val count = logged.logNew(listOf(exit(3), exit(2), exit(1)), key) { written.add(it) }
+
+        assertEquals(2, count)
+        assertEquals(listOf(exit(2), exit(3)), written)
+        assertEquals(emptyList<Exit>(), logged.unseen(listOf(exit(3), exit(2), exit(1)), key))
+    }
+
+    @Test
+    fun `a record is only marked once it is written, and the first failure stops the rest`() {
+        val file = File(temp, "exits-logged")
+        val tried = mutableListOf<Exit>()
+
+        // The second write times out: it and the third are not on disk.
+        val count = LoggedExits(file).logNew(listOf(exit(3), exit(2), exit(1)), key) { tried.add(it); it != exit(2) }
+
+        assertEquals(1, count)
+        assertEquals(listOf(exit(1), exit(2)), tried)
+        assertEquals(listOf(exit(2), exit(3)), LoggedExits(file).unseen(listOf(exit(3), exit(2), exit(1)), key))
+    }
+
+    @Test
+    fun `nothing is marked when the first write fails`() {
+        val file = File(temp, "exits-logged")
+
+        assertEquals(0, LoggedExits(file).logNew(listOf(exit(2), exit(1)), key) { false })
+
+        assertEquals(listOf(exit(1), exit(2)), LoggedExits(file).unseen(listOf(exit(2), exit(1)), key))
+    }
+
+    @Test
     fun `a record older than one already logged is still new`() {
         val logged = LoggedExits(File(temp, "exits-logged"))
         logged.markLogged(keys(exit(10)))

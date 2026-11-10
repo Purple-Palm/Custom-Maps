@@ -9,10 +9,10 @@ import android.os.Build
 import android.os.Process
 import androidx.annotation.RequiresApi
 import io.github.purplepalm.custommaps.nav.debug.AnrTrace
-import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.ExitKey
 import io.github.purplepalm.custommaps.nav.debug.LoggedExits
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
+import io.github.purplepalm.custommaps.nav.debug.UrgentDebugLog
 import io.github.purplepalm.custommaps.nav.debug.error
 import java.io.File
 import java.io.IOException
@@ -23,7 +23,7 @@ import java.time.Instant
  * a crash in native code, an ANR, the system or the user killing it) and why this one started.
  * Android keeps both. [logOnStart] reads them once per process; call it off the main thread.
  */
-internal class ProcessHistory(private val context: Context, private val debugLog: DebugLog) {
+internal class ProcessHistory(private val context: Context, private val debugLog: UrgentDebugLog) {
 
     private val activityManager: ActivityManager? = context.getSystemService(ActivityManager::class.java)
 
@@ -59,8 +59,8 @@ internal class ProcessHistory(private val context: Context, private val debugLog
             debugLog.log("process_exits_unavailable", mapOf("error" to e.toString()))
             return
         }
-        exitsLogged.unseen(exits) { it.key() }.forEach { debugLog.log("process_exit", it.debugFields()) }
-        exitsLogged.markLogged(exits.map { it.key() })
+        // Written on this thread, so each record is on disk before it is marked as logged.
+        exitsLogged.logNew(exits, { it.key() }) { debugLog.logNow("process_exit", it.debugFields(), WRITE_TIMEOUT_MILLIS) }
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
@@ -119,6 +119,9 @@ internal class ProcessHistory(private val context: Context, private val debugLog
 
     private companion object {
         const val EXITS_LOGGED_FILE = "debug-log-exits-logged"
+
+        /** How long a record waits for a write already in progress; this thread is not about to die. */
+        const val WRITE_TIMEOUT_MILLIS = 2_000L
 
         /** Android keeps a short ring buffer per app; the first start after an update logs all of it. */
         const val MAX_EXITS = 16
