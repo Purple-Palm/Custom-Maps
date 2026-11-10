@@ -10,7 +10,11 @@ import java.io.File
  */
 interface DebugLog {
 
-    /** Records one event. Returns at once; writing happens in the background. */
+    /**
+     * Records one event. Returns at once; encoding and writing happen in the background, so
+     * [fields] must not change after the call: pass read-only values (mapOf, listOf, strings,
+     * numbers), never a collection the caller keeps changing.
+     */
     fun log(type: String, fields: Map<String, Any?> = emptyMap())
 
     companion object {
@@ -19,6 +23,20 @@ interface DebugLog {
             override fun log(type: String, fields: Map<String, Any?>) = Unit
         }
     }
+}
+
+/**
+ * A [DebugLog] that can also write on the calling thread, for the last moments of a process that is
+ * about to die, such as a thread with an uncaught exception.
+ */
+interface UrgentDebugLog : DebugLog {
+
+    /**
+     * Writes every event still queued and then this one, and returns once they have been handed to
+     * the operating system, so they outlive the process. Waits at most [timeoutMillis] for a write
+     * already in progress. Returns false if the event could not be written.
+     */
+    fun logNow(type: String, fields: Map<String, Any?>, timeoutMillis: Long): Boolean
 }
 
 /** Records [error] with a short stack trace. */

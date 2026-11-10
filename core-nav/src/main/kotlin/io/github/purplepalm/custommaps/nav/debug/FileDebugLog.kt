@@ -7,21 +7,25 @@ import java.io.IOException
 import java.io.OutputStreamWriter
 import java.io.Writer
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
  * The debug log in [directory]: one JSON-lines file per local day, written by a single background
- * coroutine so [log] never blocks the caller. Once all files together pass [maxBytes], the oldest
- * days are deleted; the file being written is always kept. Copies for sharing go to
- * [exportDirectory], and [clear] deletes them along with the log.
+ * coroutine so [log] never blocks the caller: it only queues the event, and the coroutine encodes,
+ * masks and writes it. [logNow] writes on the calling thread instead, for a process that is about
+ * to die. Once all files together pass [maxBytes], the oldest days are deleted; the file being
+ * written is always kept. Copies for sharing go to [exportDirectory], and [clear] deletes them
+ * along with the log.
  */
 class FileDebugLog(
     private val directory: File,
@@ -30,31 +34,71 @@ class FileDebugLog(
     private val io: CoroutineDispatcher,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val maxBytes: Long = DEFAULT_MAX_BYTES,
-) : DebugLogArchive {
+) : DebugLogArchive, UrgentDebugLog {
 
-    private class Entry(val day: LocalDate, val line: String)
+    /** An event as the caller handed it over; encoded only by whoever writes it. */
+    private class Entry(val time: Instant, val type: String, val fields: Map<String, Any?>)
+
+    /** An encoded and masked line, and the day whose file it goes into. */
+    private class Line(val day: LocalDate, val text: String)
 
     // A full buffer drops the oldest events rather than blocking the main thread.
     private val entries = Channel<Entry>(BUFFERED_EVENTS, BufferOverflow.DROP_OLDEST)
-    private val files = Mutex()
+
+    /**
+     * Guards the files and the open writer. A thread lock rather than a coroutine mutex, because
+     * [logNow] runs on a thread that cannot suspend; it is never held across a suspension point.
+     */
+    private val files = ReentrantLock()
     private var writer: Writer? = null
     private var writerDay: LocalDate? = null
     private var linesSinceTrim = 0
 
     init {
         scope.launch(io) {
-            for (entry in entries) files.withLock { write(entry) }
+            for (entry in entries) {
+                // Encoded before taking the lock, so a large event never keeps logNow waiting.
+                val line = encode(entry)
+                files.withLock { write(line) }
+            }
         }
     }
 
     override fun log(type: String, fields: Map<String, Any?>) {
-        val now = clock.instant()
-        val line = try {
-            JsonLines.event(now, type, fields)
-        } catch (e: RuntimeException) {
-            JsonLines.event(now, "log_error", mapOf("failedType" to type, "error" to e.toString()))
+        entries.trySend(Entry(clock.instant(), type, fields))
+    }
+
+    override fun logNow(type: String, fields: Map<String, Any?>, timeoutMillis: Long): Boolean {
+        val entry = Entry(clock.instant(), type, fields)
+        // A writer stuck on slow storage must not keep a dying process alive for long.
+        val locked = try {
+            files.tryLock(timeoutMillis, TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
         }
-        entries.trySend(Entry(now.atZone(clock.zone).toLocalDate(), Redaction.redact(line)))
+        if (!locked) return false
+        try {
+            // Events logged just before this one are still queued; they go first, in order. Only an
+            // event the background writer has already taken off the queue can land after this one.
+            while (true) {
+                val queued = entries.tryReceive().getOrNull() ?: break
+                write(encode(queued))
+            }
+            return write(encode(entry))
+        } finally {
+            files.unlock()
+        }
+    }
+
+    /** The JSON line of [entry] with tokens masked; an event that cannot be encoded becomes "log_error". */
+    private fun encode(entry: Entry): Line {
+        val text = try {
+            JsonLines.event(entry.time, entry.type, entry.fields)
+        } catch (e: RuntimeException) {
+            JsonLines.event(entry.time, "log_error", mapOf("failedType" to entry.type, "error" to e.toString()))
+        }
+        return Line(entry.time.atZone(clock.zone).toLocalDate(), Redaction.redact(text))
     }
 
     override suspend fun sizeBytes(): Long = withContext(io) {
@@ -91,17 +135,23 @@ class FileDebugLog(
         exportDirectory.listFiles { file -> file.name.startsWith(EXPORT_PREFIX) }?.forEach { it.delete() }
     }
 
-    private fun write(entry: Entry) {
+    /**
+     * Appends one line and flushes it to the operating system, which keeps it even if this process
+     * dies right after. Returns false if the line was dropped. Call it holding [files].
+     */
+    private fun write(line: Line): Boolean {
         try {
-            val out = writerFor(entry.day)
-            out.write(entry.line)
+            val out = writerFor(line.day)
+            out.write(line.text)
             out.write("\n")
             out.flush()
             linesSinceTrim += 1
             if (linesSinceTrim >= TRIM_EVERY_LINES) trim()
+            return true
         } catch (e: IOException) {
             // Storage full or the file went away: drop this line, start over with the next one.
             closeWriter()
+            return false
         }
     }
 
