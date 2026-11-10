@@ -535,7 +535,9 @@ the turn. It glides in over about 1.5 s through the on-puck weight instead of ju
   zoom changed meanwhile. The car builds a new controller for each new surface.
 - A map that still shows the whole world (zoom below 3), as one does that was never moved, is not
   flown from either: the camera is put on its target with the next frame. That is the first
-  position after launch, and a map created again during a drive.
+  position after launch, and a map created again during a drive. The data source may have no
+  frame yet at that moment, because its first one waits for the map's size; the camera is then put
+  on the first frame that comes.
 
 ### Gestures hand the camera to the driver
 

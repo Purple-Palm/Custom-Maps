@@ -363,7 +363,12 @@ internal class SmoothNavigationCamera(
 
         pendingData?.let { data ->
             pendingData = null
-            applySample(data, now)
+            if (isFirstPlaceFromWorld(data)) {
+                // Nothing to glide from: the mode starts over on this frame, which puts the camera there.
+                beginTransition(mode, again = true)
+            } else {
+                applySample(data, now)
+            }
         }
         if (teleportUntil != 0.0) watchTeleport(now)
         computeTargets(now, dt)
@@ -397,6 +402,17 @@ internal class SmoothNavigationCamera(
             teleportUntil = 0.0
             beginTransition(mode, seconds = tuning.teleportTransitionSeconds, again = true)
         }
+    }
+
+    /**
+     * Whether [data] is the first frame with a place to go to for a camera that still shows the
+     * world. The data source may have had no frame yet when the camera was asked to follow: its
+     * first one waits for the map's size, as on a map created again during a drive.
+     */
+    private fun isFirstPlaceFromWorld(data: ViewportData): Boolean {
+        if (zoom.value >= WORLD_ZOOM) return false
+        val sampleZoom = (if (mode == Mode.FOLLOWING) data.cameraForFollowing else data.cameraForOverview).zoom
+        return sampleZoom != null && sampleZoom - zoom.value > FAR_ZOOM_LEVELS
     }
 
     private fun applySample(data: ViewportData, now: Double) {
@@ -558,7 +574,8 @@ internal class SmoothNavigationCamera(
 
     /**
      * Starts the move into [target], from wherever the camera is. [again] starts it over within the
-     * mode the camera is in: for a puck that jumped, and for a map that comes back on screen.
+     * mode the camera is in: for a puck that jumped, for a map that comes back on screen, and for
+     * the first frame that gives a camera on the world view a place to go to.
      */
     private fun beginTransition(target: Mode, seconds: Double? = null, again: Boolean = false) {
         if (target == mode && !again) return
