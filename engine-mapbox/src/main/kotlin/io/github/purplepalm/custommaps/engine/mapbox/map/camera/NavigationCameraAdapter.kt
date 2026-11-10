@@ -202,12 +202,12 @@ internal class NavigationCameraAdapter(
     }
 
     override fun destroy() {
-        stopIdleFollow()
         // First, so that going idle below is not reported.
         navigationCamera.unregisterNavigationCameraStateChangeObserver(stateObserver)
         cameraPlugin.removeCameraAnimationsLifecycleListener(gesturesHandler)
         cameraPlugin.removeCameraAnimationsLifecycleListener(animations)
-        // Cancels the animation it is running.
+        // Cancels the animation it is running, on the browsing map and with a route.
+        stopIdleFollow()
         navigationCamera.requestNavigationCameraToIdle()
         // Neither style of this camera sets anything on the data source, so nothing is taken back.
         source.detach()
