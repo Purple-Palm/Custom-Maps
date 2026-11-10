@@ -495,10 +495,10 @@ class PhoneMap internal constructor(
     /** Starts the once-a-second camera line; does nothing if it is already running. */
     private fun startCameraSampling() {
         if (cameraSampling != null) return
-        val now = SystemClock.elapsedRealtimeNanos()
-        cameraCadence.take(now)
-        puckCadence.take(now)
-        cameraSteps.take()
+        // Each guidance measures afresh: nothing carries over from the last one, minutes or hours ago.
+        cameraCadence.reset()
+        puckCadence.reset()
+        cameraSteps.reset()
         fixes = 0
         frameUpdates = 0
         frameUpdatesCut = 0

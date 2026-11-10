@@ -40,7 +40,17 @@ class Cadence {
         return window
     }
 
-    /** [longestGapMillis] is null until the first tick ever. */
+    /**
+     * Forgets every tick, for a new measuring period, such as the next guidance: the first tick
+     * after this has no gap before it.
+     */
+    fun reset() {
+        count = 0
+        longestGap = 0L
+        last = NEVER
+    }
+
+    /** [longestGapMillis] is null until the first tick since the cadence was made or [reset]. */
     data class Window(val count: Int, val longestGapMillis: Long?)
 
     private companion object {
@@ -91,11 +101,24 @@ class CameraSteps {
             "bearing" to Motion.round(bearing, 2),
             "pitch" to Motion.round(pitch, 2),
         )
+        clearSteps()
+        return steps
+    }
+
+    /**
+     * Forgets the last frame and the largest steps, for a new measuring period, such as the next
+     * guidance: the first frame after this is not compared with any before it.
+     */
+    fun reset() {
+        hasLast = false
+        clearSteps()
+    }
+
+    private fun clearSteps() {
         meters = 0.0
         zoom = 0.0
         bearing = 0.0
         pitch = 0.0
-        return steps
     }
 }
 

@@ -28,6 +28,21 @@ class MotionTest {
     }
 
     @Test
+    fun `a reset cadence starts over, with no gap back to the last tick before it`() {
+        val cadence = Cadence()
+        cadence.tick(0)
+        cadence.tick(16 * ms)
+
+        cadence.reset()
+        // The next guidance, ten seconds later.
+        cadence.tick(10_000 * ms)
+
+        assertEquals(Cadence.Window(count = 1, longestGapMillis = 16), cadence.take(10_016 * ms))
+        cadence.reset()
+        assertEquals(Cadence.Window(count = 0, longestGapMillis = null), cadence.take(20_000 * ms))
+    }
+
+    @Test
     fun `camera steps keep the largest change between two frames`() {
         val steps = CameraSteps()
         steps.onCamera(0.0, 0.0, 15.0, 359.0, 45.0)
@@ -54,6 +69,21 @@ class MotionTest {
         steps.onCamera(0.0, 0.0, 16.0, 0.0, 45.0)
 
         assertEquals(1.0, steps.take()["zoom"])
+    }
+
+    @Test
+    fun `reset camera steps compare the next frame with nothing before it`() {
+        val steps = CameraSteps()
+        steps.onCamera(0.0, 0.0, 15.0, 0.0, 45.0)
+        steps.onCamera(0.0, 0.0, 15.5, 0.0, 45.0)
+
+        steps.reset()
+        // The next guidance starts somewhere else, at another zoom, bearing and pitch.
+        steps.onCamera(0.001, 0.0, 16.0, 90.0, 60.0)
+
+        assertEquals(mapOf("m" to 0.0, "zoom" to 0.0, "bearing" to 0.0, "pitch" to 0.0), steps.take())
+        steps.onCamera(0.001, 0.0, 16.25, 90.0, 60.0)
+        assertEquals(0.25, steps.take()["zoom"])
     }
 
     @Test
