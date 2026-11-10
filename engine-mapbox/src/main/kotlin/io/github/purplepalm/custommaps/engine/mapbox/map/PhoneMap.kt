@@ -380,6 +380,9 @@ class PhoneMap internal constructor(
         mapErrorFolder.flush()
         scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
+        // Nothing feeds the data source any more. Without this it keeps its style subscription, and a
+        // frame still waiting for the map's size keeps the data source and the map alive.
+        viewportDataSource.onDestroy()
         mapView.location.removeOnIndicatorPositionChangedListener(puckPositionListener)
         mapView.location.removeOnIndicatorBearingChangedListener(puckBearingListener)
         mapView.camera.removeCameraAnimationsLifecycleListener(cameraAnimations)
