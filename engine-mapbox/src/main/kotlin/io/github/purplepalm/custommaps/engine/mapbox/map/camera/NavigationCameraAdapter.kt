@@ -138,7 +138,7 @@ internal class NavigationCameraAdapter(
     // This camera keeps nothing for a drive.
     override fun onGuidanceEnded() = Unit
 
-    // Its animations are Android's, which run only while the map's window is on screen.
+    // It draws no frames of its own that would have to stop.
     override fun setVisible(visible: Boolean) = Unit
 
     override fun diagnostics(): Map<String, Any?> {

@@ -135,7 +135,7 @@ class PhoneMap internal constructor(
             .build(),
     )
 
-    /** When the travelled part of the route line last took the puck's position, in nanoseconds. */
+    /** When the traveled part of the route line last took the puck's position, in nanoseconds. */
     private var routeLineUpdatedAt = 0L
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
@@ -473,7 +473,7 @@ class PhoneMap internal constructor(
     }
 
     /**
-     * Moves the end of the travelled part of the route line to the puck. The puck moves on every
+     * Moves the end of the traveled part of the route line to the puck. The puck moves on every
      * frame, but the route line takes a new point only every 62.5 ms and answers a call in between
      * with an error, which the view would only log. So a call is made only when one is due, and only
      * an accepted update is rendered.
