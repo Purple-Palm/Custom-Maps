@@ -19,6 +19,7 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportData
 import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserver
 import io.github.purplepalm.custommaps.nav.camera.Angles
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFocus
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.camera.SampleRamp
@@ -49,6 +50,9 @@ import kotlin.math.sin
  * position, so it trails the car a little and comes to rest on it when the car stops. The tilt
  * before a maneuver comes from [ManeuverFocus].
  *
+ * On the browsing map, before guidance, it follows the drawn puck in the same way, at a fixed zoom
+ * and tilt and without the data source.
+ *
  * It never starts a camera animation. Gestures, the compass and every other move of the map do, so
  * an animation that starts means someone else took the map, and the camera turns idle at once.
  *
@@ -63,10 +67,14 @@ internal class SmoothNavigationCamera(
     private val listener: GuidanceCamera.Listener,
 ) : GuidanceCamera, Choreographer.FrameCallback {
 
-    private enum class Mode(val shown: CameraMode) {
-        IDLE(CameraMode.IDLE),
-        FOLLOWING(CameraMode.FOLLOWING),
-        OVERVIEW(CameraMode.OVERVIEW),
+    /** What the camera is doing, [shown] to the screen as one of its camera modes. */
+    private enum class Mode(val shown: CameraMode, val onPuck: Boolean) {
+        IDLE(CameraMode.IDLE, onPuck = false),
+
+        /** On the car on the browsing map, with no route; the name is [GuidanceCamera.IDLE_FOLLOW]. */
+        IDLE_FOLLOW(CameraMode.IDLE, onPuck = true),
+        FOLLOWING(CameraMode.FOLLOWING, onPuck = true),
+        OVERVIEW(CameraMode.OVERVIEW, onPuck = false),
     }
 
     private val choreographer = Choreographer.getInstance()
@@ -165,7 +173,7 @@ internal class SmoothNavigationCamera(
         puckLat = point.latitude()
         puckLng = point.longitude()
         val still = abs(puckLat - puckWokeLat) <= CENTER_REST && abs(puckLng - puckWokeLng) <= CENTER_REST
-        if (mode == Mode.FOLLOWING && !still) {
+        if (mode.onPuck && !still) {
             puckWokeLat = puckLat
             puckWokeLng = puckLng
             puckSeenAt = now()
@@ -173,11 +181,16 @@ internal class SmoothNavigationCamera(
         }
     }
 
-    /** A new frame of the data source. The next frame of the display takes it, so two in a row count once. */
+    /**
+     * A new frame of the data source. The next frame of the display takes it, so two in a row count
+     * once. On the browsing map the data source has no say, and its frames wait for the next route.
+     */
     private val dataObserver = ViewportDataSourceUpdateObserver { data ->
         latestData = data
-        pendingData = data
-        requestFrame()
+        if (mode != Mode.IDLE_FOLLOW) {
+            pendingData = data
+            requestFrame()
+        }
     }
 
     /**
@@ -219,6 +232,18 @@ internal class SmoothNavigationCamera(
     override fun requestFollowing() = beginTransition(Mode.FOLLOWING)
 
     override fun requestOverview() = beginTransition(Mode.OVERVIEW)
+
+    override fun requestIdleFollow(puck: Point) {
+        // A camera built while the car stood has not seen the puck drawn yet.
+        if (puckLat.isNaN()) {
+            puckLat = puck.latitude()
+            puckLng = puck.longitude()
+        }
+        beginTransition(Mode.IDLE_FOLLOW)
+    }
+
+    // On the browsing map the camera goes after the puck as it is drawn, frame by frame.
+    override fun onPuckGlide(target: Point, glideMillis: Long) = Unit
 
     override fun requestIdle() {
         if (mode == Mode.IDLE) return
@@ -420,7 +445,11 @@ internal class SmoothNavigationCamera(
         }
         lastZoomTarget = toZoom
         lastBearingTarget = toBearing
-        toPitch = if (mode == Mode.FOLLOWING) maneuverFocus.pitchAt(now) else overviewPitch
+        toPitch = when (mode) {
+            Mode.FOLLOWING -> maneuverFocus.pitchAt(now)
+            Mode.IDLE_FOLLOW -> IdleFollow.PITCH
+            else -> overviewPitch
+        }
         for (side in 0 until SIDES) toPad[side] = if (padRamp[side].ready) padRamp[side].value(now) else pad[side].value
     }
 
@@ -524,10 +553,15 @@ internal class SmoothNavigationCamera(
         }
         val changed = target != mode
         mode = target
-        latestData?.let { data ->
-            for (ramp in ramps) ramp.forget()
-            pendingData = null
-            applySample(data, now)
+        for (ramp in ramps) ramp.forget()
+        pendingData = null
+        if (mode == Mode.IDLE_FOLLOW) {
+            // The browsing view: on the car, in the middle of the map, turned as the map is.
+            zoomRamp.reset(IdleFollow.ZOOM, now)
+            onPuckRamp.reset(1.0, now)
+            for (side in 0 until SIDES) padRamp[side].reset(0.0, now)
+        } else {
+            latestData?.let { data -> applySample(data, now) }
         }
         // What the data source has not given yet stays where the camera is, and is reached when it comes.
         if (!zoomRamp.ready) zoomRamp.reset(zoom.value, now)
@@ -550,20 +584,33 @@ internal class SmoothNavigationCamera(
         for (side in 0 until SIDES) offset[PAD + side] = pad[side].value - toPad[side]
         val screens = screensBetween(lat.value, lng.value, toLat, toLng, zoom.value)
         arcZoom = log2(screens.coerceAtLeast(1.0)).coerceIn(0.0, tuning.maxArcZoom)
-        val far = abs(toZoom - zoom.value) > FAR_ZOOM_LEVELS || screens > FAR_SCREENS
-        transitionSeconds = seconds ?: if (far) tuning.longTransitionSeconds else tuning.transitionSeconds
+        transitionSeconds = seconds ?: when {
+            // To the car on the browsing map: as quick as the ease of the other styles, unless it is far.
+            mode == Mode.IDLE_FOLLOW -> if (screens > FAR_SCREENS) tuning.longTransitionSeconds else IdleFollow.ARRIVE_SECONDS
+            abs(toZoom - zoom.value) > FAR_ZOOM_LEVELS || screens > FAR_SCREENS -> tuning.longTransitionSeconds
+            else -> tuning.transitionSeconds
+        }
         transitionStart = now
+        // A map that still shows the whole world, as one does that was never moved, has nothing to
+        // glide from: the camera is put on its target with the first frame.
+        if (zoom.value < WORLD_ZOOM && toZoom - zoom.value > FAR_ZOOM_LEVELS) {
+            offset.fill(0.0)
+            arcZoom = 0.0
+            snapOnNextFrame = true
+        }
         if (changed) {
-            arriving = true
-            listener.onCameraState(mode.shown, state, moving = true)
+            // Following on the browsing map is one state from the start; the others say when they got there.
+            arriving = mode != Mode.IDLE_FOLLOW
+            listener.onCameraState(mode.shown, state, moving = arriving)
         }
         requestFrame()
     }
 
     private fun stillMoving(now: Double): Boolean {
         if (transitionSeconds > 0.0) return true
-        // The puck and the tilt before a maneuver count only while following.
-        if (mode == Mode.FOLLOWING && (now - puckSeenAt < PUCK_AWAKE_SECONDS || maneuverFocus.isAnimating(now))) return true
+        // The puck counts only while the camera is on it, the tilt before a maneuver only during guidance.
+        if (mode.onPuck && now - puckSeenAt < PUCK_AWAKE_SECONDS) return true
+        if (mode == Mode.FOLLOWING && maneuverFocus.isAnimating(now)) return true
         for (index in ramps.indices) if (ramps[index].isMoving(now, rampRest[index])) return true
         for (side in 0 until SIDES) if (!pad[side].isSettled(toPad[side], PAD_REST)) return true
         return !(
@@ -646,6 +693,9 @@ internal class SmoothNavigationCamera(
         /** A move across more zoom levels or screens than this takes the long transition. */
         const val FAR_ZOOM_LEVELS = 3.0
         const val FAR_SCREENS = 2.0
+
+        /** Below this zoom the map shows continents: the view of a map that was never moved. */
+        const val WORLD_ZOOM = 3.0
 
         /** The width of one point of the map at zoom 0 on the equator, with 512-point tiles. */
         const val METERS_PER_POINT_AT_ZOOM_0 = 78_271.517

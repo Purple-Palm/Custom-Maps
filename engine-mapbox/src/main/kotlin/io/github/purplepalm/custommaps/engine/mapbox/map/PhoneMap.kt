@@ -8,7 +8,6 @@ import android.view.View
 import com.mapbox.common.Cancelable
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
-import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapView
@@ -16,7 +15,6 @@ import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.Style
 import com.mapbox.maps.StyleDataLoadedType
 import com.mapbox.maps.plugin.PuckBearing
-import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.attribution.attribution
 import com.mapbox.maps.plugin.compass.compass
@@ -55,6 +53,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigation
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -79,9 +78,11 @@ import kotlinx.coroutines.launch
  * the preview and, during guidance, the active route with traffic and the next maneuver arrow.
  *
  * Before guidance the puck comes from the platform location provider, so no trip session (and no
- * free drive billing) is needed just to see where you are. The view's lifecycle follows the hosting
- * activity; say with [setVisible] when the map is on screen, and call [release] when the view
- * leaves the composition.
+ * free drive billing) is needed just to see where you are. The camera follows the car there too,
+ * from its first position until the driver moves the map, and again after My location
+ * ([IdleFollow]); that takes no trip session and no request either. The view's lifecycle follows
+ * the hosting activity; say with [setVisible] when the map is on screen, and call [release] when the
+ * view leaves the composition.
  *
  * During guidance, while the map is on screen, it writes a "camera" line to the debug log once a
  * second: where the camera is and where the viewport data source wants it, how smoothly the camera
@@ -104,7 +105,9 @@ class PhoneMap internal constructor(
     private var style: Style? = null
     private var lastPuck: Point? = null
     private var lastBearing: Double? = null
-    private var centeredOnFirstFix = false
+
+    /** Whether the camera stays on the car while no route is on the map. */
+    private val idleFollow = IdleFollow()
 
     /** The puck's positions outside guidance: the phone's own location, without a trip session. */
     private val platformPuck = PlatformPuck(context)
@@ -271,6 +274,8 @@ class PhoneMap internal constructor(
         // Says why the camera stopped following: a gesture, the compass, or something else.
         override fun onCameraTaken(owner: String?, animator: String, state: String) {
             debugLog.log("camera_taken", mapOf("owner" to owner, "animator" to animator, "from" to state))
+            // The map is the driver's now, also on the browsing map.
+            idleFollow.onMapMoved()
         }
     }
 
@@ -290,6 +295,8 @@ class PhoneMap internal constructor(
             render(guidanceState)
         }
 
+        // On the browsing map the two Mapbox styles move the camera with the puck's own updates.
+        platformPuck.onGlide = { target -> if (idleFollow.following) camera.onPuckGlide(target, PlatformPuck.GLIDE_MS) }
         mapView.location.setLocationProvider(platformPuck)
         mapView.location.updateSettings {
             enabled = true
@@ -316,11 +323,19 @@ class PhoneMap internal constructor(
     override fun setCameraMode(mode: CameraMode) {
         debugLog.log("camera_request", mapOf("mode" to mode, "from" to camera.state, "guidance" to guidanceState))
         when (mode) {
-            CameraMode.FOLLOWING ->
-                if (guidanceState == GuidanceState.ACTIVE) camera.requestFollowing() else centerOnPuck()
+            CameraMode.FOLLOWING -> when (guidanceState) {
+                GuidanceState.ACTIVE -> camera.requestFollowing()
+                // My location: the camera goes to the car and stays on it.
+                GuidanceState.IDLE, GuidanceState.ARRIVED -> if (idleFollow.onMyLocation()) followCar()
+                // The preview shows the route, and its screen has no button for this.
+                GuidanceState.PREVIEW -> Unit
+            }
             CameraMode.OVERVIEW ->
                 if (guidanceState == GuidanceState.ACTIVE || guidanceState == GuidanceState.PREVIEW) camera.requestOverview()
-            CameraMode.IDLE -> camera.requestIdle()
+            CameraMode.IDLE -> {
+                idleFollow.onMapMoved()
+                camera.requestIdle()
+            }
         }
     }
 
@@ -351,7 +366,8 @@ class PhoneMap internal constructor(
         when (mode) {
             CameraMode.FOLLOWING -> camera.requestFollowing()
             CameraMode.OVERVIEW -> camera.requestOverview()
-            CameraMode.IDLE -> Unit
+            // On the browsing map the new camera stays on the car if the old one did.
+            CameraMode.IDLE -> if (idleFollow.following) followCar()
         }
     }
 
@@ -410,6 +426,7 @@ class PhoneMap internal constructor(
         mapErrorFolder.flush()
         scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
+        platformPuck.onGlide = null
         camera.destroy()
         // Nothing feeds the data source any more. Without this it keeps its style subscription, and a
         // frame still waiting for the map's size keeps the data source and the map alive.
@@ -435,6 +452,7 @@ class PhoneMap internal constructor(
                 // The car may have moved since the map last centered on it.
                 if (tracksPuckInPreview) lastPuck?.let(::feedPuck)
                 viewportDataSource.evaluate()
+                idleFollow.onRouteShown()
                 camera.requestOverview()
             }
             GuidanceState.ACTIVE -> {
@@ -443,15 +461,24 @@ class PhoneMap internal constructor(
                 fedPuck = null
                 // Also brings back the route when the map is created again during a drive.
                 showNavigatorRoutes()
+                idleFollow.onRouteShown()
                 camera.requestFollowing()
             }
             GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                 useLocationProvider(guidance = false)
                 clearRoutes()
                 camera.onGuidanceEnded()
-                if (!camera.isIdle) {
+                // A camera that still showed the route goes back to the car and stays on it. One the
+                // driver had taken the map from, and one that is on the car already, are left alone.
+                val showedRoute = !camera.isIdle && !idleFollow.following
+                val routeGone = idleFollow.onRouteGone(routeCameraHadMap = showedRoute)
+                // The car may have had its position before the map was ready, or during the drive.
+                val located = lastPuck != null && idleFollow.onCarLocated()
+                if (routeGone || located) {
+                    followCar()
+                } else if (showedRoute) {
+                    // The car has no position to go to yet.
                     camera.requestIdle()
-                    centerOnPuck()
                 }
             }
         }
@@ -470,21 +497,20 @@ class PhoneMap internal constructor(
         engine.lastPuckPosition = point
         if (cameraSampling != null) puckCadence.tick(SystemClock.elapsedRealtimeNanos())
         val style = style ?: return
-        if (guidanceState == GuidanceState.ACTIVE) {
-            updateTraveledRouteLine(style, point)
-        } else if (!centeredOnFirstFix && guidanceState == GuidanceState.IDLE) {
-            centeredOnFirstFix = true
-            centerOnPuck()
-        } else if (guidanceState == GuidanceState.PREVIEW && tracksPuckInPreview) {
-            trackPuckInPreview(point)
+        when (guidanceState) {
+            GuidanceState.ACTIVE -> updateTraveledRouteLine(style, point)
+            GuidanceState.PREVIEW -> if (tracksPuckInPreview) trackPuckInPreview(point)
+            // True once: at the car's first position, and when a position comes after it was asked for.
+            GuidanceState.IDLE, GuidanceState.ARRIVED -> if (idleFollow.onCarLocated()) followCar()
         }
     }
 
     /**
-     * Outside guidance the data source learns where the car is only when the map centers on the puck.
-     * A preview opened somewhere else would frame that old place, and Start would fly there before it
-     * found the car. So in the preview the data source gets the puck's position: when the preview
-     * opens, and then whenever the car has moved. Mapbox standard goes without, as it always has.
+     * Outside guidance the data source learns where the car is only when the camera goes to the car
+     * to follow it. A preview opened somewhere else would frame that old place, and Start would fly
+     * there before it found the car. So in the preview the data source gets the puck's position:
+     * when the preview opens, and then whenever the car has moved. Mapbox standard goes without, as
+     * it always has.
      */
     private val tracksPuckInPreview: Boolean get() = cameraStyle != CameraStyle.MAPBOX_STANDARD
 
@@ -554,14 +580,12 @@ class PhoneMap internal constructor(
         if (current !== wanted) mapView.location.setLocationProvider(wanted)
     }
 
-    private fun centerOnPuck() {
-        val point = lastPuck ?: return
-        mapView.camera.easeTo(
-            CameraOptions.Builder().center(point).zoom(BROWSE_ZOOM).pitch(BROWSE_PITCH).build(),
-            MapAnimationOptions.Builder().duration(CAMERA_EASE_MS).build(),
-        )
+    /** Sends the camera to the car on the browsing map, to stay on it until the driver moves the map. */
+    private fun followCar() {
+        val puck = lastPuck ?: return
+        camera.requestIdleFollow(puck)
         // Keeps the following camera's data fresh for when guidance starts.
-        feedPuck(point)
+        feedPuck(puck)
     }
 
     /** Tells the data source where the car is, outside guidance. */
@@ -747,9 +771,6 @@ class PhoneMap internal constructor(
         private const val ROUTE_SLOT = "middle"
         private const val ROUTE_TAP_RADIUS_DP = 30f
         private const val FADE_IN_MS = 250L
-        private const val CAMERA_EASE_MS = 800L
-        private const val BROWSE_ZOOM = 15.5
-        private const val BROWSE_PITCH = 40.0
         private const val CAMERA_SAMPLE_MS = 1_000L
 
         /** In the preview the data source follows the puck: it looks this often and acts past this distance. */

@@ -1,12 +1,14 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
 import com.mapbox.common.location.Location
+import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 
 /**
- * The camera of one map during guidance and in the route preview. A map has one at a time, and while
- * that one is not idle nothing else moves the map's camera.
+ * The camera of one map: it shows the route in the preview, follows the car during guidance, and
+ * follows it on the browsing map before guidance. A map has one at a time, and while that one is
+ * not idle nothing else moves the map's camera.
  *
  * The map gives the viewport data source the routes and the padding. The camera takes each update
  * of the navigator to the data source itself and decides when a new frame is computed from it.
@@ -26,8 +28,23 @@ internal interface GuidanceCamera {
     /** Shows the whole remaining route. */
     fun requestOverview()
 
+    /**
+     * Follows the car on the browsing map, where no route is shown: the camera goes to [puck],
+     * where the car is drawn, at the browsing zoom and tilt, and stays on the car from then on.
+     * The padding is none, so the car sits in the middle of the map whatever panels are shown. To
+     * the screen this still counts as idle; the camera's own state name for it is [IDLE_FOLLOW].
+     * It ends with the next request, or when the driver moves the map.
+     */
+    fun requestIdleFollow(puck: Point)
+
     /** Stops moving the map at once. */
     fun requestIdle()
+
+    /**
+     * Outside guidance: the phone's location gave the puck a new position, and the puck starts to
+     * glide to [target] at a steady speed over [glideMillis].
+     */
+    fun onPuckGlide(target: Point, glideMillis: Long)
 
     /**
      * A new matched position from the navigator. [isTeleport] is true when the position jumped, as it
@@ -55,6 +72,11 @@ internal interface GuidanceCamera {
      * back every limit and override it set on the data source, and calls no listener again.
      */
     fun destroy()
+
+    companion object {
+        /** The state name of a camera that follows the car on the browsing map. */
+        const val IDLE_FOLLOW = "IDLE_FOLLOW"
+    }
 
     /** Hears what the camera does. Called on the main thread, the first time while the camera is created. */
     interface Listener {

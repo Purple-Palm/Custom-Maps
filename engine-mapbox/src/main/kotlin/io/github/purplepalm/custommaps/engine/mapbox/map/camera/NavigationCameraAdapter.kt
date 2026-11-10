@@ -2,11 +2,17 @@ package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
 import android.animation.ValueAnimator
 import android.os.SystemClock
+import android.view.animation.LinearInterpolator
+import com.mapbox.common.Cancelable
 import com.mapbox.common.location.Location
+import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.MapboxMap
 import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
 import com.mapbox.maps.plugin.animation.CameraAnimationsPlugin
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
+import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.ui.maps.camera.NavigationCamera
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
@@ -16,6 +22,7 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserve
 import com.mapbox.navigation.ui.maps.camera.lifecycle.NavigationBasicGesturesHandler
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraState
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraStateChangedObserver
+import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 
@@ -34,6 +41,11 @@ import io.github.purplepalm.custommaps.nav.model.CameraMode
  *   is started only to be replaced a moment later.
  * - Following frames are reached with the longer animations of [FollowingTransition].
  * - A jump of the matched position moves the camera there at once.
+ *
+ * On the browsing map, before guidance, [NavigationCamera] has nothing to follow the car with. Both
+ * styles then move the map with plain eases of the camera plugin: one to the car, and one with every
+ * new position of the puck, as long and as steady as the puck's own glide, so the two stay together.
+ * They carry an owner name of their own; an animation of any other owner is the driver's.
  */
 internal class NavigationCameraAdapter(
     mapboxMap: MapboxMap,
@@ -59,17 +71,33 @@ internal class NavigationCameraAdapter(
     private var frameUpdates = 0
     private var frameUpdatesCut = 0
 
+    /** True while this camera follows the car on the browsing map; the navigation camera is idle then. */
+    private var idleFollowing = false
+
+    /** The ease that is taking the map to the car. */
+    private var idleEase: Cancelable? = null
+
+    /** True while the navigation camera is sent idle on the way to another state, which is reported instead. */
+    private var quiet = false
+
     /**
      * Counts the camera's frame updates, each one a new animation, and the ones cancelled before
      * they finished because the next update or a gesture came first. Also reports who takes the map
-     * from the camera. Added before [gesturesHandler], so it still sees what the camera was doing.
+     * from the camera, and ends the following on the browsing map then. Added before
+     * [gesturesHandler], so it still sees what the camera was doing.
      */
     private val animations = object : CameraAnimationsLifecycleListener {
         override fun onAnimatorStarting(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
-            if (owner == NavigationCamera.NAVIGATION_CAMERA_OWNER) {
-                if (type == CameraAnimatorType.CENTER) frameUpdates += 1
-            } else if (navigationCamera.state != NavigationCameraState.IDLE) {
-                listener.onCameraTaken(owner, type.name, navigationCamera.state.name)
+            when {
+                owner == NavigationCamera.NAVIGATION_CAMERA_OWNER -> if (type == CameraAnimatorType.CENTER) frameUpdates += 1
+                // This camera's own eases on the browsing map.
+                owner == IDLE_FOLLOW_OWNER -> Unit
+                idleFollowing -> {
+                    listener.onCameraTaken(owner, type.name, state)
+                    stopIdleFollow()
+                    listener.onCameraState(CameraMode.IDLE, state, moving = false)
+                }
+                navigationCamera.state != NavigationCameraState.IDLE -> listener.onCameraTaken(owner, type.name, state)
             }
         }
 
@@ -90,7 +118,7 @@ internal class NavigationCameraAdapter(
     }
 
     private val stateObserver = NavigationCameraStateChangedObserver { state ->
-        listener.onCameraState(state.toCameraMode(), state.name, state.isTransition())
+        if (!quiet) listener.onCameraState(state.toCameraMode(), state.name, state.isTransition())
     }
 
     init {
@@ -100,11 +128,12 @@ internal class NavigationCameraAdapter(
         navigationCamera.registerNavigationCameraStateChangeObserver(stateObserver)
     }
 
-    override val isIdle: Boolean get() = navigationCamera.state == NavigationCameraState.IDLE
+    override val isIdle: Boolean get() = !idleFollowing && navigationCamera.state == NavigationCameraState.IDLE
 
-    override val state: String get() = navigationCamera.state.name
+    override val state: String get() = if (idleFollowing) GuidanceCamera.IDLE_FOLLOW else navigationCamera.state.name
 
     override fun requestFollowing() {
+        stopIdleFollow()
         if (tuned) {
             // Start and Recenter both come through here, so both get the tuned frames.
             navigationCamera.requestNavigationCameraToFollowing(frameTransitionOptions = FollowingTransition.FRAME_OPTIONS)
@@ -113,9 +142,33 @@ internal class NavigationCameraAdapter(
         }
     }
 
-    override fun requestOverview() = navigationCamera.requestNavigationCameraToOverview()
+    override fun requestOverview() {
+        stopIdleFollow()
+        navigationCamera.requestNavigationCameraToOverview()
+    }
 
-    override fun requestIdle() = navigationCamera.requestNavigationCameraToIdle()
+    override fun requestIdleFollow(puck: Point) {
+        if (idleFollowing) return
+        // The navigation camera lets go of the map; what is reported is the following, not that.
+        quiet = true
+        navigationCamera.requestNavigationCameraToIdle()
+        quiet = false
+        idleFollowing = true
+        listener.onCameraState(CameraMode.IDLE, state, moving = false)
+        easeToCar(puck, ARRIVE_MS, steady = false)
+    }
+
+    override fun requestIdle() {
+        if (idleFollowing) {
+            stopIdleFollow()
+            listener.onCameraState(CameraMode.IDLE, state, moving = false)
+        }
+        navigationCamera.requestNavigationCameraToIdle()
+    }
+
+    override fun onPuckGlide(target: Point, glideMillis: Long) {
+        if (idleFollowing) easeToCar(target, glideMillis, steady = true)
+    }
 
     override fun onLocation(location: Location, isTeleport: Boolean) {
         dataSource.onLocationChanged(location)
@@ -149,6 +202,7 @@ internal class NavigationCameraAdapter(
     }
 
     override fun destroy() {
+        stopIdleFollow()
         // First, so that going idle below is not reported.
         navigationCamera.unregisterNavigationCameraStateChangeObserver(stateObserver)
         cameraPlugin.removeCameraAnimationsLifecycleListener(gesturesHandler)
@@ -157,6 +211,28 @@ internal class NavigationCameraAdapter(
         navigationCamera.requestNavigationCameraToIdle()
         // Neither style of this camera sets anything on the data source, so nothing is taken back.
         source.detach()
+    }
+
+    /**
+     * Eases the map to the car at [target], to the browsing zoom and tilt and without padding. A new
+     * ease takes the place of the one before, so each names all of them; what is there already
+     * starts no animation. [steady] moves at an even speed, as the puck glides.
+     */
+    private fun easeToCar(target: Point, millis: Long, steady: Boolean) {
+        val options = MapAnimationOptions.Builder().owner(IDLE_FOLLOW_OWNER).duration(millis)
+        if (steady) options.interpolator(STEADY)
+        idleEase = cameraPlugin.easeTo(
+            CameraOptions.Builder().center(target).zoom(IdleFollow.ZOOM).pitch(IdleFollow.PITCH).padding(NO_PADDING).build(),
+            options.build(),
+        )
+    }
+
+    /** Ends the following on the browsing map, if it is on, without a word to the listener. */
+    private fun stopIdleFollow() {
+        if (!idleFollowing) return
+        idleFollowing = false
+        idleEase?.cancel()
+        idleEase = null
     }
 
     private fun NavigationCameraState.isTransition(): Boolean =
@@ -192,5 +268,13 @@ internal class NavigationCameraAdapter(
             observers.forEach(source::unregisterUpdateObserver)
             observers.clear()
         }
+    }
+
+    private companion object {
+        /** Who the eases on the browsing map belong to, as the camera plugin reports it. */
+        const val IDLE_FOLLOW_OWNER = "CUSTOM_MAPS_IDLE_FOLLOW"
+        const val ARRIVE_MS = (IdleFollow.ARRIVE_SECONDS * 1_000).toLong()
+        val STEADY = LinearInterpolator()
+        val NO_PADDING = EdgeInsets(0.0, 0.0, 0.0, 0.0)
     }
 }
