@@ -182,11 +182,55 @@ class ThenRuleTest {
         assertEquals(expected, ThenRule.isWorthShowing(Maneuver(type, modifier, "Pine Street")))
     }
 
+    /**
+     * Each number of [ThenTuning] at its bound and just past it, while the other dimension is too
+     * long to count: on a slow street only the meters can decide, on a fast road only the seconds.
+     */
+    @ParameterizedTest(name = "{0} then {1}, {2} m and {3} s apart, {4} m and {5} s before -> {6}")
+    @CsvSource(
+        // Close within 300 m, shown from 400 m.
+        "TURN, TURN, 300, 45, 400, 70, true",
+        "TURN, TURN, 301, 45, 400, 70, false",
+        "TURN, TURN, 300, 45, 401, 70, false",
+        // Close within 20 s, shown from 30 s.
+        "TURN, TURN, 900, 20, 880, 30, true",
+        "TURN, TURN, 900, 21, 880, 30, false",
+        "TURN, TURN, 900, 20, 880, 31, false",
+        // Around a ramp or a fork: close within 1,000 m or 40 s.
+        "TURN, FORK, 1000, 90, 300, 23, true",
+        "TURN, FORK, 1001, 90, 300, 23, false",
+        "TURN, OFF_RAMP, 1400, 40, 300, 23, true",
+        "TURN, OFF_RAMP, 1400, 41, 300, 23, false",
+        // When the first one is a ramp: shown from 1,500 m or 50 s.
+        "OFF_RAMP, TURN, 200, 15, 1500, 90, true",
+        "OFF_RAMP, TURN, 200, 15, 1501, 90, false",
+        "OFF_RAMP, TURN, 200, 15, 1990, 50, true",
+        "OFF_RAMP, TURN, 200, 15, 1990, 51, false",
+        // Not started within 30 m of the first maneuver.
+        "TURN, TURN, 150, 12, 30.5, 2, true",
+        "TURN, TURN, 150, 12, 30, 2, false",
+    )
+    fun `each distance and each time decides alone, up to its bound`(
+        next: ManeuverType,
+        then: ManeuverType,
+        metersApart: Double,
+        secondsApart: Double,
+        metersBefore: Double,
+        secondsBefore: Double,
+        expected: Boolean,
+    ) {
+        val pair = following(type = then, meters = metersApart, seconds = secondsApart)
+        assertEquals(listOf(expected), shown(at(metersBefore, toNextTime = secondsBefore.seconds, next = next, following = pair)))
+    }
+
     @Test
     fun `an unknown time counts for nothing and the distance decides`() {
         val unknownTime = following(meters = 500.0, seconds = 0.0)
         assertEquals(listOf(false), shown(at(200.0, following = unknownTime)))
         assertEquals(listOf(false), shown(at(1_000.0, toNextTime = Duration.ZERO)))
+        // With no time at all, a pair within both distances still shows.
+        val near = following(meters = 300.0, seconds = 0.0)
+        assertEquals(listOf(true), shown(at(400.0, toNextTime = Duration.ZERO, following = near)))
     }
 
     @Test
