@@ -242,8 +242,17 @@ internal class SmoothNavigationCamera(
         beginTransition(Mode.IDLE_FOLLOW)
     }
 
-    // On the browsing map the camera goes after the puck as it is drawn, frame by frame.
-    override fun onPuckGlide(target: Point, glideMillis: Long) = Unit
+    override fun onPuckGlide(target: Point, glideMillis: Long) {
+        // On the browsing map the camera goes after the puck as it is drawn, frame by frame, and
+        // needs no word of a glide. A puck that is put on a far position at once takes the camera
+        // with it: a camera that went after it would cross all the map in between.
+        if (glideMillis == 0L && mode == Mode.IDLE_FOLLOW) {
+            puckLat = target.latitude()
+            puckLng = target.longitude()
+            snapOnNextFrame = true
+            beginTransition(mode, again = true)
+        }
+    }
 
     override fun requestIdle() {
         if (mode == Mode.IDLE) return
@@ -575,7 +584,8 @@ internal class SmoothNavigationCamera(
     /**
      * Starts the move into [target], from wherever the camera is. [again] starts it over within the
      * mode the camera is in: for a puck that jumped, for a map that comes back on screen, and for
-     * the first frame that gives a camera on the world view a place to go to.
+     * the first frame that gives a camera on the world view a place to go to. With
+     * [snapOnNextFrame] set, the next frame puts the camera there.
      */
     private fun beginTransition(target: Mode, seconds: Double? = null, again: Boolean = false) {
         if (target == mode && !again) return

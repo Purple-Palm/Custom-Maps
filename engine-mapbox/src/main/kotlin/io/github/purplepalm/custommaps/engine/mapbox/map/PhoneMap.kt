@@ -110,7 +110,7 @@ class PhoneMap internal constructor(
     private val idleFollow = IdleFollow()
 
     /** The puck's positions outside guidance: the phone's own location, without a trip session. */
-    private val platformPuck = PlatformPuck(context)
+    private val platformPuck = PlatformPuck(context) { lastPuck }
 
     /** The puck's positions during guidance, from the navigator. */
     private val guidancePuck = GuidancePuck()
@@ -298,9 +298,9 @@ class PhoneMap internal constructor(
         // While the camera follows on the browsing map, the two Mapbox styles move it with the puck's
         // own updates, and the data source learns each position, in every style: the route's camera
         // then starts from where the car is. Nothing is computed from it before a route is shown.
-        platformPuck.onGlide = { target ->
+        platformPuck.onGlide = { target, glideMillis ->
             if (idleFollow.following) {
-                camera.onPuckGlide(target, PlatformPuck.GLIDE_MS)
+                camera.onPuckGlide(target, glideMillis)
                 feedPuck(target)
             }
         }

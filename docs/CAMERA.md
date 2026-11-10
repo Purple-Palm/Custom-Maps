@@ -114,6 +114,11 @@ camera uses nothing else: no trip session and no request.
 - **Smooth follow** goes after the drawn puck on its frame loop and springs, as during guidance. It
   comes to the car over 0.8 s, or 2.2 s from more than two screens away. Its loop stops while the
   car stands.
+- **A far position.** The location component glides the car to each new position in a second,
+  whatever the distance. When the app comes back after the car drove on, or the phone had no
+  position for a while, a camera that follows would cross all the map in between, over tiles that
+  are not loaded. So a position more than 150 m from where the car is drawn puts the car there at
+  once, and the camera with it, in every style.
 - **Any gesture** hands the map to the driver, and so does the compass. A plain tap does not. In
   the two Mapbox styles a tap still cancels the ease that is running, as it does with the SDK's
   camera during guidance: the camera stands until the phone's next position starts a new ease, at
@@ -392,7 +397,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
 | `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. |
 | `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport; for Mapbox standard it glides 1.0 s and never jumps. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
-| `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, and a report of each new position for the cameras that follow with eases. |
+| `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
 | `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update, and writes the camera line to the debug log. |
 | `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
 | `CarNavigationMap` (stage 2) | `:engine-mapbox`, `car/CarNavigationMap.kt` | The same camera on the car's map surface. |
@@ -797,8 +802,7 @@ Steps 1 to 4 are done.
 
 Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the frame),
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
-jump) and `GuidancePaddingTest`
-(7: the top inset that only grows).
+jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
 The classes in `:engine-mapbox` touch Android and Mapbox types and have no JVM tests. While it was
 written, `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by
@@ -836,6 +840,8 @@ Before Start, in each style:
 - A pan, a pinch or a rotation leaves the map where the driver put it; **My location** brings the
   camera back to the car and it follows again.
 - The search bar, its suggestions and the place card do not move the car on the screen.
+- The app to the background and back after driving on: the car and the camera are on the new
+  position at once, and nothing slides across the map.
 - From there, a preview and Start, also after driving on with the app open: the flight into
   following goes straight to the car, with no detour to where the car was earlier.
 

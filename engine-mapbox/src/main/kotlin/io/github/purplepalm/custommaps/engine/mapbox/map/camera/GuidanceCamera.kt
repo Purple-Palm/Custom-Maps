@@ -43,7 +43,9 @@ internal interface GuidanceCamera {
 
     /**
      * Outside guidance: the phone's location gave the puck a new position, and the puck starts to
-     * glide to [target] at a steady speed over [glideMillis].
+     * glide to [target] at a steady speed over [glideMillis]. With 0 the position is far from where
+     * the puck was drawn, and the puck is put there at once; a camera that follows it is put there
+     * with it.
      */
     fun onPuckGlide(target: Point, glideMillis: Long)
 

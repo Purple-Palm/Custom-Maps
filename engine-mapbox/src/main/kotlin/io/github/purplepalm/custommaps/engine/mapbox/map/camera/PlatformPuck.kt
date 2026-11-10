@@ -8,17 +8,26 @@ import com.mapbox.maps.plugin.locationcomponent.DefaultLocationProvider
 import com.mapbox.maps.plugin.locationcomponent.LocationComponentConstants
 import com.mapbox.maps.plugin.locationcomponent.LocationConsumer
 import com.mapbox.maps.plugin.locationcomponent.LocationProvider
+import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 
 /**
  * The puck outside guidance: the phone's own location, which needs no trip session. Give it to the
  * map's location component as its location provider.
  *
- * It is the Maps SDK's [DefaultLocationProvider] with one addition: [onGlide] hears each new
- * position at the moment the puck starts to glide there. The provider asks for locations only while
- * the location component listens, which is while the map's activity is started, so nothing here
- * keeps the location on in the background. Main thread only.
+ * It is the Maps SDK's [DefaultLocationProvider] with two additions. [onGlide] hears each new
+ * position at the moment the puck starts to glide there. And a position far from where the puck is
+ * drawn ([IdleFollow.isJump]) puts the puck there at once: the location component would glide it
+ * there in a second whatever the distance, and a camera that follows would cross all the map in
+ * between. That happens when the map comes back on screen after the car drove on, and after a
+ * long time without a position.
+ *
+ * The provider asks for locations only while the location component listens, which is while the
+ * map's activity is started, so nothing here keeps the location on in the background. Main thread
+ * only.
+ *
+ * @param drawn where the map draws the puck now; null before its first position
  */
-internal class PlatformPuck(context: Context) : LocationProvider {
+internal class PlatformPuck(context: Context, private val drawn: () -> Point?) : LocationProvider {
 
     private val appContext = context.applicationContext
     private var provider = DefaultLocationProvider(appContext)
@@ -26,8 +35,11 @@ internal class PlatformPuck(context: Context) : LocationProvider {
     /** What each consumer of this provider is registered as with the provider inside. */
     private val taps = LinkedHashMap<LocationConsumer, Tap>()
 
-    /** Called with each new position, right after the puck was told to glide there over [GLIDE_MS]. */
-    var onGlide: ((Point) -> Unit)? = null
+    /**
+     * Called with each new position, right after the puck was told to go there, and with how long
+     * the puck takes: [GLIDE_MS], or 0 when it is put there at once.
+     */
+    var onGlide: ((target: Point, glideMillis: Long) -> Unit)? = null
 
     /**
      * Starts over with a new provider inside. One that was created before the driver granted
@@ -54,12 +66,19 @@ internal class PlatformPuck(context: Context) : LocationProvider {
         provider.unRegisterLocationConsumer(tap)
     }
 
-    /** Passes everything on to [consumer] unchanged, and reports where the puck is going. */
+    /**
+     * Passes everything on to [consumer], a far position as a jump and the rest unchanged, and
+     * reports where the puck is going.
+     */
     private inner class Tap(private val consumer: LocationConsumer) : LocationConsumer {
 
         override fun onLocationUpdated(vararg location: Point, options: (ValueAnimator.() -> Unit)?) {
-            consumer.onLocationUpdated(*location, options = options)
-            location.lastOrNull()?.let { target -> onGlide?.invoke(target) }
+            val target = location.lastOrNull()
+            val from = drawn()
+            val jump = target != null && from != null &&
+                IdleFollow.isJump(from.latitude(), from.longitude(), target.latitude(), target.longitude())
+            consumer.onLocationUpdated(*location, options = if (jump) JUMP else options)
+            if (target != null) onGlide?.invoke(target, if (jump) 0L else GLIDE_MS)
         }
 
         override fun onBearingUpdated(vararg bearing: Double, options: (ValueAnimator.() -> Unit)?) =
@@ -86,5 +105,7 @@ internal class PlatformPuck(context: Context) : LocationProvider {
          * default, at a steady speed.
          */
         const val GLIDE_MS = LocationComponentConstants.DEFAULT_INTERVAL_MILLIS
+
+        private val JUMP: ValueAnimator.() -> Unit = { duration = 0L }
     }
 }
