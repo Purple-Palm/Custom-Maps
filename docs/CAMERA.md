@@ -78,8 +78,9 @@ are starting points for tuning.
 navigator update, the SDK's one-second moves, the 1.0 s puck that slides also when the matched
 position jumps, and no position from the puck during the preview. What is not camera behaviour
 applies to every style: the route line fix, the released data source, the top padding that only
-grows during guidance, a fresh puck for every drive, following before guidance, and the camera
-line (see [Smaller causes](#smaller-causes) and [Logging](#logging)).
+grows during guidance and its band for the Then chip, a fresh puck for every drive, following
+before guidance, and the camera line (see [Smaller causes](#smaller-causes) and
+[Logging](#logging)).
 
 The chosen style applies at once, also mid-drive, and on the car screen from stage 2. The debug log
 records the active style, so drives can be compared ([DECISIONS.md](DECISIONS.md), 26).
@@ -247,6 +248,12 @@ drives.
   comes from the maneuver card alone and only grows during guidance (`GuidancePadding` in
   `:core-nav`); the search bar and its suggestions no longer count. In Smooth follow padding
   changes glide in any case.
+- **The Then chip never moves the frame.** The chip that names the maneuver after the next one
+  ([DECISIONS.md](DECISIONS.md), 37) hangs under the maneuver card, outside the card's measured
+  size. During guidance the top padding is the card's lowest bottom edge so far, plus a constant
+  band of 56 dp for the chip, plus the 16 dp margin. The band is there from Start to the end of
+  guidance, whether the chip shows or not: the chip never covers what the camera frames, and the
+  padding does not change when the chip slides out or back.
 - **Not the cause, but wasteful.** On every frame of the puck animation `PhoneMap` updated the
   travelled part of the route line. The SDK accepts a point only every 62.5 ms; each rejected call
   reads the style URI through a regex and logs an error, about 45 to 105 times a second once
@@ -394,7 +401,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
 | `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
 | `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt and the distance from which a new position is a jump. |
-| `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, and only growing during guidance. |
+| `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, only growing during guidance, plus a constant band under the card for the Then chip. |
 | `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress`, `onPuckGlide`, `onGuidanceEnded`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
@@ -628,7 +635,7 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `steps` | the largest change from one camera frame to the next: `m`, `zoom`, `bearing`, `pitch` | small and even; a jump shows as one large step |
 | `fixes` | matched positions that second | 1 |
 | `keyPoints` | the points the navigator sent with the latest position, which the puck glides through | |
-| `padding`, `paddingChanges` | the map's padding in pixels (top, left, bottom, right) and how often it changed; in the first line and whenever it changed | rare, since the top padding only grows |
+| `padding`, `paddingChanges` | the map's padding in pixels (top, left, bottom, right) and how often it changed; in the first line and whenever it changed. The top includes the Then chip's band | rare, since the top padding only grows; never when the Then chip comes or goes |
 | `render` | the render thread that second: `frames`, `fps`, `missedVsync`, `p50Ms`, `p95Ms`, `maxMs` | |
 | `renderFps` | the renderer's own rate (`MapView.setOnFpsChangedListener`, called on the render thread); left out while the map draws nothing | at least 55 at 60 Hz |
 | `animatorsEnabled` | `ValueAnimator.areAnimatorsEnabled()` | false: the animator scale is 0 and the puck jumps |
@@ -836,6 +843,8 @@ Watch for:
 - No tilt for forks, merges or ramps.
 - The two close turns stay flat throughout.
 - At 180 m the junction framing glides in over about 1.5 s, with no jump.
+- Before the two close turns the Then chip slides out from under the maneuver card. The map does
+  not move when it comes or goes, and the camera line shows no new `padding`.
 
 Before Start, in each style:
 

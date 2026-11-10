@@ -286,8 +286,9 @@ view at three points, while the camera stays in following mode:
 ### What changes
 
 The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). It is being built in steps: the
-diagnostics and the camera below are built, the rest is designed and not built yet. Stage 2 is the
-Android Auto stage.
+diagnostics and the camera below are built, and so is the Then chip the owner asked for
+([DECISIONS.md](DECISIONS.md), 37); the rest is designed and not built yet. Stage 2 is the Android
+Auto stage.
 
 #### Camera
 
@@ -300,7 +301,7 @@ The reasons and numbers behind each style are in [CAMERA.md](CAMERA.md).
 | The tilt goes down onto the junction gradually before a turn and back up after it | Abrupt switches | Built in stage 1.1 |
 | More zoom at turns, so the junction and its lanes are larger | Small lanes | Next build, with the Lane zoom setting; the full junction zoom stays in stage 4 |
 | The early turn into curves stays | The owner liked it | Kept in every style |
-| During guidance the top padding comes from the maneuver card alone and only grows, so the lanes row no longer reframes the view. In Smooth follow padding changes glide anyway | Secondary switches | Built in stage 1.1 |
+| During guidance the top padding comes from the maneuver card alone and only grows, so the lanes row no longer reframes the view. It also holds a constant band under the card for the Then chip, which therefore never moves the view. In Smooth follow padding changes glide anyway | Secondary switches | Built in stage 1.1 |
 | The route line is updated only when the SDK accepts the point | Main-thread waste | Built in stage 1.1 |
 | Before Start the camera follows the car, from the phone's own location, until the driver moves the map and again after My location | A long camera move at Start | Built in stage 1.1 |
 
@@ -517,6 +518,11 @@ On the drive:
    along the route should stay complete.
 4. **Old routes (optional).** Leave the routes open for more than 5 minutes before Start; the log
    should show a refresh right after Start.
+5. **The Then chip.** Before a turn that is closely followed by another, a chip should slide out
+   from under the maneuver card, about 400 m or 30 s before the first turn, and show the second
+   one. Note whether it comes too early or too late, whether a chain of close turns keeps it with
+   only its arrow changing, whether it shows early enough before a freeway exit with a turn at the
+   ramp's end, and whether it ever flashes or moves the map.
 
 Then share the debug log. What to read in it:
 
@@ -531,6 +537,7 @@ Then share the debug log. What to read in it:
 | Map errors | A few lines a minute instead of thousands |
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
 | Start plan | What Start did with the routes |
+| Progress: `after`, `thenShown`, `stepMetersLeft`, `stepSecondsLeft` | Where the Then chip showed, and for which pairs of maneuvers, to tune its distances |
 
 Reading the connectivity lines:
 

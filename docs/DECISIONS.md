@@ -211,7 +211,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - **Mapbox tuned:** the same camera with calmer settings: one camera update per navigator update instead of two, longer moves from frame to frame, a gradual tilt before turns and a puck that glides 1.1 s per update. It gets no higher zoom cap: its extra zoom at turns comes with the Lane zoom setting.
   - **Smooth follow:** the per-frame camera of decision 27, the default.
 - The choice is stored with the app settings as `camera_style`; a missing or unknown value reads as Smooth follow.
-- What is not camera behaviour is the same in every style: the top padding that only grows during guidance, the route line fix, a fresh puck for every drive, and following the car before guidance ([CAMERA.md](CAMERA.md)).
+- What is not camera behaviour is the same in every style: the top padding that only grows during guidance, the band it keeps free for the Then chip (37), the route line fix, a fresh puck for every drive, and following the car before guidance ([CAMERA.md](CAMERA.md)).
 - The debug log records the active style on every camera line and every change of the setting, so drives can be compared.
 - **Alternative:** a single camera. Comparing styles on the same roads is the quickest way to tune them.
 
@@ -285,3 +285,18 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen (owner):** a bright, colourful day map by day and the existing dark map at night, following the car's day and night setting. The route stays amber.
 - **Alternative:** a pale or faded day theme, which the owner rejected.
 
+## 37. The Then chip
+
+- **Chosen (owner):** on the approach to a maneuver that is closely followed by another, a chip slides out from under the maneuver card with the word **Then**, the arrow of the second maneuver and its road, for example "Then, right, Pine Street". The label is the owner's.
+- **The data comes from the route's own steps**, not from the banner's `sub` line. The Directions API fills `sub` with lanes whenever the next maneuver has lanes, which is where the second maneuver matters most. A roundabout's way out, a step of its own in these routes, is not a second maneuver: what follows a roundabout is the maneuver after its way out.
+- **One rule decides, in `:core-nav`** (`ThenRule`), once per progress update in the engine. The phone reads its answer now and the car screen reads the same answer in stage 2, so both show the same maneuver at the same moment.
+  - It shows when the second maneuver follows the first within 300 m or 20 s (1,000 m or 40 s around ramps and forks, where lanes are picked early), from 400 m or 30 s before the first (1,500 m or 50 s when the first is a ramp, fork or merge), and not from closer than 30 m.
+  - It never shows going straight on, a road that only changes its name, a merge or a note, and nothing after the arrival.
+  - Once shown it stays until the step changes, so GPS jitter, braking and a traffic refresh cannot make it flicker. Off the route it hides.
+  - The numbers are a first setting. The progress line of the debug log carries the second maneuver and whether the chip showed, to tune them after a drive.
+- **The chip is outside the measured panels.** It hangs under the maneuver card over the map, and during guidance the camera's top padding holds a constant band of 56 dp under the card for it, whether the chip shows or not. The chip never covers what the camera frames, and the camera never moves when the chip comes or goes.
+- **Alternatives:**
+  - The banner's `sub` line. It is missing at junctions with lanes.
+  - The chip inside the measured panel. The camera would frame the road again whenever the chip first showed, and with a top padding that only grows it would then keep the lost space for the rest of the drive.
+  - The chip over the framed map with no band. It would cover the road just after the turn, the very road the chip names.
+- **Cost:** the framed area is 56 dp shorter during guidance. Below the zoom cap that is a slightly wider view; at the cap, which is most frames in town, nothing changes.

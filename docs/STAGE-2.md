@@ -508,10 +508,12 @@ Other notes:
   mainly the image; the `Lane` data feeds the cluster and the head-up display.
 - The surface shows only the map (NF-2): directions, lanes and the arrival estimate go in the
   template, and the host draws them.
-- `RouteProgressSnapshot` lacks three things the car needs: the step after the next one
-  (`RoutingInfo.setNextStep`), a time for each step (`Trip.Builder.addStep` needs a `TravelEstimate`
-  per step) and a reroute signal for `setLoading(true)`; today `OffRouteObserver` only logs. They
-  are added to `:core-nav` and the engine.
+- `RouteProgressSnapshot` has what the car needs beyond the phone's card, since the Then chip was
+  built ([DECISIONS.md](DECISIONS.md), 37): the step after the next one for
+  `RoutingInfo.setNextStep` (`thenManeuver`, set when the Then rule shows it, so the car shows the
+  next step at the same moment as the phone), times per step for the `TravelEstimate` that
+  `Trip.Builder.addStep` needs (`durationToNextManeuver`, and `following.durationAfterNext`), and
+  `offRoute` as the reroute signal for `setLoading(true)`.
 
 ## The guidance bridge to NavigationManager
 
