@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 data class GuidanceSettings(
     val cameraStyle: CameraStyle = CameraStyle.DEFAULT,
     val laneZoom: LaneZoom = LaneZoom.DEFAULT,
+    val laneDetails: Boolean = false,
 )
 
 /** The debug section: trip sessions started on this phone, the simulated drive switch and the debug log. */
@@ -46,8 +47,9 @@ class SettingsViewModel(
     private val logBytes = MutableStateFlow<Long?>(null)
 
     val guidance: StateFlow<GuidanceSettings> =
-        combine(settings.cameraStyle, settings.laneZoom) { style, laneZoom -> GuidanceSettings(cameraStyle = style, laneZoom = laneZoom) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
+        combine(settings.cameraStyle, settings.laneZoom, settings.laneDetails) { style, laneZoom, laneDetails ->
+            GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, laneDetails = laneDetails)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
 
     val debug: StateFlow<DebugState> =
         combine(tripLog.entries, settings.simulateDrive, logBytes) { entries, simulate, bytes ->
@@ -90,6 +92,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the choice keeps showing the stored value, which the map keeps too.
                 debugLog.error("settings.setLaneZoom", e)
+            }
+        }
+    }
+
+    /** Applies at once, also during a drive: the map fades the lane markings in or out. */
+    fun setLaneDetails(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setLaneDetails(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the map keeps too.
+                debugLog.error("settings.setLaneDetails", e)
             }
         }
     }

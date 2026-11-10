@@ -51,10 +51,20 @@ class DataStoreAppSettingsTest {
     }
 
     @Test
-    fun `starts with a real drive, the Smooth follow camera and the Default lane zoom`() = runBlocking {
+    fun `starts with a real drive, the Smooth follow camera, the Default lane zoom and no lane details`() = runBlocking {
         assertFalse(settings.simulateDrive.first())
         assertEquals(CameraStyle.SMOOTH_FOLLOW, settings.cameraStyle.first())
         assertEquals(LaneZoom.DEFAULT, settings.laneZoom.first())
+        assertFalse(settings.laneDetails.first())
+    }
+
+    @Test
+    fun `stores the lane details switch`() = runBlocking {
+        settings.setLaneDetails(true)
+        assertTrue(settings.laneDetails.first())
+        assertFalse(settings.simulateDrive.first(), "the other switch is its own")
+        settings.setLaneDetails(false)
+        assertFalse(settings.laneDetails.first())
     }
 
     @Test
@@ -120,6 +130,10 @@ class DataStoreAppSettingsTest {
         assertEquals(LaneZoom.LARGE, settings.laneZoom.first())
         settings.setCameraStyle(CameraStyle.MAPBOX_TUNED)
         assertEquals(LaneZoom.LARGE, settings.laneZoom.first())
+        assertFalse(settings.laneDetails.first())
+        settings.setLaneDetails(true)
+        assertEquals(LaneZoom.LARGE, settings.laneZoom.first())
+        assertTrue(settings.simulateDrive.first())
     }
 
     @Test
@@ -127,8 +141,14 @@ class DataStoreAppSettingsTest {
         settings.setSimulateDrive(true)
         settings.setCameraStyle(CameraStyle.MAPBOX_TUNED)
         settings.setLaneZoom(LaneZoom.LARGE)
+        settings.setLaneDetails(true)
         assertEquals(
-            listOf<Pair<String, Any>>("simulate_drive" to true, "camera_style" to "mapbox_tuned", "lane_zoom" to "large"),
+            listOf<Pair<String, Any>>(
+                "simulate_drive" to true,
+                "camera_style" to "mapbox_tuned",
+                "lane_zoom" to "large",
+                "lane_details" to true,
+            ),
             changes,
         )
     }

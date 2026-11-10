@@ -89,6 +89,8 @@
     <string name="lane_zoom_large">Large</string>
     <string name="lane_zoom_large_note">Large: close in before every turn and, on freeways, before exits and lane splits; back out after.</string>
     <string name="lane_zoom_mapbox_standard_note">The Mapbox standard camera keeps its own zoom.</string>
+    <string name="lane_details_title">Lane details on the map</string>
+    <string name="lane_details_note">Lane markings, painted arrows and crosswalks where Mapbox has them: major highways and some cities. The car shows where you are on the road, not which lane you are in; the lanes to use are in the card. The route line can hide under bridges.</string>
 
     <string name="debug_title">Debug</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>

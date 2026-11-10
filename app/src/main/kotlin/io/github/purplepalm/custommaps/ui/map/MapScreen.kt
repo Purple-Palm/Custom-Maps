@@ -112,6 +112,8 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     LaunchedEffect(phoneMap) { settings.cameraStyle.collect(phoneMap::setCameraStyle) }
     // The same for the lane zoom: how close the camera goes before turns and lane choices.
     LaunchedEffect(phoneMap) { settings.laneZoom.collect(phoneMap::setLaneZoom) }
+    // And for lane markings on the map, where the map has them.
+    LaunchedEffect(phoneMap) { settings.laneDetails.collect(phoneMap::setLaneDetails) }
 
     var locationAccess by remember { mutableStateOf(context.locationAccess()) }
     // Routes and guidance need precise location; approximate is only good for the puck.

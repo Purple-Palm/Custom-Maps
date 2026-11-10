@@ -70,6 +70,7 @@ fun SettingsScreen(
     onClearToken: () -> Unit,
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
+    onLaneDetailsChange: (Boolean) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -105,7 +106,7 @@ fun SettingsScreen(
 
             TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
             SectionDivider()
-            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange)
+            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
             SectionDivider()
             DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow)
             SectionDivider()
@@ -180,6 +181,7 @@ private fun GuidanceSection(
     guidance: GuidanceSettings,
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
+    onLaneDetailsChange: (Boolean) -> Unit,
 ) {
     SectionTitle(R.string.guidance_title)
     Text(
@@ -223,6 +225,25 @@ private fun GuidanceSection(
 
     Spacer(Modifier.height(16.dp))
     LaneZoomBlock(guidance, onLaneZoomChange)
+
+    // Lane markings on the map. The text says what they are not: the car's lane.
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.lane_details_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.lane_details_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        Switch(checked = guidance.laneDetails, onCheckedChange = onLaneDetailsChange)
+    }
 }
 
 /** How close the camera goes before turns and lane choices: one of two, each with a line that says what it does. */
@@ -492,6 +513,7 @@ private fun SettingsScreenPreview() {
             onClearToken = {},
             onCameraStyleChange = {},
             onLaneZoomChange = {},
+            onLaneDetailsChange = {},
             onSimulateDriveChange = {},
             onShareLog = {},
             onClearLog = {},

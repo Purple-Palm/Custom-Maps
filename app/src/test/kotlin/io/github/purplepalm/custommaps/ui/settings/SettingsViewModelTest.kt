@@ -174,6 +174,37 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `lane details are off until switched on, and the switch is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        assertFalse(viewModel.guidance.value.laneDetails)
+        viewModel.setLaneDetails(true)
+        runCurrent()
+        assertTrue(settings.laneDetails.value)
+        assertEquals(GuidanceSettings(CameraStyle.SMOOTH_FOLLOW, LaneZoom.DEFAULT, laneDetails = true), viewModel.guidance.value)
+        viewModel.setLaneDetails(false)
+        runCurrent()
+        assertFalse(viewModel.guidance.value.laneDetails)
+    }
+
+    @Test
+    fun `shows the stored lane details switch`() = runTest(dispatcher) {
+        settings.laneDetails.value = true
+        val viewModel = viewModel()
+        assertTrue(viewModel.guidance.value.laneDetails)
+    }
+
+    @Test
+    fun `a lane details switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setLaneDetails(true)
+        runCurrent()
+        assertFalse(settings.laneDetails.value)
+        assertFalse(viewModel.guidance.value.laneDetails)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
     fun `a chosen lane zoom is stored and leaves the camera style alone`() = runTest(dispatcher) {
         val viewModel = viewModel()
         assertEquals(LaneZoom.DEFAULT, viewModel.guidance.value.laneZoom)

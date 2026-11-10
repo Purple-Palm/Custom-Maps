@@ -30,6 +30,11 @@ interface AppSettings {
     val laneZoom: Flow<LaneZoom>
 
     suspend fun setLaneZoom(mode: LaneZoom)
+
+    /** Whether the map draws lane markings where the map data has them. */
+    val laneDetails: Flow<Boolean>
+
+    suspend fun setLaneDetails(enabled: Boolean)
 }
 
 /**
@@ -69,6 +74,13 @@ class DataStoreAppSettings(
         onChanged(LANE_ZOOM.name, stored)
     }
 
+    override val laneDetails: Flow<Boolean> = preferences.map { it[LANE_DETAILS] ?: false }.distinctUntilChanged()
+
+    override suspend fun setLaneDetails(enabled: Boolean) {
+        dataStore.edit { it[LANE_DETAILS] = enabled }
+        onChanged(LANE_DETAILS.name, enabled)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -77,6 +89,7 @@ class DataStoreAppSettings(
         private val SIMULATE_DRIVE = booleanPreferencesKey("simulate_drive")
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
         private val LANE_ZOOM = stringPreferencesKey("lane_zoom")
+        private val LANE_DETAILS = booleanPreferencesKey("lane_details")
 
         private fun CameraStyle.stored(): String = when (this) {
             CameraStyle.MAPBOX_STANDARD -> "mapbox_standard"

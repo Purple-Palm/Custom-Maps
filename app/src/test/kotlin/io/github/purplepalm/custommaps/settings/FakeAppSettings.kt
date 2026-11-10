@@ -13,6 +13,7 @@ class FakeAppSettings(
     simulateDrive: Boolean = false,
     cameraStyle: CameraStyle = CameraStyle.DEFAULT,
     laneZoom: LaneZoom = LaneZoom.DEFAULT,
+    laneDetails: Boolean = false,
 ) : AppSettings {
 
     /** While true every change fails as it does on a full disk, and the stored value stays. */
@@ -29,6 +30,10 @@ class FakeAppSettings(
     override val laneZoom = MutableStateFlow(laneZoom)
 
     override suspend fun setLaneZoom(mode: LaneZoom) = store { laneZoom.value = mode }
+
+    override val laneDetails = MutableStateFlow(laneDetails)
+
+    override suspend fun setLaneDetails(enabled: Boolean) = store { laneDetails.value = enabled }
 
     private fun store(change: () -> Unit) {
         if (storageFull) throw IOException("No space left on device")
