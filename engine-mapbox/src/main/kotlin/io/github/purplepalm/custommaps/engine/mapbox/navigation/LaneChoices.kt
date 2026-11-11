@@ -10,12 +10,17 @@ import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.Polyline
+import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.LanesAhead
+import io.github.purplepalm.custommaps.nav.model.RouteLane
+import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 
 /**
  * The points with lanes ahead of the car, read from the lane data the route carries for its
@@ -28,6 +33,11 @@ import io.github.purplepalm.custommaps.nav.model.LanesAhead
  * with lanes is handed out, so the ones passed over can be logged with their lane counts
  * ([entering]). The maneuver card gets the lanes of a lane choice ahead from here as well
  * ([lanesAhead]).
+ *
+ * On a freeway the last part of a step before its exit or fork is a run-up ([RunUpLatch]): the
+ * close view comes in once for it and stays to the gore, and the card shows one lane row for it
+ * ([RunUpRule]). The one latch for the card and every camera is held here and moved once per
+ * update of the route progress ([runUp]); the cameras get the exit it holds for ([runUpKey]).
  *
  * The engine owns one. The lanes of a step are read once, when the car enters it; an update of the
  * route progress only measures how far ahead each point is. Called on the main thread.
@@ -44,6 +54,10 @@ internal class LaneChoices(
         val counts: LaneCounts,
         val onFreeway: Boolean,
         val lanes: LaneInfo?,
+        /** Every lane as the route lists it, from the leftmost, for the run-up's row. */
+        val routeLanes: List<RouteLane>,
+        /** The lane at the side the step's exit leaves on leaves the route here ([RunUpRule.edgeLeaves]). */
+        val edgeLeaves: Boolean,
     )
 
     private var stepKey: String? = null
@@ -51,6 +65,22 @@ internal class LaneChoices(
 
     /** The next maneuver's own lanes; whether it is a lane choice depends on the kind of maneuver. */
     private var maneuverPoint: LanePoint? = null
+
+    /** The side the step's exit or fork leaves on ([RunUpRule.exitEdge]); null when it cannot be told. */
+    private var exitEdge: LaneEdge? = null
+
+    /** Where roads without lane data leave the step on the exit's side, along the step from its start. */
+    private var branches = NO_BRANCHES
+
+    /** The run-up on now, one for the card and every camera. */
+    private val latch = RunUpLatch(tuning)
+
+    /** The update the latch was moved for last, and the card's row it gave: the same object while the row is. */
+    private var runUpUpdate: Any? = null
+    private var runUpRow: RunUpLanes? = null
+
+    /** Whether the run-up's row could not be made on this step; reported once. */
+    private var rowFailed = false
 
     private var lastProgress: RouteProgress? = null
     private var lastAhead: List<LaneChoice> = emptyList()
@@ -89,6 +119,7 @@ internal class LaneChoices(
                 intersections = stepProgress.step?.intersections().orEmpty(),
                 stepPoints = stepProgress.stepPoints.orEmpty(),
                 maneuver = leg.upcomingStep?.intersections()?.firstOrNull(),
+                exitModifier = leg.upcomingStep?.maneuver()?.modifier(),
             )
         }
     }
@@ -119,28 +150,54 @@ internal class LaneChoices(
 
     /**
      * Reads the lanes of a step: of each intersection after its first, which is the maneuver the
-     * step began with, and of [maneuver], the first intersection of the next step. Lane data that
-     * cannot be read leaves the step without lane choices; it never ends the drive.
+     * step began with, and of [maneuver], the first intersection of the next step. With them the
+     * side the step's exit leaves on, which points on the way have the lane at that side leave the
+     * route, and where roads without lane data leave on that side. Lane data that cannot be read
+     * leaves the step without lane choices; it never ends the drive.
      *
      * @param stepKey the route, leg and step, as in the progress snapshot
      * @param stepPoints the shape of the step; each intersection lies on one of its points
+     * @param exitModifier the modifier of the next step's own maneuver, as the route's step has it
+     *   (not the banner): the side its exit or fork leaves on
      */
-    fun load(stepKey: String, intersections: List<StepIntersection?>, stepPoints: List<Point>, maneuver: StepIntersection?) {
+    fun load(
+        stepKey: String,
+        intersections: List<StepIntersection?>,
+        stepPoints: List<Point>,
+        maneuver: StepIntersection?,
+        exitModifier: String? = null,
+    ) {
         this.stepKey = stepKey
         points = emptyList()
         maneuverPoint = null
+        exitEdge = null
+        branches = NO_BRANCHES
+        rowFailed = false
         reported.clear()
         try {
-            points = stepLanes(intersections, stepPoints).map {
-                LanePoint("$stepKey/${it.index}", it.metersFromStepStart, it.counts, it.onFreeway, intersections[it.index]?.lanesAhead())
+            val exitLanes = maneuver?.routeLanes().orEmpty()
+            val edge = RunUpRule.exitEdge(ManeuverMapping.modifier(exitModifier), exitLanes)
+            val read = stepLanes(intersections, stepPoints).map {
+                val intersection = intersections[it.index]
+                val lanes = intersection?.routeLanes().orEmpty()
+                LanePoint("$stepKey/${it.index}", it.metersFromStepStart, it.counts, it.onFreeway, intersection?.lanesAhead(), lanes, RunUpRule.edgeLeaves(lanes, edge))
             }
             val counts = maneuver?.laneCounts()
-            if (counts != null) {
-                // The road that leads to the maneuver leaves the step's last intersection. The card
-                // has the maneuver's lanes already, so none are kept for it here.
+            // The road that leads to the maneuver leaves the step's last intersection. The card
+            // has the maneuver's lanes already, so none are drawn for it here.
+            val atManeuver = if (maneuver != null && counts != null) {
                 val approach = intersections.lastOrNull() ?: maneuver
-                maneuverPoint = LanePoint("$stepKey/end", Double.NaN, counts, approach.isFreeway(), lanes = null)
+                LanePoint("$stepKey/end", Double.NaN, counts, approach.isFreeway(), lanes = null, routeLanes = exitLanes, edgeLeaves = false)
+            } else {
+                null
             }
+            val sideBranches = if (edge == null) NO_BRANCHES else exitSideBranches(intersections, stepPoints, edge)
+            // All of the step or nothing: a step read in part could give words a road without
+            // lane data should have withheld.
+            points = read
+            maneuverPoint = atManeuver
+            exitEdge = edge
+            branches = sideBranches
         } catch (e: RuntimeException) {
             onError(e)
         }
@@ -179,6 +236,12 @@ internal class LaneChoices(
      * @param speedMps the car's speed, the one the camera gets
      */
     fun lanesAhead(choices: List<LaneChoice>, speedMps: Double?): LanesAhead? {
+        // On a run-up the card shows the run-up's row instead, and nothing of a choice is kept.
+        if (latch.exitKey != null) {
+            cardKey = null
+            cardLanes = null
+            return null
+        }
         val window = LaneFocus.windowMeters(tuning, speedMps)
         var nearest: LaneChoice? = null
         for (i in choices.indices) {
@@ -199,6 +262,78 @@ internal class LaneChoices(
         val last = cardLanes
         if (last == null || last.lanes !== lanes || last.distance != distance) cardLanes = LanesAhead(distance, lanes)
         return cardLanes
+    }
+
+    /**
+     * The run-up to the step's exit or fork at this update of the route progress, and the card's
+     * row for it; null outside a run-up ([RunUpLatch], [RunUpRule.row]). The one latch for the card
+     * and every camera moves at most once for each progress object, whoever asks first, as [ahead]
+     * reads once: the engine's own observer and the map's cameras get the same answer. The row is
+     * the same object for as long as it does not change.
+     *
+     * @param speedMps the car's speed, the one the card's lanes and the cameras get
+     * @param nowSeconds the engine's clock, which a resume and a seek are timed on
+     */
+    fun runUp(progress: RouteProgress, speedMps: Double?, nowSeconds: Double): RunUpLanes? = runUpOnce(progress) {
+        val metersOnStep = progress.currentLegProgress?.currentStepProgress?.distanceTraveled?.toDouble() ?: 0.0
+        moveRunUp(ahead(progress), progress.currentState != RouteProgressState.OFF_ROUTE, metersOnStep, speedMps, nowSeconds)
+    }
+
+    /**
+     * The card's row for [update], an update of the route progress: [move] moves the latch for the
+     * first call with that object, and every later call with it gets the same answer.
+     */
+    internal fun runUpOnce(update: Any, move: () -> Unit): RunUpLanes? {
+        if (update !== runUpUpdate) {
+            runUpUpdate = update
+            move()
+        }
+        return runUpRow
+    }
+
+    /**
+     * One move of the latch, in plain values: [choices] as [ahead] gave them for a car
+     * [metersOnStep] into the loaded step. The row it gives is also what [runUp] hands out until
+     * the next move.
+     *
+     * @param onRoute false while the navigator has the car off the route
+     */
+    fun moveRunUp(choices: List<LaneChoice>, onRoute: Boolean, metersOnStep: Double, speedMps: Double?, nowSeconds: Double): RunUpLanes? {
+        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute)
+        val row = if (exit == null) null else rowOf(exit.key, metersOnStep)
+        // The object stays the same while the row does, so a screen skips it.
+        if (row != runUpRow) runUpRow = row
+        return runUpRow
+    }
+
+    /** The exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up. */
+    val runUpKey: String? get() = latch.exitKey
+
+    /** What began the run-up on now ([RunUpLatch.startKey]): a choice's key, `edge` or `resume`; null outside a run-up. */
+    val runUpStartKey: String? get() = latch.startKey
+
+    /**
+     * The card's row on the run-up to the exit [exitKey], for a car [metersOnStep] into the step:
+     * the next point on the way where the lane at the exit's side leaves, or the exit's own lanes.
+     * Lane data that cannot be made into a row costs the row, reported once a step, and never the
+     * drive.
+     */
+    private fun rowOf(exitKey: String, metersOnStep: Double): RunUpLanes? {
+        val exit = maneuverPoint?.takeIf { it.key == exitKey } ?: return null
+        if (rowFailed) return null
+        return try {
+            val ahead = ArrayList<RunUpRule.LanePoint>(points.size)
+            for (point in points) {
+                val metersAhead = point.metersFromStepStart - metersOnStep
+                if (metersAhead >= 0.0) ahead.add(RunUpRule.LanePoint(point.key, metersAhead, point.routeLanes))
+            }
+            val branchAhead = branches.any { it - metersOnStep >= 0.0 }
+            RunUpRule.row(exitEdge, ahead, exit.key, exit.routeLanes, branchAhead)
+        } catch (e: RuntimeException) {
+            rowFailed = true
+            onError(e)
+            null
+        }
     }
 
     /**
@@ -242,15 +377,36 @@ internal class LaneChoices(
         "skipped" to choice.skipReason(tuning),
     ).filterValues { it != null }
 
-    /** A drive ended or a new one begins: nothing is kept of the last step. */
+    /** A drive ended or a new one begins: nothing is kept of the last step, nor of a run-up. */
     fun clear() {
+        forgetStep()
+        // Forgotten: the time counts only for a seek.
+        latch.reset(nowSeconds = 0.0)
+    }
+
+    /**
+     * A seek of a simulated drive put the car somewhere else: nothing is kept of the step, as at
+     * the end of a drive, but a run-up ends at [nowSeconds], so it may begin again within
+     * [CameraTuning.runUpResumeSeconds] on its reach alone where the seek lands on the same approach.
+     */
+    fun onSeek(nowSeconds: Double) {
+        forgetStep()
+        latch.reset(nowSeconds, seek = true)
+    }
+
+    private fun forgetStep() {
         stepKey = null
         points = emptyList()
         maneuverPoint = null
+        exitEdge = null
+        branches = NO_BRANCHES
+        rowFailed = false
         lastProgress = null
         lastAhead = emptyList()
         cardKey = null
         cardLanes = null
+        runUpUpdate = null
+        runUpRow = null
         reported.clear()
     }
 
@@ -262,6 +418,7 @@ internal class LaneChoices(
         designatedLanes = counts.designated,
         onFreeway = onFreeway,
         atManeuver = atManeuver,
+        edgeLeaves = edgeLeaves && !atManeuver,
     )
 
     companion object {
@@ -280,6 +437,8 @@ internal class LaneChoices(
 
         /** Whether a maneuver of this [type], as the route's banner names it, is a lane choice where it has lanes. */
         fun isLaneChoiceManeuver(type: String?): Boolean = type in VIEW_STAYS_UP_FOR
+
+        private val NO_BRANCHES = DoubleArray(0)
     }
 }
 
@@ -342,6 +501,29 @@ internal fun StepIntersection.lanesAhead(): LaneInfo? {
     return if (lanes.isEmpty()) null else LaneInfo(lanes)
 }
 
+/**
+ * Every lane of this intersection as the route lists it, from the leftmost, read as it is: its
+ * arrows, whether the route can be followed from it and prefers it, and whether it is kept for
+ * some vehicles. Empty when the route has no lanes for it.
+ */
+internal fun StepIntersection.routeLanes(): List<RouteLane> {
+    val all = lanes() ?: return emptyList()
+    val lanes = ArrayList<RouteLane>(all.size)
+    for (lane in all) {
+        if (lane == null) continue
+        lanes.add(
+            RouteLane(
+                indications = lane.indications().orEmpty().mapNotNull(ManeuverMapping::modifier).toSet(),
+                valid = lane.valid(),
+                active = lane.active(),
+                validIndication = ManeuverMapping.modifier(lane.validIndication()),
+                designated = lane.isDesignated(),
+            ),
+        )
+    }
+    return lanes
+}
+
 /** A lane kept for buses, car pools, taxis and the like. */
 private fun IntersectionLanes.isDesignated(): Boolean = !access()?.designated().isNullOrEmpty()
 
@@ -382,6 +564,51 @@ internal fun stepLanes(intersections: List<StepIntersection?>, stepPoints: List<
         StepLanes(i, meters[n], counts[n], intersections[i - 1]?.isFreeway() == true)
     }
 }
+
+/**
+ * Where roads leave a step on the side of its exit, [edge], at intersections the route has no
+ * lane data for: along the step from its start, in the order the car reaches them. Such a road
+ * may take the lane at that side with it, which no lane data says, so the run-up's row has no
+ * words until the car has passed it. Only intersections after the step's first, on a road that
+ * leads to them as a freeway, count; a road that may not be entered, as an on ramp joining, is
+ * none. A step with a coordinate that is none has none.
+ */
+internal fun exitSideBranches(intersections: List<StepIntersection?>, stepPoints: List<Point>, edge: LaneEdge): DoubleArray {
+    val places = ArrayList<GeoPoint>()
+    for (i in 1 until intersections.size) {
+        val intersection = intersections[i] ?: continue
+        if (intersection.laneCounts() != null || intersections[i - 1]?.isFreeway() != true) continue
+        if (!intersection.branchesOff(edge)) continue
+        places.add(intersection.location().toGeoPoint() ?: return DoubleArray(0))
+    }
+    if (places.isEmpty()) return DoubleArray(0)
+    val line = stepPoints.map { it.toGeoPoint() ?: return DoubleArray(0) }
+    return Polyline.distancesTo(line, places)
+}
+
+/**
+ * Whether a road that may be entered leaves this intersection on [edge]'s side of the route's way
+ * out: its bearing lies less than half a turn clockwise of the way out for the right, and the
+ * same counterclockwise for the left. The road the car comes in on is none.
+ */
+internal fun StepIntersection.branchesOff(edge: LaneEdge): Boolean {
+    val bearings = bearings() ?: return false
+    val entry = entry() ?: return false
+    val out = out() ?: return false
+    val into = `in`()
+    val outBearing = bearings.getOrNull(out) ?: return false
+    for (j in bearings.indices) {
+        if (j == out || j == into || entry.getOrNull(j) != true) continue
+        val bearing = bearings[j] ?: continue
+        val turn = Math.floorMod(bearing - outBearing, FULL_TURN)
+        val onSide = if (edge == LaneEdge.RIGHT) turn in 1 until HALF_TURN else turn in HALF_TURN + 1 until FULL_TURN
+        if (onSide) return true
+    }
+    return false
+}
+
+private const val FULL_TURN = 360
+private const val HALF_TURN = 180
 
 /** A coordinate outside the globe is no place to measure from. */
 private fun Point.toGeoPoint(): GeoPoint? {

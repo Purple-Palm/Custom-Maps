@@ -7,9 +7,15 @@ import com.mapbox.api.directions.v5.models.StepIntersection
 import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoiceSkip
+import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.LaneTarget
+import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotSame
@@ -555,5 +561,256 @@ class LaneChoicesTest {
     fun `a step without lanes adds nothing to the log`() {
         assertNull(laneIntersectionFields(listOf(intersection(0), intersection(5)), points))
         assertNull(laneIntersectionFields(emptyList(), points))
+    }
+
+    // The run-up. A made-up freeway with a car pool lane on the left and four general lanes, and an
+    // exit on the right whose own lanes, past a fifth lane that opens for it, are the next step's
+    // first intersection. All distances are synthetic; 25 m/s gives a window of 625 m and a reach
+    // of 2,125 m.
+
+    private val hov = lane(false, designated = listOf("hov"))
+
+    /** A point about 400 m into the step where the right lane leaves: an edge point for a right exit. */
+    private val rightLeaves = listOf(hov, lane(true), lane(true), lane(true), lane(false, arrows = listOf("slight right")))
+
+    /** A point where the left general lane leaves instead. */
+    private val leftLeaves = listOf(hov, lane(false, arrows = listOf("slight left")), lane(true), lane(true), lane(true))
+
+    /** The exit's own lanes: only the new rightmost lane goes on to the ramp. */
+    private val exitLanes = listOf(hov, lane(false), lane(false), lane(false), lane(false), lane(true, arrows = listOf("slight right"), used = "slight right"))
+
+    private fun runUpStep(
+        lanes: LaneChoices,
+        key: String,
+        modifier: String? = "slight right",
+        exit: List<IntersectionLanes> = exitLanes,
+        step: List<StepIntersection?> = listOf(intersection(0), intersection(2), intersection(4, rightLeaves)),
+    ) = lanes.load(key, step, points, maneuver = intersection(10, exit, freeway = false), exitModifier = modifier)
+
+    /** One update of a car [onStep] meters into the step, the exit [toExit] ahead, at 25 m/s, at [t] seconds. */
+    private fun LaneChoices.at(onStep: Double, toExit: Double, t: Double, offRoute: Boolean = false, type: String? = "off ramp", key: String = "r/0/2"): RunUpLanes? {
+        val choices = update(offRoute, key, onStep, toExit, type) { runUpStep(this, it) }
+        return moveRunUp(choices, onRoute = !offRoute, metersOnStep = onStep, speedMps = 25.0, nowSeconds = t)
+    }
+
+    private fun RunUpLanes.lit() = lanes.lanes.map { it.isRecommended }
+
+    @Test
+    fun `a point where the lane at the exit's side leaves is an edge point, by the exit's own side`() {
+        fun edgeLeaves(modifier: String?, exit: List<IntersectionLanes> = exitLanes): Map<String, Boolean> {
+            val lanes = LaneChoices()
+            val step = listOf(intersection(0), intersection(3, rightLeaves), intersection(6, leftLeaves))
+            runUpStep(lanes, "r/0/2", modifier, exit, step)
+            return lanes.choices(0.0, 1_000.0, maneuverIsChoice = true).associate { it.key to it.edgeLeaves }
+        }
+        assertEquals(mapOf("r/0/2/1" to true, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves("slight right"))
+        assertEquals(mapOf("r/0/2/1" to true, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves("sharp right"))
+        assertEquals(mapOf("r/0/2/1" to false, "r/0/2/2" to true, "r/0/2/end" to false), edgeLeaves("slight left"))
+        // Straight on, the exit's lanes to use tell the side: here the rightmost.
+        assertEquals(mapOf("r/0/2/1" to true, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves("straight"))
+        // Lanes to use in the middle say no side: no edge points.
+        val middle = listOf(lane(false), lane(true), lane(false), lane(false))
+        assertEquals(mapOf("r/0/2/1" to false, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves(null, middle))
+    }
+
+    @Test
+    fun `the run-up begins at its reach for an edge point ahead, and its row goes from that point to the exit`() {
+        val lanes = LaneChoices()
+        // Beyond the reach nothing begins, though the edge point lies ahead.
+        assertNull(lanes.at(onStep = 0.0, toExit = 2_200.0, t = 0.0))
+        assertNull(lanes.runUpKey)
+        val first = requireNotNull(lanes.at(onStep = 0.0, toExit = 2_100.0, t = 1.0))
+        assertEquals("r/0/2/end", lanes.runUpKey)
+        assertEquals(RunUpLatch.EDGE, lanes.runUpStartKey)
+        // The edge point's row: the second lane from the right lit, the car pool lane dim.
+        assertEquals("r/0/2/2", first.key)
+        assertEquals(listOf(false, false, false, true, false), first.lit())
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), first.target)
+        assertNull(first.odd)
+        assertEquals(1, first.need)
+        assertTrue(first.lanes.lanes[0].designated)
+        // The same row, the same object, while the car drives on to it.
+        assertSame(first, lanes.at(onStep = 25.0, toExit = 2_075.0, t = 2.0))
+        assertSame(first, lanes.at(onStep = 400.0, toExit = 1_700.0, t = 16.0))
+        // Past it: the exit's own lanes, the right lane in words.
+        val exit = requireNotNull(lanes.at(onStep = 450.0, toExit = 1_650.0, t = 18.0))
+        assertEquals("r/0/2/end", exit.key)
+        assertEquals(listOf(false, false, false, false, false, true), exit.lit())
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), exit.target)
+        assertEquals(TurnModifier.SLIGHT_RIGHT, exit.lanes.lanes[5].activeIndication)
+        assertTrue(exit.lanes.lanes[0].designated)
+        assertFalse(exit.lanes.lanes[0].isRecommended)
+        assertSame(exit, lanes.at(onStep = 900.0, toExit = 100.0, t = 50.0))
+        // Past the gore the exit leaves the list: the run-up ends.
+        assertNull(lanes.at(onStep = 0.0, toExit = 800.0, t = 54.0, type = "turn", key = "r/0/3"))
+        assertNull(lanes.runUpKey)
+        assertNull(lanes.runUpStartKey)
+    }
+
+    @Test
+    fun `the run-up holds whatever the speed does and ends off the route, and a short time off begins it again`() {
+        val lanes = LaneChoices()
+        requireNotNull(lanes.at(onStep = 0.0, toExit = 1_500.0, t = 0.0))
+        // Past the edge point the exit is beyond its own window: only the latch holds it.
+        val held = requireNotNull(lanes.at(onStep = 450.0, toExit = 1_050.0, t = 18.0))
+        val choices = lanes.update(false, "r/0/2", 460.0, 1_040.0, "off ramp") { error("loaded") }
+        assertSame(held, lanes.moveRunUp(choices, onRoute = true, metersOnStep = 460.0, speedMps = 0.0, nowSeconds = 19.0), "standing")
+        assertSame(held, lanes.moveRunUp(choices, onRoute = true, metersOnStep = 460.0, speedMps = null, nowSeconds = 20.0), "no speed")
+        // Two updates off the route, then back: within 3 s, so it begins again on its reach alone.
+        assertNull(lanes.at(onStep = 460.0, toExit = 1_040.0, t = 21.0, offRoute = true))
+        assertNull(lanes.runUpKey)
+        assertNull(lanes.at(onStep = 460.0, toExit = 1_040.0, t = 22.0, offRoute = true))
+        assertEquals(held, lanes.at(onStep = 480.0, toExit = 1_020.0, t = 23.0))
+        assertEquals(RunUpLatch.RESUME, lanes.runUpStartKey)
+        // Six off: too long. The same place starts nothing now.
+        for (t in 24..29) assertNull(lanes.at(onStep = 480.0, toExit = 1_020.0, t = t.toDouble(), offRoute = true))
+        assertNull(lanes.at(onStep = 500.0, toExit = 1_000.0, t = 30.0))
+        assertNull(lanes.runUpKey)
+    }
+
+    @Test
+    fun `an update without the maneuver's type ends the run-up and the next one with it begins it again`() {
+        val lanes = LaneChoices()
+        requireNotNull(lanes.at(onStep = 0.0, toExit = 1_500.0, t = 0.0))
+        val held = requireNotNull(lanes.at(onStep = 450.0, toExit = 1_050.0, t = 18.0))
+        assertNull(lanes.at(onStep = 475.0, toExit = 1_025.0, t = 19.0, type = null))
+        assertEquals(held, lanes.at(onStep = 500.0, toExit = 1_000.0, t = 20.0))
+        assertEquals(RunUpLatch.RESUME, lanes.runUpStartKey)
+    }
+
+    @Test
+    fun `a seek ends the run-up so that it can begin again, and a new drive forgets it`() {
+        val lanes = LaneChoices()
+        requireNotNull(lanes.at(onStep = 0.0, toExit = 1_500.0, t = 0.0))
+        val held = requireNotNull(lanes.at(onStep = 450.0, toExit = 1_050.0, t = 18.0))
+        lanes.onSeek(18.5)
+        assertNull(lanes.runUpKey)
+        assertTrue(lanes.choices(450.0, 1_050.0, true).isEmpty(), "the step is read again")
+        // Landed on the same approach, past the edge point: it begins again on its reach alone.
+        assertEquals(held, lanes.at(onStep = 460.0, toExit = 1_040.0, t = 19.0))
+        assertEquals(RunUpLatch.RESUME, lanes.runUpStartKey)
+        // A seek that lands where the latch would not begin, later than 3 s: nothing.
+        lanes.onSeek(19.5)
+        assertNull(lanes.at(onStep = 470.0, toExit = 1_030.0, t = 23.0))
+        // A new drive forgets that one ended: the same place starts nothing.
+        requireNotNull(lanes.at(onStep = 0.0, toExit = 1_500.0, t = 30.0))
+        lanes.clear()
+        assertNull(lanes.runUpKey)
+        assertNull(lanes.at(onStep = 470.0, toExit = 1_030.0, t = 30.5))
+    }
+
+    @Test
+    fun `the latch moves once for each update, whoever asks first`() {
+        val lanes = LaneChoices()
+        val update = Any()
+        var moves = 0
+        val move = {
+            moves++
+            lanes.at(onStep = 0.0, toExit = 1_500.0, t = moves.toDouble())
+            Unit
+        }
+        val first = lanes.runUpOnce(update, move)
+        assertSame(first, lanes.runUpOnce(update, move))
+        assertEquals(1, moves)
+        assertEquals("r/0/2/end", lanes.runUpKey)
+        lanes.runUpOnce(Any(), move)
+        assertEquals(2, moves)
+        // After a seek the same update object moves it again.
+        lanes.onSeek(10.0)
+        lanes.runUpOnce(update, move)
+        assertEquals(3, moves)
+    }
+
+    @Test
+    fun `on a run-up the card shows its row and no lane choice ahead`() {
+        // A split 600 m in where two lanes leave on the right: a lane choice, and an edge point.
+        val split = listOf(hov, lane(true), lane(true), lane(false), lane(false))
+        val lanes = LaneChoices()
+        val step = listOf(intersection(0), intersection(6, split))
+        fun at(onStep: Double, toExit: Double, t: Double): Pair<RunUpLanes?, Distance?> {
+            val choices = lanes.update(false, "r/0/2", onStep, toExit, "off ramp") { runUpStep(lanes, it, step = step) }
+            val row = lanes.moveRunUp(choices, onRoute = true, metersOnStep = onStep, speedMps = 25.0, nowSeconds = t)
+            return row to lanes.lanesAhead(choices, 25.0)?.distance
+        }
+        // The exit beyond the reach: the split's own row, with its distance.
+        val before = at(onStep = 0.0, toExit = 2_500.0, t = 0.0)
+        assertNull(before.first)
+        assertEquals(Distance.meters(6 * spacing), before.second)
+        // In reach: the run-up's row, and nothing of the choice.
+        val on = at(onStep = 30.0, toExit = 2_100.0, t = 1.0)
+        assertEquals("r/0/2/1", on.first?.key)
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 2), on.first?.target, "the third lane from the right")
+        assertNull(on.second)
+    }
+
+    @Test
+    fun `a road without lane data that leaves on the exit's side withholds the words until it is passed`() {
+        // Three intersections without lanes: a road off to the right, one off to the left, and an
+        // on ramp joining from the right, which may not be entered.
+        fun crossing(at: Int, branch: Int, enter: Boolean) = intersection(at).toBuilder()
+            .bearings(listOf(180, 0, branch))
+            .entry(listOf(false, true, enter))
+            .`in`(0)
+            .out(1)
+            .build()
+        val offRight = crossing(2, branch = 30, enter = true)
+        val offLeft = crossing(3, branch = 330, enter = true)
+        val onRamp = crossing(5, branch = 160, enter = false)
+        assertTrue(offRight.branchesOff(LaneEdge.RIGHT))
+        assertFalse(offRight.branchesOff(LaneEdge.LEFT))
+        assertTrue(offLeft.branchesOff(LaneEdge.LEFT))
+        assertFalse(offLeft.branchesOff(LaneEdge.RIGHT))
+        assertFalse(onRamp.branchesOff(LaneEdge.RIGHT))
+        assertFalse(intersection(4).branchesOff(LaneEdge.RIGHT), "no bearings")
+        // The road the car comes in on is no road off, even where the data lets it be entered.
+        val bent = intersection(4).toBuilder().bearings(listOf(170, 0)).entry(listOf(true, true)).`in`(0).out(1).build()
+        assertFalse(bent.branchesOff(LaneEdge.RIGHT))
+        val step = listOf(intersection(0), offRight, offLeft, onRamp)
+        assertArrayEquals(doubleArrayOf(2 * spacing), exitSideBranches(step, points, LaneEdge.RIGHT), 1e-6)
+        assertArrayEquals(doubleArrayOf(3 * spacing), exitSideBranches(step, points, LaneEdge.LEFT), 1e-6)
+        // On a road that is no freeway such a road counts for nothing.
+        val street = listOf(intersection(0, freeway = false), crossing(2, branch = 30, enter = true))
+        assertEquals(0, exitSideBranches(street, points, LaneEdge.RIGHT).size)
+
+        val lanes = LaneChoices()
+        fun at(onStep: Double, toExit: Double, t: Double): RunUpLanes? {
+            val choices = lanes.update(false, "r/0/2", onStep, toExit, "off ramp") { runUpStep(lanes, it, step = step) }
+            return lanes.moveRunUp(choices, onRoute = true, metersOnStep = onStep, speedMps = 25.0, nowSeconds = t)
+        }
+        // The exit's own window opens the run-up; the road off to the right is still ahead.
+        val withheld = requireNotNull(at(onStep = 100.0, toExit = 600.0, t = 0.0))
+        assertNull(withheld.target)
+        assertEquals(RunUpRule.ODD_UNKNOWN_BRANCH, withheld.odd)
+        assertEquals(listOf(false, false, false, false, false, true), withheld.lit(), "lit as the data says")
+        assertSame(withheld, at(onStep = 2 * spacing, toExit = 500.0, t = 1.0), "at the road itself")
+        val passed = requireNotNull(at(onStep = 2 * spacing + 1.0, toExit = 499.0, t = 2.0))
+        assertNull(passed.odd)
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), passed.target)
+    }
+
+    @Test
+    fun `an exit whose side cannot be told shows its own lanes lit without words`() {
+        val middle = listOf(lane(false), lane(true), lane(false), lane(false))
+        val lanes = LaneChoices()
+        val choices = lanes.update(false, "r/0/2", 0.0, 500.0, "fork") { runUpStep(lanes, it, modifier = null, exit = middle) }
+        val row = requireNotNull(lanes.moveRunUp(choices, onRoute = true, metersOnStep = 0.0, speedMps = 25.0, nowSeconds = 0.0))
+        assertEquals("r/0/2/end", row.key)
+        assertEquals(listOf(false, true, false, false), row.lit())
+        assertNull(row.target)
+        assertNull(row.need)
+    }
+
+    @Test
+    fun `no run-up before a turn, on a road that is no freeway or for an exit that does not count`() {
+        val lanes = LaneChoices()
+        assertNull(lanes.at(onStep = 0.0, toExit = 500.0, t = 0.0, type = "turn"))
+        val street = LaneChoices()
+        val choices = street.update(false, "r/0/2", 0.0, 500.0, "off ramp") {
+            street.load(it, listOf(intersection(0, freeway = false), intersection(4, rightLeaves, freeway = false)), points, intersection(10, exitLanes, freeway = false), "slight right")
+        }
+        assertNull(street.moveRunUp(choices, onRoute = true, metersOnStep = 0.0, speedMps = 25.0, nowSeconds = 0.0))
+        val twoLanes = LaneChoices()
+        val few = twoLanes.update(false, "r/0/2", 0.0, 500.0, "off ramp") { runUpStep(twoLanes, it, exit = listOf(lane(false), lane(true))) }
+        assertNull(twoLanes.moveRunUp(few, onRoute = true, metersOnStep = 0.0, speedMps = 25.0, nowSeconds = 0.0))
     }
 }

@@ -628,8 +628,9 @@ internal class MapboxNavigationEngine(
         val replayer = navigator.mapboxReplayer
         if (-replayer.eventSeconds(0.0) != heldFirst) {
             // The session started the replay over and plays it: the car jumps to where it starts.
+            // A run-up ends there, and may begin again soon if the car lands on the same approach.
             thenTracker.reset()
-            laneChoices.clear()
+            laneChoices.onSeek(nowSeconds())
             seekHold.resume()
             showPlayed()
             logSeek(ask, ok = false, why = ReplaySeek.Why.ENDED)
@@ -649,9 +650,10 @@ internal class MapboxNavigationEngine(
                 false
             }
         if (moved) {
-            // What the Then chip and the lane choices remember is of the place the car left.
+            // What the Then chip and the lane choices remember is of the place the car left. A
+            // run-up ends at the seek, and may begin again soon if the car lands on the same approach.
             thenTracker.reset()
-            laneChoices.clear()
+            laneChoices.onSeek(nowSeconds())
             seekHold.resume()
         } else {
             seekHold.cancel()
@@ -1039,6 +1041,9 @@ internal class MapboxNavigationEngine(
         }
         if (active) onTripProgress()
         if (active && replaying) routeMetres = progress.distanceTraveled.toDouble()
+        // The run-up moves once for this update, here or in the map's camera if that asked first;
+        // never for an update held back above.
+        if (active) laneChoices.runUp(progress, lastMatch?.enhancedLocation?.speed, nowSeconds())
         val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
         // Without the next maneuver the card stays as it is, but never with a maneuver of the route
         // before a reroute or another change of route: it waits, dimmed, for the new route's.
@@ -1089,6 +1094,33 @@ internal class MapboxNavigationEngine(
     internal val replaySeeks: Int get() = seekHold.seeks
 
     /**
+     * The exit of the run-up on now, for the map's cameras, with [progress], the update they got:
+     * the same latch the card's row comes from ([LaneChoices.runUp]), moved once for that update,
+     * here if the engine's own observer has not yet. An update the screen leaves alone, from
+     * before a trip's own first position or before a seek's new place, moves nothing. Null outside
+     * a run-up.
+     */
+    internal fun runUpKey(progress: RouteProgress): String? {
+        if (_guidanceState.value == GuidanceState.ACTIVE && !progressHeld()) {
+            laneChoices.runUp(progress, lastMatch?.enhancedLocation?.speed, nowSeconds())
+        }
+        return laneChoices.runUpKey
+    }
+
+    /**
+     * Whether the progress update that comes with the latest matched position is one the screen
+     * leaves alone: it still carries where the trip before left the car ([StaleStart]), or it is
+     * from before a seek's new place ([SeekHold]).
+     */
+    private fun progressHeld(): Boolean {
+        val fix = lastMatch?.enhancedLocation?.fixTime()
+        return staleStart.isStale(fix) || seekHold.isHeld(fix)
+    }
+
+    /** The clock of the run-up's resume and of a seek, in seconds. */
+    private fun nowSeconds(): Double = SystemClock.elapsedRealtime() / MILLIS_PER_SECOND.toDouble()
+
+    /**
      * Writes a "lane_choice" line for each point with lanes that has come as near as the close
      * view's start: once for each point, with its lane counts, and with the reason when the view
      * stays as it is for it. With every camera style and either lane zoom, so a drive shows how
@@ -1100,14 +1132,25 @@ internal class MapboxNavigationEngine(
         for (i in entering.indices) debugLog.log("lane_choice", laneChoices.debugFields(entering[i], speed))
     }
 
-    /** The UI's view of [progress] with its [next] maneuver, the Then rule applied and the lanes of a lane choice ahead. */
+    /**
+     * The UI's view of [progress] with its [next] maneuver, the Then rule applied, and the run-up's
+     * lane row or, outside a run-up, the lanes of a lane choice ahead.
+     */
     private fun snapshotOf(progress: RouteProgress, next: MapboxManeuver): RouteProgressSnapshot {
         val decided = thenTracker.decide(progress.toSnapshot(next))
         // The speed the camera gets with this update, so the card's lanes and the close view come together.
-        val lanes = laneChoices.lanesAhead(laneChoices.ahead(progress), lastMatch?.enhancedLocation?.speed)
+        val speed = lastMatch?.enhancedLocation?.speed
+        // The latch moved for this update already; this is its row.
+        val runUp = laneChoices.runUp(progress, speed, nowSeconds())
+        // None on a run-up: its row stands in for a lane choice's, and nothing of one is kept.
+        val lanes = laneChoices.lanesAhead(laneChoices.ahead(progress), speed)
         // Added onto what the tracker decided: a copy of a fresh snapshot would lose the rule's
         // answer and the following maneuver's remembered object.
-        return if (lanes == null) decided else decided.copy(laneChoiceAhead = lanes)
+        return when {
+            runUp != null -> decided.copy(runUpLanes = runUp)
+            lanes != null -> decided.copy(laneChoiceAhead = lanes)
+            else -> decided
+        }
     }
 
     private val locationObserver = object : LocationObserver {
