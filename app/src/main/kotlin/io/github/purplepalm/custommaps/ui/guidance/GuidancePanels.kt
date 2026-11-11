@@ -165,8 +165,10 @@ private const val PENDING_CARD_ALPHA = 0.45f
  * words. It takes at most [labelShare] of the row and shrinks to fit, and shows whole or not at
  * all: a label wider than its share at the smallest size is left out, never cut. The lanes stay in
  * the middle of the row while there is room for that beside the label, and move over, and get
- * narrower, when there is not. The row is as high as one lane, with or without the label, so the
- * label never makes the card taller. A [description] is what the screen reader says for the row.
+ * narrower, when there is not. The row is as high as its lanes are without a label
+ * ([laneRowHeight]), so a label that comes or goes never changes the card's height; lanes made
+ * narrower by it stand in the middle of that height. A [description] is what the screen reader
+ * says for the row.
  */
 @Composable
 fun LanesRow(
@@ -192,12 +194,13 @@ fun LanesRow(
         val fullSlot = LANE_SLOT.roundToPx()
         // The card gives the row a width. Without one, every lane is as wide as it likes to be.
         val width = if (constraints.hasBoundedWidth) constraints.maxWidth else fullSlot * (count + 2)
-        // The label keeps to a share of the row and to the height of a lane; its text shrinks to
-        // fit, and a text that does not fit at its smallest size is left out.
-        val fits = label != null &&
-            wordsFit(measurer.measure(label, labelStyle.copy(fontSize = LANE_LABEL_MIN_SIZE), maxLines = 1, softWrap = false).size.width, width, labelShare)
+        val height = laneRowHeight(width, count, fullSlot)
+        // The label keeps to a share of the row and to its height; its text shrinks to fit, and a
+        // text that does not fit at its smallest size is left out.
+        val smallest = label?.let { measurer.measure(it, labelStyle.copy(fontSize = LANE_LABEL_MIN_SIZE), maxLines = 1, softWrap = false).size }
+        val fits = smallest != null && wordsFit(smallest.width, width, labelShare) && smallest.height <= height
         val shown = if (fits) {
-            measurables.getOrNull(count)?.measure(Constraints(maxWidth = (width * labelShare).roundToInt(), maxHeight = fullSlot))
+            measurables.getOrNull(count)?.measure(Constraints(maxWidth = (width * labelShare).roundToInt(), maxHeight = height))
         } else {
             null
         }
@@ -206,15 +209,22 @@ fun LanesRow(
         val gap = (row.slot * LANE_GAP_SHARE).roundToInt()
         val arrows = (row.slot - 2 * gap).coerceAtLeast(0)
         val glyphs = List(count) { measurables[it].measure(Constraints.fixed(arrows, arrows)) }
-        layout(width, row.slot) {
-            shown?.placeRelative(0, (row.slot - shown.height) / 2)
-            glyphs.forEachIndexed { index, glyph -> glyph.placeRelative(row.start + index * row.slot + gap, gap) }
+        val top = (height - row.slot) / 2
+        layout(width, height) {
+            shown?.placeRelative(0, (height - shown.height) / 2)
+            glyphs.forEachIndexed { index, glyph -> glyph.placeRelative(row.start + index * row.slot + gap, top + gap) }
         }
     }
 }
 
 /** Where the lanes of a row go: how wide each lane is, gap included, and where the first one starts. */
 internal data class LaneRowPlan(val slot: Int, val start: Int)
+
+/**
+ * How high a row of [lanes] lanes [width] pixels wide is: as high as a lane is wide without a label,
+ * [fullSlot] at most. A label beside the lanes never changes it.
+ */
+internal fun laneRowHeight(width: Int, lanes: Int, fullSlot: Int): Int = planLaneRow(width, lanes, fullSlot, reserved = 0).slot
 
 /**
  * Lays [lanes] lanes into a row [width] wide, of which the first [reserved] belong to the distance

@@ -71,6 +71,21 @@ class LaneRowTest {
     }
 
     @Test
+    fun `the row is as high with a label as without, whatever the label does to the lanes`() {
+        for (lanes in 1..9) {
+            val height = laneRowHeight(width = 304, lanes = lanes, fullSlot = 44)
+            assertEquals(planLaneRow(width = 304, lanes = lanes, fullSlot = 44, reserved = 0).slot, height, "$lanes lanes")
+            for (reserved in listOf(0, 60, 98, 144)) {
+                // Narrower lanes beside a label fit within it.
+                assertTrue(planLaneRow(width = 304, lanes = lanes, fullSlot = 44, reserved = reserved).slot <= height, "$lanes lanes, $reserved")
+            }
+        }
+        // Six lanes at full size, and the run-up's words beside them: the row stays 44 high.
+        assertEquals(44, laneRowHeight(width = 304, lanes = 6, fullSlot = 44))
+        assertTrue(planLaneRow(width = 304, lanes = 6, fullSlot = 44, reserved = 98).slot < 44)
+    }
+
+    @Test
     fun `beside the run-up's words the lanes get narrower and never reach under them`() {
         // Six lanes and words as wide as their whole share, 45 % of a row of 304 plus the gap.
         val reserved = (304 * LANE_WORDS_MAX_WIDTH_SHARE).toInt() + 8
