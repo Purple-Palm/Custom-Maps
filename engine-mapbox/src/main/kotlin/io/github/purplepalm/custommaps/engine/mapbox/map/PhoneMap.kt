@@ -9,6 +9,7 @@ import com.mapbox.common.Cancelable
 import com.mapbox.api.directions.v5.models.ManeuverModifier
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraState
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapView
@@ -63,6 +64,7 @@ import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
+import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
@@ -683,8 +685,9 @@ class PhoneMap internal constructor(
         routeLineApi.updateWithRouteProgress(progress) { update -> routeLineView.renderRouteLineUpdate(style, update) }
         renderManeuverArrow(style, progress)
         lastProgress = progress
-        // The engine reads the lane choices once for each update; its own observer got the same list.
-        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress))
+        // The engine reads the lane choices once for each update; its own observer got the same
+        // list, and the run-up's latch moves once for it, so the card and the camera agree.
+        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), engine.runUpKey(progress))
     }
 
     private fun onPuckMoved(point: Point) {
@@ -1003,6 +1006,14 @@ class PhoneMap internal constructor(
      * "laneDetails" is the switch for lane markings on the map, "hdRoads" what the style says about
      * them, and "hdRoadsReapplied" how often they had to be set again since the map was made: 0
      * unless something keeps turning them off.
+     *
+     * "aheadM", while the camera follows the car, is how much road the camera as shown has clear
+     * above the car, in meters, by the look-ahead model ([LookAhead]): from the car's row, the
+     * padding's bottom edge, to the padding's top edge, under the card. With the speed it says how
+     * many seconds of road the close view shows; a screenshot checks the model. The cameras add
+     * "runUp" (the exit of the run-up whose close view holds), "laneCapZoom" (the closest zoom the
+     * lanes may take and still show enough road) and "capSpeed" (the speed that floor is worked
+     * out for, the highest of the last few seconds); Smooth follow's "laneChoice" has its "key".
      */
     private fun cameraSample(): Map<String, Any?> {
         val now = SystemClock.elapsedRealtimeNanos()
@@ -1022,6 +1033,7 @@ class PhoneMap internal constructor(
             "pitch" to Motion.round(shown.pitch, 1),
             "bearing" to Motion.round(shown.bearing, 1),
             "laneDp" to Motion.round(MapScale.laneDp(shown.zoom, shown.center.latitude()), 1),
+            "aheadM" to clearRoadAhead(shown),
             "to" to mapOf(
                 "zoom" to target.zoom?.let { Motion.round(it, 2) },
                 "pitch" to target.pitch?.let { Motion.round(it, 1) },
@@ -1052,6 +1064,27 @@ class PhoneMap internal constructor(
         fixes = 0
         paddingChanges = 0
         return sample.filterValues { it != null }
+    }
+
+    /**
+     * How much road the camera as shown has clear above the car while it follows it, in whole
+     * meters ([LookAhead.metersAhead]); null in any other mode, before the padding is set, and
+     * where the model has no answer.
+     */
+    private fun clearRoadAhead(shown: CameraState): Long? {
+        val padding = padding ?: return null
+        if (_cameraMode.value != CameraMode.FOLLOWING) return null
+        val height = mapboxMap.getSize().height.toDouble()
+        val meters = LookAhead.metersAhead(
+            zoom = shown.zoom,
+            pitchDegrees = shown.pitch,
+            mapHeightPx = height,
+            carRowPx = height - padding.bottom,
+            rowPx = padding.top.toDouble(),
+            pixelRatio = mapboxMap.getMapOptions().pixelRatio.toDouble(),
+            latitude = shown.center.latitude(),
+        )
+        return if (meters.isFinite()) Math.round(meters) else null
     }
 
     // The render thread statistics are @MapboxExperimental: opted in here, for the camera line only.

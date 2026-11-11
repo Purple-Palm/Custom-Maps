@@ -69,9 +69,12 @@ internal interface GuidanceCamera {
     /**
      * The route progress of the same update of the navigator; it comes right after the location.
      * [laneChoices] are the points with lanes ahead of the car at this update, as the engine reads
-     * them from the route; the Large lane zoom goes close for the ones that count.
+     * them from the route; the Large lane zoom goes close for the ones that count. [runUpKey] is
+     * the exit of the run-up on now, from the engine's one latch for the card and every camera
+     * (`RunUpLatch`): its close view stays in from the run-up's start to the gore. Null outside a
+     * run-up.
      */
-    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>)
+    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?)
 
     /** There is no guidance, or no longer: whatever the camera kept for the drive is dropped. */
     fun onGuidanceEnded()

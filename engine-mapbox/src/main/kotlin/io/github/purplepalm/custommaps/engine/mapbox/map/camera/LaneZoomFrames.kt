@@ -5,7 +5,9 @@ import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.ui.maps.camera.data.FollowingFrameOptions
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
+import io.github.purplepalm.custommaps.nav.camera.TurnAhead
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import kotlin.math.max
@@ -175,6 +177,7 @@ internal object LaneZoomFrames {
      * @param laneWindow the lane choices' schedule is in for one now; it moves the limits only with Large
      * @param latitude where the car is; a lane's width on the screen depends on it
      * @param junction the road past the maneuver point that the data source frames besides its own
+     * @param lanesCap the closest zoom the lanes may go to and still show enough road ahead ([lanesCap])
      */
     fun beforeTunedEvaluate(
         dataSource: MapboxNavigationViewportDataSource,
@@ -184,12 +187,13 @@ internal object LaneZoomFrames {
         laneWindow: Boolean,
         latitude: Double,
         junction: JunctionPoints,
+        lanesCap: Double = Double.POSITIVE_INFINITY,
     ) {
         val options = dataSource.options.followingFrameOptions
         // With Default nothing of the drive is asked: the limits are the same on every update,
         // and the junction frame gets none of the bend's points.
         val framesManeuver = mode == LaneZoom.LARGE && framesManeuver(progress, options)
-        val limits = tunedLimits(mode, tuning, framesManeuver, laneWindow, latitude)
+        val limits = tunedLimits(mode, tuning, framesManeuver, laneWindow, latitude, lanesCap)
         options.minZoom = limits.minZoom
         options.maxZoom = limits.maxZoom
         options.bearingSmoothing.maxBearingAngleDiff = limits.bearingLead
@@ -223,21 +227,75 @@ internal object LaneZoomFrames {
      * - while the SDK frames a maneuver, the frame may be fitted until a lane is
      *   [CameraTuning.junctionLaneDp] wide; elsewhere the upper limit is the Default one;
      * - near a lane choice the frame of the road is no farther out than a lane of
-     *   [CameraTuning.freewayLaneDp], and the view turns less toward the road ahead. The frame of
-     *   a maneuver keeps the SDK's lower limit also then: the SDK applies the lower limit to that
-     *   frame too, and it is fitted around the car and the junction, so a limit above its fit
-     *   would push both off the map.
+     *   [CameraTuning.freewayLaneDp], or than [lanesCap] where that is farther out, so the road
+     *   ahead still shows; and the view turns less toward the road ahead. The frame of a maneuver
+     *   keeps the SDK's lower limit also then: the SDK applies the lower limit to that frame too,
+     *   and it is fitted around the car and the junction, so a limit above its fit would push both
+     *   off the map.
      *
      * @param framesManeuver the SDK frames the next maneuver now, not the road
      * @param laneWindow the lane choices' schedule is in for one now
      * @param latitude where the car is; a lane's width on the screen depends on it
+     * @param lanesCap the closest zoom the lanes may go to and still show enough road ahead
+     *   ([lanesCap]); infinity, or not a number, for none. It never takes the limit under the SDK's
      */
-    fun tunedLimits(mode: LaneZoom, tuning: CameraTuning, framesManeuver: Boolean, laneWindow: Boolean, latitude: Double): Limits {
+    fun tunedLimits(
+        mode: LaneZoom,
+        tuning: CameraTuning,
+        framesManeuver: Boolean,
+        laneWindow: Boolean,
+        latitude: Double,
+        lanesCap: Double = Double.POSITIVE_INFINITY,
+    ): Limits {
         if (mode != LaneZoom.LARGE) return Limits(SDK_MIN_ZOOM, tuning.defaultMaxZoom, SDK_BEARING_LEAD)
-        val minZoom = if (laneWindow && !framesManeuver) max(SDK_MIN_ZOOM, closest(tuning.freewayLaneDp, latitude, tuning)) else SDK_MIN_ZOOM
+        val lanes = closest(tuning.freewayLaneDp, latitude, tuning)
+        // The lower of the two; a cap that is not a number fails the test and caps nothing.
+        val lanesMin = if (lanesCap < lanes) lanesCap else lanes
+        val minZoom = if (laneWindow && !framesManeuver) max(SDK_MIN_ZOOM, lanesMin) else SDK_MIN_ZOOM
         val maxZoom = if (framesManeuver) max(tuning.defaultMaxZoom, closest(tuning.junctionLaneDp, latitude, tuning)) else tuning.defaultMaxZoom
         // The SDK takes the lower limit last, so the upper one may not be under it.
         return Limits(minZoom, max(maxZoom, minZoom), if (laneWindow) tuning.laneMaxBearingLead else SDK_BEARING_LEAD)
+    }
+
+    /**
+     * The closest zoom the lanes' close view may take and still show
+     * [CameraTuning.laneLookAheadSeconds] of driving at [capSpeed] above the car, seen at a tilt of
+     * [pitch] ([LookAhead.zoomFor]), on a map [mapHeightPx] high whose following padding has
+     * [paddingTop] and [paddingBottom], in pixels: the navigation SDK puts the car on the padding's
+     * bottom edge, and the padding's top is where the map is clear of the card. Worked out once per
+     * progress update. Infinity, no cap, without a speed, before the padding is set, and wherever
+     * the model has no answer.
+     *
+     * @param capSpeed the highest speed of the last [CameraTuning.laneCapSpeedSeconds] (`PeakSpeed`)
+     * @param pixelRatio pixels per dp
+     */
+    fun lanesCap(
+        tuning: CameraTuning,
+        capSpeed: Double?,
+        pitch: Double,
+        mapHeightPx: Double,
+        paddingTop: Double,
+        paddingBottom: Double,
+        pixelRatio: Double,
+        latitude: Double,
+    ): Double {
+        if (capSpeed == null || (paddingTop <= 0.0 && paddingBottom <= 0.0)) return Double.POSITIVE_INFINITY
+        return LookAhead.zoomFor(capSpeed * tuning.laneLookAheadSeconds, pitch, mapHeightPx, mapHeightPx - paddingBottom, paddingTop, pixelRatio, latitude)
+    }
+
+    /**
+     * The maneuver that ends the step of [progress] where the camera frames it as a junction: a
+     * maneuver of a kind the camera's own rule [counts], with the meters to where that framing
+     * begins, [framingMeters] before it. Null for a maneuver the view stays up for, without a
+     * banner and without a step. The lane focus keeps a close view for lanes until then when the
+     * turn comes right after them.
+     */
+    fun turnAhead(progress: RouteProgress, counts: (String) -> Boolean, framingMeters: Double): TurnAhead? {
+        val leg = progress.currentLegProgress ?: return null
+        val step = leg.currentStepProgress ?: return null
+        val type = progress.bannerInstructions?.primary()?.type() ?: return null
+        if (!counts(type)) return null
+        return TurnAhead("${progress.navigationRoute.id}/${leg.legIndex}/${step.stepIndex}", step.distanceRemaining.toDouble() - framingMeters)
     }
 
     /**

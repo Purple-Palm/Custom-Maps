@@ -29,6 +29,8 @@ import io.github.purplepalm.custommaps.nav.camera.JumpFrame
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
+import io.github.purplepalm.custommaps.nav.camera.PeakSpeed
+import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 
@@ -49,8 +51,10 @@ import io.github.purplepalm.custommaps.nav.model.LaneZoom
  * - A jump of the matched position moves the camera there at once.
  * - The Large lane zoom applies: before each frame is computed, the limits of the data source are
  *   moved so that the frame of a maneuver may be fitted close, and the frame near a lane choice on
- *   a freeway is close ([LaneZoomFrames.beforeTunedEvaluate]). The camera's animations glide there.
- *   Mapbox standard keeps its own zoom whatever the lane zoom is.
+ *   a freeway is close, no closer than what still shows a few seconds of road ahead, and stays so
+ *   for the whole run-up to an exit ([LaneZoomFrames.beforeTunedEvaluate]). The tilt stays the
+ *   SDK's. The camera's animations glide there. Mapbox standard keeps its own zoom whatever the
+ *   lane zoom is.
  *
  * In both, after a seek of a simulated drive ([onJump]) the camera goes at once to the frame of the
  * car's new place, computed with that place's own progress, as the drawn car does.
@@ -61,7 +65,7 @@ import io.github.purplepalm.custommaps.nav.model.LaneZoom
  * They carry an owner name of their own; an animation of any other owner is the driver's.
  */
 internal class NavigationCameraAdapter(
-    mapboxMap: MapboxMap,
+    private val mapboxMap: MapboxMap,
     private val cameraPlugin: CameraAnimationsPlugin,
     private val dataSource: MapboxNavigationViewportDataSource,
     private val tuned: Boolean,
@@ -95,6 +99,12 @@ internal class NavigationCameraAdapter(
     // For the tuned style: the car's speed and latitude at the latest position.
     private var speedMps: Double? = null
     private var latitude = Double.NaN
+
+    // For the tuned style: the highest speed of the last few seconds, and the lanes' look-ahead
+    // floor worked out for it at the last progress update ([LaneZoomFrames.lanesCap]).
+    private val peakSpeed = PeakSpeed(tuning)
+    private var capSpeed: Double? = null
+    private var lanesCap = Double.POSITIVE_INFINITY
 
     /** After a seek: the new place's progress frames it, and the camera goes there at once. */
     private val jumpFrame = JumpFrame()
@@ -223,16 +233,38 @@ internal class NavigationCameraAdapter(
         if (isTeleport) navigationCamera.resetFrame()
     }
 
-    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>) {
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?) {
         dataSource.onRouteProgressChanged(progress)
         if (tuned) {
+            val now = nowSeconds()
+            val options = dataSource.options.followingFrameOptions
+            val near = options.pitchNearManeuvers
             laneFocus.onProgress(
-                now = nowSeconds(),
+                now = now,
                 routeMeters = progress.distanceTraveled.toDouble(),
                 choices = laneChoices,
                 speedMps = speedMps,
                 onRoute = progress.currentState != RouteProgressState.OFF_ROUTE,
+                // A maneuver the SDK frames, as it counts them, from where it begins to frame it.
+                turnAhead = LaneZoomFrames.turnAhead(progress, { near.enabled && it !in near.excludedManeuvers }, near.triggerDistanceFromManeuver),
+                runUpKey = runUpKey,
             )
+            // The SDK's own tilt: the floor is worked out for it. A map that is going has no size
+            // to ask, and the floor stays as it was.
+            capSpeed = peakSpeed.onSpeed(now, speedMps)
+            if (mapboxMap.isValid()) {
+                val padding = dataSource.followingPadding
+                lanesCap = LaneZoomFrames.lanesCap(
+                    tuning,
+                    capSpeed = capSpeed,
+                    pitch = options.defaultPitch,
+                    mapHeightPx = mapboxMap.getSize().height.toDouble(),
+                    paddingTop = padding.top,
+                    paddingBottom = padding.bottom,
+                    pixelRatio = mapboxMap.getMapOptions().pixelRatio.toDouble(),
+                    latitude = latitude,
+                )
+            }
             LaneZoomFrames.beforeTunedEvaluate(
                 dataSource,
                 laneZoom,
@@ -241,6 +273,7 @@ internal class NavigationCameraAdapter(
                 laneWindow = laneFocus.goal > 0.0,
                 latitude = latitude,
                 junction = junction,
+                lanesCap = lanesCap,
             )
         }
         dataSource.evaluate()
@@ -251,8 +284,12 @@ internal class NavigationCameraAdapter(
 
     override fun onJump() {
         jumpFrame.onJump(SystemClock.elapsedRealtime())
-        // Mapbox standard keeps nothing of the road; Mapbox tuned only the lane choices' schedule.
-        if (tuned) laneFocus.reset(nowSeconds())
+        // Mapbox standard keeps nothing of the road; Mapbox tuned only the lane choices' schedule
+        // and the speeds driven.
+        if (tuned) {
+            laneFocus.reset(nowSeconds())
+            forgetSpeeds()
+        }
     }
 
     override fun setLaneZoom(mode: LaneZoom) {
@@ -266,6 +303,7 @@ internal class NavigationCameraAdapter(
         if (!tuned) return
         laneFocus.reset(nowSeconds())
         speedMps = null
+        forgetSpeeds()
         LaneZoomFrames.resetLimits(dataSource, tuning)
     }
 
@@ -284,6 +322,11 @@ internal class NavigationCameraAdapter(
             "laneGoal" to laneFocus.goal,
             "maxZoom" to limits.maxZoom,
             "minZoom" to limits.minZoom,
+            // Mapbox tuned: the run-up whose exit holds the close view, and the lanes' look-ahead
+            // floor at the highest recent speed.
+            "runUp" to laneFocus.runUpKey,
+            "laneCapZoom" to lanesCap.takeIf { it.isFinite() }?.let { Motion.round(it, 2) },
+            "capSpeed" to capSpeed?.let { Motion.round(it, 1) },
         )
         frameUpdates = 0
         frameUpdatesCut = 0
@@ -323,6 +366,13 @@ internal class NavigationCameraAdapter(
         idleFollowing = false
         idleEase?.cancel()
         idleEase = null
+    }
+
+    /** Nothing is kept of the speeds driven: after a jump, and when guidance ends. */
+    private fun forgetSpeeds() {
+        peakSpeed.reset()
+        capSpeed = null
+        lanesCap = Double.POSITIVE_INFINITY
     }
 
     /** The clock of [laneFocus], in seconds. */
