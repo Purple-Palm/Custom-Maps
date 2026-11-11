@@ -1700,12 +1700,14 @@ new route and at the gore, and is taken up again within 3 s after a new route, a
 route, a seek and a fork's gore, never after a new drive), `LookAheadTest` (10, at latitude 0 at the
 zoom of 14 dp lanes: the model's 198 m and 301 m at 45° and 55°, its inverse, at least 12 s at
 25, 29 and 33 m/s, no floor where the model has none, the highest speed of the last 10 s),
-`RunUpRuleTest` (29: the exit's side, edge points and points taken as one, the composed lane with
-lanes added, gone and kept for car pools, the clamps, the exit's row and every case without words,
-and the synthetic replays' rows), `CardLanesTest` (3), `LaneTargetTest` (4: which lanes have
-words), `LaneRowLogTest` (11), `RawOffsetTest` (6) and `DivergeWatchTest` (14: an exit missed on the
-synthetic approach, a car that leaves at an edge point, a ramp taken, the limits, the time the
-navigator was unsure, a return from off the route, a new route, a seek and the end of guidance).
+`RunUpRuleTest` (31: the exit's side, edge points and points taken as one, a lane the route allows
+but does not prefer, the composed lane with lanes added, gone and kept for car pools, the clamps,
+doubt farther on that takes the words from every point before it, the exit's row and every case
+without words, and the synthetic replays' rows), `CardLanesTest` (3), `LaneTargetTest` (4: which
+lanes have words), `LaneRowLogTest` (11), `RawOffsetTest` (6) and `DivergeWatchTest` (14: an exit
+missed on the synthetic approach, a car that leaves at an edge point, a ramp taken, the limits, the
+time the navigator was unsure, a return from off the route, a new route, a seek and the end of
+guidance).
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
 `LaneChoicesTest` (46 tests: the points ahead with their distances and lane counts, designated

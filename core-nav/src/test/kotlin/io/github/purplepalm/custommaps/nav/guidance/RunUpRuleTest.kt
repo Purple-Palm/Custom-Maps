@@ -273,6 +273,52 @@ class RunUpRuleTest {
     }
 
     @Test
+    fun `counts that leave doubt at a point farther on take the words from every point before it`() {
+        // The exit is taken from the third lane from the right. A, an edge point, counts exactly on
+        // its own; Q, 900 m after it, cannot take the lane the count leads to, so the lane lit at A
+        // is the careful one, and so are the words.
+        val later = Approach(
+            right,
+            listOf(at(1_500.0, "A", s(), s(), s(), s(), sr(false)), at(600.0, "Q", s(), s(false), s(), s())),
+            listOf(s(false), sr(), s(false), s(false)),
+        )
+        val atA = later.rowAt(2_000.0)
+        assertEquals("A [s s s* s sr] '' odd=composed", describe(atA))
+        assertEquals(2, atA?.need)
+        assertEquals("E [s sr* s s] '' odd=composed", describe(later.rowAt(1_499.0)))
+        assertEquals("E [s sr* s s] '3rd from right'", describe(later.rowAt(599.0)))
+        // Three edge points, a lane added between the second and the third: the first one counts
+        // exactly against the second, and still has no words.
+        val three = Approach(
+            right,
+            listOf(
+                at(1_800.0, "T1", s(), s(), s(), s(), s(), sr(false)),
+                at(1_200.0, "T2", s(), s(), s(), s(), sr(false)),
+                at(600.0, "T3", s(), s(), s(), s(), sr(false)),
+            ),
+            listOf(s(false), s(false), s(false), sr()),
+        )
+        assertEquals("T1 [s s s* s s sr] '' odd=composed", describe(three.rowAt(2_000.0)))
+        assertEquals(3, three.rowAt(2_000.0)?.need)
+        assertEquals("T2 [s s s* s sr] '' odd=composed", describe(three.rowAt(1_799.0)))
+        assertEquals("T3 [s s s s* sr] '2nd from right'", describe(three.rowAt(1_199.0)))
+        assertEquals("E [s s s sr*] 'Right lane'", describe(three.rowAt(599.0)))
+    }
+
+    @Test
+    fun `a lane the route allows but does not prefer can be used at a point on the way`() {
+        // At P the right lane leaves, and the route prefers the two left lanes: the third lane,
+        // which it allows, still leads on, so P's lane is the second from the right.
+        val lanes = arrayOf(s(), s(), open(true, s, active = false), sr(false))
+        assertEquals(1, RunUpRule.edgeOffset(lanes.toList(), right))
+        assertTrue(RunUpRule.edgeLeaves(lanes.toList(), right))
+        val allowed = Approach(right, listOf(at(600.0, "P", *lanes)), listOf(s(false), s(false), s(false), sr()))
+        val atP = allowed.rowAt(1_000.0)
+        assertEquals("P [s s s* sr] '2nd from right'", describe(atP))
+        assertEquals(1, atP?.need)
+    }
+
+    @Test
     fun `a lane that cannot be used at a point is never lit there`() {
         // The exit is taken from the second lane from the right. At P the right lane leaves, and so
         // does, by the data, the lane the count leads to: the usable lane below it is lit, without words.
