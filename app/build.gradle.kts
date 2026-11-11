@@ -150,8 +150,17 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
+// Files the unit tests read from the repository at run time instead of from the classpath: the
+// privacy policy (PrivacyPolicyTest) and resource XML (BackupRulesTest, DebugLogPathsTest,
+// OfflineChipStateTest). As inputs of the test task, a change to one runs the tests again instead of
+// taking their result from the build cache, and a missing policy fails the build.
+val privacyPolicy = rootProject.layout.projectDirectory.file("docs/PRIVACY.md")
+val appResources = layout.projectDirectory.dir("src/main/res")
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    inputs.file(privacyPolicy).withPropertyName("privacyPolicy").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(appResources).withPropertyName("appResources").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 androidComponents {
