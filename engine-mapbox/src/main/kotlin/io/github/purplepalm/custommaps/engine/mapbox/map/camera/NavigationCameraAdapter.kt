@@ -25,6 +25,7 @@ import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraState
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraStateChangedObserver
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
+import io.github.purplepalm.custommaps.nav.camera.JumpFrame
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
@@ -50,6 +51,9 @@ import io.github.purplepalm.custommaps.nav.model.LaneZoom
  *   moved so that the frame of a maneuver may be fitted close, and the frame near a lane choice on
  *   a freeway is close ([LaneZoomFrames.beforeTunedEvaluate]). The camera's animations glide there.
  *   Mapbox standard keeps its own zoom whatever the lane zoom is.
+ *
+ * In both, after a seek of a simulated drive ([onJump]) the camera goes at once to the frame of the
+ * car's new place, computed with that place's own progress, as the drawn car does.
  *
  * On the browsing map, before guidance, [NavigationCamera] has nothing to follow the car with. Both
  * styles then move the map with plain eases of the camera plugin: one to the car, and one with every
@@ -91,6 +95,9 @@ internal class NavigationCameraAdapter(
     // For the tuned style: the car's speed and latitude at the latest position.
     private var speedMps: Double? = null
     private var latitude = Double.NaN
+
+    /** After a seek: the new place's progress frames it, and the camera goes there at once. */
+    private val jumpFrame = JumpFrame()
 
     // For the camera line: the camera's frame updates, and the ones cut short by the next.
     private var frameUpdates = 0
@@ -200,12 +207,16 @@ internal class NavigationCameraAdapter(
 
     override fun onLocation(location: Location, isTeleport: Boolean) {
         dataSource.onLocationChanged(location)
+        if (tuned) {
+            speedMps = location.speed ?: speedMps
+            latitude = location.latitude
+        }
+        // After a seek the progress of the new place comes right after and frames it.
+        if (!jumpFrame.locationFrames(SystemClock.elapsedRealtime())) return
         if (!tuned) {
             dataSource.evaluate()
             return
         }
-        speedMps = location.speed ?: speedMps
-        latitude = location.latitude
         // The route progress of this update comes right after the location and evaluates.
         if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
         // The puck jumps on a teleport, and the camera with it: neither slides across the map.
@@ -234,9 +245,12 @@ internal class NavigationCameraAdapter(
         }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
+        // A seek put the car here: the camera goes to the new place's frame at once, with it.
+        if (jumpFrame.progressJumps()) navigationCamera.resetFrame()
     }
 
     override fun onJump() {
+        jumpFrame.onJump(SystemClock.elapsedRealtime())
         // Mapbox standard keeps nothing of the road; Mapbox tuned only the lane choices' schedule.
         if (tuned) laneFocus.reset(nowSeconds())
     }
@@ -247,7 +261,8 @@ internal class NavigationCameraAdapter(
     }
 
     override fun onGuidanceEnded() {
-        // Mapbox standard keeps nothing for a drive.
+        jumpFrame.reset()
+        // Mapbox standard keeps nothing else for a drive.
         if (!tuned) return
         laneFocus.reset(nowSeconds())
         speedMps = null

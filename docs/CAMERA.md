@@ -409,6 +409,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). After a maneuver the Large lane zoom lets the junction's zoom go along the same curve. |
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
 | `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
+| `JumpFrame` | `:core-nav`, `nav/camera/JumpFrame.kt` | After a seek of a simulated drive, the new place's progress frames it and the camera goes there at once; the locations before it move nothing unless that progress is 1.5 s overdue. Used by both Mapbox styles. |
 | `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt and the distance from which a new position is a jump. |
 | `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, only growing during guidance, plus a constant band under the card for the Then chip. |
 | `MapScale`, `LaneChoice`, `LaneFocus`, `ZoomPlanner`, `centerLeadSeconds` | `:core-nav`, `nav/camera/LaneZoomPlan.kt` | The Large lane zoom's math: a lane's width on the screen at a zoom, which points of a route count as a lane choice, when the view goes close for one, the zoom the camera aims at, and how far ahead of the car its centre aims. See [Lane zoom](#lane-zoom). |
@@ -754,8 +755,9 @@ Other lines:
   `toS`, `ok`, `durationS`, `fromM`, and `ms` or `why` (DRIVES.md, "What to read"). The first
   position at the new place reaches the camera as a jump: the camera lets go of what it kept of the
   road it left (`onJump`: the tilt onto a maneuver, the close view for lanes, the last junction's
-  zoom) and flies to the car as after a teleport, and the drawn car is put there at once in every
-  camera style.
+  zoom). Smooth follow then flies to the car as after a teleport; both Mapbox styles go at once to
+  the frame of the new place, computed with the progress of the same update, never with the one of
+  the place the car left. The drawn car is put there at once in every camera style.
 - An **animations** line: `reason`, `enabled` (`areAnimatorsEnabled()`), `durationScale` (the
   setting `Settings.Global.ANIMATOR_DURATION_SCALE`) and `powerSave`. It is written when the first
   activity starts and at every Start, not at app start: a process learns the real scale only when
@@ -1373,6 +1375,7 @@ Steps 1 to 4 are done, and so is the Lane zoom setting with lane details on top 
   for the next drive.
 
 Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the frame),
+`JumpFrameTest` (4: after a seek, the frame of the new place comes with its progress),
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
 jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
