@@ -4,6 +4,7 @@ import com.mapbox.bindgen.Value
 import com.mapbox.common.location.Location
 import com.mapbox.common.location.LocationExtraKeys
 import com.mapbox.geojson.Point
+import io.github.purplepalm.custommaps.nav.guidance.FixTime
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -121,5 +122,13 @@ class DeviceFixTest {
         val plain = Location.Builder().latitude(0.0).longitude(0.0).timestamp(946_684_800_000L).build()
 
         assertFalse(plain.isReplayed())
+    }
+
+    @Test
+    fun `a position's time carries the replayer's mark`() {
+        assertEquals(FixTime(105_000_000_000L, 946_684_900_000L, replayed = true), replayedLocation(mock = true).fixTime())
+        assertEquals(FixTime(105_000_000_000L, 946_684_900_000L, replayed = false), replayedLocation(mock = false).fixTime())
+        val plain = Location.Builder().latitude(0.0).longitude(0.0).timestamp(946_684_800_000L).build()
+        assertEquals(FixTime(elapsedNanos = null, wallMillis = 946_684_800_000L, replayed = false), plain.fixTime())
     }
 }

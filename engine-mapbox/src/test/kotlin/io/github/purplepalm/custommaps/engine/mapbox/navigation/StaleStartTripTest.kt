@@ -1,5 +1,8 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import com.mapbox.bindgen.Value
+import com.mapbox.common.location.Location
+import com.mapbox.common.location.LocationExtraKeys
 import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.geo.Geo
@@ -57,6 +60,19 @@ class StaleStartTripTest {
     /** Seconds since the phone started, on both clocks; the wall clock from 2000-01-01 UTC. */
     private fun at(seconds: Double) = FixTime((seconds * 1e9).toLong(), 946_684_800_000L + (seconds * 1e3).toLong())
 
+    /**
+     * A position as the SDK hands it over, measured [seconds] after the phone started: [mock] is the
+     * mark the replayer of a simulated drive sets and the navigator keeps on the positions it
+     * matches; null for a position of the phone's location service that comes without it.
+     */
+    private fun location(position: Point, seconds: Double, mock: Boolean?): Location = Location.Builder()
+        .latitude(position.latitude())
+        .longitude(position.longitude())
+        .timestamp(946_684_800_000L + (seconds * 1e3).toLong())
+        .monotonicTimestamp((seconds * 1e9).toLong())
+        .apply { if (mock != null) extra(Value.valueOf(hashMapOf(LocationExtraKeys.IS_MOCK to Value(mock)))) }
+        .build()
+
     /** One update of the navigator: its matched position, when that was measured, and its progress. */
     private fun update(position: Point, measured: FixTime) {
         matched = position
@@ -87,6 +103,26 @@ class StaleStartTripTest {
 
         assertEquals(listOf(onRoute), shown)
         assertEquals(listOf(onRoute), navigator.requestedFrom)
+        assertEquals(2, rule.staleUpdates)
+    }
+
+    @Test
+    fun `a real trip right after a simulated drive shows nothing of the drive's last position`() {
+        // The simulated drive ended at 1,000 s where the last trip ended, and the replayer had
+        // stamped its last position 1,100 s. The real trip's preview was made after that drive, so
+        // the trip starts as previewed, at 1,060 s, on the phone's newest position, from 1,058 s.
+        val driveLast = location(whereTheLastTripEnded, 1_100.0, mock = true)
+        rule.begin()
+        refresher.begin(trip = 1, plan = StartPlan.AS_PREVIEWED, routeId = route.id, chosenSummary = null)
+        update(whereTheLastTripEnded, driveLast.fixTime())
+        rule.onSourceFix(location(onRoute, 1_058.0, mock = null).fixTime())
+        update(whereTheLastTripEnded, driveLast.fixTime())
+        assertEquals(emptyList<Point>(), shown)
+
+        update(onRoute, location(onRoute, 1_058.0, mock = false).fixTime())
+        update(onRoute, location(onRoute, 1_061.0, mock = false).fixTime())
+
+        assertEquals(listOf(onRoute, onRoute), shown)
         assertEquals(2, rule.staleUpdates)
     }
 

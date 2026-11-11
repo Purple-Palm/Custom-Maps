@@ -92,8 +92,11 @@ internal fun Location.isReplayed(): Boolean {
     return (extras[LocationExtraKeys.IS_MOCK] as? Value)?.contents == true
 }
 
-/** When this position was measured, on both of its clocks, as [StaleStart] compares them. */
-internal fun Location.fixTime(): FixTime = FixTime(elapsedNanos = monotonicTimestamp, wallMillis = timestamp)
+/**
+ * When this position was measured, on both of its clocks, and whether it was replayed
+ * ([isReplayed]), as [StaleStart] compares them.
+ */
+internal fun Location.fixTime(): FixTime = FixTime(elapsedNanos = monotonicTimestamp, wallMillis = timestamp, replayed = isReplayed())
 
 /**
  * The last position the platform location service knows; needs no trip session. Asking for it
