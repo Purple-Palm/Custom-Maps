@@ -113,6 +113,9 @@ internal class MapboxNavigationEngine(
     private var replaying = false
     private var lastSessionId: String? = null
 
+    /** Whether the last trip session of this run was simulated; null before the first. */
+    private var lastTripSimulated: Boolean? = null
+
     /** Counts route commits; a commit that finishes after a newer one or after a stop is ignored. */
     private var commitCount = 0
 
@@ -605,16 +608,18 @@ internal class MapboxNavigationEngine(
                     chosenSummary = _routeOptions.value.firstOrNull()?.summary,
                 )
                 startPlan = StartPlan.AS_PREVIEWED
+                // The route the drive starts on, the first of the routes handed over.
+                val routeId = _previewRoutes.value.firstOrNull()?.id
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
                 navigation?.setNavigationRoutes(_previewRoutes.value) { result ->
                     if (commit != commitCount) {
-                        debugLog.log("routes_committed", mapOf("ignored" to "guidance ended before the routes were set"))
+                        debugLog.log("routes_committed", mapOf("routeId" to routeId, "ignored" to "guidance ended before the routes were set"))
                         return@setNavigationRoutes
                     }
                     val error = result.error
                     if (error == null) {
-                        debugLog.log("routes_committed", mapOf("ignoredAlternatives" to result.value?.ignoredAlternatives?.keys))
+                        debugLog.log("routes_committed", mapOf("routeId" to routeId, "ignoredAlternatives" to result.value?.ignoredAlternatives?.keys))
                         dispatch(GuidanceEvent.RoutesCommitted(command.simulated))
                     } else {
                         Log.e(TAG, "Navigator rejected the routes: ${error.message}")
@@ -882,9 +887,18 @@ internal class MapboxNavigationEngine(
         }
     }
 
-    /** Logs every trip session the SDK enters; this is what Mapbox bills. */
+    /**
+     * Logs every trip session the SDK enters; this is what Mapbox bills. "simulated" is the trip's;
+     * in the Idle state, which a trip ends with, it is that of the trip that just ended, and it is
+     * left out before the first trip of the app's run.
+     */
     private val sessionStateObserver = NavigationSessionStateObserver { state ->
-        debugLog.log("session_state", mapOf("state" to state.javaClass.simpleName, "sessionId" to state.sessionId, "simulated" to replaying))
+        if (state !is NavigationSessionState.Idle) lastTripSimulated = replaying
+        val simulated = if (state is NavigationSessionState.Idle) lastTripSimulated else replaying
+        debugLog.log(
+            "session_state",
+            mapOf("state" to state.javaClass.simpleName, "sessionId" to state.sessionId, "simulated" to simulated).filterValues { it != null },
+        )
         val kind = when (state) {
             is NavigationSessionState.ActiveGuidance -> TripKind.ACTIVE_GUIDANCE
             is NavigationSessionState.FreeDrive -> TripKind.FREE_DRIVE
