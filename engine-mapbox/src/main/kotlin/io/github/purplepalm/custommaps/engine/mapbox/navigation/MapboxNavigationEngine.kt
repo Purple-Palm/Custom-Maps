@@ -48,6 +48,7 @@ import io.github.purplepalm.custommaps.nav.guidance.CardUpdate
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
+import io.github.purplepalm.custommaps.nav.guidance.StaleStart
 import io.github.purplepalm.custommaps.nav.guidance.StartFreshness
 import io.github.purplepalm.custommaps.nav.guidance.StartPlan
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
@@ -113,6 +114,12 @@ internal class MapboxNavigationEngine(
 
     /** The route of the maneuver card on screen; null while there is none. */
     private var cardRouteId: String? = null
+
+    /**
+     * Tells the first updates of a trip that still carry where the trip before left the car from
+     * the trip's own. Begun with each trip session, ended when it stops.
+     */
+    private val staleStart = StaleStart()
 
     /**
      * The points with lanes ahead of the car, read from the route once for each step. The engine
@@ -556,6 +563,10 @@ internal class MapboxNavigationEngine(
                 }
             }
             is GuidanceCommand.StartTripSession -> {
+                // Before the session starts: its first updates may come at once, and the position the
+                // navigator held from the trip before must not count as this trip's.
+                staleStart.begin()
+                lastMatch = null
                 if (command.simulated) {
                     replaying = true
                     navigation?.let(replay::onAttached)
@@ -576,6 +587,7 @@ internal class MapboxNavigationEngine(
                 // Before the session stops: a refresh or a request still under way is given up,
                 // and its answer finds no trip to change.
                 startRefresher.end()
+                staleStart.end()
                 tripSessionRunning = false
                 if (replaying) {
                     navigation?.let(replay::onDetached)
@@ -627,6 +639,13 @@ internal class MapboxNavigationEngine(
 
     private val routeProgressObserver = RouteProgressObserver { progress ->
         val active = _guidanceState.value == GuidanceState.ACTIVE
+        // An update that still carries where the trip before left the car: logged, and otherwise
+        // left alone, by the card, the Then chip, the lane choices and the start plan alike.
+        if (active && staleStart.isStale(lastMatch?.enhancedLocation?.fixTime())) {
+            staleStart.countStaleUpdate()
+            debugLog.log("progress", progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "staleStart" to true))
+            return@RouteProgressObserver
+        }
         val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
         // Without the next maneuver the card stays as it is, but never with a maneuver of the route
         // before a reroute or another change of route: it waits, dimmed, for the new route's.
@@ -664,6 +683,13 @@ internal class MapboxNavigationEngine(
     private fun livePosition(): DeviceFix? = lastMatch?.enhancedLocation?.let(DeviceFix::of)?.takeIf { it.live }
 
     /**
+     * Whether [result], a matched position of this trip, is still the one the navigator held from
+     * the trip before ([StaleStart]); the map's camera and drawn car leave such a position alone.
+     * False outside a trip.
+     */
+    internal fun carriesOldPosition(result: LocationMatcherResult): Boolean = staleStart.isStale(result.enhancedLocation.fixTime())
+
+    /**
      * Writes a "lane_choice" line for each point with lanes that has come as near as the close
      * view's start: once for each point, with its lane counts, and with the reason when the view
      * stays as it is for it. With every camera style and either lane zoom, so a drive shows how
@@ -686,7 +712,10 @@ internal class MapboxNavigationEngine(
     }
 
     private val locationObserver = object : LocationObserver {
-        override fun onNewRawLocation(rawLocation: MapboxLocation) = Unit
+        // Called for every position the trip session hands the navigator, before the navigator has it.
+        override fun onNewRawLocation(rawLocation: MapboxLocation) {
+            staleStart.onSourceFix(rawLocation.fixTime())
+        }
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
             lastMatch = locationMatcherResult

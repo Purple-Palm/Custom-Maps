@@ -7,6 +7,8 @@ import com.mapbox.common.location.Location
 import com.mapbox.common.location.LocationProviderRequest
 import com.mapbox.common.location.LocationServiceFactory
 import com.mapbox.geojson.Point
+import io.github.purplepalm.custommaps.nav.guidance.FixTime
+import io.github.purplepalm.custommaps.nav.guidance.StaleStart
 import kotlin.coroutines.resume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -64,6 +66,9 @@ internal fun fixAgeMillis(monotonicNanos: Long?, timestampMillis: Long, nowNanos
     if (monotonicNanos != null) (nowNanos - monotonicNanos) / NANOS_PER_MILLI else nowMillis - timestampMillis
 
 private const val NANOS_PER_MILLI = 1_000_000L
+
+/** When this position was measured, on both of its clocks, as [StaleStart] compares them. */
+internal fun Location.fixTime(): FixTime = FixTime(elapsedNanos = monotonicTimestamp, wallMillis = timestamp)
 
 /**
  * The last position the platform location service knows; needs no trip session. Asking for it

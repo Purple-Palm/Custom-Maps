@@ -214,6 +214,13 @@ class PhoneMap internal constructor(
     /** The latest route progress of the drive; null outside guidance. */
     private var lastProgress: RouteProgress? = null
 
+    /**
+     * Whether the latest matched position is the one the navigator held from the trip before; the
+     * route progress of the same update is then left alone too. The navigator reports the position
+     * of an update before its progress.
+     */
+    private var oldPosition = false
+
     /** Whether the map is on screen, as the hosting screen says with [setVisible]. */
     private var visible = false
 
@@ -296,6 +303,11 @@ class PhoneMap internal constructor(
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
             if (guidanceState != GuidanceState.ACTIVE) return
+            // Where the trip before left the car, which a new trip reports before its own first
+            // position: the drawn car and the camera stay where they are, and so does the route
+            // line with the update that comes with it.
+            oldPosition = engine.carriesOldPosition(locationMatcherResult)
+            if (oldPosition) return
             fixes += 1
             lastFixAt = SystemClock.elapsedRealtimeNanos()
             lastKeyPoints = locationMatcherResult.keyPoints.size
@@ -625,7 +637,7 @@ class PhoneMap internal constructor(
     }
 
     private fun onRouteProgress(progress: RouteProgress) {
-        if (guidanceState != GuidanceState.ACTIVE) return
+        if (guidanceState != GuidanceState.ACTIVE || oldPosition) return
         val style = style ?: return
         routeLineApi.updateWithRouteProgress(progress) { update -> routeLineView.renderRouteLineUpdate(style, update) }
         renderManeuverArrow(style, progress)
@@ -718,6 +730,7 @@ class PhoneMap internal constructor(
         clearArrows()
         framedRoute = null
         lastProgress = null
+        oldPosition = false
         junctionPoints.clear()
         viewportDataSource.clearRouteData()
         viewportDataSource.evaluate()
