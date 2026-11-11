@@ -294,8 +294,13 @@ Google Cloud service account that Play Console allows to release to testing trac
 2. In Play Console: **Users and permissions → Invite new users**, enter the service account's email
    address, add Custom Maps under **App permissions** with **Release apps to testing tracks** and
    **View app information (read-only)**, and send the invitation.
-3. Encode the JSON key as one line of base64, as in step 2 of the debug key, save it as the
-   repository secret `PLAY_SERVICE_ACCOUNT_JSON_BASE64`, and delete the downloaded file.
+3. On GitHub open **Settings → Environments** and the environment `google-play`; the first publish
+   job creates it, otherwise create it with **New environment**. First limit it to `main`: under
+   **Deployment branches** choose **Selected branches and tags**, then **Add deployment branch or tag
+   rule**, Branch, `main`, **Add rule**. Only then, under **Environment secrets**, add the secret
+   `PLAY_SERVICE_ACCOUNT_JSON_BASE64`: the JSON key as one line of base64, encoded as in step 2 of
+   the debug key. Delete the downloaded file. Never create a repository secret of that name: any job
+   of any branch could read it.
 
 From then on the **publish** job of each green run on `main` (a push, or **Run workflow** on `main`)
 uploads the run's app bundle with [`scripts/play-upload.sh`](scripts/play-upload.sh) and makes it
@@ -304,7 +309,8 @@ next automatic update, as its Play Store settings say. The job:
 
 - runs only after the build, its tests, lint and the 16 KB check passed, and only for `main`; until
   the key is set it only says so and publishes nothing;
-- is the only job that is given the key: the build job, which runs Gradle, never is;
+- is the only job that uses the environment `google-play`, and only jobs that use it can read the
+  key: the build job, which runs Gradle, never can, and the branch rule keeps every other branch out;
 - publishes only on internal testing, never on closed or open testing or production;
 - runs one upload at a time; one that waits gives way to a newer one, and a bundle that is not newer
   than the one on internal testing is not uploaded, so the track never goes back to an older build;

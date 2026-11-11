@@ -34,8 +34,8 @@ jobs:
           cache-provider: basic
 
       # All build steps live in scripts/ci.sh. The signing secrets are optional: without the four
-      # release secrets no app bundle is built. GitHub hands a job only the secrets it names, and this
-      # job never names the Google Play key, so its runner, which runs Gradle, never holds that key.
+      # release secrets no app bundle is built. The Google Play key is a secret of the environment
+      # google-play, which this job does not use, so its runner, which runs Gradle, can never get it.
       - name: Build, test, lint and check 16 KB alignment
         id: build
         run: scripts/ci.sh
@@ -82,9 +82,11 @@ jobs:
           retention-days: 7
 
   # Publishes the app bundle of a green build of main on Google Play internal testing, and nowhere
-  # else. This is the only job that names the Google Play key, so only its runner holds the key, for
-  # every step of the job. Until the key is set, which comes after the app's first release was rolled
-  # out by hand (README, "Release through Google Play"), the job only says so and publishes nothing.
+  # else. The Google Play key is a secret of the GitHub environment google-play, whose deployment
+  # branch rule admits only main. Only jobs that use an environment can read its secrets, and this is
+  # the only job that uses it, so only its runner ever holds the key, for every step of the job. Until
+  # the key is set, which comes after the app's first release was rolled out by hand (README, "Release
+  # through Google Play"), the job only says so and publishes nothing.
   publish:
     name: Publish the app bundle on Google Play internal testing
     needs: build
@@ -94,6 +96,7 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment: google-play
     # One upload at a time: a new edit invalidates one that is still open. A running upload is never
     # cancelled; one that waits gives way to a newer one.
     concurrency:
@@ -103,10 +106,13 @@ jobs:
     env:
       PLAY_KEY_SET: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 != '' }}
     steps:
-      - name: Report that no Google Play key is set
-        if: env.PLAY_KEY_SET != 'true'
+      - name: Check for the Google Play key
         run: |
-          echo "::notice::No Google Play key yet, so nothing is published (README, Release through Google Play)."
+          if [[ "$PLAY_KEY_SET" == true ]]; then
+            echo "The Google Play key is set: the app bundle goes to internal testing."
+          else
+            echo "::notice::No Google Play key yet, so nothing is published (README, Release through Google Play)."
+          fi
 
       - name: Check out
         if: env.PLAY_KEY_SET == 'true'
