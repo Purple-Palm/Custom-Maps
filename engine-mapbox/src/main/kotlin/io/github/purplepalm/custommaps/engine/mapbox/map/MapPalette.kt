@@ -13,13 +13,29 @@ internal object MapPalette {
     /** Import id of the Standard basemap when it is loaded as the style itself. */
     private const val BASEMAP = "basemap"
 
+    /**
+     * The ground, the buildings and the roads at night, from the darkest to the lightest: a
+     * graphite ground, the buildings one small step above it, and the roads a clear step above
+     * both, so a street reads as a band on the ground also close in, where it is a plain surface.
+     * Without them Mapbox's own ground was a grey only a little darker than its roads. These are
+     * configured colors: the night light and the monochrome theme change them a little on the
+     * way to the screen, so they are a first setting, to be judged on the phone.
+     */
+    const val LAND = "#16181B"
+    const val BUILDINGS = "#282B31"
+    const val ROADS = "#4A4F57"
+    const val TRUNKS = "#5A5F67"
+    const val MOTORWAYS = "#6A6F77"
+
     private val nightConfig: Map<String, Value> = mapOf(
         "lightPreset" to Value.valueOf("night"),
         "theme" to Value.valueOf("monochrome"),
         "show3dObjects" to Value.valueOf(true),
-        "colorMotorways" to Value.valueOf("#5A5F67"),
-        "colorTrunks" to Value.valueOf("#4A4F57"),
-        "colorRoads" to Value.valueOf("#3B4047"),
+        "colorLand" to Value.valueOf(LAND),
+        "colorBuildings" to Value.valueOf(BUILDINGS),
+        "colorMotorways" to Value.valueOf(MOTORWAYS),
+        "colorTrunks" to Value.valueOf(TRUNKS),
+        "colorRoads" to Value.valueOf(ROADS),
         // The road surface where lane details are drawn. Only the color is set here: whether they
         // are drawn at all is LaneDetails' to set, and never while the style loads.
         "colorHdRoads" to Value.valueOf("#4A4F57"),
