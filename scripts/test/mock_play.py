@@ -10,8 +10,10 @@ It listens on a free port of 127.0.0.1 and writes that port to PORT_FILE, then t
 the upload id it hands out to LOG_FILE.secrets (the test makes sure neither is ever printed).
 Behaviour (environment): MOCK_TRACKS (track names, space separated), MOCK_INTERNAL_CODES
 (versionCodes already on the internal testing track), MOCK_VERSION_CODE (what the upload reports),
+MOCK_UNAVAILABLE_ONCE (the end of a path, such as :commit: the first call to it gets a 503),
 MOCK_INTERRUPT, MOCK_RANGE_PLAIN, MOCK_BAD_SHA, MOCK_TOKEN_ERROR, MOCK_NOT_FOUND, MOCK_NO_PERMISSION,
-MOCK_DRAFT_APP, MOCK_COMMIT_IN_REVIEW (set to 1 to turn on).
+MOCK_DRAFT_APP, MOCK_COMMIT_IN_REVIEW, MOCK_COMMIT_LOST (commits, then drops the connection without
+an answer) (set to 1 to turn on).
 """
 import base64
 import hashlib
@@ -128,6 +130,12 @@ class Handler(BaseHTTPRequestHandler):
             self.body()
             return self.error(401, "Request had invalid authentication credentials.", "UNAUTHENTICATED")
 
+        unavailable = os.environ.get("MOCK_UNAVAILABLE_ONCE")
+        if unavailable and path.endswith(unavailable) and not state.get("unavailable"):
+            state["unavailable"] = True
+            self.body()
+            return self.error(503, "The service is currently unavailable.", "UNAVAILABLE")
+
         if method == "POST" and path == edits:
             self.body()
             if on("MOCK_NOT_FOUND"):
@@ -202,6 +210,10 @@ class Handler(BaseHTTPRequestHandler):
                                        "complete before you try again.", "FAILED_PRECONDITION",
                                   "CHANGES_ALREADY_IN_REVIEW")
             log({"committed": True})
+            if on("MOCK_COMMIT_LOST"):
+                self.close_connection = True
+                self.connection.shutdown(2)
+                return
             return self.reply(200, {"id": EDIT})
         if method == "DELETE" and path == f"{edits}/{EDIT}":
             log({"deleted": True})

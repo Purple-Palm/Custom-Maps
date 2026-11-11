@@ -310,6 +310,9 @@ next automatic update, as its Play Store settings say. The job:
   than the one on internal testing is not uploaded, so the track never goes back to an older build;
 - never cancels changes that are in review in Play Console; the upload then fails, and the first
   run after the review publishes;
+- sends the final commit to Google Play only once; when no clear answer comes back, it says that the
+  build may already be on internal testing, and **Re-run failed jobs** then publishes it or finds it
+  there;
 - says in plain words what to do when Google refuses, for example when the first rollout by hand is
   missing or the service account lacks the permission.
 

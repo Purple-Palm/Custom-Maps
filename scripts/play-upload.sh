@@ -79,6 +79,9 @@ done
 
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/play-upload.XXXXXXXX")"
 edit_id=""
+# Set while the commit is sent and Google Play has not refused it: until it answers, nobody can say
+# whether the release went out.
+committing=""
 
 # An edit that is not committed is deleted, so that it does not linger until it expires.
 delete_edit() {
@@ -91,7 +94,13 @@ delete_edit() {
 
 cleanup() {
     local status=$?
-    if [[ -n "$edit_id" ]]; then
+    if [[ -n "$committing" ]]; then
+        # The answer to the commit was lost, was an error on Google's side, or never came because the
+        # job was stopped: the release may be out. The edit is left alone; the next edit replaces it.
+        echo "play-upload: the commit was sent, but whether Google Play applied it is unknown:" \
+            "internal testing may already have versionCode $version_code. Check Play Console, or use" \
+            "Re-run failed jobs: it publishes nothing if internal testing already has it." >&2
+    elif [[ -n "$edit_id" ]]; then
         delete_edit
         printf 'play-upload: nothing was published; the edit was deleted\n' >&2
     fi
@@ -175,6 +184,7 @@ call() {
             continue
         fi
         [[ -f "$work/response" ]] || : >"$work/response"
+        [[ "$code" != 4?? ]] || committing="" # Google Play refused the call, so nothing was committed.
         fail "$description failed: HTTP $code: $(google_error) $(hint "$code")"
     done
 }
@@ -314,9 +324,12 @@ call "releasing on internal testing" 3 PUT "$PLAY_API/applications/$package/edit
     -H 'Content-Type: application/json' --data-binary "@$work/track.json"
 
 # 6. Commit, without cancelling a review in progress. Never retried: a commit that reached Google
-#    Play but lost its answer must not be sent twice.
+#    Play but lost its answer must not be sent twice. Until Google Play answers, the outcome is
+#    unknown, and the log says so if the script ends without an answer or with a 5xx.
+committing=1
 call "committing the edit" 0 POST \
     "$PLAY_API/applications/$package/edits/$edit_id:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW" \
     -H 'Content-Type: application/json' --data-binary ''
-edit_id=""
+edit_id="" # First: a stop between these two lines must not delete the committed edit.
+committing=""
 echo "Published versionCode $version_code on internal testing (track $play_track) as a completed release."

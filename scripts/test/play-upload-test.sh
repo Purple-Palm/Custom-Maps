@@ -3,7 +3,8 @@
 # endpoints, with a throwaway key made here: no network, no secret, no Google account.
 #
 # Checked: the JWT and the edits flow, the internal testing track and no other, the resumable upload
-# and its resume, a bundle that is not newer than the track's, the errors and their plain words, and
+# and its resume, a bundle that is not newer than the track's, a commit that is never sent twice and
+# whose lost answer is reported as an unknown outcome, the errors and their plain words, and
 # in every run that nothing secret reaches the output (even under bash -x), any command line (curl,
 # jq, openssl, base64 and sed are wrapped to record their arguments) or the disk afterwards, and that
 # the key file is private while it exists. Needs bash, curl, jq, openssl, python3 and zip.
@@ -74,7 +75,13 @@ end_scenario() {
 logged() { grep -qF -- "$1" "$t/log.jsonl"; }
 not_logged() { ! grep -qF -- "$1" "$t/log.jsonl"; }
 said() { grep -qF -- "$1" "$t/out.txt"; }
+not_said() { ! grep -qF -- "$1" "$t/out.txt"; }
 last_status() { test "$status" -eq "$1"; }
+# requests_to METHOD PATH_END COUNT: the mock got COUNT requests with that method to a path ending so.
+requests_to() {
+    test "$(jq -s --arg m "$1" --arg p "$2" '[.[] | select(.method == $m and ((.path // "") | endswith($p)))] | length' \
+        "$t/log.jsonl")" -eq "$3"
+}
 
 start_mock() { # start_mock [ENV=VALUE...]
     rm -f "$t/log.jsonl" "$t/log.jsonl.secrets" "$t/port"
@@ -190,6 +197,23 @@ check "exit 1" last_status 1
 check "review explained" said "this job never cancels a review"
 check "edit deleted" logged '"deleted": true'
 check "nothing published said" said "nothing was published; the edit was deleted"
+check "commit sent once" requests_to POST :commit 1
+
+# Google Play applies the commit, but its answer never arrives: the commit is not sent again, and
+# the log does not claim that nothing was published.
+run "commit answer lost" --mock MOCK_COMMIT_LOST=1
+check "exit 1" last_status 1
+check "commit sent once" requests_to POST :commit 1
+check "outcome called unknown" said "whether Google Play applied it is unknown: internal testing may already have versionCode 1042"
+check "not said to be unpublished" not_said "nothing was published"
+check "edit left alone" not_logged '"deleted": true'
+
+# A 503 answer to the commit: retrying would publish, so the commit is not sent again either.
+run "commit unavailable" --mock MOCK_UNAVAILABLE_ONCE=:commit
+check "exit 1" last_status 1
+check "commit sent once" requests_to POST :commit 1
+check "outcome called unknown" said "whether Google Play applied it is unknown"
+check "edit left alone" not_logged '"deleted": true'
 
 run "draft app" --mock MOCK_DRAFT_APP=1
 check "exit 1" last_status 1
