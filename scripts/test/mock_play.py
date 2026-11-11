@@ -13,7 +13,9 @@ Behaviour (environment): MOCK_TRACKS (track names, space separated), MOCK_INTERN
 MOCK_UNAVAILABLE_ONCE (the end of a path, such as :commit: the first call to it gets a 503),
 MOCK_INTERRUPT, MOCK_RANGE_PLAIN, MOCK_BAD_SHA, MOCK_TOKEN_ERROR, MOCK_NOT_FOUND, MOCK_NO_PERMISSION,
 MOCK_DRAFT_APP, MOCK_COMMIT_IN_REVIEW, MOCK_COMMIT_LOST (commits, then drops the connection without
-an answer) (set to 1 to turn on).
+an answer), MOCK_UPLOAD_REFUSED (refuses the bundle as a used versionCode), MOCK_SESSION_GONE (the
+upload session has ended when the script asks how much arrived), MOCK_FOREIGN_LOCATION (the upload
+session URL names localhost, another host than the API's) (set to 1 to turn on).
 """
 import base64
 import hashlib
@@ -162,13 +164,16 @@ class Handler(BaseHTTPRequestHandler):
             state["data"] = b""
             if self.headers.get("X-Upload-Content-Type") != "application/octet-stream":
                 return self.error(400, "bad X-Upload-Content-Type")
-            location = f"http://127.0.0.1:{self.server.server_port}{upload}?uploadType=resumable&upload_id={UPLOAD_ID}"
+            host = "localhost" if on("MOCK_FOREIGN_LOCATION") else "127.0.0.1"
+            location = f"http://{host}:{self.server.server_port}{upload}?uploadType=resumable&upload_id={UPLOAD_ID}"
             return self.reply(200, None, {"Location": location})
         if method == "PUT" and path == upload and query.get("upload_id") == [UPLOAD_ID]:
             total = state["declared"]
             content_range = self.headers.get("Content-Range")
             if content_range == f"bytes */{total}":  # status query
                 self.body()
+                if on("MOCK_SESSION_GONE"):
+                    return self.error(410, "The upload session has expired.", "GONE")
                 got = len(state["data"])
                 if got >= total:
                     return self.finish_upload()
@@ -177,6 +182,9 @@ class Handler(BaseHTTPRequestHandler):
                 received = f"0-{got - 1}" if on("MOCK_RANGE_PLAIN") else f"bytes=0-{got - 1}"
                 return self.reply(308, None, {"Range": received})
             n = int(self.headers["Content-Length"])
+            if on("MOCK_UPLOAD_REFUSED"):
+                self.rfile.read(n)
+                return self.error(403, "Version code 1042 has already been used.", "PERMISSION_DENIED")
             if content_range:
                 span, size = content_range.split(" ")[1].split("/")
                 start = int(span.split("-")[0])

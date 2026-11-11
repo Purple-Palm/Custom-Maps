@@ -4,7 +4,9 @@
 #
 # Checked: the JWT and the edits flow, the internal testing track and no other, the resumable upload
 # and its resume, a bundle that is not newer than the track's, a commit that is never sent twice and
-# whose lost answer is reported as an unknown outcome, the errors and their plain words, and
+# whose lost answer is reported as an unknown outcome, retries of a 503 but not of a refusal, a
+# refused upload, an ended upload session, an upload URL on another host that never gets the token,
+# the errors and their plain words, and
 # in every run that nothing secret reaches the output (even under bash -x), any command line (curl,
 # jq, openssl, base64 and sed are wrapped to record their arguments) or the disk afterwards, and that
 # the key file is private while it exists. Needs bash, curl, jq, openssl, python3 and zip.
@@ -229,6 +231,39 @@ check "exit 1" last_status 1
 check "permission explained" said "Invite it in Play Console (Users and"
 check "email address masked" said "<email address>"
 check "project number masked" said "<number>"
+check "a refusal is not retried" requests_to POST /edits 1
+
+# A 503 is retried, as network errors and 429 are.
+run "opening an edit unavailable once" --mock MOCK_UNAVAILABLE_ONCE=/edits
+check "exit 0" last_status 0
+check "retried once" requests_to POST /edits 2
+check "committed" logged '"committed": true'
+
+# Google Play refuses the bundle itself: it is sent once, never again, and nothing is released.
+run "upload refused" --mock MOCK_UPLOAD_REFUSED=1
+check "exit 1" last_status 1
+check "bundle sent once" requests_to PUT /bundles 1
+check "no status query" not_logged '"content_range": "bytes */'
+check "versionCode explained" said "Google Play already has this versionCode"
+check "nothing released" not_logged '"track_update"'
+check "edit deleted" logged '"deleted": true'
+
+# The upload session has ended when the script asks how much of the cut-off upload arrived.
+run "upload session gone" --mock MOCK_INTERRUPT=1 --mock MOCK_SESSION_GONE=1
+check "exit 1" last_status 1
+check "session end explained" said "the upload session has expired or failed (HTTP 410); run this job again"
+check "only the upload and the status query" requests_to PUT /bundles 2
+check "nothing released" not_logged '"track_update"'
+check "edit deleted" logged '"deleted": true'
+
+# The upload session URL names another host: the access token is never sent there. This run lets
+# requests to localhost through, so a request with the token would reach the mock and be logged.
+run "upload URL on another host" --mock MOCK_FOREIGN_LOCATION=1 \
+    --env no_proxy=127.0.0.1,localhost --env NO_PROXY=127.0.0.1,localhost
+check "exit 1" last_status 1
+check "host refused" said "the upload session URL is not on googleapis.com"
+check "nothing sent there" not_logged '"method": "PUT"'
+check "edit deleted" logged '"deleted": true'
 
 run "sha256 mismatch" --mock MOCK_BAD_SHA=1
 check "exit 1" last_status 1
