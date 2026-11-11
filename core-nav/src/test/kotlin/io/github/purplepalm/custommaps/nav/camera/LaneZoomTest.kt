@@ -445,9 +445,16 @@ class LaneZoomTest {
     @Test
     fun `on a run-up the view comes in once and stays to the gore`() {
         val focus = LaneFocus(tuning)
+        val holding = ArrayList<Pair<Double, String?>>()
         val updates = approachDrive(RunUpLatch(tuning), focus) { update, _, _, _ ->
             if (update.goal == 1.0 && update.toGore >= 0.0) assertEquals(approachExit, focus.runUpKey, "at ${update.toGore} m")
+            holding.add(update.toGore to focus.current?.key)
         }
+        // The choice that holds the view: a point in its window before the exit, else the exit.
+        fun holderAt(toGore: Double) = holding.first { it.first <= toGore }.second
+        assertEquals("r1/0/3/P1a", holderAt(2_100.0))
+        assertEquals(approachExit, holderAt(1_300.0), "past P1, with P2 not yet in its window")
+        assertEquals("r1/0/3/P2", holderAt(800.0))
         // In at the run-up's reach, 2,125 m before the gore at 25 m/s.
         val first = updates.first { it.key != null }
         assertEquals(2_125.0, first.toGore, 1e-6)
@@ -493,6 +500,24 @@ class LaneZoomTest {
         }
         assertEquals(1.0, goals.first().second, "its first update, at ${goals.first().first} m")
         assertTrue(goals.filter { it.first >= 0.0 }.all { it.second == 1.0 })
+    }
+
+    @Test
+    fun `on a run-up a choice in its window, then one held, comes before the exit`() {
+        val focus = LaneFocus(tuning)
+        val point = LaneChoice("r1/0/3/1", 600.0, 5, 3, 0, onFreeway = true, atManeuver = false)
+        val exit = LaneChoice("r1/0/3/end", 2_000.0, 6, 2, 0, onFreeway = true, atManeuver = true)
+        // 25 m/s: the point is in its window of 625 m.
+        focus.onProgress(0.0, 0.0, listOf(point, exit), 25.0, runUpKey = exit.key)
+        assertEquals(point.key, focus.current?.key)
+        assertEquals(exit.key, focus.runUpKey)
+        // Braked to 10 m/s: the window is 400 m, and the point 575 m ahead, out of it, is held.
+        focus.onProgress(1.0, 25.0, listOf(point.copy(metersAhead = 575.0), exit.copy(metersAhead = 1_975.0)), 10.0, runUpKey = exit.key)
+        assertEquals(point.key, focus.current?.key)
+        // Past the point, the exit holds the view.
+        focus.onProgress(60.0, 610.0, listOf(exit.copy(metersAhead = 1_390.0)), 10.0, runUpKey = exit.key)
+        assertEquals(exit.key, focus.current?.key)
+        assertEquals(1.0, focus.goal)
     }
 
     @Test

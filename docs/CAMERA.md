@@ -1666,7 +1666,7 @@ Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
 jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
-For the lane zoom, `LaneZoomTest` in `:core-nav` (59 tests, on example latitudes and made-up
+For the lane zoom, `LaneZoomTest` in `:core-nav` (60 tests, on example latitudes and made-up
 routes). Among them:
 
 - Zoom and lane width are each other's inverse, with 18.89 for 28 dp and 17.89 for 14 dp at 35°.
@@ -1690,9 +1690,11 @@ routes). Among them:
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
 - Without a run-up the class is as before; with one, on the synthetic approach of [The run-up to a
   freeway exit](#the-run-up-to-a-freeway-exit), the view is in from the first update with the run-up
-  to 2 s and 30 m past the gore with no gap, a camera made anew mid-run-up holds at once, and a turn
-  whose framing starts 5 s or 13 s after the hold is bridged and one at 14 s is not, never past the
-  turn. The look-ahead floor caps the lanes, never the junction, never below the road.
+  to 2 s and 30 m past the gore with no gap, a lane choice in its window, or held after the car
+  braked out of it, holds the view before the exit does, a camera made anew mid-run-up holds at
+  once, and a turn whose framing starts 5 s or 13 s after the hold is bridged and one at 14 s is
+  not, never past the turn. The look-ahead floor caps the lanes, never the junction, never below
+  the road.
 
 Beside it, in `:core-nav`: `RunUpLatchTest` (13: the run-up begins by its reach with an edge point
 ahead or a choice in its window, holds through a stop and without a speed, ends off the route, on a
