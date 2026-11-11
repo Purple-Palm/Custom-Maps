@@ -266,6 +266,29 @@ class DivergeWatchTest {
     }
 
     @Test
+    fun `the navigator was unsure from the update that said so to the next`() {
+        val watch = DivergeWatch()
+        watch.onProgress(before(0.0, toGore = 20.0))
+        watch.onProgress(onRamp(1.0, pastGore = 5.0))
+        watch.onProgress(onRamp(2.0, pastGore = 30.0, uncertain = true))
+        // The next update comes 3 s later, sure again.
+        watch.onProgress(onRamp(5.0, pastGore = 105.0))
+        val missed = requireNotNull(watch.onOffRoute(6.0, 0.5, null, 25.0, false))
+        assertEquals(3.0, missed.fields["uncertainS"])
+    }
+
+    @Test
+    fun `a step the car comes back to from off the route is no diverge passed`() {
+        val watch = DivergeWatch()
+        watch.onProgress(before(0.0, toGore = 20.0))
+        // Off the route, and back on it on the exit's step, as when the navigator finds the car on
+        // the ramp after all: it did not pass the exit while the route was followed.
+        assertNull(watch.onProgress(before(1.0, toGore = 10.0).copy(offRoute = true, points = emptyList())))
+        assertNull(watch.onProgress(onRamp(2.0, pastGore = 30.0)))
+        assertNull(watch.onOffRoute(3.0, 0.5, null, 25.0, false), "no watch was started")
+    }
+
+    @Test
     fun `a new route, a seek or the end of guidance ends a watch without a line`() {
         val reroute = DivergeWatch()
         reroute.onProgress(before(0.0, toGore = 20.0))

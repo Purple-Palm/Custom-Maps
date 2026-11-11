@@ -1701,9 +1701,9 @@ zoom of 14 dp lanes: the model's 198 m and 301 m at 45° and 55°, its inverse, 
 `RunUpRuleTest` (29: the exit's side, edge points and points taken as one, the composed lane with
 lanes added, gone and kept for car pools, the clamps, the exit's row and every case without words,
 and the synthetic replays' rows), `CardLanesTest` (3), `LaneTargetTest` (4: which lanes have
-words), `LaneRowLogTest` (10), `RawOffsetTest` (6) and `DivergeWatchTest` (12: an exit missed on the
-synthetic approach, a car that leaves at an edge point, a ramp taken, the limits, a new route, a
-seek and the end of guidance).
+words), `LaneRowLogTest` (10), `RawOffsetTest` (6) and `DivergeWatchTest` (14: an exit missed on the
+synthetic approach, a car that leaves at an edge point, a ramp taken, the limits, the time the
+navigator was unsure, a return from off the route, a new route, a seek and the end of guidance).
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
 `LaneChoicesTest` (46 tests: the points ahead with their distances and lane counts, designated
