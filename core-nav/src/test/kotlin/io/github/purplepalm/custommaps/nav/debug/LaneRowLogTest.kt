@@ -205,6 +205,23 @@ class LaneRowLogTest {
     }
 
     @Test
+    fun `what the card shows now, for the lines that tell what it showed before a diverge`() {
+        val log = LaneRowLog()
+        assertNull(log.cardSource)
+        assertNull(log.cardWords)
+        log.at(snapshot(runUpLanes = edgeRow), runUpMeters = 400.0)
+        assertEquals("run_up", log.cardSource)
+        assertEquals("R1+1", log.cardWords)
+        log.onWordsShown("r/0/2/4", shown = false)
+        assertNull(log.cardWords, "left out")
+        log.at(snapshot(laneChoiceAhead = LanesAhead(Distance.miles(0.4), maneuverLanes)), choiceKey = "r/0/2/3")
+        assertEquals("choice", log.cardSource)
+        assertNull(log.cardWords)
+        log.reset()
+        assertNull(log.cardSource)
+    }
+
+    @Test
     fun `a pending card has no row, and a new drive writes its first row again`() {
         val log = LaneRowLog()
         log.at(snapshot(runUpLanes = exitRow), runUpMeters = 900.0, runUp = "r/0/2/end", start = "resume")

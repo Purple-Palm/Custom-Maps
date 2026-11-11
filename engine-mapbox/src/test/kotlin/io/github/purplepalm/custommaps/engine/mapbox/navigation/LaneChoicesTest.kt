@@ -9,6 +9,7 @@ import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoiceSkip
 import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
@@ -810,8 +811,9 @@ class LaneChoicesTest {
         val bent = intersection(4).toBuilder().bearings(listOf(170, 0)).entry(listOf(true, true)).`in`(0).out(1).build()
         assertFalse(bent.branchesOff(LaneEdge.RIGHT))
         val step = listOf(intersection(0), offRight, offLeft, onRamp)
-        assertArrayEquals(doubleArrayOf(2 * spacing), exitSideBranches(step, points, LaneEdge.RIGHT), 1e-6)
-        assertArrayEquals(doubleArrayOf(3 * spacing), exitSideBranches(step, points, LaneEdge.LEFT), 1e-6)
+        assertArrayEquals(doubleArrayOf(2 * spacing), exitSideBranches(step, points, LaneEdge.RIGHT).map { it.metersFromStepStart }.toDoubleArray(), 1e-6)
+        assertArrayEquals(doubleArrayOf(3 * spacing), exitSideBranches(step, points, LaneEdge.LEFT).map { it.metersFromStepStart }.toDoubleArray(), 1e-6)
+        assertEquals(listOf(1), exitSideBranches(step, points, LaneEdge.RIGHT).map { it.index })
         // On a road that is no freeway such a road counts for nothing.
         val street = listOf(intersection(0, freeway = false), crossing(2, branch = 30, enter = true))
         assertEquals(0, exitSideBranches(street, points, LaneEdge.RIGHT).size)
@@ -823,6 +825,11 @@ class LaneChoicesTest {
         }
         // The exit's own window opens the run-up; the road off to the right is still ahead.
         val withheld = requireNotNull(at(onStep = 100.0, toExit = 600.0, t = 0.0))
+        // The debug log's watch of diverges gets it with its key, as long as it is ahead.
+        val road = lanes.branchesAhead(metersOnStep = 100.0).single()
+        assertEquals("r/0/2/1", road.key)
+        assertEquals(2 * spacing - 100.0, road.metersAhead, 1e-6)
+        assertEquals(emptyList<DivergeWatch.Branch>(), lanes.branchesAhead(metersOnStep = 2 * spacing + 1.0))
         assertNull(withheld.target)
         assertEquals(RunUpRule.ODD_UNKNOWN_BRANCH, withheld.odd)
         assertEquals(listOf(false, false, false, false, false, true), withheld.lit(), "lit as the data says")

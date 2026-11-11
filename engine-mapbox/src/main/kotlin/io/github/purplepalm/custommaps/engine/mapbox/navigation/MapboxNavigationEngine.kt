@@ -16,6 +16,7 @@ import com.mapbox.navigation.base.route.RouterFailureType
 import com.mapbox.navigation.base.route.RouterOrigin
 import com.mapbox.navigation.base.trip.model.RouteLegProgress
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import com.mapbox.navigation.base.trip.model.RouteProgressState
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.arrival.ArrivalObserver
 import com.mapbox.navigation.core.directions.session.RoutesExtra
@@ -48,6 +49,7 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.CardContinuity
 import io.github.purplepalm.custommaps.nav.guidance.CardUpdate
+import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
@@ -230,6 +232,12 @@ internal class MapboxNavigationEngine(
 
     /** What the maneuver card's lane row drew at the last "lane_row" line; every drive starts it over. */
     private val laneRowLog = LaneRowLog()
+
+    /**
+     * Whether the car went the route's way where the road divides ("diverge_taken") or left the
+     * route there ("missed_maneuver"). Log only; reset where the Then chip's memory is.
+     */
+    private val divergeWatch = DivergeWatch()
 
     /** Writes the request of every reroute to the debug log, and changes none of them. */
     private val rerouteOptionsLogger = RerouteOptionsLogger(debugLog) { _destination.value }
@@ -643,6 +651,7 @@ internal class MapboxNavigationEngine(
             // A run-up ends there, and may begin again soon if the car lands on the same approach.
             thenTracker.reset()
             laneChoices.onSeek(nowSeconds())
+            divergeWatch.reset()
             seekHold.resume()
             showPlayed()
             logSeek(ask, ok = false, why = ReplaySeek.Why.ENDED)
@@ -666,6 +675,7 @@ internal class MapboxNavigationEngine(
             // run-up ends at the seek, and may begin again soon if the car lands on the same approach.
             thenTracker.reset()
             laneChoices.onSeek(nowSeconds())
+            divergeWatch.reset()
             seekHold.resume()
         } else {
             seekHold.cancel()
@@ -848,6 +858,7 @@ internal class MapboxNavigationEngine(
                 thenTracker.reset()
                 laneChoices.clear()
                 laneRowLog.reset()
+                divergeWatch.reset()
                 val commit = ++commitCount
                 // What follows inside the trip waits for its first progress; a start that made no
                 // plan is as previewed.
@@ -950,6 +961,7 @@ internal class MapboxNavigationEngine(
                 thenTracker.reset()
                 laneChoices.clear()
                 laneRowLog.reset()
+                divergeWatch.reset()
             }
         }
     }
@@ -1082,6 +1094,8 @@ internal class MapboxNavigationEngine(
             logLaneRow(progress, snapshot)
             _routeProgress.value = snapshot
         }
+        // Every update the guards let through, the card's row of it known: was a diverge passed?
+        if (active) watchDiverges(progress)
         // The first progress of a trip, the next one after a cancelled refresh, and the first one
         // after an answer to its replan.
         if (active && startRefresher.awaitsProgress) {
@@ -1184,6 +1198,52 @@ internal class MapboxNavigationEngine(
     }
 
     /**
+     * Gives the watch of diverges ([DivergeWatch]) [progress], an update the guards let through,
+     * with what the lane choices, the card's row and the latest matched position say of it, and
+     * writes the line that closes a watch. Reads only what the navigator already handed over.
+     */
+    private fun watchDiverges(progress: RouteProgress) {
+        val leg = progress.currentLegProgress ?: return
+        val stepProgress = leg.currentStepProgress ?: return
+        val step = stepProgress.step
+        val offRoute = progress.currentState == RouteProgressState.OFF_ROUTE
+        val match = lastMatch
+        val update = DivergeWatch.Update(
+            nowSeconds = nowSeconds(),
+            routeId = progress.navigationRoute.id,
+            stepKey = "${progress.navigationRoute.id}/${leg.legIndex}/${stepProgress.stepIndex}",
+            stepType = step?.maneuver()?.type(),
+            stepModifier = step?.maneuver()?.modifier(),
+            endsOnFreeway = step?.intersections()?.lastOrNull()?.isFreeway(),
+            metersDone = progress.distanceTraveled.toDouble(),
+            offRoute = offRoute,
+            uncertain = progress.currentState == RouteProgressState.UNCERTAIN,
+            points = laneChoices.ahead(progress),
+            branches = if (offRoute) emptyList() else laneChoices.branchesAhead(stepProgress.distanceTraveled.toDouble()),
+            probability = match?.roadEdgeMatchProbability?.toDouble(),
+            sideM = rawSideMeters(),
+            speedMps = match?.enhancedLocation?.speed,
+            teleport = match?.isTeleport,
+            card = laneRowLog.cardSource,
+            words = laneRowLog.cardWords,
+            runUp = laneChoices.runUpKey,
+        )
+        divergeWatch.onProgress(update)?.let(::logDiverge)
+    }
+
+    /**
+     * Writes a "missed_maneuver" or "diverge_taken" line, with "match" holding only where the
+     * phone's own position lay against the matched one ("raw"): no position goes into these lines.
+     */
+    private fun logDiverge(line: DivergeWatch.Line) {
+        val raw = lastRawOffset
+        debugLog.log(line.type, if (raw == null) line.fields else line.fields + ("match" to mapOf("raw" to raw)))
+    }
+
+    /** How far the phone's own position lay to the right of the latest matched one; null when not known. */
+    private fun rawSideMeters(): Double? = lastRawOffset?.get("sideM") as? Double
+
+    /**
      * The UI's view of [progress] with its [next] maneuver, the Then rule applied, and the run-up's
      * lane row or, outside a run-up, the lanes of a lane choice ahead.
      */
@@ -1245,6 +1305,13 @@ internal class MapboxNavigationEngine(
     private val offRouteObserver = OffRouteObserver { offRoute ->
         tripTally.onOffRoute(offRoute)
         debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to matchFields()))
+        // A diverge watched since the car passed it was missed, unless the guards hold the drive's
+        // updates back: then the navigator does not know where the car is.
+        if (offRoute && _guidanceState.value == GuidanceState.ACTIVE && !progressHeld()) {
+            val match = lastMatch
+            divergeWatch.onOffRoute(nowSeconds(), match?.roadEdgeMatchProbability?.toDouble(), rawSideMeters(), match?.enhancedLocation?.speed, match?.isTeleport)
+                ?.let(::logDiverge)
+        }
         // The navigator reroutes a car that left the route; the start plan steps back for it.
         if (offRoute) startRefresher.onReroute()
     }

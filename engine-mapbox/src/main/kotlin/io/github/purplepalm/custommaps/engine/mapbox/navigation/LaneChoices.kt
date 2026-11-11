@@ -12,6 +12,7 @@ import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.Polyline
 import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
@@ -71,8 +72,8 @@ internal class LaneChoices(
     /** The side the step's exit or fork leaves on ([RunUpRule.exitEdge]); null when it cannot be told. */
     private var exitEdge: LaneEdge? = null
 
-    /** Where roads without lane data leave the step on the exit's side, along the step from its start. */
-    private var branches = NO_BRANCHES
+    /** Where roads without lane data leave the step on the exit's side, in the order the car reaches them. */
+    private var branches: List<SideBranch> = emptyList()
 
     /** The run-up on now, one for the card and every camera. */
     private val latch = RunUpLatch(tuning)
@@ -173,7 +174,7 @@ internal class LaneChoices(
         points = emptyList()
         maneuverPoint = null
         exitEdge = null
-        branches = NO_BRANCHES
+        branches = emptyList()
         rowFailed = false
         reported.clear()
         try {
@@ -211,7 +212,7 @@ internal class LaneChoices(
             } else {
                 null
             }
-            val sideBranches = if (edge == null) NO_BRANCHES else exitSideBranches(intersections, stepPoints, edge)
+            val sideBranches = if (edge == null) emptyList() else exitSideBranches(intersections, stepPoints, edge)
             // All of the step or nothing: a step read in part could give words a road without
             // lane data should have withheld.
             points = read
@@ -336,6 +337,22 @@ internal class LaneChoices(
     val runUpStartKey: String? get() = latch.startKey
 
     /**
+     * The roads without lane data still ahead of a car [metersOnStep] into the loaded step that
+     * leave on the side of its exit, nearest first, keyed by their intersection as the points are,
+     * for the debug log's watch of diverges ([DivergeWatch]). Empty on most steps.
+     */
+    fun branchesAhead(metersOnStep: Double): List<DivergeWatch.Branch> {
+        if (branches.isEmpty()) return emptyList()
+        val step = stepKey ?: return emptyList()
+        val ahead = ArrayList<DivergeWatch.Branch>(branches.size)
+        for (branch in branches) {
+            val metersAhead = branch.metersFromStepStart - metersOnStep
+            if (metersAhead >= 0.0) ahead.add(DivergeWatch.Branch("$step/${branch.index}", metersAhead))
+        }
+        return ahead
+    }
+
+    /**
      * The card's row on the run-up to the exit [exitKey], for a car [metersOnStep] into the step:
      * the next point on the way where the lane at the exit's side leaves, or the exit's own lanes.
      * Lane data that cannot be made into a row costs the row, reported once a step, and never the
@@ -350,7 +367,7 @@ internal class LaneChoices(
                 val metersAhead = point.metersFromStepStart - metersOnStep
                 if (metersAhead >= 0.0) ahead.add(RunUpRule.LanePoint(point.key, metersAhead, point.routeLanes))
             }
-            val branchAhead = branches.any { it - metersOnStep >= 0.0 }
+            val branchAhead = branches.any { it.metersFromStepStart - metersOnStep >= 0.0 }
             RunUpRule.row(exitEdge, ahead, exit.key, exit.routeLanes, branchAhead)
         } catch (e: RuntimeException) {
             rowFailed = true
@@ -430,7 +447,7 @@ internal class LaneChoices(
         points = emptyList()
         maneuverPoint = null
         exitEdge = null
-        branches = NO_BRANCHES
+        branches = emptyList()
         rowFailed = false
         lastProgress = null
         lastAhead = emptyList()
@@ -468,8 +485,6 @@ internal class LaneChoices(
 
         /** Whether a maneuver of this [type], as the route's banner names it, is a lane choice where it has lanes. */
         fun isLaneChoiceManeuver(type: String?): Boolean = type in VIEW_STAYS_UP_FOR
-
-        private val NO_BRANCHES = DoubleArray(0)
     }
 }
 
@@ -621,6 +636,14 @@ internal fun stepLanes(intersections: List<StepIntersection?>, stepPoints: List<
     }
 }
 
+/** A road without lane data that leaves a step on the side of its exit ([exitSideBranches]). */
+internal class SideBranch(
+    /** Which of the step's intersections it leaves at, counted from 0. */
+    val index: Int,
+    /** Along the step's shape, from the start of the step. */
+    val metersFromStepStart: Double,
+)
+
 /**
  * Where roads leave a step on the side of its exit, [edge], at intersections the route has no
  * lane data for: along the step from its start, in the order the car reaches them. Such a road
@@ -629,17 +652,20 @@ internal fun stepLanes(intersections: List<StepIntersection?>, stepPoints: List<
  * leads to them as a freeway, count; a road that may not be entered, as an on ramp joining, is
  * none. A step with a coordinate that is none has none.
  */
-internal fun exitSideBranches(intersections: List<StepIntersection?>, stepPoints: List<Point>, edge: LaneEdge): DoubleArray {
+internal fun exitSideBranches(intersections: List<StepIntersection?>, stepPoints: List<Point>, edge: LaneEdge): List<SideBranch> {
+    val indices = ArrayList<Int>()
     val places = ArrayList<GeoPoint>()
     for (i in 1 until intersections.size) {
         val intersection = intersections[i] ?: continue
         if (intersection.laneCounts() != null || intersections[i - 1]?.isFreeway() != true) continue
         if (!intersection.branchesOff(edge)) continue
-        places.add(intersection.location().toGeoPoint() ?: return DoubleArray(0))
+        indices.add(i)
+        places.add(intersection.location().toGeoPoint() ?: return emptyList())
     }
-    if (places.isEmpty()) return DoubleArray(0)
-    val line = stepPoints.map { it.toGeoPoint() ?: return DoubleArray(0) }
-    return Polyline.distancesTo(line, places)
+    if (places.isEmpty()) return emptyList()
+    val line = stepPoints.map { it.toGeoPoint() ?: return emptyList() }
+    val meters = Polyline.distancesTo(line, places)
+    return indices.mapIndexed { n, i -> SideBranch(i, meters[n]) }
 }
 
 /**

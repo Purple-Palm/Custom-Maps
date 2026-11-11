@@ -89,6 +89,12 @@ class LaneRowLog {
         return lineIfChanged()
     }
 
+    /** Where the card's lane row comes from now, as the line names it; null before the first update. */
+    val cardSource: String? get() = row?.card?.source?.name?.lowercase()
+
+    /** The lanes to use beside the card's row now, as the line writes them; null while it shows no words. */
+    val cardWords: String? get() = row?.shownWords?.let(::words)
+
     /** A drive ends or a new one begins: its first row is written whatever it is. */
     fun reset() {
         row = null
