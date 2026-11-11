@@ -182,6 +182,12 @@ internal class MapboxNavigationEngine(
     /** True while the navigator forgets where the car was, before the replay goes to [seekAsk]. */
     private var seekResetting = false
 
+    /**
+     * Counts the navigator's resets for seeks, and the drives that ended while one was under way:
+     * the answer of a reset that is no longer the latest changes nothing, not even a later drive's.
+     */
+    private var seekResets = 0
+
     /** The navigator whose reroutes the first seek of a simulated drive turned off; null while they run. */
     private var reroutesHeldOn: MapboxNavigation? = null
 
@@ -393,10 +399,7 @@ internal class MapboxNavigationEngine(
         startRefresher.end()
         // Nor can a simulated drive be moved. The navigator goes; a new one reroutes as usual.
         if (replaying) mapboxNavigation.mapboxReplayer.unregisterObserver(replayObserver)
-        seekAsk?.let { logSeek(it, ok = false, why = ReplaySeek.Why.ENDED) }
-        seekAsk = null
-        seekResetting = false
-        seekHold.end()
+        giveUpSeek()
         reroutesHeldOn = null
         rerouting = false
         navigation = null
@@ -585,9 +588,9 @@ internal class MapboxNavigationEngine(
         seekHold.ask()
         // No more positions from where the car was.
         navigator.mapboxReplayer.stop()
-        val trip = commitCount
+        val reset = ++seekResets
         try {
-            navigator.resetTripSession { onSeekReset(navigator, trip) }
+            navigator.resetTripSession { onSeekReset(navigator, reset) }
         } catch (e: RuntimeException) {
             debugLog.error("resetTripSession", e)
             seekResetting = false
@@ -601,13 +604,15 @@ internal class MapboxNavigationEngine(
 
     /**
      * The navigator has forgotten where the car was: the replay goes to the newest release and
-     * plays on from there. A drive that ended meanwhile, or whose route changed, stays as it is.
+     * plays on from there. The answer of a reset that is no longer the latest, as of a drive that
+     * ended meanwhile, changes nothing; a drive whose route changed stays where it is.
      */
-    private fun onSeekReset(navigator: MapboxNavigation, trip: Int) {
+    private fun onSeekReset(navigator: MapboxNavigation, reset: Int) {
+        if (reset != seekResets) return
         seekResetting = false
         val ask = seekAsk ?: return
         seekAsk = null
-        if (trip != commitCount || !replaying || navigation !== navigator) {
+        if (!replaying || navigation !== navigator) {
             logSeek(ask, ok = false, why = ReplaySeek.Why.ENDED)
             return
         }
@@ -636,6 +641,18 @@ internal class MapboxNavigationEngine(
         }
         replayer.play()
         logSeek(ask, ok = moved, why = if (moved) null else if (sameRoute) ReplaySeek.Why.REFUSED else ReplaySeek.Why.ENDED)
+    }
+
+    /**
+     * A drive ends, or its navigator goes: a release still waiting for the navigator is given up,
+     * and the answer of a reset under way will change nothing.
+     */
+    private fun giveUpSeek() {
+        seekAsk?.let { logSeek(it, ok = false, why = ReplaySeek.Why.ENDED) }
+        seekAsk = null
+        seekResetting = false
+        seekResets += 1
+        seekHold.end()
     }
 
     /** The slider shows the replay's newest played position again, after a seek that was not made. */
@@ -869,9 +886,7 @@ internal class MapboxNavigationEngine(
                 staleStart.end()
                 tripSessionRunning = false
                 // A seek still waiting for the navigator is given up with the drive.
-                seekAsk?.let { logSeek(it, ok = false, why = ReplaySeek.Why.ENDED) }
-                seekAsk = null
-                seekHold.end()
+                giveUpSeek()
                 if (replaying) {
                     navigation?.let { navigator ->
                         navigator.mapboxReplayer.unregisterObserver(replayObserver)
