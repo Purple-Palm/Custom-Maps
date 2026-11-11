@@ -175,7 +175,8 @@ are signed with a different key, the upload key (see
    base64 -i custommaps-debug.p12 | pbcopy
    ```
 
-   Linux (copy the content of the file, then delete it):
+   Linux, in the folder that holds the key file and never inside this repository (copy the content
+   of the file, then delete it):
 
    ```bash
    base64 -w 0 custommaps-debug.p12 > custommaps-debug.b64
@@ -301,8 +302,9 @@ Google Cloud service account that Play Console allows to release to testing trac
    **Deployment branches** choose **Selected branches and tags**, then **Add deployment branch or tag
    rule**, Branch, `main`, **Add rule**. Only then, under **Environment secrets**, add the secret
    `PLAY_SERVICE_ACCOUNT_JSON_BASE64`: the JSON key as one line of base64, encoded as in step 2 of
-   the debug key. Delete the downloaded file. Never create a repository secret of that name: any job
-   of any branch could read it.
+   the debug key in the folder the browser saved it to, never inside this repository. Then delete
+   the JSON file and any `.b64` file for good and clear the clipboard. Never create a repository
+   secret of that name: any job of any branch could read it.
 
 From then on the **publish** job of each green run on `main` (a push, or **Run workflow** on `main`)
 uploads the run's app bundle with [`scripts/play-upload.sh`](scripts/play-upload.sh) and makes it

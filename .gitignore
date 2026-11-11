@@ -14,6 +14,14 @@ keystore.properties
 *.keystore
 *.p12
 
+# Key material that must never be committed, should it land in the working tree: base64 copies of
+# keys, a service account's JSON key saved at the top of the repository, and files named after
+# the secrets. Nested JSON files, such as map styles, are not matched.
+*.b64
+/*.json
+*_BASE64.txt
+*_PASSWORD.txt
+
 # Build outputs copied outside build/
 *.apk
 *.aab
