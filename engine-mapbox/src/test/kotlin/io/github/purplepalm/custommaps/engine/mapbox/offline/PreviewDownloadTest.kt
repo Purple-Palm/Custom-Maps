@@ -1,10 +1,14 @@
 package io.github.purplepalm.custommaps.engine.mapbox.offline
 
 import com.mapbox.common.NetworkRestriction
+import com.mapbox.common.TilesetDescriptor
+import com.mapbox.geojson.MultiLineString
 import com.mapbox.geojson.Point
+import com.mapbox.maps.GlyphsRasterizationMode
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import kotlin.math.sin
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -43,6 +47,48 @@ class PreviewDownloadTest {
     fun `for now the download may use any network`() {
         // An open question to the owner; changing this constant is the whole change.
         assertEquals(NetworkRestriction.NONE, PreviewDownload.NETWORK)
+    }
+
+    @Test
+    fun `the region's tiles are the style at both zooms, drawn for the screen`() {
+        val options = PreviewDownload.descriptorOptions(pixelRatio = 2.75f)
+
+        assertEquals(PreviewDownload.STYLE, options.styleURI)
+        // Each zoom is 0 when it is left out.
+        assertEquals(11.toByte(), options.minZoom)
+        assertEquals(16.toByte(), options.maxZoom)
+        assertEquals(2.75f, options.pixelRatio)
+        assertNull(options.tilesets)
+    }
+
+    @Test
+    fun `the region is loaded from the routes' start, taking what the phone has, over the chosen networks`() {
+        val geometry = MultiLineString.fromLngLats(listOf(road(points = 3, step = 500.0)))
+        // Made by the offline manager on the phone; a stand-in here, with no native side.
+        val descriptor = object : TilesetDescriptor(0L) {}
+        val origin = at(east = 10.0, north = 20.0)
+
+        val options = PreviewDownload.loadOptions(geometry, listOf(descriptor), origin)
+
+        assertSame(geometry, options.geometry)
+        assertEquals(listOf(descriptor), options.descriptors)
+        assertEquals(origin, options.startLocation)
+        // Tiles past their date are taken as they are, and the network is the one constant's.
+        assertTrue(options.acceptExpired)
+        assertEquals(PreviewDownload.NETWORK, options.networkRestriction)
+        // The SDK does not implement an average rate, and nothing forces a refresh.
+        assertNull(options.averageBytesPerSecond)
+        assertNull(options.extraOptions)
+        assertNull(options.metadata)
+    }
+
+    @Test
+    fun `the style's own files are loaded anew when past their date, ideographs drawn on the phone`() {
+        val options = PreviewDownload.stylePackOptions()
+
+        assertFalse(options.acceptExpired)
+        assertEquals(GlyphsRasterizationMode.IDEOGRAPHS_RASTERIZED_LOCALLY, options.glyphsRasterizationMode)
+        assertNull(options.extraOptions)
     }
 
     @Test

@@ -1,9 +1,15 @@
 package io.github.purplepalm.custommaps.engine.mapbox.offline
 
 import com.mapbox.common.NetworkRestriction
+import com.mapbox.common.TileRegionLoadOptions
+import com.mapbox.common.TilesetDescriptor
+import com.mapbox.geojson.Geometry
 import com.mapbox.geojson.MultiLineString
 import com.mapbox.geojson.Point
+import com.mapbox.maps.GlyphsRasterizationMode
 import com.mapbox.maps.Style
+import com.mapbox.maps.StylePackLoadOptions
+import com.mapbox.maps.TilesetDescriptorOptions
 import io.github.purplepalm.custommaps.nav.geo.Geo
 
 /**
@@ -108,6 +114,44 @@ internal object PreviewDownload {
         val kept = routes.filter { it.size >= 2 }.map { thin(it) }
         return if (kept.isEmpty()) null else Shape(MultiLineString.fromLngLats(kept.map { it.line }), kept)
     }
+
+    /**
+     * Which tiles the region is made of: [STYLE] from the town band to the street band ([ZOOMS]),
+     * drawn for [pixelRatio], the screen's pixels for each density-independent one. Both zooms are
+     * always set, since each is 0 when left out.
+     */
+    fun descriptorOptions(pixelRatio: Float): TilesetDescriptorOptions = TilesetDescriptorOptions.Builder()
+        .styleURI(STYLE)
+        .minZoom(ZOOMS.min.toByte())
+        .maxZoom(ZOOMS.max.toByte())
+        .pixelRatio(pixelRatio)
+        .build()
+
+    /**
+     * How the store is asked for the region: the tiles of [descriptors] along [geometry], loaded
+     * outward from [origin], over the networks [NETWORK] allows. Tiles the phone has are taken as
+     * they are, also past their date. No average rate is set: the SDK does not implement it, so
+     * only the network restriction limits what the download costs.
+     */
+    fun loadOptions(geometry: Geometry, descriptors: List<TilesetDescriptor>, origin: Point): TileRegionLoadOptions =
+        TileRegionLoadOptions.Builder()
+            .geometry(geometry)
+            .descriptors(descriptors)
+            .startLocation(origin)
+            .acceptExpired(true)
+            .networkRestriction(NETWORK)
+            .build()
+
+    /**
+     * How the style's own files are loaded. Ideographs are drawn with the phone's own font, as the
+     * Maps SDK suggests, and other glyphs are loaded. Files past their date are loaded anew: the
+     * Maps SDK's guide says a style that is on the phone as a pack is not brought up to date until
+     * the pack is loaded again, so this is also how the map's look stays current.
+     */
+    fun stylePackOptions(): StylePackLoadOptions = StylePackLoadOptions.Builder()
+        .glyphsRasterizationMode(GlyphsRasterizationMode.IDEOGRAPHS_RASTERIZED_LOCALLY)
+        .acceptExpired(false)
+        .build()
 
     private fun meters(a: Point, b: Point): Double = Geo.meters(a.latitude(), a.longitude(), b.latitude(), b.longitude())
 }

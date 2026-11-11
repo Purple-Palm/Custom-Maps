@@ -4,20 +4,16 @@ import android.os.SystemClock
 import com.mapbox.bindgen.Expected
 import com.mapbox.common.TileRegion
 import com.mapbox.common.TileRegionError
-import com.mapbox.common.TileRegionLoadOptions
 import com.mapbox.common.TileRegionLoadProgress
 import com.mapbox.common.TileStore
 import com.mapbox.common.TilesetDescriptor
 import com.mapbox.geojson.Point
-import com.mapbox.maps.GlyphsRasterizationMode
 import com.mapbox.maps.MapboxMap
 import com.mapbox.maps.MapboxMapsOptions
 import com.mapbox.maps.OfflineManager
 import com.mapbox.maps.StylePack
 import com.mapbox.maps.StylePackError
-import com.mapbox.maps.StylePackLoadOptions
 import com.mapbox.maps.StylePackLoadProgress
-import com.mapbox.maps.TilesetDescriptorOptions
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.utils.DecodeUtils.completeGeometryToLineString
 import com.mapbox.navigation.core.MapboxNavigation
@@ -89,21 +85,10 @@ internal class OfflineData(
      */
     private val offlineManager by lazy { OfflineManager() }
 
-    /**
-     * Which tiles the preview's region is made of: the phone map's style from the town band to the
-     * street band. Both zooms are always set, since each is 0 when left out, and the pixel ratio
-     * is the screen's.
-     */
-    private val previewDescriptor: TilesetDescriptor by lazy {
-        offlineManager.createTilesetDescriptor(
-            TilesetDescriptorOptions.Builder()
-                .styleURI(PreviewDownload.STYLE)
-                .minZoom(PreviewDownload.ZOOMS.min.toByte())
-                .maxZoom(PreviewDownload.ZOOMS.max.toByte())
-                .pixelRatio(pixelRatio)
-                .build(),
-        )
-    }
+    /** Which tiles the preview's region is made of ([PreviewDownload.descriptorOptions]). */
+    private val previewDescriptorOptions by lazy { PreviewDownload.descriptorOptions(pixelRatio) }
+
+    private val previewDescriptor: TilesetDescriptor by lazy { offlineManager.createTilesetDescriptor(previewDescriptorOptions) }
 
     /** The shape of the newest preview's routes being put together off the main thread. */
     private var previewGeometry: Job? = null
@@ -211,22 +196,18 @@ internal class OfflineData(
         val load = Download<TileRegionLoadProgress>(SystemClock.elapsedRealtimeNanos(), number, routes)
         regionLoad = load
         try {
-            val options = TileRegionLoadOptions.Builder()
-                .geometry(shape.geometry)
-                .descriptors(listOf(previewDescriptor))
-                .startLocation(origin)
-                .acceptExpired(true)
-                .networkRestriction(PreviewDownload.NETWORK)
-                .build()
+            val options = PreviewDownload.loadOptions(shape.geometry, listOf(previewDescriptor), origin)
+            // What the store is really asked for, read back from the options it gets.
+            val descriptor = previewDescriptorOptions
             debugLog.log(
                 "offline_region_start",
                 OfflineLines.regionStart(
                     load = number,
                     routes = routes,
                     points = shape.routes.sumOf { it.line.size },
-                    zooms = PreviewDownload.ZOOMS,
-                    pixelRatio = pixelRatio,
-                    network = PreviewDownload.NETWORK.name,
+                    zooms = ZoomBand(descriptor.minZoom.toInt(), descriptor.maxZoom.toInt()),
+                    pixelRatio = descriptor.pixelRatio,
+                    network = options.networkRestriction.name,
                     routeMeters = shape.routes.map { it.routeMeters },
                     keptMeters = shape.routes.map { it.keptMeters },
                     maxMeters = PreviewDownload.MAX_ROUTE_METERS,
@@ -284,23 +265,17 @@ internal class OfflineData(
      * Loads the style's own files (the style, its fonts and images), which the map needs to open
      * without a connection. Asked for with the first preview of a run and, until a load has
      * succeeded, with each one after it; then not again in this run. Files past their date are
-     * loaded anew. The Maps SDK's guide says a style that is on the phone as a pack is not brought
-     * up to date until the pack is loaded again, so this is also how the map's look stays current.
+     * loaded anew ([PreviewDownload.stylePackOptions]).
      */
     private fun loadStylePack() {
         if (!stylePack.begin()) return
         val load = Download<StylePackLoadProgress>(SystemClock.elapsedRealtimeNanos())
         stylePackLoad = load
         try {
-            val options = StylePackLoadOptions.Builder()
-                // Ideographs are drawn with the phone's own font, as the Maps SDK suggests; other glyphs are loaded.
-                .glyphsRasterizationMode(GlyphsRasterizationMode.IDEOGRAPHS_RASTERIZED_LOCALLY)
-                .acceptExpired(false)
-                .build()
             // Both callbacks come on a background thread.
             load.cancelable = offlineManager.loadStylePack(
                 PreviewDownload.STYLE,
-                options,
+                PreviewDownload.stylePackOptions(),
                 { progress -> load.progress = progress },
                 { result -> onStylePackLoaded(load, result) },
             )
