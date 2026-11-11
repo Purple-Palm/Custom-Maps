@@ -17,6 +17,9 @@ class StaleStartTest {
     /** A position with the wall clock only, as from a source without elapsed realtime. */
     private fun wallOnly(seconds: Double) = FixTime(elapsedNanos = null, wallMillis = wallAtBoot + (seconds * 1e3).toLong())
 
+    /** A position played by a simulated drive, stamped [seconds] after boot by its replayer. */
+    private fun replayed(seconds: Double) = at(seconds).copy(replayed = true)
+
     @Test
     fun `outside a trip nothing is stale`() {
         val rule = StaleStart()
@@ -98,7 +101,69 @@ class StaleStartTest {
         val rule = StaleStart()
         rule.begin()
         assertTrue(rule.isStale(at(1_900.0)))
-        rule.onSourceFix(at(2_100.0))
+        rule.onSourceFix(replayed(2_100.0))
+        assertFalse(rule.isStale(replayed(2_100.0)))
+        assertFalse(rule.isStale(replayed(2_101.0)))
+        assertTrue(rule.isStale(at(1_900.0)))
+    }
+
+    @Test
+    fun `a real trip right after a simulated drive leaves the drive's last position alone`() {
+        // The simulated drive ended at 1,000 s, its last position stamped 1,100 s by the replayer.
+        // A real trip starts at 1,060 s; the phone's newest position then is from 1,058 s.
+        val rule = StaleStart()
+        rule.begin()
+        assertTrue(rule.isStale(replayed(1_100.0)))
+        rule.onSourceFix(at(1_058.0))
+        // By its time alone the drive's last position would count as the trip's.
+        assertFalse(StaleStart.measuredBefore(replayed(1_100.0), at(1_058.0)))
+        assertTrue(rule.isStale(replayed(1_100.0)))
+        assertTrue(rule.isStale(replayed(1_099.9)))
+        assertFalse(rule.isStale(at(1_058.0)))
+        assertFalse(rule.isStale(at(1_061.0)))
+        // The drive's last position once more, after the trip's own: still the old one.
+        rule.onSourceFix(at(1_061.0))
+        assertTrue(rule.isStale(replayed(1_100.0)))
+    }
+
+    @Test
+    fun `a trip fed by a mock location app is told by the times alone`() {
+        // Every position of the trip carries the mark, as those of a simulated drive do. The trip
+        // before ended at 300 s; this one starts at 500 s.
+        val rule = StaleStart()
+        rule.begin()
+        rule.onSourceFix(replayed(500.0))
+        assertFalse(rule.isStale(replayed(500.0)))
+        assertFalse(rule.isStale(replayed(499.5)))
+        assertFalse(rule.isStale(replayed(620.0)))
+        assertTrue(rule.isStale(replayed(300.0)))
+        assertTrue(rule.isStale(at(300.0)))
+    }
+
+    @Test
+    fun `the positions of a mock location app that starts during the trip are the trip's`() {
+        // The trip begins on the phone's own position from 600 s; from 610 s a mock location app
+        // hands over the positions.
+        val rule = StaleStart()
+        rule.begin()
+        rule.onSourceFix(at(600.0))
+        rule.onSourceFix(replayed(610.0))
+        assertFalse(rule.isStale(replayed(610.0)))
+        rule.onSourceFix(replayed(611.0))
+        assertFalse(rule.isStale(replayed(611.0)))
+        // Once the phone's own positions are back, it is the newest that decides again.
+        rule.onSourceFix(at(612.0))
+        assertTrue(rule.isStale(replayed(611.0)))
+        assertFalse(rule.isStale(at(612.0)))
+    }
+
+    @Test
+    fun `an unmarked position in a simulated drive is told by its time`() {
+        // Should the navigator drop the mark from the positions it matches, a simulated drive is
+        // told as before, by when its positions were stamped.
+        val rule = StaleStart()
+        rule.begin()
+        rule.onSourceFix(replayed(2_100.0))
         assertFalse(rule.isStale(at(2_100.0)))
         assertFalse(rule.isStale(at(2_101.0)))
         assertTrue(rule.isStale(at(1_900.0)))
