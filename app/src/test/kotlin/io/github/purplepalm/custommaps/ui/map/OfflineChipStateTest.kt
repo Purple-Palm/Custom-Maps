@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.ui.map
 
+import android.content.ActivityNotFoundException
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
@@ -284,6 +285,11 @@ class OfflineChipStateTest {
     }
 
     @Test
+    fun `only the blocked sentence offers Settings`() {
+        assertEquals(listOf(OfflineReason.BLOCKED), OfflineReason.entries.filter(::offersSettings))
+    }
+
+    @Test
     fun `the sentences and the short word are the ones in the drive notes`() {
         val strings = strings()
         assertEquals("No internet. The map shows only areas saved on the phone; guidance continues.", strings["offline_no_network"])
@@ -318,8 +324,14 @@ class OfflineChipStateTest {
         val tried = mutableListOf<String>()
         assertEquals(data, openFirst(DATA_SETTINGS_ACTIONS) { tried.add(it) })
         assertEquals(listOf(data), tried)
-        // Without the data page the details page opens.
-        assertEquals(details, openFirst(DATA_SETTINGS_ACTIONS) { it == details })
+        // Without the data page, as the system says by throwing, the details page opens.
+        assertEquals(details, openFirst(DATA_SETTINGS_ACTIONS) { if (it != details) throw ActivityNotFoundException() })
+    }
+
+    @Test
+    fun `a page that is not for other apps to open is passed over`() {
+        val details = "android.settings.APPLICATION_DETAILS_SETTINGS"
+        assertEquals(details, openFirst(DATA_SETTINGS_ACTIONS) { if (it != details) throw SecurityException() })
     }
 
     @Test
@@ -328,7 +340,7 @@ class OfflineChipStateTest {
         assertNull(
             openFirst(DATA_SETTINGS_ACTIONS) {
                 tried.add(it)
-                false
+                throw ActivityNotFoundException()
             },
         )
         assertEquals(DATA_SETTINGS_ACTIONS, tried)

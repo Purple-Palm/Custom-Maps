@@ -144,6 +144,13 @@ internal fun shownOfflineReason(
         }
     }.distinctUntilChanged()
 
+/**
+ * Whether the chip's sentence for [reason] comes with a Settings button: only when Android keeps
+ * the app off the network, which the app's own system pages can change. Nothing there helps
+ * without a network or without internet.
+ */
+internal fun offersSettings(reason: OfflineReason): Boolean = reason == OfflineReason.BLOCKED
+
 /** The chip's sentence for [reason]; null when the app is online and there is nothing to say. */
 @StringRes
 internal fun offlineSentenceRes(reason: OfflineReason): Int? = when (reason) {
@@ -208,7 +215,7 @@ fun OfflineChip(reason: State<OfflineReason>, onOpenSettings: () -> Unit, modifi
     val current = reason.value
     val sentence = offlineSentenceRes(current)
     if (sentence != null) {
-        val blocked = current == OfflineReason.BLOCKED
+        val blocked = offersSettings(current)
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -304,9 +311,20 @@ internal val DATA_SETTINGS_ACTIONS = listOf(
 
 /**
  * Opens the first of [actions] that [start] can open, and returns it; null when it could open
- * none. [start] answers false for a page this phone does not have.
+ * none. [start] throws, as `startActivity` does, for a page this phone does not have
+ * ([ActivityNotFoundException]) or does not let other apps open ([SecurityException]); the next
+ * one is tried then, and nothing else stops.
  */
-internal fun openFirst(actions: List<String>, start: (String) -> Boolean): String? = actions.firstOrNull(start)
+internal fun openFirst(actions: List<String>, start: (String) -> Unit): String? = actions.firstOrNull { action ->
+    try {
+        start(action)
+        true
+    } catch (e: ActivityNotFoundException) {
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+}
 
 /**
  * Opens this app's data settings for the chip's Settings button, and notes in the debug log which
@@ -314,17 +332,7 @@ internal fun openFirst(actions: List<String>, start: (String) -> Boolean): Strin
  */
 internal fun Context.openDataSettings(debugLog: DebugLog) {
     val app = Uri.fromParts("package", packageName, null)
-    val opened = openFirst(DATA_SETTINGS_ACTIONS) { action ->
-        try {
-            startActivity(Intent(action, app))
-            true
-        } catch (e: ActivityNotFoundException) {
-            false
-        } catch (e: SecurityException) {
-            // A page that exists but is not for other apps to open.
-            false
-        }
-    }
+    val opened = openFirst(DATA_SETTINGS_ACTIONS) { action -> startActivity(Intent(action, app)) }
     debugLog.log("offline_settings", mapOf("opened" to opened))
 }
 
