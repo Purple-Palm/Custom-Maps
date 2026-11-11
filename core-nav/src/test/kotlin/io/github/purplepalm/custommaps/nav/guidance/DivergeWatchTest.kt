@@ -152,7 +152,7 @@ class DivergeWatchTest {
         assertEquals(
             mapOf(
                 "kind" to "maneuver",
-                "type" to "off ramp",
+                "maneuverType" to "off ramp",
                 "modifier" to "slight right",
                 "key" to "r/0/2/end",
                 "freeway" to true,
@@ -201,7 +201,8 @@ class DivergeWatchTest {
         assertEquals(0.4, missed.fields["probMin"])
         assertEquals(9.0, missed.fields["sideMax"])
         assertEquals(false, missed.fields["teleportAtOff"])
-        assertFalse("type" in missed.fields, "a point where the route goes straight on is no maneuver")
+        assertFalse("maneuverType" in missed.fields, "a point where the route goes straight on is no maneuver")
+        assertFalse("modifier" in missed.fields)
     }
 
     @Test

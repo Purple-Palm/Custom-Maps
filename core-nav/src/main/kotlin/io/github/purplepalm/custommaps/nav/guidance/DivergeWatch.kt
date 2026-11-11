@@ -261,7 +261,8 @@ class DivergeWatch(private val tuning: CameraTuning = CameraTuning.PHONE) {
             val missed = offRoute && !over()
             val fields = mapOf(
                 "kind" to kind,
-                "type" to type,
+                // Not "type": that is the line's own, and the log would write this one as "field_type".
+                "maneuverType" to type,
                 "modifier" to modifier,
                 "key" to key,
                 "freeway" to freeway,
