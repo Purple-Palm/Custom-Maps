@@ -10,8 +10,9 @@ Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#ch
 
 ## In short
 
-- The app has no account, no ads, no analytics or crash reporting service and no server of its own.
-  The developer receives no data from the app.
+- The app has no account, no ads, no analytics or crash reporting service and no server of its own,
+  and it sends the developer nothing. Google Play shows the developer some reports that Google itself
+  collects; see [No other third party](#no-other-third-party).
 - Maps, routes, traffic and search come from Mapbox. To provide them, the Mapbox software inside the
   app sends Mapbox the phone's location, what you search for, where you plan routes to, your Mapbox
   access token, and usage and device details. You can turn off Mapbox's telemetry with the (i) button
@@ -101,9 +102,14 @@ and routes and guidance do not work.
 No other company receives data from the app: there are no ads, no analytics and no crash reporting
 service. The Mapbox software may use the network component of Google Play services on the phone to
 make its connections, which go to Mapbox. Google Play, which installs and updates the app, and
-Android's backup are Google services under Google's own privacy policy. Two buttons in Settings open a
-web page in your browser, Mapbox's usage statistics and this policy; those sites see the visit as any
-other.
+Android's backup are Google services under Google's own privacy policy. In Play Console, Google shows
+the developer crash and "app not responding" reports from phones whose users chose to share usage and
+diagnostics data with Google, and, for test versions, "certain data on your use of the app (such as
+device information, app usage information, and user-triggered events)". Turning that sharing off in
+the phone's Google settings stops the crash and "app not responding" reports from your phone. Testers
+are added by the email address of their Google account, which stays on the developer's testers list.
+Two buttons in Settings open a web page in your browser, Mapbox's usage statistics and this policy;
+those sites see the visit as any other.
 
 The app is meant for adult drivers and is not directed to children.
 
@@ -117,7 +123,9 @@ The app is meant for adult drivers and is not directed to children.
   phone's backup in the backup settings of that account.
 - **At Mapbox:** use Mapbox's [data request form](https://www.mapbox.com/legal/ccpa-deletion-request);
   the [Mapbox Privacy Policy](https://www.mapbox.com/legal/privacy) describes your other rights.
-- **With the developer:** there is nothing to delete, because the developer receives no data. A debug
+- **With the developer:** the app sends the developer nothing to delete, and Google keeps the Play
+  Console reports under its own privacy policy. To be taken off the testers list, or to have a debug
+  log you sent to the developer deleted, ask the developer (see [Contact](#contact)). Any other debug
   log you shared is with the app or the person you shared it with.
 
 ## Changes
