@@ -461,7 +461,9 @@ Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a p
   tens of MB for a new area, reused on later drives. Every download writes into the log how many
   bytes it really loaded. Data outside tile regions is capped at 1 GB by default.
   The preview download also runs on mobile data when routes are planned on the road. Whether it
-  should wait for Wi-Fi is an open question to the owner; in the code it is one constant.
+  should wait for Wi-Fi is an open question to the owner. For the tile region it is one constant
+  in the code; the style pack has no network option in the SDK, so Wi-Fi only would need a second
+  change for it.
 - **Offline chip.** 3 s after the app loses internet a chip says so, and it goes at once when the
   internet is back. The delay hides a normal handover from Wi-Fi to mobile data. A reason that
   changes while the chip is up changes what it says at once.

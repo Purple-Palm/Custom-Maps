@@ -45,7 +45,8 @@ class PreviewDownloadTest {
 
     @Test
     fun `for now the download may use any network`() {
-        // An open question to the owner; changing this constant is the whole change.
+        // An open question to the owner. This constant limits the tile region only: the SDK has no
+        // network option for the style pack.
         assertEquals(NetworkRestriction.NONE, PreviewDownload.NETWORK)
     }
 

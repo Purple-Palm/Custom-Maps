@@ -32,10 +32,15 @@ internal object PreviewDownload {
     val ZOOMS = ZoomBand(min = OfflineAreas.TOWN_ZOOMS.min, max = OfflineAreas.STREET_ZOOMS.max)
 
     /**
-     * Which networks the download may use: for now any, mobile data included, so routes planned on
-     * the road are covered too. Whether it should wait for a network that costs nothing is an open
-     * question to the owner; a setting may take the place of this constant, and
+     * Which networks the tile region may load over: for now any, mobile data included, so routes
+     * planned on the road are covered too. Whether it should wait for a network that costs nothing
+     * is an open question to the owner; a setting may take the place of this constant, and
      * [NetworkRestriction.DISALLOW_EXPENSIVE] is the value that waits.
+     *
+     * It does not cover the style's own files ([stylePackOptions]): the Maps SDK has no network
+     * option for a style pack, so with the other value they would still load over mobile data,
+     * once in a run and again when past their date. Waiting for Wi-Fi also needs the style pack
+     * started only on a network that costs nothing.
      */
     val NETWORK: NetworkRestriction = NetworkRestriction.NONE
 
