@@ -63,7 +63,10 @@ object ReplaySeek {
         /** A newer release came before this one was carried out, and goes instead. */
         REPLACED("replaced"),
 
-        /** The drive ended, or the route changed, before the seek was carried out. */
+        /**
+         * The drive ended, the route changed, or the replay started over on an update of the
+         * routes, before the seek was carried out.
+         */
         ENDED("ended"),
 
         /** The navigator or the replayer would not do it. */

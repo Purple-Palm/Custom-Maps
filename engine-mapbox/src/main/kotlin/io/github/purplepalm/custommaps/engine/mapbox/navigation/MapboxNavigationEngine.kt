@@ -586,11 +586,14 @@ internal class MapboxNavigationEngine(
         }
         seekResetting = true
         seekHold.ask()
+        // What the replayer holds while it stands, by its first position's time: Mapbox's replay
+        // session may start the drive over meanwhile ([onSeekReset]).
+        val heldFirst = -navigator.mapboxReplayer.eventSeconds(0.0)
         // No more positions from where the car was.
         navigator.mapboxReplayer.stop()
         val reset = ++seekResets
         try {
-            navigator.resetTripSession { onSeekReset(navigator, reset) }
+            navigator.resetTripSession { onSeekReset(navigator, reset, heldFirst) }
         } catch (e: RuntimeException) {
             debugLog.error("resetTripSession", e)
             seekResetting = false
@@ -606,8 +609,14 @@ internal class MapboxNavigationEngine(
      * The navigator has forgotten where the car was: the replay goes to the newest release and
      * plays on from there. The answer of a reset that is no longer the latest, as of a drive that
      * ended meanwhile, changes nothing; a drive whose route changed stays where it is.
+     *
+     * While the replay stands, Mapbox's replay session takes any update of the routes (a refresh,
+     * new alternatives) for a new route: it puts the replay back to the route's start and plays it
+     * at once. [heldFirst], the time of the first position the replayer held when it was stopped,
+     * tells that apart. The drive then goes on from the start, as a jump, and the replay is not
+     * started a second time.
      */
-    private fun onSeekReset(navigator: MapboxNavigation, reset: Int) {
+    private fun onSeekReset(navigator: MapboxNavigation, reset: Int, heldFirst: Double) {
         if (reset != seekResets) return
         seekResetting = false
         val ask = seekAsk ?: return
@@ -617,6 +626,15 @@ internal class MapboxNavigationEngine(
             return
         }
         val replayer = navigator.mapboxReplayer
+        if (-replayer.eventSeconds(0.0) != heldFirst) {
+            // The session started the replay over and plays it: the car jumps to where it starts.
+            thenTracker.reset()
+            laneChoices.clear()
+            seekHold.resume()
+            showPlayed()
+            logSeek(ask, ok = false, why = ReplaySeek.Why.ENDED)
+            return
+        }
         // The replayer counts its seconds from the first position it holds now.
         val first = -replayer.eventSeconds(0.0)
         val duration = replayer.durationSeconds()
