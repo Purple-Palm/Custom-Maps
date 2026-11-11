@@ -45,7 +45,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | Coordinates in links are used as they are; Google place pages are read for exact coordinates, on by default with a switch; the fallback is a Mapbox search near the link's place hint | [Shared links](#shared-links) | 34 |
 | A link during a drive offers "Go there now", on the phone and in the car, which changes the running drive's destination after a confirmation | [A link during a drive](#a-link-during-a-drive) | 34 |
 | Opening Custom Maps on the car screen again during a drive takes the car back from another navigation app | [onStopNavigation](#onstopnavigation) | 32 |
-| Internal App Sharing is set up during this stage, once the Play account is verified, so the car screen can be tried in the real car before stage 3 | [The real car](#the-real-car) | ROADMAP |
+| The real car runs the build from Google Play's internal testing, which came forward from stage 3 on 2026-11-11, instead of Internal App Sharing | [The real car](#the-real-car) | 42 |
 | Trip logs go to a private GitHub repository: a fine-grained token for that repository only, 366 days, a reminder two weeks before it expires, an upload after every trip and Upload now | [GitHub log upload](#github-log-upload) | 35 |
 | A bright, colourful day map in the car, the existing dark map at night | [Day and night](#day-and-night) | 36 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
@@ -169,7 +169,8 @@ Other notes:
     `carColorPrimaryDark`, `carColorSecondary` and `carColorSecondaryDark`.
 - Permissions: `androidx.car.app.NAVIGATION_TEMPLATES`; `androidx.car.app.ACCESS_SURFACE` (also merged
   from maps-androidauto; registering a surface callback without it throws `SecurityException`);
-  `ACCESS_BACKGROUND_LOCATION`; `INTERNET`, which today arrives only through Mapbox's manifest.
+  `ACCESS_BACKGROUND_LOCATION`, in the debug manifest only while this stage is built (see
+  [The real car](#the-real-car)); `INTERNET`, which today arrives only through Mapbox's manifest.
 - Already merged from Mapbox: `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS` and the
   location-type trip service.
 - Not declared: `FEATURE_CLUSTER`, which adds a second Session; the `androidx.car.app.action.NAVIGATE`
@@ -697,7 +698,10 @@ throws without a callback; `updateTrip()` throws when navigation has not started
   the phone, then the app's location settings page. On Android 11 and newer "Allow all the time" can
   be set only there, and asking for foreground and background location together is ignored. Settings
   shows the state with a button. The explanation also serves as the prominent in-app disclosure that
-  Google Play asks for (stage 3). The manifest declares `ACCESS_BACKGROUND_LOCATION`.
+  Google Play asks for (stage 3). While this stage is built only the debug manifest
+  (`app/src/debug/AndroidManifest.xml`) declares `ACCESS_BACKGROUND_LOCATION`, and a build without
+  it skips this step and relies on the start guard; the Play bundle gets it once, by hand, with
+  Google's declaration ([The real car](#the-real-car)).
 - **Start guard**, `TripStartPolicy` in `:engine-mapbox`: a trip may start when Android is older than
   10 (API 29), or background location is granted, or the phone's `MainActivity` is at least STARTED,
   that is visible. Start on the phone with the app on screen is always safe: it is while-in-use
@@ -1383,14 +1387,22 @@ Debug build, phone on USB, Android Auto developer mode. Unlock the phone to star
   App Sharing or an internal test track. Android Auto's "unknown sources" option does not apply to
   them ([testing](https://developer.android.com/training/cars/testing)). The CI debug APK runs only on
   the DHU.
-- So every car check of this stage happens on the DHU until stage 3, or until an Internal App Sharing
-  upload (the owner's choice: set it up during this stage).
+- So the real car runs the build from Google Play's internal testing, which CI publishes from every
+  green build of `main`. It came forward from stage 3 on 2026-11-11 and replaces the Internal App
+  Sharing the owner had chosen: a track build updates by itself, and an Internal App Sharing install
+  could not update from the track without an uninstall. The other car checks of this stage run on
+  the DHU with the debug APK.
 - Play checks apps against the car quality guidelines only on some tracks: internal sharing and
   internal testing are not reviewed, closed testing does not block, open testing and production do.
-- "Allow all the time" brings Play's background location declaration, a video and a review of the
-  builds on every active track, internal testing included (stage 3). Play lists turn-by-turn
-  navigation as foreground use, "not applicable if any functionality is conducted while the user is
-  outside the app", so the declaration has to explain the car case.
+- "Allow all the time" brings Play's background location declaration, with a video, the prominent
+  disclosure and a review that can take several weeks. Google reviews the declaration only with a
+  bundle that requests the permission, and an API release of such a bundle fails until Google has
+  approved it. So the permission stays in the debug build while this stage is built. When the stage
+  is ready, one bundle with it is uploaded and rolled out by hand in Play Console together with the
+  declaration; during the review the publish job fails and the phone keeps the last Play version, so
+  new builds come through the debug APK, and once Google approves, CI publishes again. Play lists
+  turn-by-turn navigation as foreground use, "not applicable if any functionality is conducted while
+  the user is outside the app", so the declaration has to explain the car case.
 - In the car: repeat (a) to (e) with a real unplug and replug, the phone locked in a pocket, and a
   drive of more than 20 minutes. Set the battery to Unrestricted and add the app to Never sleeping
   apps first. Samsung says foreground services of apps targeting Android 14 work as intended since
@@ -1416,7 +1428,7 @@ Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then:
 | 12 | Drive marker, resume, Crash now. | Process death. |
 | 13 | Shared links: parser and tests, the search additions, short links, Google pages and their switch, `LinkInActivity` and filters, the Settings rows, Go there now. | JVM tests, adb intents, live links. |
 | 14 | DHU profiles in `dhu/`; README, DECISIONS and ROADMAP updates. | |
-| 15 | The real car. | After stage 3, or with Internal App Sharing. |
+| 15 | The real car. | The internal testing build; "Allow all the time" there once its declaration is approved. |
 
 ## Risks
 
@@ -1439,7 +1451,7 @@ Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then:
 | The notification interceptor runs on a background thread and has one slot | The engine owns the slot; the extender's state is behind a lock |
 | Notifications refused: no rail and no heads-up in the car | Asked for during setup; both screens say so |
 | Before Start, with "while in use" and the phone locked, no puck and no route origin in the car | "Allow all the time"; case (b) |
-| Play's background location review in stage 3; Play lists turn-by-turn navigation as foreground use | The disclosure is designed now; the declaration explains the car |
+| Play's background location review, up to several weeks, during which Play updates stop; Play lists turn-by-turn navigation as foreground use | The permission stays in the debug build until the stage is ready, then one bundle by hand with the declaration, and the debug APK carries new builds meanwhile; the disclosure is designed now; the declaration explains the car |
 | The rule that keeps the navigator alive lives in Mapbox internals, and Navigation SDK v3 is not API-stable | Checked again with every SDK upgrade |
 | car-app raises `onStopNavigation` by itself at ON_DESTROY; library behaviour can change | Logged; checked again with every car-app upgrade |
 | If the app ever leaves internal testing: SA-1 and NF-2 limit animations and overlays, NF-5 conflicts with guiding next to another app, NF-6, NF-7 and VC-1 become mandatory | Internal tracks only for now |
@@ -1461,7 +1473,8 @@ Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then:
 Answered on 2026-11-10:
 
 1. **Internal App Sharing:** yes, set it up during this stage as soon as the Play account is
-   verified.
+   verified. Replaced on 2026-11-11: the Google Play release came forward, and the real car runs the
+   internal testing build (decision 42).
 2. **Taking the car back:** yes.
 3. **Where Go there now asks:** on the phone and in the car; the first answer wins.
 

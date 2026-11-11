@@ -1,7 +1,9 @@
-# Status: stage 1.1 in progress (2026-11-10)
+# Status: stage 1.1 in progress, Google Play internal testing built (2026-11-11)
 
 The owner answered the checkpoint questions on 2026-11-10 and said to continue. Stage 1.1, the next
-phone build, is being built; stage 2 (Android Auto) follows it.
+phone build, is being built; stage 2 (Android Auto) follows it. On 2026-11-11 the owner brought the
+Google Play release forward from stage 3: the order of the work is now the Google Play step, then
+spare Mapbox tokens, then the new features (stage 1.1 from step 7, then stage 2).
 
 ## Where things stand
 
@@ -9,6 +11,9 @@ phone build, is being built; stage 2 (Android Auto) follows it.
 - **Two real drives** were logged and analysed: [DRIVES.md](DRIVES.md).
 - **The guidance camera was redesigned** from that analysis: [CAMERA.md](CAMERA.md).
 - **Stage 2 (Android Auto) is designed**, with the owner's choices: [STAGE-2.md](STAGE-2.md).
+- **Google Play internal testing is built:** CI builds the Play app bundle and, once the owner has
+  rolled out the first release by hand and added the Google Play key, publishes every green build
+  of `main` there ([README](../README.md), Release through Google Play; decision 42).
 - Decisions 26 to 36 in [DECISIONS.md](DECISIONS.md) record what was chosen and why.
 
 ## The owner's answers of 2026-11-10
@@ -26,7 +31,9 @@ phone build, is being built; stage 2 (Android Auto) follows it.
    itself. No End or Cancel within the first minute counts as a successful prediction. The map must
    stay smooth through all of it.
 5. **Arriving on the right side:** no.
-6. **Internal App Sharing in stage 2:** yes.
+6. **Internal App Sharing in stage 2:** yes. Replaced on 2026-11-11 by Google Play's internal
+   testing, which came forward from stage 3: Android Auto runs it in the real car too, and it
+   updates the app by itself.
 7. **Taking the car back** when Custom Maps is opened on the car screen again: yes.
 8. **Go there now** is offered on the phone and in the car. Links and addresses shared into the app
    from other apps come with stage 2, as designed ([STAGE-2.md](STAGE-2.md), shared links).
@@ -47,7 +54,11 @@ Stage 1.1, in this order, each part pushed to `main` once CI is green:
    itself.
 8. Docs and the checklist for the next drive.
 
-Then a test drive with that build, and stage 2, the car screen, checked on the Desktop Head Unit.
+Steps 1 to 6 are on `main`. Then the Google Play step (built) and spare Mapbox tokens, then steps 7
+and 8, a test drive with that build, and stage 2, the car screen, checked on the Desktop Head Unit
+and in the real car with the internal testing build. Background location for stage 2 stays in the
+debug build while stage 2 is built; then one bundle with it goes to Google Play by hand, with its
+declaration ([STAGE-2.md](STAGE-2.md), The real car).
 
 ## Checks on the phone
 
