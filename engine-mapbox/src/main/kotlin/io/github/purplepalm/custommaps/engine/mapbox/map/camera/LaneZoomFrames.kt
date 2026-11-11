@@ -218,6 +218,17 @@ internal object LaneZoomFrames {
         return lead
     }
 
+    /**
+     * How far Smooth follow's tilt goes toward the lanes' tilt (`guidancePitch`): the lane focus,
+     * with Large while the camera follows the car; nothing with Default and in any other mode, where
+     * the tilt is the one it always had. The focus is read only where it counts.
+     *
+     * @param following the camera follows the car, or the frame is the one that follows it
+     * @param focus the lane focus at the time the tilt is for, from 0 to 1
+     */
+    inline fun laneShare(mode: LaneZoom, following: Boolean, focus: () -> Double): Double =
+        if (mode == LaneZoom.LARGE && following) focus() else 0.0
+
     /** The zooms a following frame is fitted within, and how far the view may turn toward the road ahead, in degrees. */
     class Limits(val minZoom: Double, val maxZoom: Double, val bearingLead: Double)
 

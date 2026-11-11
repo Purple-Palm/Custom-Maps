@@ -402,7 +402,7 @@ internal class SmoothNavigationCamera(
         // It gets the tilt the camera will have when this frame has been reached: with Large, up
         // toward the lanes' tilt along the lane focus.
         val later = now + tuning.sampleHoldSeconds
-        val laneShare = if (laneZoom == LaneZoom.LARGE) laneFocus.focusAt(later) else 0.0
+        val laneShare = LaneZoomFrames.laneShare(laneZoom, following = true) { laneFocus.focusAt(later) }
         dataSource.followingPitchPropertyOverride(guidancePitch(tuning, laneShare, maneuverFocus.focusAt(later)))
         dataSource.onRouteProgressChanged(progress)
         // With this progress the data source has decided whether its frames are of the road or
@@ -650,7 +650,7 @@ internal class SmoothNavigationCamera(
         // Once a frame, for the zoom and the tilt alike: how far the view is down onto a maneuver,
         // and how far in for lanes, which moves the zoom and the tilt only with Large.
         val junctionFocus = if (mode == Mode.FOLLOWING) maneuverFocus.focusAt(now) else 0.0
-        val laneShare = if (largeFollowing) laneFocus.focusAt(now) else 0.0
+        val laneShare = LaneZoomFrames.laneShare(laneZoom, following = mode == Mode.FOLLOWING) { laneFocus.focusAt(now) }
         // With Large the frame of a maneuver may be fitted closer than before. The camera holds
         // the open road at the zoom it always had, and goes closer toward a maneuver and near a
         // lane choice, there no closer than its look-ahead floor.

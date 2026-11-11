@@ -1720,10 +1720,11 @@ off the exit's side without lane data),
 `LaneDetailsTest` (12: nothing is set within the callback of a style load, the setting is made
 after it and made again when something changed it, and nothing after the map is gone),
 `RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own) and
-`LaneZoomFramesTest` (16: the limits Mapbox tuned gives the data source with Default and with
+`LaneZoomFramesTest` (17: the limits Mapbox tuned gives the data source with Default and with
 Large, on the road, in the frame of a maneuver and near a lane choice, also with the floor of 12 s;
-the upper limit Smooth follow gives it, raised only with Large in the frame of a maneuver; and the
-rule for when a maneuver is framed, with the SDK's own options).
+the upper limit Smooth follow gives it, raised only with Large in the frame of a maneuver; Smooth
+follow's tilt toward the lanes, only with Large while it follows the car; and the rule for when a
+maneuver is framed, with the SDK's own options).
 
 The cameras themselves touch Android and Mapbox types and have no JVM tests. While it was written,
 `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by frame

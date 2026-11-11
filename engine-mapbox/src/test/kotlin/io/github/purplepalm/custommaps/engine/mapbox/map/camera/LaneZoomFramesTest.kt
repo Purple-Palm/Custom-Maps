@@ -5,6 +5,7 @@ import com.mapbox.navigation.ui.maps.camera.data.FollowingFrameOptions
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
+import io.github.purplepalm.custommaps.nav.camera.guidancePitch
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -151,6 +152,28 @@ class LaneZoomFramesTest {
         assertEquals(tuning.junctionMaxBearingLead, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuning, false, junctionFocus = 1.0))
         assertEquals(tuning.laneMaxBearingLead, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuning, laneWindow = true, junctionFocus = 0.0))
         assertEquals(20.0, tuning.junctionMaxBearingLead)
+    }
+
+    @Test
+    fun `smooth follow tilts toward the lanes only with large while it follows the car`() {
+        var asked = 0
+        fun share(mode: LaneZoom, following: Boolean) = LaneZoomFrames.laneShare(mode, following) {
+            asked++
+            0.8
+        }
+        assertEquals(0.8, share(LaneZoom.LARGE, following = true))
+        assertEquals(1, asked)
+        for ((mode, following) in listOf(LaneZoom.DEFAULT to true, LaneZoom.DEFAULT to false, LaneZoom.LARGE to false)) {
+            assertEquals(0.0, share(mode, following), "$mode, following $following")
+        }
+        assertEquals(1, asked, "the lane focus is read only where it counts")
+        // With no share the tilt is the one it always was: the road's, down onto a junction.
+        for (junction in listOf(0.0, 0.5, 1.0)) {
+            val plain = tuning.cruisePitch + (tuning.maneuverPitch - tuning.cruisePitch) * junction
+            assertEquals(plain, guidancePitch(tuning, share(LaneZoom.DEFAULT, following = true), junction), 1e-9, "junction $junction")
+            assertEquals(plain, guidancePitch(tuning, share(LaneZoom.LARGE, following = false), junction), 1e-9, "junction $junction")
+        }
+        assertEquals(tuning.lanePitch, guidancePitch(tuning, LaneZoomFrames.laneShare(LaneZoom.LARGE, following = true) { 1.0 }, 0.0), 1e-9)
     }
 
     // The lanes' look-ahead floor, at latitude 0 on a made-up screen: a map 2,400 px high at 3 px
