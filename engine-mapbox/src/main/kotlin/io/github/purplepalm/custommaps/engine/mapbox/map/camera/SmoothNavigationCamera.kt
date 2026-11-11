@@ -82,6 +82,8 @@ internal class SmoothNavigationCamera(
     private val dataSource: MapboxNavigationViewportDataSource,
     private val tuning: CameraTuning,
     private val listener: GuidanceCamera.Listener,
+    /** The road past a maneuver point that the data source frames with Large; the map owns it. */
+    private val junction: JunctionPoints,
 ) : GuidanceCamera, Choreographer.FrameCallback {
 
     /** What the camera is doing, [shown] to the screen as one of its camera modes. */
@@ -378,7 +380,7 @@ internal class SmoothNavigationCamera(
         // With this progress the data source has decided whether its frames are of the road or
         // of a maneuver, until the next progress. Only the frame of a maneuver may be fitted
         // closer with Large, so the upper limit follows that choice with every progress.
-        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress)
+        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction)
         dataSource.evaluate()
         pacing.onProgress(SystemClock.elapsedRealtime())
         // The tilt may have begun to move, also when the frame of the data source is the same.

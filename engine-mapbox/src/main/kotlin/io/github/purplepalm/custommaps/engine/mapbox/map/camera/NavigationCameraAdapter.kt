@@ -63,6 +63,8 @@ internal class NavigationCameraAdapter(
     private val tuned: Boolean,
     private val tuning: CameraTuning,
     private val listener: GuidanceCamera.Listener,
+    /** The road past a maneuver point that the data source frames with Large; the map owns it. */
+    private val junction: JunctionPoints,
 ) : GuidanceCamera {
 
     private val source = DetachableSource(dataSource)
@@ -220,7 +222,15 @@ internal class NavigationCameraAdapter(
                 speedMps = speedMps,
                 onRoute = progress.currentState != RouteProgressState.OFF_ROUTE,
             )
-            LaneZoomFrames.beforeTunedEvaluate(dataSource, laneZoom, tuning, progress, laneWindow = laneFocus.goal > 0.0, latitude)
+            LaneZoomFrames.beforeTunedEvaluate(
+                dataSource,
+                laneZoom,
+                tuning,
+                progress,
+                laneWindow = laneFocus.goal > 0.0,
+                latitude = latitude,
+                junction = junction,
+            )
         }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())

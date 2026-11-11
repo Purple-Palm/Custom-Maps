@@ -52,6 +52,7 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.JunctionPoints
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.LaneZoomFrames
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCameraAdapter
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
@@ -187,6 +188,13 @@ class PhoneMap internal constructor(
     private val placePin = PlacePin.on(mapboxMap, debugLog)
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
+
+    /**
+     * With Large, the road from a maneuver point to past where it bends, which the data source
+     * frames besides its own points while it frames that maneuver ([JunctionPoints]). The cameras
+     * set it with each progress; the map takes it back at a new route and when the route goes.
+     */
+    private val junctionPoints = JunctionPoints(viewportDataSource)
 
     /**
      * How the camera moves. The map starts with the style Settings starts with, so that the stored
@@ -464,7 +472,7 @@ class PhoneMap internal constructor(
         // The old camera took back what it had set on the data source, and the frames are set up
         // for the new style and the lane zoom. The frame the data source holds was computed for
         // the old camera: the new one gets a frame of its own to start from.
-        LaneZoomFrames.apply(viewportDataSource, style, laneZoom, CameraTuning.PHONE, framedRoute, lastProgress)
+        LaneZoomFrames.apply(viewportDataSource, style, laneZoom, CameraTuning.PHONE, framedRoute, lastProgress, junctionPoints)
         viewportDataSource.evaluate()
         cameraStyle = style
         // The new camera starts idle; a transition the old one was in ends with it.
@@ -483,7 +491,7 @@ class PhoneMap internal constructor(
         laneZoom = mode
         // First the frames of the data source, then the camera, then a frame computed for both.
         // During a drive the camera glides to it.
-        LaneZoomFrames.apply(viewportDataSource, cameraStyle, mode, CameraTuning.PHONE, framedRoute, lastProgress)
+        LaneZoomFrames.apply(viewportDataSource, cameraStyle, mode, CameraTuning.PHONE, framedRoute, lastProgress, junctionPoints)
         camera.setLaneZoom(mode)
         viewportDataSource.evaluate()
     }
@@ -688,6 +696,8 @@ class PhoneMap internal constructor(
 
     /** Gives the data source the route to frame; a route it has already changes nothing. */
     private fun frameRoute(route: NavigationRoute) {
+        // The road past a maneuver of the route before is no part of this one's frames.
+        if (route.id != framedRoute?.id) junctionPoints.clear()
         framedRoute = route
         viewportDataSource.onRouteChanged(route)
     }
@@ -708,6 +718,7 @@ class PhoneMap internal constructor(
         clearArrows()
         framedRoute = null
         lastProgress = null
+        junctionPoints.clear()
         viewportDataSource.clearRouteData()
         viewportDataSource.evaluate()
     }
@@ -844,9 +855,25 @@ class PhoneMap internal constructor(
         guidancePuck.jumpOnTeleport = !standard
         val created = when (style) {
             CameraStyle.MAPBOX_STANDARD, CameraStyle.MAPBOX_TUNED ->
-                NavigationCameraAdapter(mapboxMap, mapView.camera, viewportDataSource, tuned = !standard, CameraTuning.PHONE, cameraListener)
+                NavigationCameraAdapter(
+                    mapboxMap,
+                    mapView.camera,
+                    viewportDataSource,
+                    tuned = !standard,
+                    CameraTuning.PHONE,
+                    cameraListener,
+                    junctionPoints,
+                )
             CameraStyle.SMOOTH_FOLLOW ->
-                SmoothNavigationCamera(mapboxMap, mapView.location, mapView.camera, viewportDataSource, CameraTuning.PHONE, cameraListener)
+                SmoothNavigationCamera(
+                    mapboxMap,
+                    mapView.location,
+                    mapView.camera,
+                    viewportDataSource,
+                    CameraTuning.PHONE,
+                    cameraListener,
+                    junctionPoints,
+                )
         }
         created.setLaneZoom(laneZoom)
         created.setVisible(visible)
@@ -959,7 +986,7 @@ class PhoneMap internal constructor(
             "steps" to cameraSteps.take(),
             "fixes" to fixes,
             "keyPoints" to lastKeyPoints.takeIf { hasFix },
-        ) + camera.diagnostics() + laneDetails.diagnostics() + mapOf(
+        ) + camera.diagnostics() + junctionPoints.diagnostics() + laneDetails.diagnostics() + mapOf(
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "paddingChanges" to paddingChanges.takeIf { it > 0 },
             "render" to takeFrameStats(),
