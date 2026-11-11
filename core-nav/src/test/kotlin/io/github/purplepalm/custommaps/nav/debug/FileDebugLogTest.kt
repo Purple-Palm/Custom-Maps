@@ -266,6 +266,40 @@ class FileDebugLogTest {
     }
 
     @Test
+    fun `a day with a compressed part and a plain one is exported oldest lines first`() = runTest {
+        val log = newLog()
+        log.log("before")
+        runCurrent()
+        clock.now = Instant.parse("2000-01-02T09:00:00Z")
+        log.log("next day")
+        runCurrent()
+        // The phone's clock is set back into the compressed day, and the log is shared then.
+        clock.now = Instant.parse("2000-01-01T23:00:00Z")
+        log.log("late")
+        runCurrent()
+        assertTrue(File(logDirectory, "2000-01-01.jsonl.gz").exists())
+        assertTrue(firstDay.exists())
+
+        val exported = log.export(emptyMap()).first().readLines().drop(1).map(::typeOf)
+
+        assertEquals(listOf("before", "late"), exported)
+    }
+
+    @Test
+    fun `what a pass cut short left behind is deleted by the next pass`() = runTest {
+        // A pass ended with the process while it wrote a day that the limit then deleted.
+        logDirectory.mkdirs()
+        val left = File(logDirectory, "1999-12-30.jsonl.gz.tmp").apply { writeText("half a day") }
+        val log = newLog()
+
+        log.log("today")
+        runCurrent()
+
+        assertFalse(left.exists())
+        assertEquals(listOf("today"), firstDay.readLines().map(::typeOf))
+    }
+
+    @Test
     fun `days left plain by an earlier run are compressed at the first line`() = runTest {
         logDirectory.mkdirs()
         val old = File(logDirectory, "1999-12-30.jsonl").apply { writeText("{\"t\":\"1999-12-30T10:00:00Z\",\"type\":\"old\"}\n") }

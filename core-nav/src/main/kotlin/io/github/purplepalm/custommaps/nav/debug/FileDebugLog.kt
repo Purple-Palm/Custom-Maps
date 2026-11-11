@@ -170,8 +170,9 @@ class FileDebugLog(
 
     /**
      * One file of the log opened for reading: a compressed day, or [length] bytes of a plain one,
-     * as long as it was when it was opened. An open file can still be read when it is renamed or
-     * deleted.
+     * as long as it was when it was opened. A compressed day is never written to once it is there:
+     * compression puts a new file in its place. An open file can still be read when it is replaced,
+     * renamed or deleted.
      */
     private class Part(val day: String, private val input: FileInputStream, private val compressed: Boolean, private val length: Long) {
         fun open(): InputStream = if (compressed) GZIPInputStream(input.buffered()) else LimitedInput(input.buffered(), length)
@@ -288,11 +289,13 @@ class FileDebugLog(
 
     /**
      * Compresses each day that is over and still plain, one at a time, without holding the lock
-     * while it compresses: the lines of the file as long as it was are written to a temporary file,
-     * and only then, under the lock, does that take the plain file's place, if the file is still
-     * as long as it was. A day that got lines meanwhile, as when the phone's clock was set back,
-     * stays plain until the next pass. Lines that come for a day that is already compressed are
-     * added to it as one more gzip member, which reads as one text.
+     * while it compresses. A temporary file gets the day's compressed part as it was, if there is
+     * one, and then the lines of the plain file as long as it was, as one more gzip member, which
+     * reads on as the same text. It is on the storage before, under the lock, it takes the
+     * compressed part's place in one rename, and only then is the plain file deleted: a pass cut
+     * short by the end of the process, a full storage or a power loss leaves the day as it was
+     * and is done again by the next pass. A day that got lines meanwhile, as when the phone's clock
+     * was set back, stays as it is until the next pass.
      */
     private fun compressClosedDays() {
         files.withLock { temporaryFiles().forEach { it.delete() } }
@@ -301,40 +304,45 @@ class FileDebugLog(
             logFiles().filter { it.name.endsWith(LOG_EXTENSION) && it != current }
         }
         for (plain in closed) {
-            val length = files.withLock { plain.length().takeIf { plain.exists() && plain != writerDay?.let(::fileFor) } } ?: continue
             val compressed = File(directory, plain.name + GZIP_SUFFIX)
             val temporary = File(directory, compressed.name + TEMPORARY_SUFFIX)
+            // The day as it is now: the plain file's length, and the compressed part's, if any.
+            val before = files.withLock {
+                if (!plain.exists() || plain == writerDay?.let(::fileFor)) null else DayFiles(plain.length(), compressed.lengthIfThere())
+            } ?: continue
             try {
-                GZIPOutputStream(FileOutputStream(temporary).buffered()).use { out ->
-                    LimitedInput(FileInputStream(plain).buffered(), length).use { it.copyTo(out) }
+                FileOutputStream(temporary).use { file ->
+                    val out = file.buffered()
+                    before.compressed?.let { length -> LimitedInput(FileInputStream(compressed).buffered(), length).use { it.copyTo(out) } }
+                    GZIPOutputStream(out).use { gzip ->
+                        LimitedInput(FileInputStream(plain).buffered(), before.plain).use { it.copyTo(gzip) }
+                        gzip.finish()
+                        out.flush()
+                        // On the storage before it takes the day's place, so a power loss cannot leave it empty.
+                        file.fd.sync()
+                    }
                 }
             } catch (e: IOException) {
-                // Storage full or the file went away: the day stays as it is.
+                // Storage full or a file went away: the day stays as it is.
                 temporary.delete()
                 continue
             }
             files.withLock {
-                val unchanged = plain.exists() && plain.length() == length && plain != writerDay?.let(::fileFor)
-                try {
-                    if (!unchanged) {
-                        temporary.delete()
-                    } else if (compressed.exists()) {
-                        FileOutputStream(compressed, true).use { out -> temporary.inputStream().use { it.copyTo(out) } }
-                        temporary.delete()
-                        plain.delete()
-                    } else if (temporary.renameTo(compressed)) {
-                        plain.delete()
-                    } else {
-                        temporary.delete()
-                    }
-                } catch (e: IOException) {
-                    temporary.delete()
-                }
+                val unchanged = plain != writerDay?.let(::fileFor) &&
+                    plain.exists() && plain.length() == before.plain && compressed.lengthIfThere() == before.compressed
+                // The rename takes the compressed part's place in one step; an export that has the
+                // old one open reads on in it.
+                if (unchanged && temporary.renameTo(compressed)) plain.delete() else temporary.delete()
             }
         }
         // The days take less room now; the oldest may have to go all the same.
         files.withLock { trim() }
     }
+
+    /** How long a day's two parts were when a pass of compression read them; [compressed] null when it had none. */
+    private class DayFiles(val plain: Long, val compressed: Long?)
+
+    private fun File.lengthIfThere(): Long? = if (exists()) length() else null
 
     private fun closeWriter() {
         try {
