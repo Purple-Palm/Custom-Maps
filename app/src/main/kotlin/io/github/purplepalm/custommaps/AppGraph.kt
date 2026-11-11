@@ -197,7 +197,9 @@ class AppGraph(private val application: Application) {
         applicationScope.launch {
             var generation = 0
             var applied: TokenEntry? = null
-            var held: TokenEntry? = null
+            // The token a change waits with until the trip ends, logged once; null for none at all.
+            var holding = false
+            var heldToken: String? = null
             combine(tokenStore.list, engine.navigation.guidanceState, ::Pair).collect { (list, guidance) ->
                 val wanted = list.active?.takeIf { MapboxAccessTokens.check(it.token) == AccessTokenCheck.VALID }
                 val first = _mapsAccess.value == MapsAccess.Checking
@@ -206,14 +208,15 @@ class AppGraph(private val application: Application) {
                     TokenSwitch.Step.Keep -> {
                         applied = wanted
                         appliedTokenId = wanted?.id
-                        held = null
+                        holding = false
                     }
-                    TokenSwitch.Step.Hold -> if (held != wanted) {
-                        held = wanted
+                    TokenSwitch.Step.Hold -> if (!holding || heldToken != wanted?.token) {
+                        holding = true
+                        heldToken = wanted?.token
                         debugLog.log("token_switch_held", entryFields(list, wanted) + ("guidance" to guidance))
                     }
                     is TokenSwitch.Step.Apply -> {
-                        held = null
+                        holding = false
                         if (step.closePreview) engine.navigation.clearPreview()
                         if (wanted != null) {
                             MapboxAccessTokens.apply(wanted.token)
