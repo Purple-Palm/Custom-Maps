@@ -70,8 +70,10 @@ android {
         resValue("string", "build_revision", buildRevision)
 
         ndk {
-            // Phones run arm64; x86_64 keeps the emulator working. CI builds arm64 only
-            // (-Pcustommaps.abis=arm64-v8a) to halve the APK the phone downloads.
+            // Phones run arm64; x86_64 keeps the emulator working. The CI debug APK is arm64 only
+            // (-Pcustommaps.abis=arm64-v8a) to halve the APK the phone downloads. The Play bundle,
+            // built in its own Gradle run without that filter, keeps both ABIs; Google Play sends
+            // each phone only its own.
             abiFilters += providers.gradleProperty("custommaps.abis")
                 .map { it.split(',').map(String::trim).filter(String::isNotEmpty) }
                 .getOrElse(listOf("arm64-v8a", "x86_64"))
