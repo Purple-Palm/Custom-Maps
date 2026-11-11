@@ -295,8 +295,9 @@ uploads the run's app bundle with [`scripts/play-upload.sh`](scripts/play-upload
 the release of internal testing. The phone gets it from the Play Store within minutes, or with the
 next automatic update, as its Play Store settings say. The job:
 
-- runs only after the build, its tests, lint and the 16 KB check passed, only for `main`, and only
-  once the key is set; until then it is skipped;
+- runs only after the build, its tests, lint and the 16 KB check passed, and only for `main`; until
+  the key is set it only says so and publishes nothing;
+- is the only job that is given the key: the build job, which runs Gradle, never is;
 - publishes only on internal testing, never on closed or open testing or production;
 - runs one upload at a time; one that waits gives way to a newer one, and a bundle that is not newer
   than the one on internal testing is not uploaded, so the track never goes back to an older build;
