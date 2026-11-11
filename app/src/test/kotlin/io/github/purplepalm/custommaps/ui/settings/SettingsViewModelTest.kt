@@ -1,8 +1,10 @@
 package io.github.purplepalm.custommaps.ui.settings
 
+import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.trip.LogBegan
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
@@ -78,7 +80,9 @@ class SettingsViewModelTest {
     private fun trip(daysAgo: Long, simulated: Boolean = false) =
         TripSessionStart(now.minusDays(daysAgo).toInstant(), TripKind.ACTIVE_GUIDANCE, simulated)
 
-    private fun TestScope.viewModel() = SettingsViewModel(tripLog, settings, archive) { now }.also {
+    private var installedAt = now.minusYears(1).toInstant()
+
+    private fun TestScope.viewModel() = SettingsViewModel(tripLog, settings, archive, now = { now }, installedAt = { installedAt }).also {
         it.debug.launchIn(backgroundScope)
         it.guidance.launchIn(backgroundScope)
         runCurrent()
@@ -88,7 +92,23 @@ class SettingsViewModelTest {
     fun `counts only this month's trip sessions`() = runTest(dispatcher) {
         tripLog.log.value = listOf(trip(daysAgo = 40), trip(daysAgo = 2), trip(daysAgo = 1, simulated = true))
         val viewModel = viewModel()
-        assertEquals(2, viewModel.debug.value.tripsThisMonth)
+        assertEquals(2, viewModel.debug.value.trips.count)
+        assertEquals(null, viewModel.debug.value.trips.partialSince)
+    }
+
+    @Test
+    fun `after an installation this month the count says since when`() = runTest(dispatcher) {
+        // Installed again on the first of the month, in the afternoon; the trips of that morning are gone.
+        installedAt = now.withDayOfMonth(1).withHour(15).toInstant()
+        tripLog.log.value = listOf(trip(daysAgo = 1))
+        val viewModel = viewModel()
+
+        val trips = viewModel.debug.value.trips
+        assertEquals(1, trips.count)
+        assertEquals(now.toLocalDate().withDayOfMonth(1), trips.partialSince)
+        assertEquals(LogBegan.INSTALLATION, trips.began)
+        assertEquals(R.string.debug_trips_since_installation, tripsSinceRes(trips.began))
+        assertEquals(R.string.debug_trips_since_oldest_kept, tripsSinceRes(LogBegan.OLDEST_KEPT))
     }
 
     @Test
@@ -107,7 +127,7 @@ class SettingsViewModelTest {
         val viewModel = viewModel()
         tripLog.record(trip(daysAgo = 0))
         runCurrent()
-        assertEquals(1, viewModel.debug.value.tripsThisMonth)
+        assertEquals(1, viewModel.debug.value.trips.count)
     }
 
     @Test

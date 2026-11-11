@@ -6,12 +6,14 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
 import java.io.File
 import java.io.IOException
+import java.time.Instant
 import java.time.ZonedDateTime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,7 +31,8 @@ data class GuidanceSettings(
 
 /** The debug section: trip sessions started on this phone, the simulated drive switch and the debug log. */
 data class DebugState(
-    val tripsThisMonth: Int = 0,
+    /** The month's trip sessions, and since when the count runs when that is after the month began. */
+    val trips: MonthCount = MonthCount(0),
     /** Newest first. */
     val recentTrips: List<TripSessionStart> = emptyList(),
     val simulateDrive: Boolean = false,
@@ -42,6 +45,8 @@ class SettingsViewModel(
     private val settings: AppSettings,
     private val debugLog: DebugLogArchive,
     private val now: () -> ZonedDateTime = ZonedDateTime::now,
+    /** When the app was installed on this phone, which is when its trip session log began. */
+    private val installedAt: () -> Instant = { Instant.EPOCH },
 ) : ViewModel() {
 
     private val logBytes = MutableStateFlow<Long?>(null)
@@ -54,7 +59,7 @@ class SettingsViewModel(
     val debug: StateFlow<DebugState> =
         combine(tripLog.entries, settings.simulateDrive, logBytes) { entries, simulate, bytes ->
             DebugState(
-                tripsThisMonth = TripLog.countInMonth(entries, now()),
+                trips = TripLog.monthCount(entries, now(), installedAt()),
                 recentTrips = entries.takeLast(RECENT_TRIPS).asReversed(),
                 simulateDrive = simulate,
                 logBytes = bytes,

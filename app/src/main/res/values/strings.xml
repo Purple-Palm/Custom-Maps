@@ -101,6 +101,8 @@
 
     <string name="debug_title">Debug</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
+    <string name="debug_trips_since_installation">Trip sessions this month: %1$d, since installation on %2$s</string>
+    <string name="debug_trips_since_oldest_kept">Trip sessions this month: %1$d, since %2$s, the oldest one kept</string>
     <string name="debug_trips_note">Counted on this phone each time guidance starts, simulated drives included. It is an estimate: Mapbox bills by its own count.</string>
     <string name="debug_open_statistics">Open Mapbox statistics</string>
     <string name="debug_recent_title">Recent trip sessions</string>

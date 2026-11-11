@@ -47,12 +47,15 @@ import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.trip.LogBegan
+import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import io.github.purplepalm.custommaps.ui.token.TokenEditor
 import io.github.purplepalm.custommaps.ui.token.TokenState
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -61,6 +64,19 @@ import java.util.Locale
 private const val MAPBOX_STATISTICS_URL = "https://console.mapbox.com/account/statistics/"
 
 private val TRIP_TIME = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.US)
+
+/** The day since which the month's trip count runs, when the log began after the month did. */
+private val TRIPS_SINCE_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.US)
+
+/**
+ * The words for a month's trip count that does not cover the whole month: since the installation,
+ * or since the oldest trip the log kept ([LogBegan]).
+ */
+@StringRes
+internal fun tripsSinceRes(began: LogBegan?): Int = when (began) {
+    LogBegan.OLDEST_KEPT -> R.string.debug_trips_since_oldest_kept
+    LogBegan.INSTALLATION, null -> R.string.debug_trips_since_installation
+}
 
 @Composable
 fun SettingsScreen(
@@ -317,8 +333,12 @@ private fun DebugSection(
 ) {
     val uriHandler = LocalUriHandler.current
     SectionTitle(R.string.debug_title)
+    val trips = debug.trips
     Text(
-        text = stringResource(R.string.debug_trips_this_month, debug.tripsThisMonth),
+        text = when (val since = trips.partialSince) {
+            null -> stringResource(R.string.debug_trips_this_month, trips.count)
+            else -> stringResource(tripsSinceRes(trips.began), trips.count, TRIPS_SINCE_DAY.format(since))
+        },
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.onSurface,
     )
@@ -519,7 +539,7 @@ private fun SettingsScreenPreview() {
             tokenEditable = true,
             guidance = GuidanceSettings(),
             debug = DebugState(
-                tripsThisMonth = 3,
+                trips = MonthCount(3, partialSince = LocalDate.of(2000, 1, 15), began = LogBegan.INSTALLATION),
                 recentTrips = listOf(
                     TripSessionStart(Instant.parse("2026-11-03T17:05:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = true),
                     TripSessionStart(Instant.parse("2026-11-01T02:40:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false),

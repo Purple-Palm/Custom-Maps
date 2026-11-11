@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps
 
 import android.app.Application
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
 import androidx.datastore.core.DataStore
@@ -93,6 +94,28 @@ class AppGraph(private val application: Application) {
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()
+
+    /**
+     * When the app was installed on this phone, which is when its trip session log began: an
+     * update keeps the time, a new installation starts it over. The start of time when Android
+     * cannot say, which counts as a log that covers every month.
+     */
+    fun installedAt(): Instant = firstInstall
+
+    private val firstInstall: Instant by lazy {
+        try {
+            val manager = application.packageManager
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                manager.getPackageInfo(application.packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                manager.getPackageInfo(application.packageName, 0)
+            }
+            Instant.ofEpochMilli(info.firstInstallTime)
+        } catch (e: PackageManager.NameNotFoundException) {
+            Instant.EPOCH
+        }
+    }
 
     /** Opens every exported log file, so each one says which build and phone it came from. */
     fun debugLogHeader(): Map<String, Any?> = mapOf(

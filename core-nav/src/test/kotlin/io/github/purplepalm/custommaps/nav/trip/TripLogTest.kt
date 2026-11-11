@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.trip
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -51,5 +52,71 @@ class TripLogTest {
         }
         assertEquals(TripLog.MAX_ENTRIES, entries.size)
         assertEquals(Instant.ofEpochSecond(3), entries.first().startedAt)
+    }
+
+    /** Times in UTC on invented days of January 2000. */
+    private val utc = ZoneId.of("UTC")
+    private val midJanuary = ZonedDateTime.of(2000, 1, 20, 12, 0, 0, 0, utc)
+
+    @Test
+    fun `a log begun before the month covers all of it`() {
+        val entries = listOf(start("2000-01-03T08:00:00Z"), start("2000-01-19T08:00:00Z"))
+
+        val month = TripLog.monthCount(entries, midJanuary, installedAt = Instant.parse("1999-12-10T00:00:00Z"))
+
+        assertEquals(MonthCount(2), month)
+    }
+
+    @Test
+    fun `an installation in the middle of the month counts since that day`() {
+        val entries = listOf(start("2000-01-16T08:00:00Z"), start("2000-01-19T08:00:00Z"))
+
+        val month = TripLog.monthCount(entries, midJanuary, installedAt = Instant.parse("2000-01-15T21:30:00Z"))
+
+        assertEquals(MonthCount(2, LocalDate.of(2000, 1, 15), LogBegan.INSTALLATION), month)
+    }
+
+    @Test
+    fun `the day is the installation's local day`() {
+        // 02:00 UTC on January 15 is still January 14 in California.
+        val nowInCalifornia = ZonedDateTime.of(2000, 1, 20, 4, 0, 0, 0, california)
+
+        val month = TripLog.monthCount(emptyList(), nowInCalifornia, installedAt = Instant.parse("2000-01-15T02:00:00Z"))
+
+        assertEquals(MonthCount(0, LocalDate.of(2000, 1, 14), LogBegan.INSTALLATION), month)
+    }
+
+    @Test
+    fun `an installation on the first moment of the month covers it`() {
+        assertEquals(MonthCount(0), TripLog.monthCount(emptyList(), midJanuary, installedAt = Instant.parse("2000-01-01T00:00:00Z")))
+        assertEquals(
+            MonthCount(0, LocalDate.of(2000, 1, 1), LogBegan.INSTALLATION),
+            TripLog.monthCount(emptyList(), midJanuary, installedAt = Instant.parse("2000-01-01T00:00:01Z")),
+        )
+    }
+
+    @Test
+    fun `trips restored from before the installation move the start back`() {
+        // A backup brought back trips of December and January; the app was installed again later.
+        val entries = listOf(start("1999-12-20T08:00:00Z"), start("2000-01-05T08:00:00Z"))
+        assertEquals(MonthCount(1), TripLog.monthCount(entries, midJanuary, installedAt = Instant.parse("2000-01-18T00:00:00Z")))
+
+        // Restored trips that begin within the month: since the oldest of them, as far as anyone can tell.
+        val january = listOf(start("2000-01-05T08:00:00Z"), start("2000-01-19T08:00:00Z"))
+        assertEquals(
+            MonthCount(2, LocalDate.of(2000, 1, 5), LogBegan.OLDEST_KEPT),
+            TripLog.monthCount(january, midJanuary, installedAt = Instant.parse("2000-01-18T00:00:00Z")),
+        )
+    }
+
+    @Test
+    fun `a full log within the month counts since its oldest trip`() {
+        // Trips every half hour from January 9, 500 of them, the last on January 19.
+        val first = Instant.parse("2000-01-09T06:00:00Z")
+        val entries = (0 until TripLog.MAX_ENTRIES).map { TripSessionStart(first.plusSeconds(1_800L * it), TripKind.ACTIVE_GUIDANCE, false) }
+
+        val month = TripLog.monthCount(entries, midJanuary, installedAt = Instant.parse("1999-06-01T00:00:00Z"))
+
+        assertEquals(MonthCount(TripLog.MAX_ENTRIES, LocalDate.of(2000, 1, 9), LogBegan.OLDEST_KEPT), month)
     }
 }
