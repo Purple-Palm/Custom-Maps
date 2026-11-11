@@ -58,6 +58,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 engine = graph.engine,
                 settings = graph.settings,
                 debugLog = graph.debugLog,
+                network = graph.network.status,
                 onOpenSettings = { showSettings = true },
             )
         }

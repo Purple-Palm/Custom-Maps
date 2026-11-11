@@ -1,0 +1,365 @@
+package io.github.purplepalm.custommaps.ui.map
+
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.annotation.StringRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
+import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
+import io.github.purplepalm.custommaps.nav.model.Maneuver
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import io.github.purplepalm.custommaps.nav.network.NetworkStatus
+import io.github.purplepalm.custommaps.nav.network.OfflineReason
+import io.github.purplepalm.custommaps.nav.network.offlineReason
+import io.github.purplepalm.custommaps.ui.guidance.CARD_CORNER
+import io.github.purplepalm.custommaps.ui.guidance.ManeuverPanel
+import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
+import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_PADDING
+import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_SHAPE
+import io.github.purplepalm.custommaps.ui.guidance.thenSideMinFont
+import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+
+/**
+ * How long the app has to be without internet before the chip says so. A phone that leaves Wi-Fi
+ * for mobile data is without a network for a second or two, and that is no news.
+ */
+internal const val OFFLINE_CHIP_WAIT_MILLIS = 3_000L
+
+/**
+ * What the offline chip says, as it changes: why the app has no internet, or [OfflineReason.NONE]
+ * while there is no chip.
+ *
+ * The chip comes [waitMillis] after the app lost its internet, if it is still without it, and goes
+ * at once when the internet is back. The wait is counted from the loss: a reason that changes on
+ * the way does not start it over, and one that changes while the chip is up changes what the chip
+ * says, with no new wait. Before Android has said anything the app does not count as offline.
+ *
+ * The wait runs in whoever collects this, so it starts when the collecting does: a screen made
+ * while the app is offline gets its chip [waitMillis] later.
+ */
+internal fun shownOfflineReason(status: StateFlow<NetworkStatus>, waitMillis: Long = OFFLINE_CHIP_WAIT_MILLIS): Flow<OfflineReason> =
+    channelFlow {
+        val reasons = status.map { it.offlineReason() }
+        // Only going offline and coming back start something new; the reason alone does not.
+        reasons.map { it != OfflineReason.NONE }.distinctUntilChanged().collectLatest { offline ->
+            if (offline) {
+                delay(waitMillis)
+                // The chip is up: the reason as it is now, and each one after it. Being online
+                // again ends this.
+                reasons.filter { it != OfflineReason.NONE }.collect { send(it) }
+            } else {
+                send(OfflineReason.NONE)
+            }
+        }
+    }.distinctUntilChanged()
+
+/** The chip's sentence for [reason]; null when the app is online and there is nothing to say. */
+@StringRes
+internal fun offlineSentenceRes(reason: OfflineReason): Int? = when (reason) {
+    OfflineReason.NONE -> null
+    OfflineReason.NO_NETWORK -> R.string.offline_no_network
+    OfflineReason.NO_INTERNET -> R.string.offline_no_internet
+    OfflineReason.BLOCKED -> R.string.offline_blocked
+}
+
+/**
+ * The debug line for a chip that came, went or changed what it says. [guidance] tells which form
+ * the driver saw: the sentence under the search bar, the tab under the maneuver card during
+ * guidance, or neither, as in the route preview.
+ */
+internal fun offlineChipLine(reason: OfflineReason, guidance: GuidanceState): Map<String, Any?> = mapOf(
+    "shown" to (reason != OfflineReason.NONE),
+    "reason" to reason.name,
+    "guidance" to guidance.name,
+)
+
+/**
+ * Follows [network] for the offline chip: the reason the chip gives now, [OfflineReason.NONE]
+ * while there is none. Each change is one "offline_chip" line in the debug log, written when the
+ * chip changes and not when something is drawn again.
+ *
+ * Call it once for a screen and pass the result on unread: only what draws the chip reads it, so
+ * a change draws the chip again and nothing else. It keeps following while the screen is in the
+ * background, so the chip is right the moment the screen is back.
+ */
+@Composable
+internal fun rememberOfflineChip(network: StateFlow<NetworkStatus>, debugLog: DebugLog, guidance: () -> GuidanceState): State<OfflineReason> {
+    val guidanceNow by rememberUpdatedState(guidance)
+    return produceState(OfflineReason.NONE, network, debugLog) {
+        try {
+            shownOfflineReason(network).collect { reason ->
+                if (reason != value) {
+                    value = reason
+                    debugLog.log("offline_chip", offlineChipLine(reason, guidanceNow()))
+                }
+            }
+        } finally {
+            // The screen is going, and a chip that was up goes with it.
+            if (value != OfflineReason.NONE) debugLog.log("offline_chip", offlineChipLine(OfflineReason.NONE, guidanceNow()))
+        }
+    }
+}
+
+/**
+ * The offline chip while no drive runs: the whole sentence, for [reason], and nothing while the
+ * app is online. When Android keeps the app off the network, a button leads to the system page
+ * where that is changed.
+ *
+ * It belongs under the search bar, outside the column that is measured there, so that it comes and
+ * goes without moving anything else.
+ */
+@Composable
+fun OfflineChip(reason: State<OfflineReason>, onOpenSettings: () -> Unit, modifier: Modifier = Modifier) {
+    val current = reason.value
+    val sentence = offlineSentenceRes(current)
+    if (sentence != null) {
+        val blocked = current == OfflineReason.BLOCKED
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = if (blocked) 8.dp else 16.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_offline),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = stringResource(sentence),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 4.dp)
+                        // A screen reader says it when it comes, and again when the reason changes.
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                if (blocked) {
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.offline_settings)) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The offline chip during guidance: the icon and one word, as the end tab of
+ * [ManeuverPanel], in the band under the maneuver card where the Then chip hangs. It has no
+ * button, since nothing on the screen asks for a tap while the car moves; a screen reader gets
+ * the whole sentence for [reason]. Nothing while the app is online.
+ *
+ * The panel gives it its share of the card's width. The word gets smaller before it is cut, on a
+ * narrow screen or with a large font, and the tab stays as high as the band whatever the font.
+ */
+@Composable
+fun OfflinePill(reason: State<OfflineReason>, modifier: Modifier = Modifier) {
+    val sentence = offlineSentenceRes(reason.value)
+    if (sentence != null) {
+        val description = stringResource(sentence)
+        Surface(
+            modifier = modifier.clearAndSetSemantics { contentDescription = description },
+            shape = THEN_CHIP_SHAPE,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            Row(
+                // The top of the tab stays under the card's rounded bottom edge, like the Then chip's.
+                modifier = Modifier
+                    .padding(start = 12.dp, top = CARD_CORNER + THEN_CHIP_PADDING, end = 12.dp, bottom = THEN_CHIP_PADDING)
+                    .height(THEN_CHIP_BAND - THEN_CHIP_PADDING * 2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_offline),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.width(6.dp))
+                val style = MaterialTheme.typography.labelLarge
+                Text(
+                    text = stringResource(R.string.offline_short),
+                    style = style,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    autoSize = TextAutoSize.StepBased(minFontSize = LocalDensity.current.thenSideMinFont(), maxFontSize = style.fontSize),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The system pages where the owner lets the app use the network again, the best one first: the
+ * app's own data page, with background data and the Data saver exception, then the app's details
+ * page, which every phone has and which leads to the same switches.
+ */
+internal val DATA_SETTINGS_ACTIONS = listOf(
+    Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+)
+
+/**
+ * Opens the first of [actions] that [start] can open, and returns it; null when it could open
+ * none. [start] answers false for a page this phone does not have.
+ */
+internal fun openFirst(actions: List<String>, start: (String) -> Boolean): String? = actions.firstOrNull(start)
+
+/**
+ * Opens this app's data settings for the chip's Settings button, and notes in the debug log which
+ * page opened. A phone without any of the pages opens nothing; that is no reason to stop the app.
+ */
+internal fun Context.openDataSettings(debugLog: DebugLog) {
+    val app = Uri.fromParts("package", packageName, null)
+    val opened = openFirst(DATA_SETTINGS_ACTIONS) { action ->
+        try {
+            startActivity(Intent(action, app))
+            true
+        } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: SecurityException) {
+            // A page that exists but is not for other apps to open.
+            false
+        }
+    }
+    debugLog.log("offline_settings", mapOf("opened" to opened))
+}
+
+/** Each sentence under a search bar, on a narrow phone, also with a large font. */
+@Preview(name = "offline chip, each reason", widthDp = 360)
+@Preview(name = "offline chip, each reason, large font", widthDp = 360, fontScale = 1.3f)
+@Composable
+private fun OfflineChipPreview() {
+    CustomMapsTheme {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                // A grey stand-in for the map.
+                .background(Color(0xFF2B3036))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SearchBar(text = "", searching = false, onTextChange = {}, onClear = {}, onOpenSettings = {})
+            for (reason in listOf(OfflineReason.NO_NETWORK, OfflineReason.NO_INTERNET, OfflineReason.BLOCKED)) {
+                OfflineChip(reason = remember { mutableStateOf(reason) }, onOpenSettings = {})
+            }
+        }
+    }
+}
+
+/**
+ * The tab beside a Then chip that is as wide as it may be, under a card with lanes, on a narrow
+ * phone, also with a large font: the two stay apart.
+ */
+@Preview(name = "offline tab beside a long Then chip", widthDp = 360)
+@Preview(name = "offline tab beside a long Then chip, large font", widthDp = 360, fontScale = 1.3f)
+@Composable
+private fun OfflinePillBesideThenPreview() {
+    OfflinePillPreview(
+        then = Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street Old Mill Extension"),
+        lanes = LaneInfo(
+            listOf(
+                Lane(setOf(TurnModifier.LEFT), isRecommended = true, activeIndication = TurnModifier.LEFT),
+                Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
+                Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.RIGHT), isRecommended = false),
+            ),
+        ),
+    )
+}
+
+/** The tab alone, under a card without lanes. */
+@Preview(name = "offline tab alone", widthDp = 360)
+@Composable
+private fun OfflinePillAlonePreview() {
+    OfflinePillPreview(then = null, lanes = null)
+}
+
+@Composable
+private fun OfflinePillPreview(then: Maneuver?, lanes: LaneInfo?) {
+    CustomMapsTheme {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+                .background(Color(0xFF2B3036))
+                .padding(12.dp),
+        ) {
+            val reason = remember { mutableStateOf(OfflineReason.NO_NETWORK) }
+            ManeuverPanel(
+                progress = RouteProgressSnapshot(
+                    nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.LEFT, "Oak Street"),
+                    distanceToNextManeuver = Distance.feet(350.0),
+                    lanes = lanes,
+                    distanceRemaining = Distance.miles(2.1),
+                    durationRemaining = 7.minutes,
+                    following = then?.let { FollowingManeuver(it, distanceAfterNext = Distance.meters(120.0), durationAfterNext = 10.seconds) },
+                    showThen = then != null,
+                ),
+                endTab = { OfflinePill(reason) },
+            )
+        }
+    }
+}

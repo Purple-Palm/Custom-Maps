@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -56,6 +57,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
@@ -74,15 +76,27 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.network.NetworkStatus
+import io.github.purplepalm.custommaps.nav.network.OfflineReason
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.ui.guidance.ArrivedCard
 import io.github.purplepalm.custommaps.ui.guidance.GuidanceBar
 import io.github.purplepalm.custommaps.ui.guidance.ManeuverPanel
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
+import kotlinx.coroutines.flow.StateFlow
 
-/** The main screen: the map with search, route choice and guidance drawn over it. */
+/**
+ * The main screen: the map with search, route choice and guidance drawn over it. [network] is the
+ * app's network as Android reports it, for the chip that says when the app is offline.
+ */
 @Composable
-fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, onOpenSettings: () -> Unit) {
+fun MapScreen(
+    engine: MapboxEngine,
+    settings: AppSettings,
+    debugLog: DebugLog,
+    network: StateFlow<NetworkStatus>,
+    onOpenSettings: () -> Unit,
+) {
     val context = LocalContext.current
     val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -93,6 +107,10 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     // Guidance progress changes about once a second. It is passed on unread, so an update
     // recomposes only the two panels that show it, not this screen.
     val progress = viewModel.progress.collectAsStateWithLifecycle()
+    // What the offline chip says, if anything. It is passed on unread as well: a change draws the
+    // chip again and nothing else, and the wait before the chip comes goes on whatever the screen
+    // shows meanwhile.
+    val offline = rememberOfflineChip(network, debugLog) { engine.navigation.guidanceState.value }
 
     // The navigator lives while this screen does (and for the length of any drive).
     DisposableEffect(lifecycleOwner) {
@@ -206,11 +224,14 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
     // and its suggestions never make the camera frame the road again. The Then chip hangs under
     // the panel, outside its measured size: the band it hangs in stays out of the camera's frame
     // for the whole of guidance, so the chip never covers what the camera frames, and the camera
-    // never moves when the chip comes or goes.
+    // never moves when the chip comes or goes. The offline chip is no input either: during
+    // guidance it is a tab in the same band, and before it lies under the search bar, outside the
+    // top column.
     var screenHeight by remember { mutableIntStateOf(0) }
     var topPanelTop by remember { mutableIntStateOf(0) }
     var topPanelBottom by remember { mutableIntStateOf(0) }
     var maneuverPanelBottom by remember { mutableIntStateOf(0) }
+    var offlineChipBottom by remember { mutableIntStateOf(0) }
     var bottomPanelTop by remember { mutableIntStateOf(0) }
     val panelMargin = with(density) { 16.dp.roundToPx() }
     // A screen of another size starts over.
@@ -222,9 +243,9 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
         val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
         phoneMap.setViewportPadding(ViewportPadding(panelMargin, top + panelMargin, panelMargin, bottom + panelMargin))
     }
-    // The compass sits under whatever the top of the screen shows, and during guidance under the
-    // whole band, where the Then chip hangs and a tab at the card's end side can.
-    val compassInset = compassTopInset(guiding, maneuverPanelBottom, thenBand, topPanelBottom)
+    // The compass sits under whatever the top of the screen shows: under the offline chip when
+    // that is up, and during guidance under the whole band, where the two tabs hang.
+    val compassInset = compassTopInset(guiding, maneuverPanelBottom, thenBand, topPanelBottom, offlineChipBottom)
     LaunchedEffect(compassInset) { phoneMap.setCompassTopInset(compassInset + panelMargin) }
 
     BackHandler(enabled = state.guidance == GuidanceState.PREVIEW) { viewModel.onCancelPreview() }
@@ -252,7 +273,7 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 },
         ) {
             when (state.guidance) {
-                GuidanceState.ACTIVE -> ManeuverSlot(progress, onBottomChanged = { maneuverPanelBottom = it })
+                GuidanceState.ACTIVE -> ManeuverSlot(progress, offline, onBottomChanged = { maneuverPanelBottom = it })
                 GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                     SearchBar(
                         text = state.searchText,
@@ -275,6 +296,23 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
                 }
                 GuidanceState.PREVIEW -> Unit
             }
+        }
+
+        // The offline chip under the search bar. It is no part of the column above, so nothing
+        // that is measured there changes when it comes or goes. Not over an open list of
+        // suggestions, which can reach down to the strip of the Mapbox logo, and not in the route
+        // preview, where it would lie over the far end of the routes on the map.
+        val searchBarShown = state.guidance == GuidanceState.IDLE || state.guidance == GuidanceState.ARRIVED
+        if (searchBarShown && state.suggestions.isEmpty()) {
+            OfflineChipSlot(
+                reason = offline,
+                onOpenSettings = { context.openDataSettings(debugLog) },
+                onBottomChanged = { offlineChipBottom = it },
+                modifier = Modifier
+                    // From the search bar's bottom edge, as far below it as its suggestions are.
+                    .offset { IntOffset(0, topPanelBottom) }
+                    .padding(start = 12.dp, top = 8.dp, end = 12.dp),
+            )
         }
 
         Column(
@@ -355,14 +393,37 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
 /**
  * The maneuver panel once guidance has its first progress. It reads the progress itself, and
  * reports where its bottom edge is, 0 while it is not shown, for the camera's padding. The panel
- * is as large as the maneuver card alone: the Then chip under it is not measured.
+ * is as large as the maneuver card alone: the Then chip under it is not measured, and neither is
+ * the offline chip, here a tab at the other end of the same band, which reads [offline] itself.
  */
 @Composable
-private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, onBottomChanged: (Int) -> Unit) {
+private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, offline: State<OfflineReason>, onBottomChanged: (Int) -> Unit) {
     progress.value?.let { current ->
         ManeuverPanel(
             progress = current,
             modifier = Modifier.onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) },
+            endTab = { OfflinePill(offline) },
+        )
+        DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
+    }
+}
+
+/**
+ * The offline chip under the search bar. It reads [reason] itself and reports where its bottom
+ * edge is, 0 while there is no chip, so that the compass can keep clear of it.
+ */
+@Composable
+private fun OfflineChipSlot(
+    reason: State<OfflineReason>,
+    onOpenSettings: () -> Unit,
+    onBottomChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (reason.value != OfflineReason.NONE) {
+        OfflineChip(
+            reason = reason,
+            onOpenSettings = onOpenSettings,
+            modifier = modifier.onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) },
         )
         DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
     }
@@ -371,15 +432,20 @@ private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, onBottomChange
 /**
  * How far down from the top of the map the top of the screen reaches, for the compass to sit
  * under, in pixels. During guidance that is the band under the maneuver panel, whether anything
- * hangs in it or not, so the compass stays where it is when something comes to hang there.
- * Otherwise it is the top column.
+ * hangs in it or not, so the compass stays where it is when the Then chip or the offline tab
+ * comes. Otherwise it is the top column, or the offline chip under it.
  *
  * @param maneuverPanelBottom the bottom edge of the maneuver panel; 0 while it is not shown
  * @param band how far the band under the maneuver panel reaches below it
  * @param topPanelBottom the bottom edge of the top column
+ * @param offlineChipBottom the bottom edge of the offline chip under the search bar; 0 without one
  */
-internal fun compassTopInset(guiding: Boolean, maneuverPanelBottom: Int, band: Int, topPanelBottom: Int): Int =
-    if (guiding && maneuverPanelBottom > 0) maxOf(topPanelBottom, maneuverPanelBottom + band) else topPanelBottom
+internal fun compassTopInset(guiding: Boolean, maneuverPanelBottom: Int, band: Int, topPanelBottom: Int, offlineChipBottom: Int): Int =
+    if (guiding && maneuverPanelBottom > 0) {
+        maxOf(topPanelBottom, maneuverPanelBottom + band)
+    } else {
+        maxOf(topPanelBottom, offlineChipBottom)
+    }
 
 /** The guidance bar, reading the progress itself. */
 @Composable
