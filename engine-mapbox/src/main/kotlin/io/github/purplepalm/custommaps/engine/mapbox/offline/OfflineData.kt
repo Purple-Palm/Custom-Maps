@@ -8,7 +8,6 @@ import com.mapbox.common.TileRegionLoadOptions
 import com.mapbox.common.TileRegionLoadProgress
 import com.mapbox.common.TileStore
 import com.mapbox.common.TilesetDescriptor
-import com.mapbox.geojson.MultiLineString
 import com.mapbox.geojson.Point
 import com.mapbox.maps.GlyphsRasterizationMode
 import com.mapbox.maps.MapboxMap
@@ -155,10 +154,11 @@ internal class OfflineData(
 
     /**
      * Puts the street map along [routes], the routes of a preview that has just opened, on the
-     * phone: the map's style from zoom 11 to 16 as one tile region, loaded outward from [origin],
-     * where the routes start. The region is the same one every time, so a new preview takes over
-     * from the one before: a load still under way is ended, and tiles only the old routes needed
-     * are the store's to drop. The first call of a run also loads the style's own files.
+     * phone: the map's style from zoom 11 to 16 as one tile region, along the first
+     * [PreviewDownload.MAX_ROUTE_METERS] of each route, loaded outward from [origin], where the
+     * routes start. The region is the same one every time, so a new preview takes over from the
+     * one before: a load still under way is ended, and tiles only the old routes needed are the
+     * store's to drop. The first call of a run also loads the style's own files.
      *
      * Tiles the phone has are taken as they are, also past their date. Nothing is asked of the
      * network here beyond handing the store its work: without a connection the store waits and
@@ -171,7 +171,7 @@ internal class OfflineData(
         previewGeometry?.cancel()
         previewGeometry = scope.launch {
             // Reads every point of every route, so not here on the main thread.
-            val geometry = withContext(Dispatchers.Default) {
+            val shape = withContext(Dispatchers.Default) {
                 try {
                     PreviewDownload.geometry(routes.map { it.directionsRoute.completeGeometryToLineString().coordinates() })
                 } catch (e: RuntimeException) {
@@ -180,7 +180,7 @@ internal class OfflineData(
                 }
             }
             // Back on the main thread, and neither a newer preview nor guidance has come since.
-            loadRegion(routes.size, geometry, origin)
+            loadRegion(routes.size, shape, origin)
         }
     }
 
@@ -196,9 +196,9 @@ internal class OfflineData(
         end(stylePackLoad, EndedBy.GUIDANCE)
     }
 
-    private fun loadRegion(routes: Int, geometry: MultiLineString?, origin: Point) {
+    private fun loadRegion(routes: Int, shape: PreviewDownload.Shape?, origin: Point) {
         val number = ++regionLoads
-        if (geometry == null) {
+        if (shape == null) {
             debugLog.log(
                 "offline_region",
                 OfflineLines.region(number, routes, OfflineLines.NO_GEOMETRY, message = null, endedBy = null, counts = null, seconds = 0.0),
@@ -212,7 +212,7 @@ internal class OfflineData(
         regionLoad = load
         try {
             val options = TileRegionLoadOptions.Builder()
-                .geometry(geometry)
+                .geometry(shape.geometry)
                 .descriptors(listOf(previewDescriptor))
                 .startLocation(origin)
                 .acceptExpired(true)
@@ -223,10 +223,13 @@ internal class OfflineData(
                 OfflineLines.regionStart(
                     load = number,
                     routes = routes,
-                    points = geometry.coordinates().sumOf { it.size },
+                    points = shape.routes.sumOf { it.line.size },
                     zooms = PreviewDownload.ZOOMS,
                     pixelRatio = pixelRatio,
                     network = PreviewDownload.NETWORK.name,
+                    routeMeters = shape.routes.map { it.routeMeters },
+                    keptMeters = shape.routes.map { it.keptMeters },
+                    maxMeters = PreviewDownload.MAX_ROUTE_METERS,
                 ),
             )
             // Both callbacks come on a thread of the store.

@@ -90,16 +90,33 @@ internal object OfflineLines {
      * The "offline_region_start" line: the tile region is asked for again, for the [routes] of a
      * new preview. [load] counts the loads of this run of the app and is on the "offline_region"
      * line that answers this one. [points] is how many points the routes' lines have after
-     * thinning, [network] which networks the download may use.
+     * thinning, [network] which networks the download may use. [routeMeters] is the length of each
+     * route that has a line, [keptMeters] how far along it the region reaches, and [maxMeters] how
+     * far it may reach at most; all three are written in km.
      */
-    fun regionStart(load: Int, routes: Int, points: Int, zooms: ZoomBand, pixelRatio: Float, network: String): Map<String, Any?> = mapOf(
+    fun regionStart(
+        load: Int,
+        routes: Int,
+        points: Int,
+        zooms: ZoomBand,
+        pixelRatio: Float,
+        network: String,
+        routeMeters: List<Double>,
+        keptMeters: List<Double>,
+        maxMeters: Double,
+    ): Map<String, Any?> = mapOf(
         "load" to load,
         "routes" to routes,
         "points" to points,
         "zooms" to zooms.ends(),
         "pixelRatio" to pixelRatio,
         "network" to network,
+        "routeKm" to routeMeters.map(::km),
+        "keptKm" to keptMeters.map(::km),
+        "maxKm" to km(maxMeters),
     )
+
+    private fun km(meters: Double): Double = Motion.round(meters / METERS_PER_KM, 1)
 
     /**
      * The "offline_region" line: how load number [load] of the tile region ended. "result" and
@@ -150,4 +167,6 @@ internal object OfflineLines {
 
     /** The reason of a region that was never asked for: no previewed route had a line. */
     const val NO_GEOMETRY = "NO_GEOMETRY"
+
+    private const val METERS_PER_KM = 1_000.0
 }

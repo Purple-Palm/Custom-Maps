@@ -50,7 +50,7 @@ class PreviewDownloadTest {
         // 10 km with a point every 10 m.
         val line = road(points = 1_001, step = 10.0)
 
-        val thinned = PreviewDownload.thin(line)
+        val thinned = PreviewDownload.thin(line).line
 
         assertSame(line.first(), thinned.first())
         assertSame(line.last(), thinned.last())
@@ -64,7 +64,7 @@ class PreviewDownloadTest {
         // A winding road: 5 km with a point every 5 m, swinging 150 m to either side.
         val line = road(points = 1_001, step = 5.0, swing = 150.0)
 
-        val thinned = PreviewDownload.thin(line)
+        val thinned = PreviewDownload.thin(line).line
 
         assertTrue(thinned.size < line.size / 5, "${thinned.size}")
         val kept = thinned.toSet()
@@ -79,7 +79,7 @@ class PreviewDownloadTest {
         // A straight road with a point every 2 km.
         val line = road(points = 20, step = 2_000.0)
 
-        assertEquals(line, PreviewDownload.thin(line))
+        assertEquals(line, PreviewDownload.thin(line).line)
     }
 
     @Test
@@ -87,14 +87,14 @@ class PreviewDownloadTest {
         // 60 m with a point every 10 m.
         val line = road(points = 7, step = 10.0)
 
-        assertEquals(listOf(line.first(), line.last()), PreviewDownload.thin(line))
+        assertEquals(listOf(line.first(), line.last()), PreviewDownload.thin(line).line)
     }
 
     @Test
     fun `a line of two points is kept as it is`() {
         val line = listOf(at(0.0), at(5.0))
 
-        assertSame(line, PreviewDownload.thin(line))
+        assertEquals(line, PreviewDownload.thin(line).line)
     }
 
     @Test
@@ -102,7 +102,64 @@ class PreviewDownloadTest {
         // Points at 0, 100, 200 and 230 m: the end is 30 m after a kept point.
         val line = listOf(at(0.0), at(100.5), at(201.0), at(230.0))
 
-        assertEquals(line, PreviewDownload.thin(line))
+        assertEquals(line, PreviewDownload.thin(line).line)
+    }
+
+    @Test
+    fun `a route reaches at most 100 km`() {
+        assertEquals(100_000.0, PreviewDownload.MAX_ROUTE_METERS)
+    }
+
+    @Test
+    fun `a route longer than the limit is cut there, from its start`() {
+        // 500 km going east with a point every 300 m.
+        val line = road(points = 1_668, step = 300.0)
+
+        val kept = PreviewDownload.thin(line)
+
+        // To the first point at or past the limit: 334 steps, 100.2 km along the road.
+        assertEquals(line.take(335), kept.line)
+        assertEquals(100_200.0, kept.keptMeters, 1.0)
+        assertEquals(500_100.0, kept.routeMeters, 1.0)
+        // Nothing much beyond the limit is in the region.
+        assertTrue(kept.line.all { meters(line.first(), it) < PreviewDownload.MAX_ROUTE_METERS + 300.0 })
+    }
+
+    @Test
+    fun `the cut comes at the first point at or past the limit, also far from the one before`() {
+        // A point every 3 km: 99 km, then 102 km.
+        val line = road(points = 60, step = 3_000.0)
+
+        val kept = PreviewDownload.thin(line)
+
+        assertEquals(line.take(35), kept.line)
+        assertEquals(102_000.0, kept.keptMeters, 1.0)
+        assertEquals(177_000.0, kept.routeMeters, 1.0)
+    }
+
+    @Test
+    fun `the length is measured along the road, not straight from its start`() {
+        // 30 km out, 30 km back, then out again: 100 km along the road come 40 km from the start.
+        val there = road(points = 101, step = 300.0)
+        val line = there + there.reversed().drop(1) + road(points = 201, step = 300.0).drop(1)
+
+        val kept = PreviewDownload.thin(line)
+
+        assertEquals(line.take(335), kept.line)
+        assertEquals(100_200.0, kept.keptMeters, 1.0)
+        assertEquals(120_000.0, kept.routeMeters, 1.0)
+    }
+
+    @Test
+    fun `a route shorter than the limit is kept to its end, with its length`() {
+        // 5 km with a point every 10 m.
+        val line = road(points = 501, step = 10.0)
+
+        val kept = PreviewDownload.thin(line)
+
+        assertSame(line.last(), kept.line.last())
+        assertEquals(5_000.0, kept.routeMeters, 0.1)
+        assertEquals(kept.routeMeters, kept.keptMeters)
     }
 
     @Test
@@ -112,9 +169,25 @@ class PreviewDownloadTest {
 
         val shape = PreviewDownload.geometry(listOf(first, second))!!
 
-        assertEquals(2, shape.coordinates().size)
-        assertEquals(PreviewDownload.thin(first), shape.coordinates()[0])
-        assertEquals(PreviewDownload.thin(second), shape.coordinates()[1])
+        assertEquals(2, shape.geometry.coordinates().size)
+        assertEquals(PreviewDownload.thin(first).line, shape.geometry.coordinates()[0])
+        assertEquals(PreviewDownload.thin(second).line, shape.geometry.coordinates()[1])
+        assertEquals(listOf(PreviewDownload.thin(first), PreviewDownload.thin(second)), shape.routes)
+    }
+
+    @Test
+    fun `each route of the shape is cut on its own`() {
+        val long = road(points = 1_001, step = 300.0)
+        val short = road(points = 301, step = 100.0, swing = 80.0)
+
+        val shape = PreviewDownload.geometry(listOf(long, short))!!
+
+        val (cut, whole) = shape.routes
+        assertEquals(300_000.0, cut.routeMeters, 1.0)
+        assertEquals(100_200.0, cut.keptMeters, 1.0)
+        assertSame(short.last(), whole.line.last())
+        assertEquals(whole.routeMeters, whole.keptMeters)
+        assertEquals(shape.routes.map { it.line }, shape.geometry.coordinates())
     }
 
     @Test
@@ -123,7 +196,7 @@ class PreviewDownloadTest {
 
         val shape = PreviewDownload.geometry(listOf(emptyList(), route, listOf(at(0.0))))!!
 
-        assertEquals(listOf(PreviewDownload.thin(route)), shape.coordinates())
+        assertEquals(listOf(PreviewDownload.thin(route).line), shape.geometry.coordinates())
     }
 
     @Test

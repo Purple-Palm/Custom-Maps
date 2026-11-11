@@ -86,7 +86,8 @@ one; the debug section counts them with the rest.
 
 The app saves what a drive needs for stretches without a connection:
 
-- when routes are shown, the street map along them, starting where they start;
+- when routes are shown, the street map along the first 100 km of each, starting where they
+  start;
 - during guidance, the map and the road data around the car, along the route and around the
   destination.
 

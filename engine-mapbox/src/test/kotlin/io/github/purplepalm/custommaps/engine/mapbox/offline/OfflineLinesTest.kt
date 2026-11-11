@@ -202,8 +202,29 @@ class OfflineLinesTest {
     @Test
     fun `the start line names the load, the routes and what may be used`() {
         assertEquals(
-            mapOf("load" to 5, "routes" to 3, "points" to 420, "zooms" to listOf(11, 16), "pixelRatio" to 2.5f, "network" to "NONE"),
-            OfflineLines.regionStart(load = 5, routes = 3, points = 420, zooms = ZoomBand(11, 16), pixelRatio = 2.5f, network = "NONE"),
+            mapOf(
+                "load" to 5,
+                "routes" to 3,
+                "points" to 420,
+                "zooms" to listOf(11, 16),
+                "pixelRatio" to 2.5f,
+                "network" to "NONE",
+                // Each route's length in km, and how far along it the region reaches.
+                "routeKm" to listOf(412.3, 38.0, 99.9),
+                "keptKm" to listOf(100.1, 38.0, 99.9),
+                "maxKm" to 100.0,
+            ),
+            OfflineLines.regionStart(
+                load = 5,
+                routes = 3,
+                points = 420,
+                zooms = ZoomBand(11, 16),
+                pixelRatio = 2.5f,
+                network = "NONE",
+                routeMeters = listOf(412_345.6, 38_012.0, 99_949.0),
+                keptMeters = listOf(100_120.0, 38_012.0, 99_949.0),
+                maxMeters = 100_000.0,
+            ),
         )
     }
 

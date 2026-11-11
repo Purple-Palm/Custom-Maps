@@ -438,8 +438,9 @@ Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a p
   | Standard map, zoom 11 to 14 | 10 km | 5 km | 10 km |
 
 - **Street map along the routes.** When routes appear in the preview, the Standard map at zoom 11
-  to 16 along every previewed route is downloaded, outward from where the routes start. The first
-  preview after the app starts also loads the Standard style pack, so the map can open offline.
+  to 16 along the first 100 km of every previewed route is downloaded, outward from where the
+  routes start. The first preview after the app starts also loads the Standard style pack, so the
+  map can open offline.
   - It is one tile region that each new preview replaces, not the owner-chosen offline regions on
     the future list in ROADMAP.md.
   - Start ends a download that is still under way: during a drive only predictive caching loads,
@@ -448,6 +449,9 @@ Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a p
     lets its download finish.
   - Map tiles only; road data is loaded during guidance, as part of the trip. Tiles the phone
     already has are taken as they are.
+  - Only the first 100 km of each route: Mapbox refuses a region whole when it needs more than 750
+    tile packs, so a long trip's whole length would save nothing at all. During guidance
+    predictive caching keeps the rest ahead.
   - On the first drive this would have used the 8 minutes on home Wi-Fi.
   - Whether Mapbox resolves the Standard style for a tile region, its 3D buildings included,
     cannot be read from the SDK's sources. The first download on the phone shows it; see the next
@@ -499,7 +503,7 @@ Built in stage 1.1. New lines in the debug log:
 | Camera | Once a second during guidance while the map is on screen (the `activity` and `screen` lines show when it was not): zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. Also how wide a lane is on the screen, what sets the zoom with the Large lane zoom, and whether lane details are on. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
 | Lane choices | Once for each point of the route with lanes, when it comes as near as the close view would start: its lanes, how many can be used and how many leave the route, whether the road is a freeway, and the reason when the rule passes it over. Each route also lists, step by step, its intersections with lanes | How often Large goes close on a freeway, and how often a looser rule would |
 | Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
-| Offline data | For each navigator, whether it and the map share the tile store, and how far data is kept ahead. For each download of a preview's routes and of the map's style: how it ended (done, partial, replaced by a newer preview, stopped at Start, or failed and why), how many resources it needed and has, their bytes on the phone, the bytes that came over the network for it, and the seconds it took. Errors of predictive caching, the first of each kind and then counts. Each time the offline chip comes, goes or changes its sentence, with the reason and whether a drive was running, and which system page its Settings button opened | Nothing saved ahead; what saving costs in data |
+| Offline data | For each navigator, whether it and the map share the tile store, and how far data is kept ahead. For each download of a preview's routes and of the map's style: each route's length and how far along it the region reached, how it ended (done, partial, replaced by a newer preview, stopped at Start, or failed and why), how many resources it needed and has, their bytes on the phone, the bytes that came over the network for it, and the seconds it took. Errors of predictive caching, the first of each kind and then counts. Each time the offline chip comes, goes or changes its sentence, with the reason and whether a drive was running, and which system page its Settings button opened | Nothing saved ahead; what saving costs in data |
 | Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it and the one the app took, the result's types, categories and Mapbox id | Behind the store |
 | Route requests | Every route request the app sends: where it starts, and how old, how fast and in which direction that position was; the stop point, the arrival target and the direction sent with it; whether it was sent inside a trip. And every reroute request of the navigator: how many points and arrival targets it has, whether the destination's target is set, and how far its end is from where the trip goes | Behind the store; what a drive costs |
 | Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, whether a cancelled refresh is asked for once more, and the reason whenever fresh routes were not set | Old routes at Start |
@@ -607,7 +611,10 @@ On the drive:
      open for a minute or two before Start; Start ends a download still under way. The log then
      has an `offline_region` line. `required` above zero, with some MB in `completedBytes`, means
      Mapbox resolved the Standard style for a tile region. That line is the only place where
-     this shows. `failed` with `tileset_descriptor` means it did not resolve.
+     this shows. `failed` with `tileset_descriptor` means it did not resolve. `failed` with
+     `tile_count_exceeded` means that 100 km of each route is too much for the tilesets of
+     Standard; `required` and `completedBytes` of a load that worked tell how far the limit could
+     go.
    - **The chip, before a drive.** With the map open and no drive, turn on airplane mode. Within
      about 3 s the sentence "No internet. The map shows only areas saved on the phone; guidance
      continues." should appear under the search bar. It should go as soon as the phone is online
@@ -671,7 +678,7 @@ Then share the debug log. What to read in it:
 | `route_request`: `stopPoint`, `targets`, `bearings`, `originFix`, `inTrip` | Whether routes went to the stop point with the place as target; whether a direction was sent and from what speed; one request for each Directions press, and at most one with `inTrip` in a drive |
 | `reroute_options` | Whether reroutes keep the arrival target: `targets` null with `targetWanted` true means a reroute lost it. `endMeters` near 0 means it still ends at the same point |
 | `tile_store` | `shared` true: the map and the navigator have the one tile store. `map` false would mean that predictive caching keeps no map data |
-| `offline_region_start`, `offline_region` | One pair for each preview. `required` above zero: Mapbox Standard resolved for a tile region. `loadedBytes` is what the download cost in data, `completedBytes` what the phone holds for it, `seconds` how long it took. `replaced` (a newer preview) and `stopped` (Start) are no faults; `partial` and `failed` name their reason. A start line with no line after it is a download that never got an answer, as without a connection |
+| `offline_region_start`, `offline_region` | One pair for each preview. `routeKm` is each route's length and `keptKm` how far along it the region reaches, up to about `maxKm`. `required` above zero: Mapbox Standard resolved for a tile region. `tile_count_exceeded`: the region was too large and saved nothing. `loadedBytes` is what the download cost in data, `completedBytes` what the phone holds for it, `seconds` how long it took. `replaced` (a newer preview) and `stopped` (Start) are no faults; `partial` and `failed` name their reason. A start line with no line after it is a download that never got an answer, as without a connection |
 | `offline_style_pack` | The size of the map's style, loaded once after the app starts, and again with the next preview if that failed |
 | `offline_cache`, `offline_cache_error` | That predictive caching was set up, once for each navigator, with its distances, and what it could not do |
 | `offline_chip` | When the chip came and went, with its reason and the guidance state. `shown` true should follow a `network` line that reports the app offline by about 3 s, and `shown` false should come with the line that reports it online again |
