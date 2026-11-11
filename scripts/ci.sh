@@ -4,6 +4,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Tests of the CI scripts themselves; they need no network, no Android SDK and no secret.
+scripts/test/version-test.sh
+
+# The version of this build (scripts/version.sh): on CI the versionCode rises with every run and re-run.
+version="$(scripts/version.sh)"
+read -r version_code version_name <<<"$version"
+version_args=("-Pcustommaps.versionCode=$version_code" "-Pcustommaps.versionName=$version_name")
+echo "Version $version_name; release builds get versionCode $version_code."
+
 # Optional shared debug signing key from the repository secrets (README, "Shared debug signing key").
 if [[ -n "${DEBUG_KEYSTORE_BASE64:-}" ]]; then
     keystore="${RUNNER_TEMP:-$(mktemp -d)}/debug-signing.p12"
@@ -15,7 +24,8 @@ else
 fi
 
 # The published APK is for phones only (arm64), which roughly halves its size.
-./gradlew assembleDebug testDebugUnitTest :core-nav:test :app:lintDebug -Pcustommaps.abis=arm64-v8a --stacktrace
+./gradlew assembleDebug testDebugUnitTest :core-nav:test :app:lintDebug -Pcustommaps.abis=arm64-v8a \
+    "${version_args[@]}" --stacktrace
 scripts/check-16kb-alignment.sh app/build/outputs/apk/debug/app-debug.apk
 
 # The APK is published as is (not zipped); its name says which run and commit it comes from.

@@ -8,6 +8,14 @@ plugins {
 // Commit the build was made from, shown in Settings: the short SHA on CI, "local" otherwise.
 val buildRevision: String = providers.environmentVariable("GITHUB_SHA").map { it.take(7) }.getOrElse("local")
 
+// The version of this build. CI passes both values from scripts/version.sh: the versionCode rises with
+// every run and re-run, the versionName shows the run. A build on a computer is 1 and 0.1.0.
+val releaseVersionCode: Int = providers.gradleProperty("custommaps.versionCode").map(String::toInt).getOrElse(1)
+val appVersionName: String = providers.gradleProperty("custommaps.versionName").getOrElse("0.1.0")
+check(releaseVersionCode in 1..2_100_000_000) {
+    "custommaps.versionCode must be between 1 and 2100000000, the largest versionCode Google Play takes"
+}
+
 val localProperties = Properties().apply {
     providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
         .asText.orNull?.let { load(it.reader()) }
@@ -53,8 +61,10 @@ android {
         applicationId = "io.github.purplepalm.custommaps"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
+        // Release builds take releaseVersionCode (below). Debug builds stay at 1, so a build from
+        // Android Studio still installs over a CI build: Android refuses a lower versionCode.
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = appVersionName
 
         resValue("string", "app_version", versionName ?: "")
         resValue("string", "build_revision", buildRevision)
@@ -135,4 +145,11 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+androidComponents {
+    // Google Play needs a higher versionCode for every upload, and only release builds go there.
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { it.versionCode.set(releaseVersionCode) }
+    }
 }
