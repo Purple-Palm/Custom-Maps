@@ -21,8 +21,9 @@ class DebugKeyTest {
         assertFalse(isDefaultDebugSubject("CN=Custom Maps Debug,O=Example Owner,C=US"))
         assertFalse(isDefaultDebugSubject("CN=Android Debug Bridge,O=Android,C=US"))
         assertFalse(isDefaultDebugSubject("O=Android Debug,C=US"))
-        // An escaped comma is part of the name.
-        assertFalse(isDefaultDebugSubject("CN=Android\\, Debug,O=Android"))
+        // An escaped comma is part of the value: "CN=Android Debug" here is text of O. Written by
+        // hand, since the platform also escapes "=" and its own names cannot tell this case apart.
+        assertFalse(isDefaultDebugSubject("O=Example\\,CN=Android Debug,C=US"))
         assertFalse(isDefaultDebugSubject(""))
     }
 }
