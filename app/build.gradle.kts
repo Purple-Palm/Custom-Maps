@@ -8,23 +8,42 @@ plugins {
 // Commit the build was made from, shown in Settings: the short SHA on CI, "local" otherwise.
 val buildRevision: String = providers.environmentVariable("GITHUB_SHA").map { it.take(7) }.getOrElse("local")
 
-// Optional shared key for debug builds, so a newer build (from CI or Android Studio) installs over the
-// installed one. Values come from environment variables (CI secrets) or local.properties.
 val localProperties = Properties().apply {
     providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
         .asText.orNull?.let { load(it.reader()) }
 }
-val debugSigning: Map<String, String?> =
-    listOf("DEBUG_KEYSTORE_FILE", "DEBUG_KEYSTORE_PASSWORD", "DEBUG_KEY_ALIAS", "DEBUG_KEY_PASSWORD")
-        .associateWith { name ->
-            providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
-                ?: localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
-        }
-val missingDebugSigning = debugSigning.filterValues { it == null }.keys
-check(missingDebugSigning.isEmpty() || missingDebugSigning.size == debugSigning.size) {
-    "Shared debug signing key is only partly configured; missing: ${missingDebugSigning.joinToString()}"
+
+/** A keystore file and the alias and passwords that open the key in it. */
+class SigningKey(val file: String, val storePassword: String, val alias: String, val keyPassword: String)
+
+/**
+ * The key whose four values start with [prefix]: `<prefix>_KEYSTORE_FILE`, `_KEYSTORE_PASSWORD`,
+ * `_KEY_ALIAS` and `_KEY_PASSWORD`, each from an environment variable (CI secrets) or local.properties.
+ * All four or none: null when none is set, and a build with only some of them fails with a message
+ * that names the missing ones, never a value.
+ */
+fun signingKey(prefix: String, title: String): SigningKey? {
+    val names = listOf("KEYSTORE_FILE", "KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD").map { "${prefix}_$it" }
+    val values = names.associateWith { name ->
+        providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
+            ?: localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+    }
+    val missing = values.filterValues { it == null }.keys
+    check(missing.isEmpty() || missing.size == names.size) {
+        "$title is only partly configured; missing: ${missing.joinToString()}"
+    }
+    if (missing.isNotEmpty()) return null
+    val (file, storePassword, alias, keyPassword) = names.map { values.getValue(it)!! }
+    return SigningKey(file, storePassword, alias, keyPassword)
 }
-val useSharedDebugKey = missingDebugSigning.isEmpty()
+
+// Optional shared key for debug builds, so a newer build (from CI or Android Studio) installs over the
+// installed one.
+val debugKey = signingKey("DEBUG", "Shared debug signing key")
+
+// The upload key for Google Play. Release builds are signed with it when it is configured and are
+// unsigned otherwise; Google Play signs what it delivers with its own app signing key.
+val releaseKey = signingKey("RELEASE", "Release signing key")
 
 android {
     namespace = "io.github.purplepalm.custommaps"
@@ -50,14 +69,14 @@ android {
     }
 
     signingConfigs {
-        if (useSharedDebugKey) {
-            create("sharedDebug") {
-                storeFile = file(debugSigning.getValue("DEBUG_KEYSTORE_FILE")!!)
-                storePassword = debugSigning.getValue("DEBUG_KEYSTORE_PASSWORD")
-                keyAlias = debugSigning.getValue("DEBUG_KEY_ALIAS")
-                keyPassword = debugSigning.getValue("DEBUG_KEY_PASSWORD")
-            }
+        fun add(name: String, key: SigningKey) = create(name) {
+            storeFile = file(key.file)
+            storePassword = key.storePassword
+            keyAlias = key.alias
+            keyPassword = key.keyPassword
         }
+        debugKey?.let { add("sharedDebug", it) }
+        releaseKey?.let { add("release", it) }
     }
 
     buildTypes {
@@ -65,8 +84,13 @@ android {
             // Lets a debug build live next to the Play build, so neither has to be uninstalled.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            if (useSharedDebugKey) {
+            if (debugKey != null) {
                 signingConfig = signingConfigs.getByName("sharedDebug")
+            }
+        }
+        release {
+            if (releaseKey != null) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }

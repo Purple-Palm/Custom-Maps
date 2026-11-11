@@ -6,10 +6,19 @@
 # The Mapbox access token is NOT configured here. It is entered in the app (Settings) and
 # stays on the phone. Mapbox SDK downloads need no token at all.
 #
+# Each signing key below takes four values: set all four or none. Use an absolute path with forward
+# slashes, also on Windows (C:/Users/me/keys/custommaps-debug.p12).
+#
 # Optional shared key for debug builds (README, "Shared debug signing key"). Use the same values
-# as the GitHub secrets so local and CI builds install over each other. Set all four or none.
-# Use an absolute path with forward slashes, also on Windows (C:/Users/me/keys/custommaps-debug.p12).
+# as the GitHub secrets so local and CI builds install over each other.
 DEBUG_KEYSTORE_FILE=
 DEBUG_KEYSTORE_PASSWORD=
 DEBUG_KEY_ALIAS=
 DEBUG_KEY_PASSWORD=
+#
+# Optional upload key for Google Play, for release builds made on this computer. Without it a release
+# build is unsigned. CI signs with the RELEASE_* secrets instead.
+RELEASE_KEYSTORE_FILE=
+RELEASE_KEYSTORE_PASSWORD=
+RELEASE_KEY_ALIAS=
+RELEASE_KEY_PASSWORD=
