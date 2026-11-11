@@ -17,6 +17,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.StepShapes
 import io.github.purplepalm.custommaps.nav.camera.Bend
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.debug.RawOffset
 import io.github.purplepalm.custommaps.nav.debug.RouteCounts
 import io.github.purplepalm.custommaps.nav.geo.Geo
 
@@ -284,6 +285,25 @@ internal fun Location.debugFields(): Map<String, Any?> {
     )
     return if (replayed) fields + ("replayed" to true) else fields
 }
+
+/**
+ * Where this position, the phone's own, lay against [matched], the navigator's position matched to
+ * the road, for the "raw" object of the "match" fields ([RawOffset]). Its age is how old it was at
+ * [nowNanos] and [nowMillis], when [matched] came; none for a replayed position, whose times are
+ * the replayer's. Numbers only.
+ */
+internal fun Location.rawOffsetFields(matched: Location, nowNanos: Long, nowMillis: Long): Map<String, Any?> =
+    RawOffset.fields(
+        rawLatitude = latitude,
+        rawLongitude = longitude,
+        rawBearing = bearing,
+        rawSpeedMps = speed,
+        rawAccuracyMeters = horizontalAccuracy,
+        matchedLatitude = matched.latitude,
+        matchedLongitude = matched.longitude,
+        matchedBearing = matched.bearing,
+        ageMillis = if (isReplayed()) null else fixAgeMillis(monotonicTimestamp, timestamp, nowNanos, nowMillis),
+    )
 
 /**
  * What a route request says about the position it starts from: how old it was, and the speed and

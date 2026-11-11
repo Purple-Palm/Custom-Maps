@@ -4,6 +4,7 @@ import com.mapbox.bindgen.Value
 import com.mapbox.common.location.Location
 import com.mapbox.common.location.LocationExtraKeys
 import com.mapbox.geojson.Point
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.FixTime
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -13,6 +14,9 @@ import org.junit.jupiter.api.Test
 
 /** Invented positions in the sea near the point 0, 0, and invented clocks. */
 class DeviceFixTest {
+
+    /** One degree of latitude on the sphere the app measures with. */
+    private val metersPerDegree = Math.toRadians(1.0) * Geo.EARTH_RADIUS_METERS
 
     private val point = Point.fromLngLat(0.002, 0.001)
 
@@ -122,6 +126,18 @@ class DeviceFixTest {
         val plain = Location.Builder().latitude(0.0).longitude(0.0).timestamp(946_684_800_000L).build()
 
         assertFalse(plain.isReplayed())
+    }
+
+    @Test
+    fun `the phone's position against the matched one, with its age when that came`() {
+        // Matched 10 m north of the phone's fix, heading north: the fix lies 10 m behind it.
+        val matched = Location.Builder().latitude(0.001 + 10.0 / metersPerDegree).longitude(0.002).bearing(0.0).timestamp(946_684_900_200L).build()
+        val phone = replayedLocation(mock = false).rawOffsetFields(matched, nowNanos = 105_250_000_000L, nowMillis = 946_684_900_250L)
+        assertEquals(mapOf("sideM" to 0.0, "aheadM" to -10.0, "accM" to null, "ageMs" to 250L, "bearingDiff" to 44.0), phone)
+        // A replayed position has no age on the phone's clock.
+        val replayed = replayedLocation(mock = true).rawOffsetFields(matched, nowNanos = 5_000_000_000L, nowMillis = 946_684_800_000L)
+        assertNull(replayed["ageMs"])
+        assertEquals(-10.0, replayed["aheadM"])
     }
 
     @Test

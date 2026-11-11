@@ -222,6 +222,12 @@ internal class MapboxNavigationEngine(
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
 
+    /** The phone's newest position of the trip, before the navigator matched it. Kept in memory only, like [lastMatch]. */
+    private var lastRawFix: MapboxLocation? = null
+
+    /** Where [lastRawFix] lay against [lastMatch] when that came: the "raw" object of the "match" fields ([rawOffsetFields]). */
+    private var lastRawOffset: Map<String, Any?>? = null
+
     /** What the maneuver card's lane row drew at the last "lane_row" line; every drive starts it over. */
     private val laneRowLog = LaneRowLog()
 
@@ -408,6 +414,8 @@ internal class MapboxNavigationEngine(
         rerouting = false
         navigation = null
         lastMatch = null
+        lastRawFix = null
+        lastRawOffset = null
         debugLog.log("navigator_detached")
     }
 
@@ -875,6 +883,8 @@ internal class MapboxNavigationEngine(
                 // navigator held from the trip before must not count as this trip's.
                 staleStart.begin()
                 lastMatch = null
+                lastRawFix = null
+                lastRawOffset = null
                 beginTripTally(command.simulated)
                 // The preview's download goes on into the drive until it is done.
                 offlineData.onTripStarted()
@@ -1036,13 +1046,13 @@ internal class MapboxNavigationEngine(
         // left alone, by the card, the Then chip, the lane choices and the start plan alike.
         if (active && staleStart.isStale(fix)) {
             staleStart.countStaleUpdate()
-            debugLog.log("progress", progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "staleStart" to true))
+            debugLog.log("progress", progress.debugFields() + mapOf("match" to matchFields(), "staleStart" to true))
             return@RouteProgressObserver
         }
         // The same for one from before a seek of a simulated drive, or from while the navigator
         // knew no place for the car: the screen goes on with the new place.
         if (active && seekHold.isHeld(fix)) {
-            debugLog.log("progress", progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "replaySeek" to true))
+            debugLog.log("progress", progress.debugFields() + mapOf("match" to matchFields(), "replaySeek" to true))
             return@RouteProgressObserver
         }
         if (active) onTripProgress()
@@ -1062,7 +1072,7 @@ internal class MapboxNavigationEngine(
         debugLog.log(
             "progress",
             progress.debugFields() + mapOf(
-                "match" to lastMatch?.debugFields(),
+                "match" to matchFields(),
                 "thenShown" to snapshot?.showThen,
                 "card" to card?.logName,
             ) + speedLimitChange(active),
@@ -1124,6 +1134,17 @@ internal class MapboxNavigationEngine(
     private fun progressHeld(): Boolean {
         val fix = lastMatch?.enhancedLocation?.fixTime()
         return staleStart.isStale(fix) || seekHold.isHeld(fix)
+    }
+
+    /**
+     * The "match" fields of a "progress" or "off_route" line: the navigator's latest matched
+     * position, and as "raw" where the phone's own position lay against it when it came. Null
+     * before the first matched position.
+     */
+    private fun matchFields(): Map<String, Any?>? {
+        val fields = lastMatch?.debugFields() ?: return null
+        val raw = lastRawOffset ?: return fields
+        return fields + ("raw" to raw)
     }
 
     /** The clock of the run-up's resume and of a seek, in seconds. */
@@ -1189,10 +1210,13 @@ internal class MapboxNavigationEngine(
             val time = rawLocation.fixTime()
             staleStart.onSourceFix(time)
             seekHold.onSourceFix(time)
+            lastRawFix = rawLocation
         }
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
             lastMatch = locationMatcherResult
+            // Once for each matched position, for every line until the next.
+            lastRawOffset = lastRawFix?.rawOffsetFields(locationMatcherResult.enhancedLocation, SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis())
             if (tripTally.running && !carriesOldPosition(locationMatcherResult)) {
                 val location = locationMatcherResult.enhancedLocation
                 // The first position after a seek is where the car was put, not a stretch it drove.
@@ -1220,7 +1244,7 @@ internal class MapboxNavigationEngine(
 
     private val offRouteObserver = OffRouteObserver { offRoute ->
         tripTally.onOffRoute(offRoute)
-        debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to lastMatch?.debugFields()))
+        debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to matchFields()))
         // The navigator reroutes a car that left the route; the start plan steps back for it.
         if (offRoute) startRefresher.onReroute()
     }
