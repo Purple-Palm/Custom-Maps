@@ -9,6 +9,9 @@ import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.FakeAppSettings
+import io.github.purplepalm.custommaps.token.TokenList
+import io.github.purplepalm.custommaps.token.TokenTrips
+import io.github.purplepalm.custommaps.token.TripsOf
 import java.io.File
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -116,10 +119,78 @@ class SettingsViewModelTest {
         val trips = (9L downTo 0L).map { trip(daysAgo = it) }
         tripLog.log.value = trips
         val viewModel = viewModel()
-        val recent = viewModel.debug.value.recentTrips
+        val recent = viewModel.debug.value.recentTrips.map { it.start }
         assertEquals(5, recent.size)
         assertEquals(trips.last(), recent.first())
         assertTrue(recent.zipWithNext().all { (newer, older) -> newer.startedAt > older.startedAt })
+    }
+
+    /** Two saved tokens, Main (t1, active) and Test (t2), with clearly fake values. */
+    private val twoTokens = TokenList.EMPTY.add(null, "pk.dGVzdA.c2ln1", "t1").add("Test", "pk.dGVzdA.c2ln2", "t2")
+    private val tokens = MutableStateFlow(twoTokens)
+
+    private fun TestScope.viewModelWithTokens() =
+        SettingsViewModel(tripLog, settings, archive, now = { now }, installedAt = { installedAt }, tokens = tokens).also {
+            it.debug.launchIn(backgroundScope)
+            runCurrent()
+        }
+
+    private fun trip(daysAgo: Long, tokenId: String?) = trip(daysAgo).copy(tokenId = tokenId)
+
+    @Test
+    fun `counts the month's trip sessions for each token`() = runTest(dispatcher) {
+        // Two drives on two tokens this month, one on Main last month.
+        tripLog.log.value = listOf(trip(daysAgo = 40, tokenId = "t1"), trip(daysAgo = 2, tokenId = "t1"), trip(daysAgo = 1, tokenId = "t2"))
+        val viewModel = viewModelWithTokens()
+
+        val debug = viewModel.debug.value
+        assertEquals(2, debug.trips.count)
+        assertEquals(listOf(TokenTrips(TripsOf.Token("Main"), 1), TokenTrips(TripsOf.Token("Test"), 1)), debug.tripsByToken)
+    }
+
+    @Test
+    fun `sessions from before tokens were named, and those of deleted tokens, keep counting`() = runTest(dispatcher) {
+        tripLog.log.value = listOf(trip(daysAgo = 2, tokenId = null), trip(daysAgo = 2, tokenId = "gone"), trip(daysAgo = 1, tokenId = "t2"))
+        val viewModel = viewModelWithTokens()
+
+        assertEquals(
+            listOf(
+                TokenTrips(TripsOf.Token("Main"), 0),
+                TokenTrips(TripsOf.Token("Test"), 1),
+                TokenTrips(TripsOf.Deleted, 1),
+                TokenTrips(TripsOf.BeforeNames, 1),
+            ),
+            viewModel.debug.value.tripsByToken,
+        )
+
+        // Test deleted: its session counts as a deleted token's from then on.
+        tokens.value = twoTokens.remove("t2")
+        runCurrent()
+        assertEquals(
+            listOf(TokenTrips(TripsOf.Token("Main"), 0), TokenTrips(TripsOf.Deleted, 2), TokenTrips(TripsOf.BeforeNames, 1)),
+            viewModel.debug.value.tripsByToken,
+        )
+        assertEquals(3, viewModel.debug.value.trips.count)
+    }
+
+    @Test
+    fun `one token with every trip on it shows no line by token`() = runTest(dispatcher) {
+        tokens.value = twoTokens.remove("t2")
+        tripLog.log.value = listOf(trip(daysAgo = 2, tokenId = "t1"))
+        val viewModel = viewModelWithTokens()
+
+        assertEquals(emptyList<TokenTrips>(), viewModel.debug.value.tripsByToken)
+        assertEquals(1, viewModel.debug.value.trips.count)
+    }
+
+    @Test
+    fun `recent trips say which token they ran on`() = runTest(dispatcher) {
+        tripLog.log.value = listOf(trip(daysAgo = 3, tokenId = null), trip(daysAgo = 2, tokenId = "gone"), trip(daysAgo = 1, tokenId = "t2"))
+        val viewModel = viewModelWithTokens()
+
+        assertEquals(listOf(TripsOf.Token("Test"), TripsOf.Deleted, TripsOf.BeforeNames), viewModel.debug.value.recentTrips.map { it.token })
+        // Names only reach the screen, never a token.
+        assertFalse(viewModel.debug.value.toString().contains("pk."))
     }
 
     @Test

@@ -67,7 +67,7 @@ fun CustomMapsApp(graph: AppGraph) {
         if (showSettings) {
             BackHandler { showSettings = false }
             val settingsViewModel = viewModel {
-                SettingsViewModel(graph.tripLogStore, graph.settings, graph.debugLog, installedAt = graph::installedAt)
+                SettingsViewModel(graph.tripLogStore, graph.settings, graph.debugLog, installedAt = graph::installedAt, tokens = graph.tokenStore.list)
             }
             LaunchedEffect(Unit) { settingsViewModel.refreshLogSize() }
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()

@@ -39,4 +39,16 @@ class DataStoreTripLogStoreTest {
         store.record(second)
         assertEquals(listOf(first, second), store.entries.first())
     }
+
+    @Test
+    fun `a session's token id is kept next to the sessions without one`() = runBlocking {
+        val store = DataStoreTripLogStore(
+            PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(directory, "log.preferences_pb") }),
+        )
+        val before = TripSessionStart(Instant.parse("2000-01-03T08:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false)
+        val tagged = TripSessionStart(Instant.parse("2000-01-04T08:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false, tokenId = "0123456789ab")
+        store.record(before)
+        store.record(tagged)
+        assertEquals(listOf(before, tagged), store.entries.first())
+    }
 }

@@ -17,6 +17,11 @@ data class TripSessionStart(
     val kind: TripKind,
     /** A replayed drive; still billed as a trip. */
     val simulated: Boolean,
+    /**
+     * The app's own id of the saved token the session ran on, never the token itself; null for the
+     * sessions logged before the app kept several tokens.
+     */
+    val tokenId: String? = null,
 )
 
 /** Persistent record of trip session starts. */
@@ -55,10 +60,18 @@ object TripLog {
 
     const val MAX_ENTRIES = 500
 
-    fun countInMonth(entries: List<TripSessionStart>, now: ZonedDateTime): Int {
-        val month = YearMonth.from(now)
-        return entries.count { YearMonth.from(it.startedAt.atZone(now.zone)) == month }
-    }
+    fun countInMonth(entries: List<TripSessionStart>, now: ZonedDateTime): Int = entries.count { inMonth(it, now) }
+
+    /**
+     * The trip sessions of the month of [now], in its time zone, for each token id they ran on;
+     * the key null holds the sessions logged without one. Ids with no session this month are left
+     * out. The counts add up to [countInMonth].
+     */
+    fun countByToken(entries: List<TripSessionStart>, now: ZonedDateTime): Map<String?, Int> =
+        entries.filter { inMonth(it, now) }.groupingBy { it.tokenId }.eachCount()
+
+    private fun inMonth(entry: TripSessionStart, now: ZonedDateTime): Boolean =
+        YearMonth.from(entry.startedAt.atZone(now.zone)) == YearMonth.from(now)
 
     /**
      * The trips of the month of [now], in its time zone, and since when the log covers it.
@@ -82,17 +95,29 @@ object TripLog {
     fun append(entries: List<TripSessionStart>, start: TripSessionStart): List<TripSessionStart> =
         (entries + start).takeLast(MAX_ENTRIES)
 
-    /** One entry per line: epoch millis, kind, 1 if simulated. */
+    /**
+     * One entry per line: epoch millis, kind, 1 if simulated, and the token id when there is one.
+     * A line without a token id has the three fields that versions before token ids wrote and read.
+     */
     fun encode(entries: List<TripSessionStart>): String = entries.joinToString("\n") { entry ->
-        "${entry.startedAt.toEpochMilli()},${entry.kind.name},${if (entry.simulated) 1 else 0}"
+        val line = "${entry.startedAt.toEpochMilli()},${entry.kind.name},${if (entry.simulated) 1 else 0}"
+        if (entry.tokenId == null) line else "$line,${entry.tokenId}"
     }
 
-    /** Skips lines it cannot read instead of failing, so one bad entry never hides the rest. */
+    /**
+     * Reads lines of three fields, as every version wrote them before token ids, and of four.
+     * Skips lines it cannot read instead of failing, so one bad entry never hides the rest.
+     */
     fun decode(text: String): List<TripSessionStart> = text.lineSequence().mapNotNull(::decodeLine).toList()
+
+    /** Whether [text] can be a token id in a line: 1 to 32 letters, digits, '_' and '-'. */
+    fun isTokenId(text: String): Boolean = TOKEN_ID.matches(text)
+
+    private val TOKEN_ID = Regex("[A-Za-z0-9_-]{1,32}")
 
     private fun decodeLine(line: String): TripSessionStart? {
         val parts = line.trim().split(',')
-        if (parts.size != 3) return null
+        if (parts.size != 3 && parts.size != 4) return null
         val millis = parts[0].toLongOrNull() ?: return null
         val kind = TripKind.entries.firstOrNull { it.name == parts[1] } ?: return null
         val simulated = when (parts[2]) {
@@ -100,6 +125,7 @@ object TripLog {
             "0" -> false
             else -> return null
         }
-        return TripSessionStart(Instant.ofEpochMilli(millis), kind, simulated)
+        val tokenId = parts.getOrNull(3)?.also { if (!isTokenId(it)) return null }
+        return TripSessionStart(Instant.ofEpochMilli(millis), kind, simulated, tokenId)
     }
 }

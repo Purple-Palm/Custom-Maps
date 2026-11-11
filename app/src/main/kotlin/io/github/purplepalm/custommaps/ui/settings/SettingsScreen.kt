@@ -51,6 +51,8 @@ import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.token.TokenProblem
+import io.github.purplepalm.custommaps.token.TokenTrips
+import io.github.purplepalm.custommaps.token.TripsOf
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import io.github.purplepalm.custommaps.ui.token.TokenListSection
 import io.github.purplepalm.custommaps.ui.token.TokenRow
@@ -307,6 +309,14 @@ private fun DebugSection(
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.onSurface,
     )
+    // By the token each ran on, when there is more than one line.
+    debug.tripsByToken.forEach { row ->
+        Text(
+            text = stringResource(R.string.debug_trips_token, tripsOfText(row.of), row.count),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
     Text(
         text = stringResource(R.string.debug_trips_note),
         style = MaterialTheme.typography.bodySmall,
@@ -329,12 +339,14 @@ private fun DebugSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    debug.recentTrips.forEach { trip ->
+    debug.recentTrips.forEach { (trip, token) ->
         Text(
             text = listOfNotNull(
                 TRIP_TIME.format(trip.startedAt.atZone(ZoneId.systemDefault())),
                 stringResource(trip.kind.labelRes()),
                 if (trip.simulated) stringResource(R.string.debug_trip_simulated) else null,
+                // A session from before tokens were named shows none.
+                if (token == TripsOf.BeforeNames) null else tripsOfText(token),
             ).joinToString(" · "),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -497,6 +509,14 @@ private fun LaneZoom.noteRes(): Int = when (this) {
     LaneZoom.LARGE -> R.string.lane_zoom_large_note
 }
 
+/** The name a count or a trip goes under: the token's own, or what stands for a token that is gone or had none. */
+@Composable
+private fun tripsOfText(of: TripsOf): String = when (of) {
+    is TripsOf.Token -> of.name
+    TripsOf.Deleted -> stringResource(R.string.debug_trips_deleted_token)
+    TripsOf.BeforeNames -> stringResource(R.string.debug_trips_before_names)
+}
+
 @StringRes
 private fun TripKind.labelRes(): Int = when (this) {
     TripKind.ACTIVE_GUIDANCE -> R.string.debug_trip_guidance
@@ -520,9 +540,15 @@ private fun SettingsScreenPreview() {
             guidance = GuidanceSettings(),
             debug = DebugState(
                 trips = MonthCount(3, partialSince = LocalDate.of(2000, 1, 15), began = LogBegan.INSTALLATION),
+                tripsByToken = listOf(
+                    TokenTrips(TripsOf.Token("Main"), 1),
+                    TokenTrips(TripsOf.Token("Test"), 1),
+                    TokenTrips(TripsOf.BeforeNames, 1),
+                ),
                 recentTrips = listOf(
-                    TripSessionStart(Instant.parse("2026-11-03T17:05:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = true),
-                    TripSessionStart(Instant.parse("2026-11-01T02:40:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false),
+                    RecentTrip(TripSessionStart(Instant.parse("2000-01-19T17:05:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = true, tokenId = "t2"), TripsOf.Token("Test")),
+                    RecentTrip(TripSessionStart(Instant.parse("2000-01-18T02:40:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false, tokenId = "t1"), TripsOf.Token("Main")),
+                    RecentTrip(TripSessionStart(Instant.parse("2000-01-16T12:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false), TripsOf.BeforeNames),
                 ),
                 simulateDrive = true,
                 logBytes = 2_400_000,

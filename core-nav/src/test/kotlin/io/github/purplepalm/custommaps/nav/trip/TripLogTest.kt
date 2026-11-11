@@ -5,14 +5,15 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TripLogTest {
 
     private val california = ZoneId.of("America/Los_Angeles")
 
-    private fun start(iso: String, kind: TripKind = TripKind.ACTIVE_GUIDANCE, simulated: Boolean = false) =
-        TripSessionStart(Instant.parse(iso), kind, simulated)
+    private fun start(iso: String, kind: TripKind = TripKind.ACTIVE_GUIDANCE, simulated: Boolean = false, tokenId: String? = null) =
+        TripSessionStart(Instant.parse(iso), kind, simulated, tokenId)
 
     @Test
     fun `counts only starts in the current local month`() {
@@ -42,6 +43,67 @@ class TripLogTest {
         val decoded = TripLog.decode(text)
         assertEquals(2, decoded.size)
         assertEquals(TripKind.FREE_DRIVE, decoded.last().kind)
+    }
+
+    @Test
+    fun `lines with a token id are written with four fields and read back`() {
+        val entries = listOf(
+            TripSessionStart(Instant.parse("2000-01-03T08:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false, tokenId = "a1b2c3d4e5f6"),
+            TripSessionStart(Instant.parse("2000-01-04T08:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = true, tokenId = "t-2_x"),
+            TripSessionStart(Instant.parse("2000-01-05T08:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false),
+        )
+
+        val text = TripLog.encode(entries)
+
+        assertEquals(
+            listOf("946886400000,ACTIVE_GUIDANCE,0,a1b2c3d4e5f6", "946972800000,ACTIVE_GUIDANCE,1,t-2_x", "947059200000,ACTIVE_GUIDANCE,0"),
+            text.lines(),
+        )
+        assertEquals(entries, TripLog.decode(text))
+    }
+
+    @Test
+    fun `the three-field lines of earlier versions are read, without a token`() {
+        val decoded = TripLog.decode("946886400000,ACTIVE_GUIDANCE,0\n946972800000,FREE_DRIVE,1")
+
+        assertEquals(
+            listOf(
+                TripSessionStart(Instant.parse("2000-01-03T08:00:00Z"), TripKind.ACTIVE_GUIDANCE, simulated = false, tokenId = null),
+                TripSessionStart(Instant.parse("2000-01-04T08:00:00Z"), TripKind.FREE_DRIVE, simulated = true, tokenId = null),
+            ),
+            decoded,
+        )
+    }
+
+    @Test
+    fun `a line whose token id is no id, or with more fields, is skipped`() {
+        val text = listOf(
+            "946886400000,ACTIVE_GUIDANCE,0,a1",
+            "946886400000,ACTIVE_GUIDANCE,0,",
+            "946886400000,ACTIVE_GUIDANCE,0,a b",
+            "946886400000,ACTIVE_GUIDANCE,0,${"a".repeat(33)}",
+            "946886400000,ACTIVE_GUIDANCE,0,a1,b2",
+        ).joinToString("\n")
+
+        assertEquals(listOf("a1"), TripLog.decode(text).map { it.tokenId })
+        assertTrue(TripLog.isTokenId("a".repeat(32)))
+    }
+
+    @Test
+    fun `the month's trips are counted for each token`() {
+        val entries = listOf(
+            start("1999-12-31T08:00:00Z", tokenId = "main"),
+            start("2000-01-03T08:00:00Z", tokenId = "main"),
+            start("2000-01-04T08:00:00Z", tokenId = "test"),
+            start("2000-01-05T08:00:00Z", tokenId = "main", simulated = true),
+            start("2000-01-06T08:00:00Z"),
+        )
+
+        val counts = TripLog.countByToken(entries, midJanuary)
+
+        assertEquals(mapOf("main" to 2, "test" to 1, null to 1), counts)
+        assertEquals(TripLog.countInMonth(entries, midJanuary), counts.values.sum())
+        assertEquals(emptyMap<String?, Int>(), TripLog.countByToken(emptyList(), midJanuary))
     }
 
     @Test

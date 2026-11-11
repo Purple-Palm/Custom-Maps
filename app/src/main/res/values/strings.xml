@@ -147,6 +147,9 @@
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
     <string name="debug_trips_since_installation">Trip sessions this month: %1$d, since installation on %2$s</string>
     <string name="debug_trips_since_oldest_kept">Trip sessions this month: %1$d, since %2$s, the oldest one kept</string>
+    <string name="debug_trips_token">%1$s: %2$d</string>
+    <string name="debug_trips_deleted_token">Deleted token</string>
+    <string name="debug_trips_before_names">Before tokens were named</string>
     <string name="debug_temporary_key">This build is signed with a temporary key. Installing the next CI build will need an uninstall, which deletes the token, the settings and this log: share the log first.</string>
     <string name="debug_trips_note">Counted on this phone each time guidance starts, simulated drives included. It is an estimate: Mapbox bills by its own count.</string>
     <string name="debug_open_statistics">Open Mapbox statistics</string>

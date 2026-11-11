@@ -29,6 +29,7 @@ import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenStore
 import io.github.purplepalm.custommaps.token.TokenSwitch
 import io.github.purplepalm.custommaps.trip.DataStoreTripLogStore
+import io.github.purplepalm.custommaps.trip.TokenTaggedTripLog
 import java.io.File
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -93,8 +94,18 @@ class AppGraph(private val application: Application) {
     /** This app's network as Android reports it: logged on every change. */
     val network = NetworkMonitor(application, debugLog, applicationScope)
 
-    /** Sets up the navigator; starts no trip session. */
-    val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog, network.status)
+    /**
+     * The id of the saved token last handed to the SDKs, null while none is. Written on the main
+     * thread when a token is handed over, which never happens during a trip ([TokenSwitch]).
+     */
+    @Volatile
+    private var appliedTokenId: String? = null
+
+    /**
+     * Sets up the navigator; starts no trip session. Each session it logs gets the id of the token
+     * it ran on, never the token.
+     */
+    val engine: MapboxEngine = MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { appliedTokenId }, debugLog, network.status)
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()
@@ -194,6 +205,7 @@ class AppGraph(private val application: Application) {
                     // A rename: the same token under its new name.
                     TokenSwitch.Step.Keep -> {
                         applied = wanted
+                        appliedTokenId = wanted?.id
                         held = null
                     }
                     TokenSwitch.Step.Hold -> if (held != wanted) {
@@ -211,6 +223,7 @@ class AppGraph(private val application: Application) {
                             _mapsAccess.value = MapsAccess.NeedsToken
                         }
                         applied = wanted
+                        appliedTokenId = wanted?.id
                         debugLog.log(
                             "maps_access",
                             mapOf("access" to _mapsAccess.value.toString()) + entryFields(list, wanted) + ("previewClosed" to step.closePreview),
