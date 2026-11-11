@@ -36,6 +36,7 @@ import com.mapbox.navigation.core.trip.session.OffRouteObserver
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.tripdata.maneuver.api.MapboxManeuverApi
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
+import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -81,6 +82,7 @@ internal class MapboxNavigationEngine(
     context: Context,
     private val tripLog: TripLogStore,
     private val debugLog: DebugLog,
+    private val offlineData: OfflineData,
 ) : NavigationEngine, MapboxNavigationObserver {
 
     private val appContext = context.applicationContext
@@ -339,6 +341,11 @@ internal class MapboxNavigationEngine(
                     previewOrigin = origin
                     showPreview(response.routes)
                     dispatch(GuidanceEvent.RoutesReady(response.routes.size))
+                    // While the routes are looked at, the street map along them is put on the
+                    // phone, for a drive that loses its connection. A download of map tiles: no
+                    // route request and no trip session. Only here, never for routes that come
+                    // inside a trip.
+                    offlineData.downloadPreview(response.routes, origin)
                     RouteRequestResult.Success
                 }
             }
@@ -507,6 +514,8 @@ internal class MapboxNavigationEngine(
         val navigation = navigation
         when (command) {
             is GuidanceCommand.CommitRoutes -> {
+                // The preview's download ends here: during a drive only predictive caching loads.
+                offlineData.stopPreviewDownload()
                 // Keeps the navigator alive for the drive, even without a screen.
                 MapboxNavigationApp.attach(guidanceLifecycle)
                 // A new drive: the Then chip and the lane choices know nothing of the last one.

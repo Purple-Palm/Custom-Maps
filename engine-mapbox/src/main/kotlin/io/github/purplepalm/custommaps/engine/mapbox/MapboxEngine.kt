@@ -32,9 +32,9 @@ class MapboxEngine private constructor(
 ) {
 
     /** What is kept on the phone for stretches without a connection, in the one tile store. */
-    private val offlineData = OfflineData(tileStore, debugLog)
+    private val offlineData = OfflineData(tileStore, application.resources.displayMetrics.density, debugLog)
 
-    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog)
+    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog, offlineData)
 
     val navigation: NavigationEngine get() = navigationEngine
 

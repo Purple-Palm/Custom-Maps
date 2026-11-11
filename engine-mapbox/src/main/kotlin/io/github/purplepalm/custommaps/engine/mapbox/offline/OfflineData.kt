@@ -1,8 +1,27 @@
 package io.github.purplepalm.custommaps.engine.mapbox.offline
 
+import android.os.SystemClock
+import com.mapbox.bindgen.Expected
+import com.mapbox.common.Cancelable
+import com.mapbox.common.TileRegion
+import com.mapbox.common.TileRegionError
+import com.mapbox.common.TileRegionLoadOptions
+import com.mapbox.common.TileRegionLoadProgress
 import com.mapbox.common.TileStore
+import com.mapbox.common.TilesetDescriptor
+import com.mapbox.geojson.MultiLineString
+import com.mapbox.geojson.Point
+import com.mapbox.maps.GlyphsRasterizationMode
 import com.mapbox.maps.MapboxMap
 import com.mapbox.maps.MapboxMapsOptions
+import com.mapbox.maps.OfflineManager
+import com.mapbox.maps.StylePack
+import com.mapbox.maps.StylePackError
+import com.mapbox.maps.StylePackLoadOptions
+import com.mapbox.maps.StylePackLoadProgress
+import com.mapbox.maps.TilesetDescriptorOptions
+import com.mapbox.navigation.base.route.NavigationRoute
+import com.mapbox.navigation.base.utils.DecodeUtils.completeGeometryToLineString
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
@@ -11,7 +30,12 @@ import com.mapbox.navigation.ui.maps.PredictiveCacheControllerErrorHandler
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
 import io.github.purplepalm.custommaps.nav.debug.error
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The data kept on the phone for stretches without a connection. All of it is in one tile store,
@@ -27,12 +51,41 @@ import kotlinx.coroutines.MainScope
  * whatever network the app has then, mobile data included, and nothing here starts a session or
  * sends a request of its own.
  *
- * Main thread only, like the SDK calls it makes.
+ * Before guidance, [downloadPreview] puts the street map along the previewed routes on the phone:
+ * one tile region that each new preview takes over, and the style's own files. These are map
+ * tiles, as the map loads them itself when it shows a place; road data is not asked for outside a
+ * trip. Starting guidance ends it ([stopPreviewDownload]), so that during a drive nothing loads
+ * but predictive caching, within its areas.
+ *
+ * Every download costs the driver data, so each one says in the debug log how many bytes came
+ * over the network for it.
+ *
+ * Main thread only, like the SDK calls it makes. The tile store and the offline manager answer on
+ * threads of their own; what runs there remembers the latest numbers and writes to the debug log,
+ * and touches nothing else.
  */
 internal class OfflineData(
     private val tileStore: TileStore,
+    /** The screen's pixels for each density-independent one, as the map draws its tiles. */
+    private val pixelRatio: Float,
     private val debugLog: DebugLog,
 ) : MapboxNavigationObserver {
+
+    /**
+     * One download, from the call that starts it to the store's answer. [progress] and [finished]
+     * are written on the store's thread, [endedBy] on the main thread just before a cancel, and
+     * each is read on the other. [number] and [routes] are those of a load of the tile region.
+     */
+    private class Download<P>(val startedNanos: Long, val number: Int = 0, val routes: Int = 0) {
+        @Volatile var progress: P? = null
+
+        @Volatile var endedBy: EndedBy? = null
+
+        @Volatile var finished = false
+
+        /** Main thread only. */
+        var cancelable: Cancelable? = null
+    }
 
     private val scope = MainScope()
 
@@ -48,6 +101,43 @@ internal class OfflineData(
     private val cacheErrorHandler = PredictiveCacheControllerErrorHandler { message ->
         cacheErrors.record("offline_cache_error", RepeatFolder.keyOf(message), mapOf("message" to message))
     }
+
+    /**
+     * Makes tile descriptors and loads style packs. Made at the first preview, on the main thread,
+     * long after the engine gave the Maps SDK the shared tile store.
+     */
+    private val offlineManager by lazy { OfflineManager() }
+
+    /**
+     * Which tiles the preview's region is made of: the phone map's style from the town band to the
+     * street band. Both zooms are always set, since each is 0 when left out, and the pixel ratio
+     * is the screen's.
+     */
+    private val previewDescriptor: TilesetDescriptor by lazy {
+        offlineManager.createTilesetDescriptor(
+            TilesetDescriptorOptions.Builder()
+                .styleURI(PreviewDownload.STYLE)
+                .minZoom(PreviewDownload.ZOOMS.min.toByte())
+                .maxZoom(PreviewDownload.ZOOMS.max.toByte())
+                .pixelRatio(pixelRatio)
+                .build(),
+        )
+    }
+
+    /** The shape of the newest preview's routes being put together off the main thread. */
+    private var previewGeometry: Job? = null
+
+    /** Counts the loads of the tile region in this run of the app. */
+    private var regionLoads = 0
+
+    /** The load of the tile region that was started last; it may have finished. */
+    private var regionLoad: Download<TileRegionLoadProgress>? = null
+
+    /** Whether the style's own files are on the phone, as far as this run of the app knows. */
+    private val stylePack = AtomicInteger(PACK_MISSING)
+
+    /** The load of the style pack that was started last; it may have finished. */
+    private var stylePackLoad: Download<StylePackLoadProgress>? = null
 
     init {
         MapboxNavigationApp.registerObserver(this)
@@ -80,6 +170,209 @@ internal class OfflineData(
         val controller = predictiveCache ?: return
         guarded("predictiveCache.removeMap") { controller.removeMapControllers(map) }
     }
+
+    /**
+     * Puts the street map along [routes], the routes of a preview that has just opened, on the
+     * phone: the map's style from zoom 11 to 16 as one tile region, loaded outward from [origin],
+     * where the routes start. The region is the same one every time, so a new preview takes over
+     * from the one before: a load still under way is ended, and tiles only the old routes needed
+     * are the store's to drop. The first call of a run also loads the style's own files.
+     *
+     * Tiles the phone has are taken as they are, also past their date. Nothing is asked of the
+     * network here beyond handing the store its work: without a connection the store waits and
+     * goes on by itself, or reports that it failed.
+     */
+    fun downloadPreview(routes: List<NavigationRoute>, origin: Point) {
+        if (routes.isEmpty()) return
+        loadStylePack()
+        // Only the newest preview counts.
+        previewGeometry?.cancel()
+        previewGeometry = scope.launch {
+            // Reads every point of every route, so not here on the main thread.
+            val geometry = withContext(Dispatchers.Default) {
+                try {
+                    PreviewDownload.geometry(routes.map { it.directionsRoute.completeGeometryToLineString().coordinates() })
+                } catch (e: RuntimeException) {
+                    debugLog.error("offline_region.geometry", e)
+                    null
+                }
+            }
+            // Back on the main thread, and neither a newer preview nor guidance has come since.
+            loadRegion(routes.size, geometry, origin)
+        }
+    }
+
+    /**
+     * Ends what [downloadPreview] started and has not finished. Called when guidance starts: from
+     * then on predictive caching keeps the route in use, and the routes not taken are not paid for
+     * in data. What was loaded so far stays on the phone.
+     */
+    fun stopPreviewDownload() {
+        previewGeometry?.cancel()
+        previewGeometry = null
+        end(regionLoad, EndedBy.GUIDANCE)
+        end(stylePackLoad, EndedBy.GUIDANCE)
+    }
+
+    private fun loadRegion(routes: Int, geometry: MultiLineString?, origin: Point) {
+        val number = ++regionLoads
+        if (geometry == null) {
+            debugLog.log(
+                "offline_region",
+                OfflineLines.region(number, routes, OfflineLines.NO_GEOMETRY, message = null, endedBy = null, counts = null, seconds = 0.0),
+            )
+            return
+        }
+        // The store would end a load of the same region by itself; said here first, so that its
+        // answer is known for what it is.
+        end(regionLoad, EndedBy.NEWER_PREVIEW)
+        val load = Download<TileRegionLoadProgress>(SystemClock.elapsedRealtimeNanos(), number, routes)
+        regionLoad = load
+        try {
+            val options = TileRegionLoadOptions.Builder()
+                .geometry(geometry)
+                .descriptors(listOf(previewDescriptor))
+                .startLocation(origin)
+                .acceptExpired(true)
+                .networkRestriction(PreviewDownload.NETWORK)
+                .build()
+            debugLog.log(
+                "offline_region_start",
+                OfflineLines.regionStart(
+                    load = number,
+                    routes = routes,
+                    points = geometry.coordinates().sumOf { it.size },
+                    zooms = PreviewDownload.ZOOMS,
+                    pixelRatio = pixelRatio,
+                    network = PreviewDownload.NETWORK.name,
+                ),
+            )
+            // Both callbacks come on a thread of the store.
+            load.cancelable = tileStore.loadTileRegion(
+                PreviewDownload.REGION_ID,
+                options,
+                { progress -> load.progress = progress },
+                { result -> onRegionLoaded(load, result) },
+            )
+        } catch (e: RuntimeException) {
+            // Nothing was started, so no answer will come for it.
+            load.finished = true
+            debugLog.error("offline_region", e)
+        }
+    }
+
+    /** On a thread of the store: writes the load's one line. */
+    private fun onRegionLoaded(load: Download<TileRegionLoadProgress>, result: Expected<TileRegionError, TileRegion>) {
+        load.finished = true
+        try {
+            val region = result.value
+            val error = result.error
+            val progress = load.progress
+            val counts = when {
+                // The region's own numbers; what came over the network is only in the progress.
+                region != null -> DownloadCounts(
+                    required = region.requiredResourceCount,
+                    completed = region.completedResourceCount,
+                    completedBytes = region.completedResourceSize,
+                    loadedBytes = progress?.loadedResourceSize,
+                    errored = progress?.erroredResourceCount ?: 0,
+                )
+                progress != null -> DownloadCounts(
+                    required = progress.requiredResourceCount,
+                    completed = progress.completedResourceCount,
+                    completedBytes = progress.completedResourceSize,
+                    loadedBytes = progress.loadedResourceSize,
+                    errored = progress.erroredResourceCount,
+                )
+                else -> null
+            }
+            debugLog.log(
+                "offline_region",
+                OfflineLines.region(load.number, load.routes, error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos)),
+            )
+        } catch (e: RuntimeException) {
+            debugLog.error("offline_region", e)
+        }
+    }
+
+    /**
+     * Loads the style's own files (the style, its fonts and images), which the map needs to open
+     * without a connection. Asked for with the first preview of a run and, until a load has
+     * succeeded, with each one after it; then not again in this run. Files past their date are
+     * loaded anew. The Maps SDK's guide says a style that is on the phone as a pack is not brought
+     * up to date until the pack is loaded again, so this is also how the map's look stays current.
+     */
+    private fun loadStylePack() {
+        if (!stylePack.compareAndSet(PACK_MISSING, PACK_LOADING)) return
+        val load = Download<StylePackLoadProgress>(SystemClock.elapsedRealtimeNanos())
+        stylePackLoad = load
+        try {
+            val options = StylePackLoadOptions.Builder()
+                // Ideographs are drawn with the phone's own font, as the Maps SDK suggests; other glyphs are loaded.
+                .glyphsRasterizationMode(GlyphsRasterizationMode.IDEOGRAPHS_RASTERIZED_LOCALLY)
+                .acceptExpired(false)
+                .build()
+            // Both callbacks come on a background thread.
+            load.cancelable = offlineManager.loadStylePack(
+                PreviewDownload.STYLE,
+                options,
+                { progress -> load.progress = progress },
+                { result -> onStylePackLoaded(load, result) },
+            )
+        } catch (e: RuntimeException) {
+            load.finished = true
+            stylePack.set(PACK_MISSING)
+            debugLog.error("offline_style_pack", e)
+        }
+    }
+
+    /** On a background thread: notes whether the pack is there now, and writes the load's one line. */
+    private fun onStylePackLoaded(load: Download<StylePackLoadProgress>, result: Expected<StylePackError, StylePack>) {
+        load.finished = true
+        // A load that failed or was ended is asked for again with the next preview.
+        stylePack.set(if (result.isValue) PACK_LOADED else PACK_MISSING)
+        try {
+            val pack = result.value
+            val error = result.error
+            val progress = load.progress
+            val counts = when {
+                pack != null -> DownloadCounts(
+                    required = pack.requiredResourceCount,
+                    completed = pack.completedResourceCount,
+                    completedBytes = pack.completedResourceSize,
+                    loadedBytes = progress?.loadedResourceSize,
+                    errored = progress?.erroredResourceCount ?: 0,
+                )
+                progress != null -> DownloadCounts(
+                    required = progress.requiredResourceCount,
+                    completed = progress.completedResourceCount,
+                    completedBytes = progress.completedResourceSize,
+                    loadedBytes = progress.loadedResourceSize,
+                    errored = progress.erroredResourceCount,
+                )
+                else -> null
+            }
+            debugLog.log(
+                "offline_style_pack",
+                OfflineLines.stylePack(error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos)),
+            )
+        } catch (e: RuntimeException) {
+            debugLog.error("offline_style_pack", e)
+        }
+    }
+
+    /**
+     * Ends [load] if it is still under way, and notes who ended it before the cancel: the store
+     * answers a cancelled load on its own thread, and the line it writes then says why. A load
+     * that was ended before keeps its first reason.
+     */
+    private fun end(load: Download<*>?, by: EndedBy) {
+        if (load == null || load.finished || load.endedBy != null) return
+        load.endedBy = by
+        guarded("offline.cancel") { load.cancelable?.cancel() }
+    }
+
+    private fun secondsSince(startedNanos: Long): Double = (SystemClock.elapsedRealtimeNanos() - startedNanos) / NANOS_PER_SECOND
 
     /**
      * Sets up predictive caching for a new navigator. Road data starts with the constructor; each
@@ -134,5 +427,14 @@ internal class OfflineData(
         } catch (e: RuntimeException) {
             debugLog.error(where, e)
         }
+    }
+
+    private companion object {
+        const val NANOS_PER_SECOND = 1e9
+
+        // What this run of the app knows of the style pack.
+        const val PACK_MISSING = 0
+        const val PACK_LOADING = 1
+        const val PACK_LOADED = 2
     }
 }
