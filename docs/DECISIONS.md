@@ -276,7 +276,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Chosen (owner):** after precise location, the app asks for location all the time.
 - **Why:** Android 14 and 15 treat an app shown only on the car screen as in the background. Without background location, Start pressed in the car with the phone locked may be refused, and the car map has no position before Start.
-- **Cost:** Google Play asks for a background-location declaration, a video and a review (stage 3). A start guard still checks before every trip start, and a refused start goes back to the route preview instead of crashing.
+- **Cost:** Google Play asks for a background-location declaration, a video and a review, at the end of stage 2 with one bundle rolled out by hand, and Play updates pause during the review (42). A start guard still checks before every trip start, and a refused start goes back to the route preview instead of crashing.
 
 ## 34. Shared links and Google place pages
 

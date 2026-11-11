@@ -103,8 +103,10 @@ The full design is in [STAGE-2.md](STAGE-2.md).
   place ends the drive. If another navigation app starts guiding in the car, this app keeps
   guiding too.
 - Location "Allow all the time", asked for after precise location, so Start works from the car with
-  the phone locked and the car map shows the position before Start (Google Play needs a declaration
-  for it in stage 3).
+  the phone locked and the car map shows the position before Start. While this stage is built only
+  the debug build declares it; at its end one bundle with it is rolled out by hand on internal
+  testing together with Google Play's background location declaration and its video, and Play
+  updates pause during the review ([DECISIONS.md](DECISIONS.md), 42).
 - If the app stops mid-drive (crash or system kill), the phone and the car offer to resume to the
   same destination.
 - Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
@@ -149,7 +151,6 @@ Left, for production (not scheduled; the owner decides when):
   account), then the application for production.
 - Store listing, app category, content rating, target audience, the Data safety form and the
   privacy policy link in Play Console.
-- The background location declaration and its video once stage 2 asks for "Allow all the time".
 - R8 on the internal track with drives, preferably without obfuscation.
 
 ## Stage 4: smart camera (planned)

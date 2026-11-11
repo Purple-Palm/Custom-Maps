@@ -698,7 +698,7 @@ throws without a callback; `updateTrip()` throws when navigation has not started
   the phone, then the app's location settings page. On Android 11 and newer "Allow all the time" can
   be set only there, and asking for foreground and background location together is ignored. Settings
   shows the state with a button. The explanation also serves as the prominent in-app disclosure that
-  Google Play asks for (stage 3). While this stage is built only the debug manifest
+  Google Play asks for. While this stage is built only the debug manifest
   (`app/src/debug/AndroidManifest.xml`) declares `ACCESS_BACKGROUND_LOCATION`, and a build without
   it skips this step and relies on the start guard; the Play bundle gets it once, by hand, with
   Google's declaration ([The real car](#the-real-car)).
