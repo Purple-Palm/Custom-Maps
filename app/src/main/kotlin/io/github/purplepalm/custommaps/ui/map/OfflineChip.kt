@@ -227,8 +227,10 @@ fun OfflinePill(reason: State<OfflineReason>, modifier: Modifier = Modifier) {
         ) {
             Row(
                 // The top of the tab stays under the card's rounded bottom edge, like the Then chip's.
+                // Narrow at the sides: on a screen 320 dp wide the word has 39 dp left, and needs
+                // 36 dp at its smallest.
                 modifier = Modifier
-                    .padding(start = 12.dp, top = CARD_CORNER + THEN_CHIP_PADDING, end = 12.dp, bottom = THEN_CHIP_PADDING)
+                    .padding(start = 10.dp, top = CARD_CORNER + THEN_CHIP_PADDING, end = 10.dp, bottom = THEN_CHIP_PADDING)
                     .height(THEN_CHIP_BAND - THEN_CHIP_PADDING * 2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -312,10 +314,11 @@ private fun OfflineChipPreview() {
 
 /**
  * The tab beside a Then chip that is as wide as it may be, under a card with lanes, on a narrow
- * phone, also with a large font: the two stay apart.
+ * phone, also with a large font and on a screen set to show everything larger: the two stay apart.
  */
 @Preview(name = "offline tab beside a long Then chip", widthDp = 360)
 @Preview(name = "offline tab beside a long Then chip, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "offline tab beside a long Then chip, narrow screen", widthDp = 320, fontScale = 1.3f)
 @Composable
 private fun OfflinePillBesideThenPreview() {
     OfflinePillPreview(
