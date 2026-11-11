@@ -23,6 +23,8 @@ import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.navigation.core.formatter.MapboxDistanceFormatter
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
+import com.mapbox.navigation.core.replay.history.ReplayEventUpdateLocation
+import com.mapbox.navigation.core.replay.history.ReplayEventsObserver
 import com.mapbox.navigation.core.replay.route.ReplayRouteSession
 import com.mapbox.navigation.core.reroute.RerouteController
 import com.mapbox.navigation.core.reroute.RerouteOptionsAdapter
@@ -61,6 +63,9 @@ import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.network.OfflineReason
 import io.github.purplepalm.custommaps.nav.network.offlineReason
+import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
+import io.github.purplepalm.custommaps.nav.replay.ReplaySeek
+import io.github.purplepalm.custommaps.nav.replay.SeekHold
 import io.github.purplepalm.custommaps.nav.trip.TripEnding
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
@@ -73,6 +78,7 @@ import java.io.IOException
 import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
+import kotlin.math.max
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -106,7 +112,7 @@ internal class MapboxNavigationEngine(
     private val scope = MainScope()
     private val deviceLocation = DeviceLocation()
     private val guidanceLifecycle = GuidanceLifecycleOwner()
-    private val replay = ReplayRouteSession()
+    private val replaySession = wholeRouteReplay()
     private val maneuverApi = MapboxManeuverApi(MapboxDistanceFormatter(MapboxEngine.distanceFormatterOptions(context)))
 
     private var navigation: MapboxNavigation? = null
@@ -165,6 +171,36 @@ internal class MapboxNavigationEngine(
     private var lastSpeedLimit: Map<String, Any?>? = null
 
     /**
+     * Holds the navigator's updates from the moment a seek of a simulated drive is asked for until
+     * the drive's new place has come in; the screen and the trip's summary leave them alone.
+     */
+    private val seekHold = SeekHold()
+
+    /** The release of the replay slider that the seek under way goes to; null while none waits. */
+    private var seekAsk: SeekAsk? = null
+
+    /** True while the navigator forgets where the car was, before the replay goes to [seekAsk]. */
+    private var seekResetting = false
+
+    /** The navigator whose reroutes the first seek of a simulated drive turned off; null while they run. */
+    private var reroutesHeldOn: MapboxNavigation? = null
+
+    /** Whether the navigator is fetching or putting in place a new route after the car left its route. */
+    private var rerouting = false
+
+    /** How far along its route the latest progress of the drive had the car, in metres; null before it. */
+    private var routeMetres: Double? = null
+
+    /** The replay's newest played position; null before the first of a simulated drive. */
+    private var played: ReplayPosition? = null
+
+    /** The first timestamp the replayer held at that position, on the replay's own clock. */
+    private var replayStart = 0.0
+
+    /** The seeks the trip's summary has taken in: the first position after each is a jump, not a stretch driven. */
+    private var tallySeeks = 0
+
+    /**
      * The points with lanes ahead of the car, read from the route once for each step. The engine
      * owns the one copy; the map's camera reads the same list, so both see the same lane choices.
      */
@@ -203,6 +239,9 @@ internal class MapboxNavigationEngine(
 
     private val _destination = MutableStateFlow<Place?>(null)
     override val destination: StateFlow<Place?> = _destination.asStateFlow()
+
+    private val _replay = MutableStateFlow<ReplayPosition?>(null)
+    override val replay: StateFlow<ReplayPosition?> = _replay.asStateFlow()
 
     private val _previewRoutes = MutableStateFlow<List<NavigationRoute>>(emptyList())
 
@@ -304,10 +343,12 @@ internal class MapboxNavigationEngine(
 
     /**
      * The navigator's own reroute, heard from its first moment: while it fetches a route, and when
-     * it has one. From then on the start plan leaves the routes alone.
+     * it has one. From then on the start plan leaves the routes alone, and a simulated drive does
+     * not seek until the new route is in place.
      */
     private val rerouteStateObserver = RerouteController.RerouteStateObserver { state ->
-        if (state is RerouteState.FetchingRoute || state is RerouteState.RouteFetched) startRefresher.onReroute()
+        rerouting = state is RerouteState.FetchingRoute || state is RerouteState.RouteFetched
+        if (rerouting) startRefresher.onReroute()
     }
 
     init {
@@ -350,6 +391,13 @@ internal class MapboxNavigationEngine(
         setRerouteOptionsAdapter(mapboxNavigation, null)
         // Without a navigator nothing can be refreshed or set any more.
         startRefresher.end()
+        // Nor can a simulated drive be moved. The navigator goes; a new one reroutes as usual.
+        if (replaying) mapboxNavigation.mapboxReplayer.unregisterObserver(replayObserver)
+        seekAsk = null
+        seekResetting = false
+        seekHold.end()
+        reroutesHeldOn = null
+        rerouting = false
         navigation = null
         lastMatch = null
         debugLog.log("navigator_detached")
@@ -485,6 +533,126 @@ internal class MapboxNavigationEngine(
 
     override fun stopGuidance(reason: StopReason) {
         dispatch(GuidanceEvent.Stopped(reason))
+    }
+
+    /**
+     * Moves a simulated drive to where the replay slider was let go, by [ReplaySeek]'s rule, back as
+     * well as forward. The replay stops, and the navigator forgets where the car was
+     * ([MapboxNavigation.resetTripSession]), as Mapbox asks for before any large change of
+     * position, so it finds the car on the route afresh at the new place. Then the replay goes
+     * there and plays on. The routes stay as they are, and the trip session runs on: nothing is
+     * started, ended, set or asked for that Mapbox bills. From the drive's first seek on, the
+     * navigator's own reroutes are off until the drive ends, so no jump can make it fetch a route.
+     * Until the new place has come in, the navigator's updates are held ([SeekHold]).
+     */
+    override fun seekReplay(fraction: Double) {
+        val navigator = navigation
+        val position = _replay.value
+        val answer = if (navigator != null && replaying) {
+            ReplaySeek.answer(position, fraction, rerouting)
+        } else {
+            ReplaySeek.Answer.Stay(ReplaySeek.Why.NO_REPLAY)
+        }
+        if (answer !is ReplaySeek.Answer.Go || navigator == null || position == null) return
+        // The newest release goes; one that still waits is replaced.
+        seekAsk = SeekAsk(toTimestamp = replayStart + answer.toSeconds, routeId = navigator.getNavigationRoutes().firstOrNull()?.id)
+        // The slider shows where the drive goes until the replay plays from there.
+        _replay.value = position.copy(seconds = answer.toSeconds, seeking = true)
+        if (seekResetting) return
+        if (!holdReroutes(navigator)) {
+            seekAsk = null
+            showPlayed()
+            return
+        }
+        seekResetting = true
+        seekHold.ask()
+        // No more positions from where the car was.
+        navigator.mapboxReplayer.stop()
+        val trip = commitCount
+        try {
+            navigator.resetTripSession { onSeekReset(navigator, trip) }
+        } catch (e: RuntimeException) {
+            debugLog.error("resetTripSession", e)
+            seekResetting = false
+            seekAsk = null
+            seekHold.cancel()
+            navigator.mapboxReplayer.play()
+            showPlayed()
+        }
+    }
+
+    /**
+     * The navigator has forgotten where the car was: the replay goes to the newest release and
+     * plays on from there. A drive that ended meanwhile, or whose route changed, stays as it is.
+     */
+    private fun onSeekReset(navigator: MapboxNavigation, trip: Int) {
+        seekResetting = false
+        val ask = seekAsk ?: return
+        seekAsk = null
+        if (trip != commitCount || !replaying || navigation !== navigator) return
+        val replayer = navigator.mapboxReplayer
+        // The replayer counts its seconds from the first position it holds now.
+        val first = -replayer.eventSeconds(0.0)
+        val duration = replayer.durationSeconds()
+        val moved = ask.routeId == navigator.getNavigationRoutes().firstOrNull()?.id && duration > 0.0 &&
+            try {
+                replayer.seekTo((ask.toTimestamp - first).coerceIn(0.0, duration))
+                true
+            } catch (e: IllegalStateException) {
+                // The replayer was between two batches of positions; the drive goes on where it was.
+                debugLog.error("replaySeek", e)
+                false
+            }
+        if (moved) {
+            // What the Then chip and the lane choices remember is of the place the car left.
+            thenTracker.reset()
+            laneChoices.clear()
+            seekHold.resume()
+        } else {
+            seekHold.cancel()
+            showPlayed()
+        }
+        replayer.play()
+    }
+
+    /** The slider shows the replay's newest played position again, after a seek that was not made. */
+    private fun showPlayed() {
+        if (replaying) _replay.value = played ?: _replay.value?.copy(seeking = false)
+    }
+
+    /**
+     * Turns the navigator's own reroutes off for the rest of a simulated drive, at its first seek.
+     * The replay follows the route, so a drive has no use for them; but the navigator, finding the
+     * car somewhere else at once, might take it for off the route, and a reroute is a route
+     * request. Turned back on when the drive's trip session stops ([releaseReroutes]). False when
+     * the navigator would not: the seek is then not made.
+     */
+    private fun holdReroutes(navigator: MapboxNavigation): Boolean {
+        if (reroutesHeldOn === navigator) return true
+        return try {
+            navigator.setRerouteEnabled(false)
+            reroutesHeldOn = navigator
+            true
+        } catch (e: RuntimeException) {
+            debugLog.error("setRerouteEnabled", e)
+            false
+        }
+    }
+
+    /**
+     * The navigator reroutes again, after a simulated drive that turned it off. Called once its trip
+     * session has stopped, when it no longer looks for the car on a route.
+     */
+    private fun releaseReroutes() {
+        val navigator = reroutesHeldOn ?: return
+        reroutesHeldOn = null
+        if (navigator !== navigation) return
+        try {
+            navigator.setRerouteEnabled(true)
+        } catch (e: RuntimeException) {
+            // Seen in the log: the next drive of this run would go without reroutes.
+            debugLog.error("setRerouteEnabled", e)
+        }
     }
 
     override fun clearPreview() {
@@ -639,7 +807,15 @@ internal class MapboxNavigationEngine(
                 offlineData.onTripStarted()
                 if (command.simulated) {
                     replaying = true
-                    navigation?.let(replay::onAttached)
+                    played = null
+                    routeMetres = null
+                    navigation?.let { navigator ->
+                        replaySession.onAttached(navigator)
+                        // The slider follows what the replayer plays.
+                        navigator.mapboxReplayer.registerObserver(replayObserver)
+                    }
+                    // The slider is there from the start, so the screen does not move when it comes.
+                    _replay.value = ReplayPosition(seconds = 0.0, durationSeconds = 0.0)
                 } else {
                     try {
                         navigation?.startTripSession()
@@ -660,11 +836,19 @@ internal class MapboxNavigationEngine(
                 endTripTally()
                 staleStart.end()
                 tripSessionRunning = false
+                // A seek still waiting for the navigator is given up with the drive.
+                seekAsk = null
+                seekHold.end()
                 if (replaying) {
-                    navigation?.let(replay::onDetached)
+                    navigation?.let { navigator ->
+                        navigator.mapboxReplayer.unregisterObserver(replayObserver)
+                        replaySession.onDetached(navigator)
+                    }
                     replaying = false
                 }
+                _replay.value = null
                 navigation?.stopTripSession()
+                releaseReroutes()
             }
             GuidanceCommand.ClearRoutes -> {
                 val trip = commitCount
@@ -774,14 +958,22 @@ internal class MapboxNavigationEngine(
 
     private val routeProgressObserver = RouteProgressObserver { progress ->
         val active = _guidanceState.value == GuidanceState.ACTIVE
+        val fix = if (active) lastMatch?.enhancedLocation?.fixTime() else null
         // An update that still carries where the trip before left the car: logged, and otherwise
         // left alone, by the card, the Then chip, the lane choices and the start plan alike.
-        if (active && staleStart.isStale(lastMatch?.enhancedLocation?.fixTime())) {
+        if (active && staleStart.isStale(fix)) {
             staleStart.countStaleUpdate()
             debugLog.log("progress", progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "staleStart" to true))
             return@RouteProgressObserver
         }
+        // The same for one from before a seek of a simulated drive, or from while the navigator
+        // knew no place for the car: the screen goes on with the new place.
+        if (active && seekHold.isHeld(fix)) {
+            debugLog.log("progress", progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "replaySeek" to true))
+            return@RouteProgressObserver
+        }
         if (active) onTripProgress()
+        if (active && replaying) routeMetres = progress.distanceTraveled.toDouble()
         val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
         // Without the next maneuver the card stays as it is, but never with a maneuver of the route
         // before a reroute or another change of route: it waits, dimmed, for the new route's.
@@ -820,10 +1012,13 @@ internal class MapboxNavigationEngine(
 
     /**
      * Whether [result], a matched position of this trip, is still the one the navigator held from
-     * the trip before ([StaleStart]); the map's camera and drawn car leave such a position alone.
-     * False outside a trip.
+     * the trip before ([StaleStart]), or one from before a seek of a simulated drive ([SeekHold]);
+     * the map's camera and drawn car leave such a position alone. False outside a trip.
      */
-    internal fun carriesOldPosition(result: LocationMatcherResult): Boolean = staleStart.isStale(result.enhancedLocation.fixTime())
+    internal fun carriesOldPosition(result: LocationMatcherResult): Boolean {
+        val fix = result.enhancedLocation.fixTime()
+        return staleStart.isStale(fix) || seekHold.isHeld(fix)
+    }
 
     /**
      * Writes a "lane_choice" line for each point with lanes that has come as near as the close
@@ -850,16 +1045,36 @@ internal class MapboxNavigationEngine(
     private val locationObserver = object : LocationObserver {
         // Called for every position the trip session hands the navigator, before the navigator has it.
         override fun onNewRawLocation(rawLocation: MapboxLocation) {
-            staleStart.onSourceFix(rawLocation.fixTime())
+            val time = rawLocation.fixTime()
+            staleStart.onSourceFix(time)
+            seekHold.onSourceFix(time)
         }
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
             lastMatch = locationMatcherResult
             if (tripTally.running && !carriesOldPosition(locationMatcherResult)) {
                 val location = locationMatcherResult.enhancedLocation
-                tripTally.onPosition(location.latitude, location.longitude, jump = locationMatcherResult.isTeleport)
+                // The first position after a seek is where the car was put, not a stretch it drove.
+                val seek = seekHold.seeks != tallySeeks
+                tallySeeks = seekHold.seeks
+                tripTally.onPosition(location.latitude, location.longitude, jump = locationMatcherResult.isTeleport || seek)
             }
         }
+    }
+
+    /**
+     * The replay's newest played position, about once a second during a simulated drive, for the
+     * slider: on the replayer's own clock, from the first position it still holds. While a seek
+     * waits the replay is stopped, and the slider keeps showing where the seek goes.
+     */
+    private val replayObserver = ReplayEventsObserver { events ->
+        val newest = events.lastOrNull { it is ReplayEventUpdateLocation } ?: return@ReplayEventsObserver
+        val replayer = navigation?.mapboxReplayer ?: return@ReplayEventsObserver
+        if (!replaying) return@ReplayEventsObserver
+        replayStart = newest.eventTimestamp - replayer.eventSeconds(newest.eventTimestamp)
+        val position = replayPosition(newest.eventTimestamp, replayStart, replayer.durationSeconds(), routeMetres)
+        played = position
+        if (seekAsk == null) _replay.value = position
     }
 
     private val offRouteObserver = OffRouteObserver { offRoute ->
@@ -1001,6 +1216,32 @@ internal class MapboxNavigationEngine(
         /** How often the marker of a running trip is written again. */
         const val MARKER_EVERY_MILLIS = 60_000L
     }
+}
+
+/**
+ * One release of the replay slider that a seek goes to: [toTimestamp] on the replay's own clock, on
+ * the route [routeId] the drive was on.
+ */
+private class SeekAsk(val toTimestamp: Double, val routeId: String?)
+
+/**
+ * The replay of a simulated drive. It decodes the whole route at once, so the replayer holds the
+ * drive from its start to its end, and a seek can go back as well as forward. By default it decodes
+ * 100 km at a time and drops what it has played when it takes the next part, so only the part in
+ * hand could be sought in. A route of a few hundred km takes a few MB of positions, one a second.
+ */
+@OptIn(ExperimentalPreviewMapboxNavigationAPI::class)
+internal fun wholeRouteReplay(): ReplayRouteSession = ReplayRouteSession().apply {
+    setOptions(getOptions().toBuilder().decodeMinDistance(Double.MAX_VALUE).build())
+}
+
+/**
+ * The slider's position for the replay's newest played position at [timestamp], with [first] the
+ * first timestamp the replayer holds and [duration] how many seconds it holds after that.
+ */
+internal fun replayPosition(timestamp: Double, first: Double, duration: Double, metres: Double?): ReplayPosition {
+    val held = max(duration, 0.0)
+    return ReplayPosition(seconds = (timestamp - first).coerceIn(0.0, held), durationSeconds = held, metres = metres)
 }
 
 /**

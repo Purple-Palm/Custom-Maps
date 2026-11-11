@@ -16,6 +16,7 @@ import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
 import io.github.purplepalm.custommaps.settings.FakeAppSettings
 import java.io.IOException
 import kotlin.time.Duration.Companion.minutes
@@ -416,6 +417,7 @@ class MapViewModelTest {
         override val routeOptions = MutableStateFlow<List<RouteOption>>(emptyList())
         override val routeProgress = MutableStateFlow<RouteProgressSnapshot?>(null)
         override val destination = MutableStateFlow<Place?>(null)
+        override val replay = MutableStateFlow<ReplayPosition?>(null)
 
         var previewResult: RouteRequestResult = RouteRequestResult.Success
         var previewGate: CompletableDeferred<Unit>? = null
@@ -444,6 +446,8 @@ class MapViewModelTest {
             stops += reason
             goIdle()
         }
+
+        override fun seekReplay(fraction: Double) = Unit
 
         override fun clearPreview() = goIdle()
 

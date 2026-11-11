@@ -5,6 +5,8 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
+import io.github.purplepalm.custommaps.nav.replay.ReplaySeek
 import kotlinx.coroutines.flow.StateFlow
 
 /** Routing and turn-by-turn guidance, independent of the map data provider. */
@@ -20,6 +22,12 @@ interface NavigationEngine {
     /** Destination of the current preview, guidance or arrival. */
     val destination: StateFlow<Place?>
 
+    /**
+     * Where a simulated drive is on its replay, once a second while it plays; null unless a
+     * simulated drive runs.
+     */
+    val replay: StateFlow<ReplayPosition?>
+
     /** Requests routes with alternatives from the current position. Starts no trip session. */
     suspend fun previewRoutes(destination: Place): RouteRequestResult
 
@@ -29,6 +37,13 @@ interface NavigationEngine {
     fun startGuidance(simulated: Boolean)
 
     fun stopGuidance(reason: StopReason)
+
+    /**
+     * Moves a simulated drive to [fraction] of its replay, from 0 at the start to 1 at the end, by
+     * [ReplaySeek]'s rule. It starts and ends no trip session and asks for no route. Does nothing
+     * outside a simulated drive.
+     */
+    fun seekReplay(fraction: Double)
 
     fun clearPreview()
 
