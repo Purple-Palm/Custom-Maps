@@ -161,6 +161,9 @@ internal class MapboxNavigationEngine(
     /** When the marker was last written, in milliseconds since boot. */
     private var markerWrittenAt = 0L
 
+    /** The speed limit on the progress line that last had one; null at the start of a trip. */
+    private var lastSpeedLimit: Map<String, Any?>? = null
+
     /**
      * The points with lanes ahead of the car, read from the route once for each step. The engine
      * owns the one copy; the map's camera reads the same list, so both see the same lane choices.
@@ -711,6 +714,7 @@ internal class MapboxNavigationEngine(
         tripTally.begin(now, simulated, offline = network.value.offlineReason() != OfflineReason.NONE)
         tripEnding = null
         startVitals = null
+        lastSpeedLimit = null
         val trip = commitCount
         scope.launch {
             val read = withContext(Dispatchers.IO) { phoneVitals.read() }
@@ -750,6 +754,19 @@ internal class MapboxNavigationEngine(
         }
     }
 
+    /**
+     * "speedLimit" for the progress line of a drive, with the limit the navigator has for the road
+     * under the car: on the first line of a trip and whenever it changes, and on no other line.
+     */
+    private fun speedLimitChange(active: Boolean): Map<String, Any?> {
+        if (!active) return emptyMap()
+        val info = lastMatch?.speedLimitInfo ?: return emptyMap()
+        val limit = speedLimitFields(info.speed, info.unit.name, info.sign.name)
+        if (limit == lastSpeedLimit) return emptyMap()
+        lastSpeedLimit = limit
+        return mapOf("speedLimit" to limit)
+    }
+
     /** A map error of the drive's map, by the name of its kind, for the trip's summary. */
     internal fun onMapError(kind: String) {
         tripTally.onMapError(kind)
@@ -780,7 +797,7 @@ internal class MapboxNavigationEngine(
                 "match" to lastMatch?.debugFields(),
                 "thenShown" to snapshot?.showThen,
                 "card" to card?.logName,
-            ),
+            ) + speedLimitChange(active),
         )
         if (active) logLaneChoices(progress)
         if (snapshot != null) {

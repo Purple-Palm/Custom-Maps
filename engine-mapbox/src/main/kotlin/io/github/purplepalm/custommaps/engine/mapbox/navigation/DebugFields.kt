@@ -16,6 +16,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.StepShapes
 import io.github.purplepalm.custommaps.nav.camera.Bend
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.debug.RouteCounts
 import io.github.purplepalm.custommaps.nav.geo.Geo
 
 /*
@@ -34,14 +35,37 @@ internal fun NavigationRoute.debugFields(): Map<String, Any?> {
     val route = directionsRoute
     // One list of points for each step of each leg.
     val shapes = route.stepsGeometryToPoints()
+    val legs = route.legs().orEmpty()
     return mapOf(
         "id" to id,
         "origin" to origin,
         "meters" to route.distance(),
         "seconds" to route.duration(),
         "typicalSeconds" to route.durationTypical(),
-        "legs" to route.legs().orEmpty().mapIndexed { index, leg -> leg.debugFields(shapes.getOrNull(index).orEmpty()) },
+        // The stretches of heavy and of severe traffic, how many and how long each, in meters.
+        "congestionRuns" to RouteCounts.congestionRuns(legs.mapNotNull { it.congestionSegments() }),
+        "legs" to legs.mapIndexed { index, leg -> leg.debugFields(shapes.getOrNull(index).orEmpty()) },
     )
+}
+
+/**
+ * The traffic level of each segment of the leg, by the names of [congestionLevels], with each
+ * segment's length; null when the route has no traffic or no lengths for it.
+ */
+private fun RouteLeg.congestionSegments(): Pair<List<String?>, List<Double>>? {
+    val annotation = annotation() ?: return null
+    val meters = annotation.distance() ?: return null
+    val levels = annotation.congestionNumeric()?.map(::congestionLevel) ?: annotation.congestion() ?: return null
+    return levels to meters
+}
+
+/** The level of a numeric congestion value (0 to 100), in the SDK's default ranges. */
+private fun congestionLevel(value: Int?): String = when {
+    value == null -> "unknown"
+    value < MODERATE_CONGESTION -> "low"
+    value < HEAVY_CONGESTION -> "moderate"
+    value < SEVERE_CONGESTION -> RouteCounts.HEAVY
+    else -> RouteCounts.SEVERE
 }
 
 /**
@@ -77,15 +101,7 @@ private fun RouteLeg.debugFields(stepShapes: List<List<Point>>): Map<String, Any
 private fun RouteLeg.congestionLevels(): Map<String, Int>? {
     val annotation = annotation() ?: return null
     annotation.congestionNumeric()?.let { values ->
-        return values.groupingBy { value ->
-            when {
-                value == null -> "unknown"
-                value < MODERATE_CONGESTION -> "low"
-                value < HEAVY_CONGESTION -> "moderate"
-                value < SEVERE_CONGESTION -> "heavy"
-                else -> "severe"
-            }
-        }.eachCount()
+        return values.groupingBy(::congestionLevel).eachCount()
     }
     return annotation.congestion()?.groupingBy { it }?.eachCount()
 }
@@ -116,6 +132,9 @@ private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
             ?.filter { it.type() == "lane" }
             ?.map { mapOf("directions" to it.directions(), "active" to it.active(), "activeDirection" to it.activeDirection()) },
         "laneIntersections" to laneIntersectionFields(intersections().orEmpty(), shape),
+        // The class of the step's road, as it leaves the maneuver, and what the step has on the way.
+        "roadClass" to intersections()?.firstOrNull()?.mapboxStreetsV8()?.roadClass(),
+    ) + stepSignFields(intersections().orEmpty()) + mapOf(
         // Which way the road runs into and out of the maneuver, and where it bends after it: numbers only.
         "bearingBefore" to maneuver.bearingBefore(),
         "bearingAfter" to maneuver.bearingAfter(),
@@ -123,6 +142,25 @@ private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
         "bendDeg" to bend?.degrees?.let { Motion.round(it, 1) },
     )
 }
+
+/**
+ * How many of a step's intersections have traffic signals, a stop sign, a yield sign or a railway
+ * crossing, as the route's intersections flag them; each null when no intersection of the step
+ * says anything of it ([RouteCounts.flagged]).
+ */
+internal fun stepSignFields(intersections: List<StepIntersection?>): Map<String, Any?> = mapOf(
+    "trafficSignals" to RouteCounts.flagged(intersections.map { it?.trafficSignal() }),
+    "stopSigns" to RouteCounts.flagged(intersections.map { it?.stopSign() }),
+    "yieldSigns" to RouteCounts.flagged(intersections.map { it?.yieldSign() }),
+    "railwayCrossings" to RouteCounts.flagged(intersections.map { it?.railwayCrossing() }),
+)
+
+/**
+ * The speed limit the navigator has for the road under the car, for the "progress" line when it
+ * changes: the [speed] (null where the road has none), its [unit] and the [sign] type.
+ */
+internal fun speedLimitFields(speed: Int?, unit: String, sign: String): Map<String, Any?> =
+    mapOf("value" to speed, "unit" to unit, "sign" to sign)
 
 /**
  * Where the road of a step bends after its maneuver point, as the junction's frame with Large finds
