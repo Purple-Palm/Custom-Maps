@@ -78,7 +78,8 @@ are starting points for tuning.
 
 **What Mapbox standard shares.** Its camera behaviour stays as it was: two evaluations per
 navigator update, the SDK's one-second moves, the 1.0 s puck that slides also when the matched
-position jumps, and no position from the puck during the preview. What is not camera behaviour
+position jumps, and no position from the puck during the preview. Only a seek of a simulated drive
+puts the puck and the camera at the new place at once, as in every style. What is not camera behaviour
 applies to every style: the route line fix, the released data source, the top padding that only
 grows during guidance and its band for the Then chip, a fresh puck for every drive, following
 before guidance, and the camera line (see [Smaller causes](#smaller-causes) and
@@ -419,7 +420,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
 | `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. |
-| `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport, from where it glides on for one glide along its heading at its speed (`PuckGlide`); for Mapbox standard it glides 1.0 s and never jumps. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
+| `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport, from where it glides on for one glide along its heading at its speed (`PuckGlide`); for Mapbox standard it glides 1.0 s and slides also on a teleport. In every style, Mapbox standard included, the first position after a seek of a simulated drive (`onFix(jump = true)`) puts it at the new place at once, and it glides on from there in the same way. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
 | `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
 | `LaneDetails`, `RouteLineWidths` | `:engine-mapbox`, `map/LaneDetails.kt`, `map/RouteLineWidths.kt` | Lane markings on the map, set after the SDK has turned them off, and the route line that stays thin close in while they are on. |
 | `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log. |

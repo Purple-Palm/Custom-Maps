@@ -901,7 +901,8 @@ class PhoneMap internal constructor(
 
     /**
      * The camera of a style, and the puck that goes with it: Mapbox standard keeps the SDK's puck,
-     * the other styles glide it a little longer and let it jump when the matched position jumps.
+     * the other styles glide it a little longer and let it jump when the matched position jumps. A
+     * seek of a simulated drive puts it at the new place at once in every style.
      */
     private fun createCamera(style: CameraStyle): GuidanceCamera {
         val standard = style == CameraStyle.MAPBOX_STANDARD

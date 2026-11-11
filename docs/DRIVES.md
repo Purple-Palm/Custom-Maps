@@ -513,7 +513,7 @@ Built in stage 1.1. New lines in the debug log:
 | Camera | Once a second during guidance while the map is on screen (the `activity` and `screen` lines show when it was not): zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. Also how wide a lane is on the screen, what sets the zoom with the Large lane zoom, and whether lane details are on. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
 | Lane choices | Once for each point of the route with lanes, when it comes as near as the close view would start: its lanes, how many can be used and how many leave the route, whether the road is a freeway, and the reason when the rule passes it over. Each route also lists, step by step, its intersections with lanes | How often Large goes close on a freeway, and how often a looser rule would |
 | Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
-| Offline data | For each navigator, whether it and the map share the tile store, and how far data is kept ahead. For each download of a preview's routes and of the map's style: each route's length and how far along it the region reached, how it ended (done, partial, replaced by a newer preview, stopped at Start, or failed and why), how many resources it needed and has, their bytes on the phone, the bytes that came over the network for it, and the seconds it took. Errors of predictive caching, the first of each kind and then counts. Each time the offline chip comes, goes or changes its sentence, with the reason and whether a drive was running, and which system page its Settings button opened | Nothing saved ahead; what a preview download costs in data |
+| Offline data | For each navigator, whether it and the map share the tile store, and how far data is kept ahead. For each download of a preview's routes and of the map's style: each route's length and how far along it the region reached, how it ended (done, partial, replaced by a newer preview, stopped when the drive ended first, or failed and why) and whether it ended during a drive, how many resources it needed and has, their bytes on the phone, the bytes that came over the network for it, and the seconds it took. Errors of predictive caching, the first of each kind and then counts. Each time the offline chip comes, goes or changes its sentence, with the reason and whether a drive was running, and which system page its Settings button opened | Nothing saved ahead; what a preview download costs in data |
 | Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it and the one the app took, the result's types, categories and Mapbox id | Behind the store |
 | Route requests | Every route request the app sends: where it starts, and how old, how fast and in which direction that position was; the stop point, the arrival target and the direction sent with it; whether it was sent inside a trip. And every reroute request of the navigator: how many points and arrival targets it has, whether the destination's target is set, and how far its end is from where the trip goes | Behind the store; what a drive costs |
 | Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, whether a cancelled refresh is asked for once more, and the reason whenever fresh routes were not set | Old routes at Start |
@@ -733,8 +733,11 @@ On the drive:
     the room; after the turn the map should turn only a little toward the road ahead while the
     view is still down. An ordinary turn should look as before. The log: on the `camera` lines
     before the turn, `bendM` and `bendDeg` (where the road bends past the maneuver point) and
-    `extraPts` above 0; in `route_response` and `routes_updated`, each step's `bendM`, `bendDeg`,
-    `bearingBefore` and `bearingAfter`. Screenshots, as above.
+    `extraPts` above 0, and after the turn, back on the open road, `extraPts` 0 again; in
+    `route_response` and `routes_updated`, each step's `bendM`, `bendDeg`, `bearingBefore` and
+    `bearingAfter`. Where the road only leaves the maneuver point a few degrees off the way in and
+    runs on straight, as at many name changes, the view should stay as close as at an ordinary
+    turn, with no `bendM` on the `camera` line. Screenshots, as above.
 14. **The card after a reroute.** Leave the route once, where it is safe to. Right after the new
     route appears the card may dim for a moment and show no distance; it must never show a
     maneuver of the old route next to the new route's line. The log: `progress` lines with `card`
@@ -763,7 +766,7 @@ On the drive:
     `batteryUsedPercent` with the battery. A drive whose app Android closed gets its line at the
     next start, with `ending` `process_death`. Days later, **Settings → Debug** should hold many
     more days for the same size, and **Share debug log** should still give one plain text file
-    per day that opens as before.
+    per day that opens as before, with no `export_error` line in it.
 20. **The camera after a flight, and after a jump.** With Smooth follow: after Start, Recenter and
     Overview, a `camera_settled` line follows the `camera_state` line within about two seconds;
     `settled` false with gaps means the camera was still turning or tilting. Where the car's
@@ -790,7 +793,10 @@ On the drive:
     percent. The log: one `replay_seek` line per release, `ok` true with a small `ms`; `progress`
     lines with `replaySeek` only in the moment after a seek; no `off_route` and no `routes_updated`
     with `reroute` after a seek; the drive's `trip_summary` with `simulated` true and `meters` close
-    to the road actually replayed.
+    to the road actually replayed. Seek once in Mapbox tuned and once in Mapbox standard as well:
+    the view should be at the new place at once, never sliding across the map or framing the turn
+    the car left. Then let go of the slider and press End at once: the car should be drawn where the
+    phone is, never left on the simulated route.
 
 Then share the debug log. What to read in it:
 
@@ -805,7 +811,7 @@ Then share the debug log. What to read in it:
 | `route_request`: `stopPoint`, `targets`, `bearings`, `originFix`, `inTrip` | Whether routes went to the stop point with the place as target; whether a direction was sent and from what speed; one request for each Directions press, and at most one with `inTrip` in a drive |
 | `reroute_options` | Whether reroutes keep the arrival target: `targets` null with `targetWanted` true means a reroute lost it. `endMeters` near 0 means it still ends at the same point |
 | `tile_store` | `shared` true: the map and the navigator have the one tile store. `map` false would mean that predictive caching keeps no map data |
-| `offline_region_start`, `offline_region` | One pair for each preview. `routeKm` is each route's length and `keptKm` how far along it the region reaches, up to about `maxKm`. `required` above zero: Mapbox Standard resolved for a tile region. `tile_count_exceeded`: the region was too large and saved nothing. `loadedBytes` is what the download cost in data, `completedBytes` what the phone holds for it, `seconds` how long it took. `replaced` (a newer preview) and `stopped` (Start) are no faults; `partial` and `failed` name their reason. A start line with no line after it is a download that never got an answer, as without a connection |
+| `offline_region_start`, `offline_region` | One pair for each preview. `routeKm` is each route's length and `keptKm` how far along it the region reaches, up to about `maxKm`. `required` above zero: Mapbox Standard resolved for a tile region. `tile_count_exceeded`: the region was too large and saved nothing. `loadedBytes` is what the download cost in data, `completedBytes` what the phone holds for it, `seconds` how long it took. `replaced` (a newer preview) and `stopped` with `trip_end` (the drive ended before the download) are no faults; `partial` and `failed` name their reason. A start line with no line after it is a download that never got an answer, as without a connection |
 | `offline_style_pack` | The size of the map's style, loaded once after the app starts, and again with the next preview if that failed |
 | `device`: `appRxBytes` | All the bytes the app has received, Wi-Fi and mobile data alike. Its growth from the first to the last `device` line of a drive is the most that predictive caching can have loaded; Mapbox gives no count of its own for it |
 | `offline_cache`, `offline_cache_error` | That predictive caching was set up, once for each navigator, with its distances, and what it could not do |
