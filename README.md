@@ -224,12 +224,12 @@ monthly active user.
 
 Google Play signs the APKs it delivers with an app signing key that Google generates and keeps
 (Play App Signing). CI signs each app bundle with the **upload key**, which shows Google that the
-bundle comes from the owner. It is a PKCS12 keystore with an RSA 2048 key, kept outside the
-repository; it is not the debug key. Its certificate's SHA-256 fingerprint, which Play Console shows
-on the Play app signing page, is
+bundle comes from the owner. It is a PKCS12 keystore with an RSA 2048 key, not the debug key. The
+owner keeps the upload key; CI has it as secrets. Its certificate's SHA-256 fingerprint, which Play
+Console shows on the Play app signing page, is
 `AB:19:35:13:3F:7C:B9:D1:8C:09:B2:C0:F6:72:60:28:8D:7D:33:4C:E5:DD:D5:C7:4C:24:53:CA:AA:7E:3D:00`.
 
-Four repository secrets hold it (**Settings → Secrets and variables → Actions**):
+The four repository secrets that hold it (**Settings → Secrets and variables → Actions**):
 
 | Name | What it is |
 |---|---|
@@ -276,11 +276,15 @@ Play Console. Once:
 1. Download the newest `custommaps-release-<versionCode>-<commit>.aab` from a green CI run.
 2. In Play Console open the app, then **Test and release → Testing → Internal testing → Create new
    release**. Keep Play App Signing with the key Google generates, the default for a new app. Upload
-   the bundle, click **Next**, then **Save** and **Start rollout**.
-3. If Play Console asks for the foreground service declaration (**App content**), declare the
-   location type: the Mapbox navigation service keeps turn-by-turn guidance going after the driver
-   taps **Start**, and ends with the drive. Google asks for a link to a short video that shows a
-   drive being started. If it asks about the advertising ID, the answer is No: the app has none.
+   the bundle and click **Next**. On **Preview and confirm** click **Start rollout** (or
+   **Publish**): the release goes out at once. If only **Save** is offered, the changes need review:
+   click **Save**, then **Send for review** on the **Publishing overview** page. Changes are not sent
+   for review by themselves.
+3. Fill in the foreground service declaration (**App content**) when Play Console asks for it, and
+   before the first automatic upload at the latest. Declare the location type: the Mapbox
+   navigation service keeps turn-by-turn guidance going after the driver taps **Start**, and ends
+   with the drive. Google asks for a link to a short video that shows a drive being started. If Play
+   Console asks about the advertising ID, the answer is No: the app has none.
 4. On the **Testers** tab create an email list with the Google account the phone's Play Store uses,
    select it, **Save changes**, and copy the shareable link. Open the link on the phone, accept the
    invitation and install Custom Maps from the Play Store page it leads to. The link works once the
@@ -308,8 +312,9 @@ Google Cloud service account that Play Console allows to release to testing trac
 
 From then on the **publish** job of each green run on `main` (a push, or **Run workflow** on `main`)
 uploads the run's app bundle with [`scripts/play-upload.sh`](scripts/play-upload.sh) and makes it
-the release of internal testing. The phone gets it from the Play Store within minutes, or with the
-next automatic update, as its Play Store settings say. The job:
+the release of internal testing. The update usually reaches the phone's Play Store within minutes,
+though Google says that changes can take several hours; the phone installs it as its Play Store
+settings say. The job:
 
 - runs only after the build, its tests, lint and the 16 KB check passed, and only for `main`; until
   the key is set it only says so and publishes nothing;
