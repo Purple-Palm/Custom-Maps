@@ -222,8 +222,10 @@ fun MapScreen(engine: MapboxEngine, settings: AppSettings, debugLog: DebugLog, o
         val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
         phoneMap.setViewportPadding(ViewportPadding(panelMargin, top + panelMargin, panelMargin, bottom + panelMargin))
     }
-    // The compass sits under whatever the top of the screen shows.
-    LaunchedEffect(topPanelBottom) { phoneMap.setCompassTopInset(topPanelBottom + panelMargin) }
+    // The compass sits under whatever the top of the screen shows, and during guidance under the
+    // whole band, where the Then chip hangs and a tab at the card's end side can.
+    val compassInset = compassTopInset(guiding, maneuverPanelBottom, thenBand, topPanelBottom)
+    LaunchedEffect(compassInset) { phoneMap.setCompassTopInset(compassInset + panelMargin) }
 
     BackHandler(enabled = state.guidance == GuidanceState.PREVIEW) { viewModel.onCancelPreview() }
     BackHandler(enabled = state.guidance == GuidanceState.IDLE && state.searchText.isNotEmpty()) { viewModel.clearSearch() }
@@ -365,6 +367,19 @@ private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, onBottomChange
         DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
     }
 }
+
+/**
+ * How far down from the top of the map the top of the screen reaches, for the compass to sit
+ * under, in pixels. During guidance that is the band under the maneuver panel, whether anything
+ * hangs in it or not, so the compass stays where it is when something comes to hang there.
+ * Otherwise it is the top column.
+ *
+ * @param maneuverPanelBottom the bottom edge of the maneuver panel; 0 while it is not shown
+ * @param band how far the band under the maneuver panel reaches below it
+ * @param topPanelBottom the bottom edge of the top column
+ */
+internal fun compassTopInset(guiding: Boolean, maneuverPanelBottom: Int, band: Int, topPanelBottom: Int): Int =
+    if (guiding && maneuverPanelBottom > 0) maxOf(topPanelBottom, maneuverPanelBottom + band) else topPanelBottom
 
 /** The guidance bar, reading the progress itself. */
 @Composable
