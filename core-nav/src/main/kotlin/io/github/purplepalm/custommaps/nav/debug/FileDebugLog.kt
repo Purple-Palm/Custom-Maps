@@ -6,6 +6,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.io.Writer
 import java.time.Clock
@@ -143,7 +144,10 @@ class FileDebugLog(
      * Each day of the log as a plain text file, `custom-maps-debug-<day>.txt`, the [header] line
      * first, then the day's lines in the order they were written; a compressed day is written out
      * as text. The files are opened under the lock and copied after it, so writing goes on
-     * meanwhile: the copy has what the log held when the export began.
+     * meanwhile: the copy has what the log held when the export began. A part of a day that cannot
+     * be read to its end, as a compressed day cut short by a power loss, keeps what could be read
+     * and ends with an "export_error" line, and the other days are shared all the same. Only a
+     * failure to write the copies fails the export.
      */
     override suspend fun export(header: Map<String, Any?>): List<File> = withContext(io) {
         val sources = files.withLock {
@@ -159,13 +163,43 @@ class FileDebugLog(
                     exported.outputStream().buffered().use { out ->
                         out.write(headerLine.toByteArray(Charsets.UTF_8))
                         out.write('\n'.code)
-                        for (part in parts) part.open().use { it.copyTo(out) }
+                        for (part in parts) copyPart(part, out)
                     }
                 }
             }
         } finally {
             sources.forEach { it.close() }
         }
+    }
+
+    /**
+     * Copies what [part] holds into [out]. Where the part cannot be read on, what was read stays and
+     * an "export_error" line with the day and the error follows; a failure to write is thrown.
+     */
+    private fun copyPart(part: Part, out: OutputStream) {
+        val input = try {
+            part.open()
+        } catch (e: IOException) {
+            return writeExportError(part.day, e, out)
+        }
+        input.use {
+            val buffer = ByteArray(COPY_BUFFER_BYTES)
+            while (true) {
+                val read = try {
+                    input.read(buffer)
+                } catch (e: IOException) {
+                    return writeExportError(part.day, e, out)
+                }
+                if (read < 0) return
+                out.write(buffer, 0, read)
+            }
+        }
+    }
+
+    /** The line that ends a day's copy where the rest could not be read, on a line of its own. */
+    private fun writeExportError(day: String, error: IOException, out: OutputStream) {
+        val line = Redaction.redact(JsonLines.event(clock.instant(), "export_error", mapOf("day" to day, "error" to error.toString())))
+        out.write("\n$line\n".toByteArray(Charsets.UTF_8))
     }
 
     /**
@@ -380,5 +414,6 @@ class FileDebugLog(
         private const val TEMPORARY_SUFFIX = ".tmp"
         private const val BUFFERED_EVENTS = 10_000
         private const val TRIM_EVERY_LINES = 1_000
+        private const val COPY_BUFFER_BYTES = 8 * 1024
     }
 }

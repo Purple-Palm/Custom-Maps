@@ -144,9 +144,11 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 
 To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
 for example Google Drive. Each day becomes one text file, `custom-maps-debug-<date>.txt`, with one
-JSON event per line. The log never leaves the phone otherwise: it is kept out of backups and device
-transfers, days that are over are kept compressed, the oldest days are deleted once it passes 50 MB
-on the phone, and **Clear** deletes it together with the copies made for sharing. The shared text
+JSON event per line. A day the phone cannot read to its end, as one cut short by a power loss, keeps
+what could be read and then says so in an `export_error` line; the other days are shared as usual.
+The log never leaves the phone otherwise: it is kept out of backups and device transfers, days that
+are over are kept compressed, the oldest days are deleted once it passes 50 MB on the phone, and
+**Clear** deletes it together with the copies made for sharing. The shared text
 files are several times larger than the size Settings shows. It never contains the Mapbox token;
 token-shaped text is masked in every line as a last safeguard.
 

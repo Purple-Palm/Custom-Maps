@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.debug
 
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Clock
 import java.time.Duration
@@ -11,6 +12,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -300,6 +302,35 @@ class FileDebugLogTest {
     }
 
     @Test
+    fun `a day that cannot be read keeps what could be read, and the other days are shared`() = runTest {
+        logDirectory.mkdirs()
+        File(logDirectory, "1999-12-28.jsonl.gz").writeBytes(gzip("{\"t\":\"1999-12-28T10:00:00.000Z\",\"type\":\"good\"}\n"))
+        // Empty, as a day whose file a power loss caught.
+        File(logDirectory, "1999-12-29.jsonl.gz").writeBytes(ByteArray(0))
+        // Cut short halfway through its compressed lines.
+        val lines = (1..200).joinToString("") { "{\"t\":\"1999-12-30T10:00:00.000Z\",\"type\":\"cut\",\"n\":$it,\"text\":\"${noise(40)}\"}\n" }
+        val whole = gzip(lines)
+        File(logDirectory, "1999-12-30.jsonl.gz").writeBytes(whole.copyOf(whole.size / 2))
+        val log = newLog()
+        log.log("today")
+        runCurrent()
+
+        val files = log.export(emptyMap())
+
+        val days = files.map { it.name.removePrefix(FileDebugLog.EXPORT_PREFIX).removeSuffix(".txt") }
+        assertEquals(listOf("1999-12-28", "1999-12-29", "1999-12-30", "2000-01-01"), days)
+        assertEquals(listOf("good"), files[0].readLines().drop(1).map(::typeOf))
+        assertEquals(listOf("today"), files[3].readLines().drop(1).map(::typeOf))
+        for ((file, day) in files.zip(days).subList(1, 3)) {
+            val last = file.readLines().last()
+            assertEquals("export_error", typeOf(last))
+            assertTrue(last.contains("\"day\":\"$day\""), last)
+        }
+        // What could be read before the cut is there.
+        assertTrue(files[2].readLines()[1].contains("\"n\":1,"))
+    }
+
+    @Test
     fun `days left plain by an earlier run are compressed at the first line`() = runTest {
         logDirectory.mkdirs()
         val old = File(logDirectory, "1999-12-30.jsonl").apply { writeText("{\"t\":\"1999-12-30T10:00:00Z\",\"type\":\"old\"}\n") }
@@ -497,6 +528,9 @@ class FileDebugLogTest {
         const val QUEUED_BEHIND = 5
 
         fun gunzip(file: File): String = GZIPInputStream(file.inputStream()).bufferedReader().use { it.readText() }
+
+        fun gzip(text: String): ByteArray =
+            ByteArrayOutputStream().also { bytes -> GZIPOutputStream(bytes).use { it.write(text.toByteArray(Charsets.UTF_8)) } }.toByteArray()
 
         fun typeOf(line: String): String = line.substringAfter("\"type\":\"").substringBefore('"')
 

@@ -827,6 +827,7 @@ Then share the debug log. What to read in it:
 | Progress: `card` | `pending` only in the first second or so after a new route, never for long; `kept` for a second now and then |
 | `trip_session_reset` | One after each drive's end: the navigator forgot where the drive left the car. `ms` is how long that took |
 | Progress: `staleStart` | An update at the start of a drive that still carried where the drive before ended; nothing on the screen and no start plan acted on it. None are expected after a `trip_session_reset` |
+| `export_error` | Only in a shared file: a part of that day could not be read to its end (`error` says why), and the lines before it are what could be read of it. The other days are complete |
 | `trip_summary` | One for each drive: `trip` (the session id of `session_state`), `simulated`, `ending`, `seconds`, `meters`, `reroutes`, `offRouteEpisodes`, `firstProgressS`, `longestGapS`, `mapErrors`, `offlineSeconds`, `staleStart`, `staleUpdates`, `receivedBytes`, `batteryUsedPercent`. With `ending` `process_death` the numbers are those of the last minute before Android closed the app |
 | `process_start`: `matched`, `found` | How the start's record was found: `pid`, `bindTime` or `complete` (handed over at the first frame). `found` false with `records`: Android had none for this start |
 | `camera_settled` | With Smooth follow, how long after a `camera_state` line with `ms` the camera came to rest (`ms`). `settled` false: not within 5 s, with the gaps left |
