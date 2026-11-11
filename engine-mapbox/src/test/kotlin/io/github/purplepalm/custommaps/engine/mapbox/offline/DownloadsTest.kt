@@ -4,6 +4,7 @@ import com.mapbox.common.Cancelable
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -77,6 +78,80 @@ class DownloadsTest {
         download.progress = 25L
 
         assertEquals(25L, download.progress)
+    }
+
+    /** A load handed to the SDK, which notes who had ended it each time it is cancelled. */
+    private class Load(number: Int) {
+        val download = Download<Long>(startedNanos = 0L, number = number)
+        val endedByAtCancels = mutableListOf<EndedBy?>()
+
+        init {
+            download.cancelable = Cancelable { endedByAtCancels += download.endedBy }
+        }
+    }
+
+    @Test
+    fun `the first load of the region replaces nothing`() {
+        val loads = LatestDownload<Long>()
+        val first = Load(1)
+
+        loads.replace(first.download)
+
+        assertSame(first.download, loads.current)
+        assertEquals(emptyList<EndedBy?>(), first.endedByAtCancels)
+    }
+
+    @Test
+    fun `a newer preview's load ends the one before, which then reads as replaced`() {
+        val loads = LatestDownload<Long>()
+        val first = Load(1)
+        val second = Load(2)
+        loads.replace(first.download)
+
+        loads.replace(second.download)
+
+        // Cancelled once, and the reason was there before the store heard of it.
+        assertEquals(listOf(EndedBy.NEWER_PREVIEW), first.endedByAtCancels)
+        assertEquals(OfflineLines.REPLACED, OfflineLines.outcome("CANCELED", first.download.endedBy).result)
+        assertSame(second.download, loads.current)
+        assertEquals(emptyList<EndedBy?>(), second.endedByAtCancels)
+        assertNull(second.download.endedBy)
+    }
+
+    @Test
+    fun `a load that had finished is left alone by the next one`() {
+        val loads = LatestDownload<Long>()
+        val first = Load(1)
+        loads.replace(first.download)
+        first.download.finished = true
+
+        loads.replace(Load(2).download)
+
+        assertEquals(emptyList<EndedBy?>(), first.endedByAtCancels)
+        assertNull(first.download.endedBy)
+    }
+
+    @Test
+    fun `a load stopped at Start keeps that reason when a preview comes after it`() {
+        val loads = LatestDownload<Long>()
+        val first = Load(1)
+        loads.replace(first.download)
+
+        loads.stop(EndedBy.GUIDANCE)
+        // Back in a preview before the store has answered the cancel.
+        loads.replace(Load(2).download)
+
+        assertEquals(listOf(EndedBy.GUIDANCE), first.endedByAtCancels)
+        assertEquals(OfflineLines.Outcome(OfflineLines.STOPPED, "guidance"), OfflineLines.outcome("CANCELED", first.download.endedBy))
+    }
+
+    @Test
+    fun `stopping with no load started does nothing`() {
+        val loads = LatestDownload<Long>()
+
+        loads.stop(EndedBy.GUIDANCE)
+
+        assertNull(loads.current)
     }
 
     @Test

@@ -615,6 +615,10 @@ On the drive:
      `tile_count_exceeded` means that 100 km of each route is too much for the tilesets of
      Standard; `required` and `completedBytes` of a load that worked tell how far the limit could
      go.
+   - **A preview that replaces one, and Start during a download.** On Wi-Fi, open the routes to a
+     place, go back within a few seconds and open them again. The first load's `offline_region`
+     line should say `replaced`, never `failed` with `canceled`. Then press Start while the second
+     load still runs: its line should say `stopped` with `guidance`.
    - **The chip, before a drive.** With the map open and no drive, turn on airplane mode. Within
      about 3 s the sentence "No internet. The map shows only areas saved on the phone; guidance
      continues." should appear under the search bar. It should go as soon as the phone is online

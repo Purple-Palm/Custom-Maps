@@ -96,8 +96,8 @@ internal class OfflineData(
     /** Counts the loads of the tile region in this run of the app. */
     private var regionLoads = 0
 
-    /** The load of the tile region that was started last; it may have finished. */
-    private var regionLoad: Download<TileRegionLoadProgress>? = null
+    /** The loads of the tile region, each new one in the place of the one before. */
+    private val regionLoad = LatestDownload<TileRegionLoadProgress>()
 
     /** Whether the style's own files have been loaded in this run of the app. */
     private val stylePack = LoadedOnce()
@@ -177,24 +177,26 @@ internal class OfflineData(
     fun stopPreviewDownload() {
         previewGeometry?.cancel()
         previewGeometry = null
-        end(regionLoad, EndedBy.GUIDANCE)
+        guarded("offline.cancel") { regionLoad.stop(EndedBy.GUIDANCE) }
         end(stylePackLoad, EndedBy.GUIDANCE)
     }
 
     private fun loadRegion(routes: Int, shape: PreviewDownload.Shape?, origin: Point) {
         val number = ++regionLoads
         if (shape == null) {
+            // A newer preview all the same: what the load before it still fetches is for routes
+            // that are no longer shown.
+            guarded("offline.cancel") { regionLoad.stop(EndedBy.NEWER_PREVIEW) }
             debugLog.log(
                 "offline_region",
                 OfflineLines.region(number, routes, OfflineLines.NO_GEOMETRY, message = null, endedBy = null, counts = null, seconds = 0.0),
             )
             return
         }
-        // The store would end a load of the same region by itself; said here first, so that its
-        // answer is known for what it is.
-        end(regionLoad, EndedBy.NEWER_PREVIEW)
         val load = Download<TileRegionLoadProgress>(SystemClock.elapsedRealtimeNanos(), number, routes)
-        regionLoad = load
+        // The store would end the load before by itself; ended here first, before this one is
+        // asked for, so that its answer is known for what it is.
+        guarded("offline.cancel") { regionLoad.replace(load) }
         try {
             val options = PreviewDownload.loadOptions(shape.geometry, listOf(previewDescriptor), origin)
             // What the store is really asked for, read back from the options it gets.

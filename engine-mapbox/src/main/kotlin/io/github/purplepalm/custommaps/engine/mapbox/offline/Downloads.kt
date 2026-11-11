@@ -38,6 +38,34 @@ internal class Download<P>(val startedNanos: Long, val number: Int = 0, val rout
 }
 
 /**
+ * The downloads of something only one load at a time fills, as the one tile region: each new
+ * download takes the place of the one before it. Main thread only.
+ */
+internal class LatestDownload<P> {
+
+    /** The download started last; it may have finished. */
+    var current: Download<P>? = null
+        private set
+
+    /**
+     * Makes [next] the current download and ends the one before it, if that is still under way, as
+     * replaced by a newer preview. Call it before [next] is handed to the SDK: the store ends a load
+     * of the same region by itself when the next one starts, and its answer for the old one is then
+     * known for what it is. A download ended before keeps its first reason.
+     */
+    fun replace(next: Download<P>) {
+        val previous = current
+        current = next
+        previous?.end(EndedBy.NEWER_PREVIEW)
+    }
+
+    /** Ends the current download, if it is still under way, for [by]. */
+    fun stop(by: EndedBy) {
+        current?.end(by)
+    }
+}
+
+/**
  * Something that is loaded once in a run of the app: asked for until one load has succeeded, never
  * by two loads at a time, and not again after that. Safe to call from any thread.
  */
