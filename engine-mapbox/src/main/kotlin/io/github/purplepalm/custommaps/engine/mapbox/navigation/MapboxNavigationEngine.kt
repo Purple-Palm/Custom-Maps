@@ -584,7 +584,13 @@ internal class MapboxNavigationEngine(
                 navigation?.stopTripSession()
             }
             GuidanceCommand.ClearRoutes -> {
-                navigation?.setNavigationRoutes(emptyList())
+                val trip = commitCount
+                navigation?.let { navigator ->
+                    navigator.setNavigationRoutes(emptyList()) { _ ->
+                        // Only while no newer trip has begun on this navigator since.
+                        if (trip == commitCount && this.navigation === navigator) forgetLastPosition(navigator)
+                    }
+                }
                 MapboxNavigationApp.detach(guidanceLifecycle)
             }
             GuidanceCommand.ClearPreview -> {
@@ -595,6 +601,27 @@ internal class MapboxNavigationEngine(
                 thenTracker.reset()
                 laneChoices.clear()
             }
+        }
+    }
+
+    /**
+     * Has the navigator forget where the trip that ended left the car. Kept, that position is
+     * where the next trip of this navigator would begin: its first updates would carry it, as far
+     * away as the two trips are apart, and the navigator would find the car off the route and
+     * reroute for nothing. Called once a trip's session is stopped and its routes are cleared. The
+     * reset starts no trip session, ends none and sets no routes; the map outside guidance shows
+     * the phone's own location and does not change. The "trip_session_reset" line says how long it
+     * took.
+     */
+    private fun forgetLastPosition(navigator: MapboxNavigation) {
+        val asked = SystemClock.elapsedRealtime()
+        try {
+            navigator.resetTripSession {
+                debugLog.log("trip_session_reset", mapOf("ms" to SystemClock.elapsedRealtime() - asked))
+            }
+        } catch (e: RuntimeException) {
+            // The next trip may begin on the old position, as it did before; nothing else is lost.
+            debugLog.error("resetTripSession", e)
         }
     }
 
