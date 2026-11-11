@@ -93,10 +93,16 @@ scripts/check-16kb-alignment.sh app/build/outputs/apk/debug/app-debug.apk
 
 # The APK is published as is (not zipped); its name says which run and commit it comes from. It is
 # copied here only after its tests, lint and 16 KB check passed, so CI publishes it even when the app
-# bundle part below fails.
+# bundle part below fails. Without the shared debug key every run signs with a key of its own: the
+# name then ends in "-tempkey", and the run's page carries a warning (a workflow command on stdout).
 revision="${GITHUB_SHA:-local}"
+apk="custommaps-debug-${GITHUB_RUN_NUMBER:-local}-${revision:0:7}"
+if [[ "$debug_key" != true ]]; then
+    apk+="-tempkey"
+    echo "::warning title=Temporary debug key::This APK is signed with a temporary key. Installing it over a build with another key needs an uninstall, which deletes the Mapbox token, the settings and the debug log on the phone; share the debug log first."
+fi
 mkdir -p build/ci
-cp app/build/outputs/apk/debug/app-debug.apk "build/ci/custommaps-debug-${GITHUB_RUN_NUMBER:-local}-${revision:0:7}.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "build/ci/$apk.apk"
 
 if [[ "$release_key" == true ]]; then
     # The upload key exists on disk only for this Gradle run, which alone is given its three values.
