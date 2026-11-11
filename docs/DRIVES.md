@@ -742,13 +742,20 @@ On the drive:
     route appears the card may dim for a moment and show no distance; it must never show a
     maneuver of the old route next to the new route's line. The log: `progress` lines with `card`
     `pending` right after a `routes_updated` line, then `fresh`.
-15. **A second drive from elsewhere.** Simulated drives will do: start one, End it far from where it
-    started, then plan a drive from somewhere else and start it. The second drive's card and car
-    must appear where the car is, never first where the last drive ended, and no new route should
-    come in its first seconds. The log: a `trip_session_reset` line after each End; the second
-    drive's first `progress` lines without `staleStart`, its `trip_summary` with `staleStart`
-    false, and no `off_route` or reroute in its first seconds. `staleStart` true on a line means
-    the navigator still had the old position, and the app left that update alone.
+15. **A second drive from elsewhere.** Start a simulated drive, drag its slider far along the
+    route and End it there; within a minute, plan a real drive from where the phone is and start
+    it. A second simulated drive will not do: its replay makes the navigator forget its position
+    by itself as it starts, so it cannot show whether the reset after End worked. Do the same once
+    after a real drive: End it, drive on a kilometre or more without guidance, and start the next.
+    The second drive's card and car must appear where the car is, never first where the last drive
+    ended, and no new route should come in its first seconds. The log: a `trip_session_reset` line
+    after each End; the second drive's first `progress` lines without `staleStart`, its
+    `trip_summary` with `staleStart` false, and no `off_route` or reroute in its first seconds.
+    `staleStart` true on a line means the navigator still had the old position, and the app left
+    that update alone; after a simulated drive the `match` of such a line says `replayed` true. In
+    the real drive only such lines may say `replayed`, and only a few at its start: a line with
+    `replayed` but without `staleStart` means the old position reached the screen, and many lines
+    with both mean the phone's own positions carry the replay's mark and the drive showed nothing.
 16. **The street map after a quick Start.** On Wi-Fi, open the routes to a place you have not shown
     on the map before and press Start within a few seconds. The `offline_region` line comes during
     the drive, with `inTrip` true and `done`. End a drive before its download is done: `stopped`
@@ -832,7 +839,7 @@ Then share the debug log. What to read in it:
 | Camera: `bendM`, `bendDeg`, `extraPts`; step fields `bendM`, `bendDeg`, `bearingBefore`, `bearingAfter` | Where the road bends past each maneuver point, and whether the junction frame held it: how often a step begins well before its bend, and at what angle, to check the rule's 20 degrees and 4 m |
 | Progress: `card` | `pending` only in the first second or so after a new route, never for long; `kept` for a second now and then |
 | `trip_session_reset` | One after each drive's end: the navigator forgot where the drive left the car. `ms` is how long that took |
-| Progress: `staleStart` | An update at the start of a drive that still carried where the drive before ended; nothing on the screen and no start plan acted on it. None are expected after a `trip_session_reset` |
+| Progress: `staleStart` | An update at the start of a drive that still carried where the drive before ended; nothing on the screen and no start plan acted on it. None are expected after a `trip_session_reset`. After a simulated drive, the `match` of such a line says `replayed` true |
 | `export_error` | Only in a shared file: a part of that day could not be read to its end (`error` says why), and the lines before it are what could be read of it. The other days are complete |
 | `trip_summary` | One for each drive: `trip` (the session id of `session_state`), `simulated`, `ending`, `seconds`, `meters`, `reroutes`, `offRouteEpisodes`, `firstProgressS`, `longestGapS`, `mapErrors`, `offlineSeconds`, `staleStart`, `staleUpdates`, `receivedBytes`, `batteryUsedPercent`. With `ending` `process_death` the numbers are those of the last minute before Android closed the app |
 | `process_start`: `matched`, `found` | How the start's record was found: `pid`, `bindTime` or `complete` (handed over at the first frame). `found` false with `records`: Android had none for this start |
