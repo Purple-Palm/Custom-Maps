@@ -31,8 +31,8 @@ Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#ch
   the debug log, which names the token in use only by its place in the list and its name.
 - **Settings:** camera style, lane zoom, lane details and the simulated drive switch.
 - **The trip session log:** when each guidance session started, its kind, whether it was
-  simulated, and a random id the app gave the token it ran on, never the token itself; the last 500
-  at most. It holds no places.
+  simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
+  most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads, the position, speed and road
   every second of guidance, a summary of each drive (how it ended, its length and time, and the data

@@ -4,10 +4,9 @@ import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 
 /**
- * One saved Mapbox public token. [id] is the app's own, random and never derived from the token;
- * the trip session log keeps it for the token, never the token itself. [name] is the driver's,
- * such as Main or Test. [toString] masks the token, so an entry written anywhere by mistake never
- * shows it.
+ * One saved Mapbox public token. [id] is the app's own and never derived from the token; the trip
+ * session log keeps it for the token, never the token itself. [name] is the driver's, such as Main
+ * or Test. [toString] masks the token, so an entry written anywhere by mistake never shows it.
  */
 data class TokenEntry(val id: String, val name: String, val token: String) {
     override fun toString(): String = "TokenEntry(id=$id, name=$name, token=${MapboxAccessTokens.mask(token)})"

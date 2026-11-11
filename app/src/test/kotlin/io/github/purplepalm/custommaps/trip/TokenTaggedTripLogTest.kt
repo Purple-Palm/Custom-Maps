@@ -4,6 +4,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
+import io.github.purplepalm.custommaps.token.DataStoreTokenStore
 import io.github.purplepalm.custommaps.token.TokenList
 import java.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,8 +52,9 @@ class TokenTaggedTripLogTest {
 
     @Test
     fun `every id a saved token can get fits in a line of the trip log`() {
-        // A 12-digit hex id as the store makes them, and the longest one the list allows.
-        for (id in listOf("0123456789ab", "a".repeat(32), "t-2_x")) {
+        // A 12-digit hex id as the store makes them, the id of the token moved from the old key,
+        // and the longest one the list allows.
+        for (id in listOf("0123456789ab", DataStoreTokenStore.MIGRATED_ID, "a".repeat(32), "t-2_x")) {
             assertTrue(TokenList.isId(id))
             assertTrue(TripLog.isTokenId(id))
             assertEquals(listOf(start(1, id)), TripLog.decode(TripLog.encode(listOf(start(1, id)))))

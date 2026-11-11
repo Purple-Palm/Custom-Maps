@@ -45,7 +45,7 @@ interface TokenStore {
 /**
  * The tokens in the DataStore file [FILE_NAME]: the list in one key and the active entry's id in
  * another, both written in one go. [newId] makes the id of a new entry: random, never derived from
- * the token.
+ * the token. The token moved from the old key into an empty list gets [MIGRATED_ID] instead.
  */
 class DataStoreTokenStore(
     private val dataStore: DataStore<Preferences>,
@@ -63,14 +63,24 @@ class DataStoreTokenStore(
      * key, and only then is the list emitted, so every entry shown has the id it keeps. When the
      * second write fails, the list is emitted with the old key still there; the next change of the
      * list removes it, and until then it is read again harmlessly, as its token is in the list.
+     *
+     * When the first write fails, as on a full disk, the token is used all the same: the list is
+     * emitted as that write would have made it, Main under [MIGRATED_ID], the id the move gives it
+     * whenever it succeeds, at a later read or the next change of the list. The old key stays until
+     * then. A token an older version wrote again next to saved entries joins them only once written.
      */
     override val list: Flow<TokenList> = dataStore.data
         .transform { preferences ->
             val list = stored(preferences)
-            when (TokenMigration.of(list, preferences[LEGACY_KEY])) {
+            val oldToken = preferences[LEGACY_KEY]
+            when (TokenMigration.of(list, oldToken)) {
                 TokenMigration.NONE -> emit(list)
                 // Each write brings the next read, one step further.
-                TokenMigration.ADD_ENTRY -> dataStore.edit(::migrateOneStep)
+                TokenMigration.ADD_ENTRY -> try {
+                    dataStore.edit(::migrateOneStep)
+                } catch (e: IOException) {
+                    emit(if (list.entries.isEmpty()) withOldToken(list, checkNotNull(oldToken)) else list)
+                }
                 TokenMigration.REMOVE_OLD_KEY -> try {
                     dataStore.edit(::migrateOneStep)
                 } catch (e: IOException) {
@@ -125,10 +135,17 @@ class DataStoreTokenStore(
         val oldToken = preferences[LEGACY_KEY]
         when (TokenMigration.of(list, oldToken)) {
             TokenMigration.NONE -> Unit
-            TokenMigration.ADD_ENTRY -> write(preferences, list.add(null, checkNotNull(oldToken), freshId(list)))
+            TokenMigration.ADD_ENTRY -> write(preferences, withOldToken(list, checkNotNull(oldToken)))
             TokenMigration.REMOVE_OLD_KEY -> preferences.remove(LEGACY_KEY)
         }
     }
+
+    /**
+     * [list] with the old key's [oldToken] added: in an empty list, as after the update, it is Main
+     * and active under [MIGRATED_ID]; next to saved entries it gets the next name and a new id.
+     */
+    private fun withOldToken(list: TokenList, oldToken: String): TokenList =
+        list.add(null, oldToken, if (list.entries.isEmpty()) MIGRATED_ID else freshId(list))
 
     private fun stored(preferences: Preferences): TokenList = TokenList.decode(preferences[LIST_KEY], preferences[ACTIVE_KEY])
 
@@ -173,6 +190,14 @@ class DataStoreTokenStore(
 
         /** Every key the store writes, all of them in the one file [FILE_NAME]. */
         val KEY_NAMES: Set<String> = listOf(LEGACY_KEY, LIST_KEY, ACTIVE_KEY).map { it.name }.toSet()
+
+        /**
+         * The id of the entry the old key's token becomes in an empty list. It is the same at every
+         * attempt, so the list used while the file cannot be written has the id the move writes
+         * later, and the trip sessions in between count under it. Made by the app, never from the
+         * token; no random id can be it, as those are hex digits only.
+         */
+        const val MIGRATED_ID = "main0"
 
         private const val READ_RETRY_MS = 1_000L
         private const val MAX_RETRY_STEPS = 30L

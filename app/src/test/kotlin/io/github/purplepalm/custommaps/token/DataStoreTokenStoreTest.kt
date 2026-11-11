@@ -153,17 +153,20 @@ class DataStoreTokenStoreTest {
         assertEquals(TokenProblem.NotFound, store.remove("id3"))
     }
 
+    /** The list a version before the list leaves, its one token [token] moved: Main, active, with the move's own id. */
+    private fun migrated(token: String) = TokenList(listOf(TokenEntry(DataStoreTokenStore.MIGRATED_ID, "Main", token)), DataStoreTokenStore.MIGRATED_ID)
+
     @Test
     fun `the token of a version before the list becomes Main and active, once`() = runBlocking {
         writeRaw(oldKey.name to fake(1))
 
         val list = store().list.first()
 
-        assertEquals(TokenList(listOf(TokenEntry("id1", "Main", fake(1))), "id1"), list)
+        assertEquals(migrated(fake(1)), list)
         assertEquals(setOf("mapbox_tokens", "mapbox_active_token"), raw().keys, "the old key is gone")
         // Read again, by a new store as after the next start: the same entry with the same id.
         assertEquals(list, store().list.first())
-        assertEquals(1, ids.get(), "no second id was made")
+        assertEquals(0, ids.get(), "the move made no new id")
     }
 
     @Test
@@ -188,13 +191,49 @@ class DataStoreTokenStoreTest {
 
         // The second write, the one that removes the old key, never happens.
         val first = store(Probe(file, failingWrite = 2)).list.first()
-        assertEquals(TokenList(listOf(TokenEntry("id1", "Main", fake(1))), "id1"), first)
+        assertEquals(migrated(fake(1)), first)
         assertEquals(fake(1), raw()["mapbox_access_token"], "both keys are there, as after a crash")
 
         // The next start reads both keys: the token is in the list already, so only the old key goes.
         val next = store().list.first()
         assertEquals(first, next)
         assertFalse("mapbox_access_token" in raw().keys)
+    }
+
+    @Test
+    fun `a file that cannot be written still gives the token of a version before the list`() = runBlocking {
+        writeRaw(oldKey.name to fake(1))
+
+        // Every write fails, as on a full disk; reading works.
+        val shown = withTimeout(5_000) { store(Probe(file, diskFull = true)).list.first() }
+
+        assertEquals(migrated(fake(1)), shown)
+        assertEquals(mapOf("mapbox_access_token" to fake(1)), raw(), "the old key stays for a later move")
+
+        // With room again, as at the next start, the move writes the entry that was shown, id and all.
+        assertEquals(shown, store().list.first())
+        assertEquals(setOf("mapbox_tokens", "mapbox_active_token"), raw().keys)
+    }
+
+    @Test
+    fun `the token used while the file cannot be written is the entry a later change finds`() = runBlocking {
+        writeRaw(oldKey.name to fake(1))
+        val shown = withTimeout(5_000) { store(Probe(file, diskFull = true)).list.first() }
+
+        // With room again, deleting the entry that was shown deletes the token, and nothing is left.
+        assertNull(store().remove(checkNotNull(shown.activeId)))
+        assertEquals(TokenList.EMPTY, store().list.first())
+        assertTrue(raw().isEmpty())
+    }
+
+    @Test
+    fun `a token an older version wrote again waits next to a list that cannot be written`() = runBlocking {
+        writeRaw("mapbox_tokens" to "m1\t${fake(1)}\tMain", "mapbox_active_token" to "m1", oldKey.name to fake(2))
+
+        val list = withTimeout(5_000) { store(Probe(file, diskFull = true)).list.first() }
+
+        assertEquals(TokenList(listOf(TokenEntry("m1", "Main", fake(1))), "m1"), list)
+        assertEquals(fake(2), raw()["mapbox_access_token"])
     }
 
     @Test
@@ -249,9 +288,9 @@ class DataStoreTokenStoreTest {
         writeRaw(oldKey.name to fake(1))
         val store = store()
         store.list.first()
-        store.add("Test", fake(2))
-        store.rename("id2", "Spare")
-        store.activate("id2")
+        assertNull(store.add("Test", fake(2)))
+        assertNull(store.rename("id1", "Spare"))
+        assertNull(store.activate("id1"))
 
         assertTrue(DataStoreTokenStore.KEY_NAMES.containsAll(raw().keys), raw().keys.toString())
         assertEquals(setOf("mapbox_access_token", "mapbox_tokens", "mapbox_active_token"), DataStoreTokenStore.KEY_NAMES)
@@ -267,13 +306,14 @@ class DataStoreTokenStoreTest {
     }
 
     /**
-     * The token file with a write that fails, as a process that dies there leaves it, reads that
-     * fail, and the keys held after each write.
+     * The token file with a write that fails, as a process that dies there leaves it, or with
+     * every write failing, as on a full disk; reads that fail; and the keys held after each write.
      */
     private class Probe(
         private val file: DataStore<Preferences>,
         private val failingWrite: Int? = null,
         private val failingReads: Int = 0,
+        private val diskFull: Boolean = false,
     ) : DataStore<Preferences> {
         private val writes = AtomicInteger()
         private val reads = AtomicInteger()
@@ -285,6 +325,7 @@ class DataStoreTokenStoreTest {
         }
 
         override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            if (diskFull) throw IOException("No space left on device")
             if (writes.incrementAndGet() == failingWrite) throw IOException("The process died here")
             return file.updateData(transform).also { written += it.asMap().keys.map { key -> key.name }.toSet() }
         }
