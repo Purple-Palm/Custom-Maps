@@ -113,9 +113,33 @@ class StaleStartTest {
         assertTrue(rule.isStale(wallOnly(50.0)))
         // One side without elapsed realtime is enough: the wall clocks are compared.
         assertTrue(rule.isStale(FixTime(elapsedNanos = 200_000_000_000L, wallMillis = wallAtBoot + 50_000L)))
-        // Zero is no time.
+    }
+
+    @Test
+    fun `with elapsed realtime on both sides the elapsed clock decides`() {
+        val rule = StaleStart()
+        rule.begin()
+        rule.onSourceFix(at(100.0))
+        // The wall clock was set back 90 s: the position is still the trip's.
+        assertFalse(rule.isStale(FixTime(elapsedNanos = 101_000_000_000L, wallMillis = wallAtBoot + 11_000L)))
+        // The wall clock was set forward: the position is still from before the trip.
+        assertTrue(rule.isStale(FixTime(elapsedNanos = 50_000_000_000L, wallMillis = wallAtBoot + 200_000L)))
+    }
+
+    @Test
+    fun `zero elapsed realtime is no time, on either side`() {
+        val rule = StaleStart()
+        rule.begin()
+        rule.onSourceFix(at(100.0))
+        // The update's zero: the wall clocks are compared.
+        assertFalse(rule.isStale(FixTime(elapsedNanos = 0L, wallMillis = wallAtBoot + 100_500L)))
         assertTrue(rule.isStale(FixTime(elapsedNanos = 0L, wallMillis = wallAtBoot + 50_000L)))
-        assertFalse(rule.isStale(FixTime(elapsedNanos = 0L, wallMillis = wallAtBoot + 100_000L)))
+        // The trip's first position with zero.
+        val other = StaleStart()
+        other.begin()
+        other.onSourceFix(FixTime(elapsedNanos = 0L, wallMillis = wallAtBoot + 100_000L))
+        assertFalse(other.isStale(at(100.0)))
+        assertTrue(other.isStale(at(50.0)))
     }
 
     @Test
