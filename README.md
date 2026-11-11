@@ -48,6 +48,8 @@ Every push to `main` builds a debug APK.
    latest successful run, or a newer one that failed only in the app bundle part, for example with a
    wrong release secret. Downloads need a signed-in GitHub account.
 2. Under **Artifacts**, download `custommaps-debug-<run>-<commit>.apk`. It is the APK itself, not a zip.
+   A name that ends in `-tempkey` means the build has a temporary key (see
+   [Shared debug signing key](#shared-debug-signing-key)).
 3. Open the APK on the phone (download it there, or copy it over), and allow installing apps from
    that source when Android asks.
 4. Launch **Custom Maps Debug**, as the debug build is named on the phone, and paste your Mapbox
@@ -95,7 +97,7 @@ one; the debug section counts them with the rest.
 The app saves what a drive needs for stretches without a connection:
 
 - when routes are shown, the street map along the first 100 km of each, starting where they
-  start;
+  start; the download goes on after **Start** until it is done, and stops when the drive ends;
 - during guidance, the map and the road data around the car, along the route and around the
   destination.
 
@@ -128,14 +130,17 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
   size and the bytes it loaded, and when the offline chip showed;
 - one camera line a second during guidance while the map is on screen: where the camera is and
   where it is heading, how smoothly the camera and the car move, and the map's frame rate;
+- one summary line at the end of each drive: how it ended, how long and how far, reroutes, the
+  time without internet, and the data and battery it took;
 - map errors, the first of each kind in full and the repeats as one count a minute.
 
 To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
 for example Google Drive. Each day becomes one text file, `custom-maps-debug-<date>.txt`, with one
 JSON event per line. The log never leaves the phone otherwise: it is kept out of backups and device
-transfers, the oldest days are deleted once it passes 50 MB, and **Clear** deletes it together with
-the copies made for sharing. It never contains the Mapbox token; token-shaped text is masked in
-every line as a last safeguard.
+transfers, days that are over are kept compressed, the oldest days are deleted once it passes 50 MB
+on the phone, and **Clear** deletes it together with the copies made for sharing. The shared text
+files are several times larger than the size Settings shows. It never contains the Mapbox token;
+token-shaped text is masked in every line as a last safeguard.
 
 Debug builds also offer **Settings → Debug → Crash now**, which closes the app as a crash would, to
 check on the phone that the crash and how the app ended are recorded.
@@ -210,6 +215,10 @@ are signed with a different key, the upload key (see
    absolute path with forward slashes, also on Windows.
 
 Set all four values or none: a partial setup fails the build with a message listing what is missing.
+
+Until the key is set up, the APK's name ends in `-tempkey`, the run's page shows a warning, and
+**Settings → Debug** in such a build says that the next CI build needs an uninstall, which deletes
+the token, the settings and the debug log: share the debug log first.
 
 ## Release through Google Play
 
@@ -435,6 +444,8 @@ all signing secrets are optional.
   phone, so the session keeps running until arrival or End. Every start is logged, and **Settings → Debug** shows
   the count for the month, the latest starts and a link to the
   [Mapbox statistics page](https://console.mapbox.com/account/statistics/), which has the billed numbers.
+  The log starts empty with each installation, so after one during the month the count says since
+  which day it runs.
 - Route and search requests made outside a trip session are billed per request.
 - Every installation counts as a user: install updates over the app instead of reinstalling it.
 

@@ -443,10 +443,11 @@ Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a p
   map can open offline.
   - It is one tile region that each new preview replaces, not the owner-chosen offline regions on
     the future list in ROADMAP.md.
-  - Start ends a download that is still under way: during a drive only predictive caching loads,
-    so the routes not taken are not paid for in mobile data. After a preview that was open for
-    seconds only, the map ahead comes from predictive caching. A preview closed without Start
-    lets its download finish.
+  - The download goes on after Start until it is done: a preview is often open for a few seconds
+    only, and a download ended at Start rarely saved anything. It ends early only when a newer
+    preview takes the region over, or when the drive ends first, by End or at the destination.
+    It runs next to predictive caching, on the tile store's own threads. A preview closed without
+    Start lets its download finish too.
   - Map tiles only; road data is loaded during guidance, as part of the trip. Tiles the phone
     already has are taken as they are.
   - Only the first 100 km of each route: Mapbox refuses a region whole when it needs more than 750
@@ -505,7 +506,7 @@ Built in stage 1.1. New lines in the debug log:
 |---|---|---|
 | Crash | A Kotlin or Java crash on any thread, written to the file at once, after the events still queued and before Android shows "keeps stopping": thread, exception, stack and causes, guidance state, and whether the app was on screen | The restart |
 | Exit reasons | At every start, on Android 11 and newer, each earlier end of the app not logged yet: when, Android's reason (a swipe from Recents shows as `USER_REQUESTED`, "remove task"), status, importance, memory, the state summary the app left with the process (guidance state, on screen, since when), and for an ANR the main thread's stack | The restart |
-| Start reason | On Android 15 and newer: why the app started (launcher, Recents, a service), cold, warm or hot, and whether it had been force-stopped | The restart |
+| Start reason | On Android 15 and newer, one line for every start: why the app started (launcher, Recents, a service), cold, warm or hot, whether it had been force-stopped, and how Android's record of it was found | The restart |
 | Device state | On screen or not; screen on, off, unlocked; charging; Power saving and Doze; heat; memory pressure. Once per start: battery limits, background restriction, standby bucket, Data saver, location power saving. During guidance, one line a minute: battery level and temperature, thermal status and headroom, Power saving, memory, and all the bytes the app has received | Phone conditions; what a drive costs in data |
 | Connectivity | Every change of the app's network: Wi-Fi or mobile, internet reached or not, blocked or not, metered, roaming, suspended, and which networks the app can see. At start, on every return to the app and after each change, the settings that can cut off only this app: Data saver, the Mobile data switch, the SIM, background restriction, battery limits | The missing internet |
 | Animations | Whether Android's animations run and the animator duration scale, when the first screen opens, when guidance starts and whenever the scale changes. Logged only; the app never changes the setting | Steps |
@@ -517,10 +518,16 @@ Built in stage 1.1. New lines in the debug log:
 | Route requests | Every route request the app sends: where it starts, and how old, how fast and in which direction that position was; the stop point, the arrival target and the direction sent with it; whether it was sent inside a trip. And every reroute request of the navigator: how many points and arrival targets it has, whether the destination's target is set, and how far its end is from where the trip goes | Behind the store; what a drive costs |
 | Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, whether a cancelled refresh is asked for once more, and the reason whenever fresh routes were not set | Old routes at Start |
 | Routes | How far the Directions API moved each requested point: about 71 m for the store. The lines that describe whole routes are put together off the main thread, so they are written a moment after the lines that follow them | Behind the store |
-| Fix age | Every matched location carries the age of its fix in ms and the number of points the drawn car glides through | GPS delay; old fixes, as at the second drive's Start |
+| Fix age | Every matched location carries the age of its fix in ms and the number of points the drawn car glides through. A simulated drive's positions say `replayed` instead of an age: the replayer stamps them on a clock of its own | GPS delay; old fixes, as at the second drive's Start |
+| Trip start and end | When a drive ends, the navigator is told to forget where it left the car, and a line says so. The first updates of the next drive that still carry the old position are marked, and nothing on the screen acts on them | A later drive that began where the one before ended |
+| Trip summary | One line at the end of each drive: how it ended, how long and how far, reroutes, times off the route, the longest wait for an update, map errors by kind, the time without internet, the bytes and battery it took, and whether it began on an old position. Numbers only. A drive cut short when Android closed the app gets its line at the next start | Drives compared at a glance |
+| Route counts | Each step of a route: its traffic signals, stop and yield signs, railway crossings and road class; each route: its runs of heavy and of severe traffic and their lengths; the speed limit whenever it changes | What the roads of a drive were like |
 
 - Folded, the first drive's 2337 map error lines become at most a few dozen, and the file about
   half as large.
+- Every time in the log is UTC with three digits of the second.
+- Days that are over are kept compressed on the phone, so the 50 MB limit holds many more days of
+  guidance. **Share debug log** still writes one plain text file per day.
 - Android keeps exit records across app updates. Installed over the current build, the next
   build's first start should log the record behind the first drive's restart, as long as it is
   still among the last 16 that Android keeps.
@@ -616,9 +623,9 @@ On the drive:
    exit. Note smoothness, how the tilt changes before and after turns, and whether the freeway
    view zooms out too far. Change the style only while stopped.
 3. **Offline.** None of it could be run on a phone, so some checks come before the drive.
-   - **The first download.** At home on Wi-Fi, open the routes to a place and leave the preview
-     open for a minute or two before Start; Start ends a download still under way. The log then
-     has an `offline_region` line. `required` above zero, with some MB in `completedBytes`, means
+   - **The first download.** At home on Wi-Fi, open the routes to a place and press Start; the
+     download goes on during the drive until it is done. The log then has an `offline_region`
+     line. `required` above zero, with some MB in `completedBytes`, means
      Mapbox resolved the Standard style for a tile region. That line is the only place where
      this shows. `failed` with `tileset_descriptor` means it did not resolve. `failed` with
      `tile_count_exceeded` means that 100 km of each route is too much for the tilesets of
@@ -630,7 +637,8 @@ On the drive:
    - **A preview that replaces one, and Start during a download.** On Wi-Fi, open the routes to a
      place, go back within a few seconds and open them again. The first load's `offline_region`
      line should say `replaced`, never `failed` with `canceled`. Then press Start while the second
-     load still runs: its line should say `stopped` with `guidance`.
+     load still runs: its line should come later, during the drive, with `inTrip` true; if the
+     drive ends first, it says `stopped` with `trip_end`.
    - **The chip, before a drive.** With the map open and no drive, turn on airplane mode. Within
      about 3 s the sentence "No internet. The map shows only areas saved on the phone; guidance
      continues." should appear under the search bar. It should go as soon as the phone is online
@@ -710,6 +718,47 @@ On the drive:
     route appears the card may dim for a moment and show no distance; it must never show a
     maneuver of the old route next to the new route's line. The log: `progress` lines with `card`
     `pending` right after a `routes_updated` line, then `fresh`.
+15. **A second drive from elsewhere.** Simulated drives will do: start one, End it far from where it
+    started, then plan a drive from somewhere else and start it. The second drive's card and car
+    must appear where the car is, never first where the last drive ended, and no new route should
+    come in its first seconds. The log: a `trip_session_reset` line after each End; the second
+    drive's first `progress` lines without `staleStart`, its `trip_summary` with `staleStart`
+    false, and no `off_route` or reroute in its first seconds. `staleStart` true on a line means
+    the navigator still had the old position, and the app left that update alone.
+16. **The street map after a quick Start.** On Wi-Fi, open the routes to a place you have not shown
+    on the map before and press Start within a few seconds. The `offline_region` line comes during
+    the drive, with `inTrip` true and `done`. End a drive before its download is done: `stopped`
+    with `trip_end`. Note whether guidance felt slower in its first minute.
+17. **The month's count.** **Settings → Debug**: after a new installation in the middle of a
+    month the count says "since installation on" and the day; after an update installed over the
+    app it is the month's count as before.
+18. **Why the app started.** On Android 15 or newer, every start of the app writes one
+    `process_start` line: open it from the launcher, from Recents, after **Crash now**, and after
+    swiping it away. Each line has `reason` and `matched` (`pid`, `bindTime` or `complete`);
+    `found` false means Android had no record of that start.
+19. **A summary of each drive, and a longer log.** After each drive one `trip_summary` line, with
+    `ending` `arrived`, `end_in_app` or `end_in_notification`, and the drive's numbers. Compare
+    `meters` and `seconds` with the drive, `receivedBytes` with the phone's data usage, and
+    `batteryUsedPercent` with the battery. A drive whose app Android closed gets its line at the
+    next start, with `ending` `process_death`. Days later, **Settings → Debug** should hold many
+    more days for the same size, and **Share debug log** should still give one plain text file
+    per day that opens as before.
+20. **The camera after a flight, and after a jump.** With Smooth follow: after Start, Recenter and
+    Overview, a `camera_settled` line follows the `camera_state` line within about two seconds;
+    `settled` false with gaps means the camera was still turning or tilting. Where the car's
+    position jumps, as to a road alongside, the drawn car should go on moving from its new place,
+    never stand still for a second; the `camera` line's `puckGapMs` stays small then.
+21. **The log's own fixes.** In a simulated drive the positions say `replayed` true and have no
+    `fixAgeMs`; `routes_committed` names the `routeId`; the Idle `session_state` line right after
+    a simulated drive says `simulated` true; every time has three digits after the second.
+22. **The roads in numbers.** In `route_response` and `routes_updated`: each step's
+    `trafficSignals`, `stopSigns`, `yieldSigns`, `railwayCrossings` (null when the service sent
+    nothing for that step) and `roadClass`; each route's `congestionRuns`; and on the `progress`
+    lines, `speedLimit` where the limit changes. Compare a few with the road.
+23. **A build with a temporary key.** A CI build made without the shared debug key is named
+    `...-tempkey.apk`, its run shows a warning, and **Settings → Debug** in that build says that
+    the next CI build needs an uninstall, which deletes the token, the settings and the log. Share
+    the log before installing the next build.
 
 Then share the debug log. What to read in it:
 
@@ -744,6 +793,14 @@ Then share the debug log. What to read in it:
 | `map_layers` | `arrowAboveLine` true at every style load: the maneuver arrow is drawn above the route line. `middle` lists the order of the route's layers |
 | Camera: `bendM`, `bendDeg`, `extraPts`; step fields `bendM`, `bendDeg`, `bearingBefore`, `bearingAfter` | Where the road bends past each maneuver point, and whether the junction frame held it: how often a step begins well before its bend, and at what angle, to check the rule's 20 degrees and 4 m |
 | Progress: `card` | `pending` only in the first second or so after a new route, never for long; `kept` for a second now and then |
+| `trip_session_reset` | One after each drive's end: the navigator forgot where the drive left the car. `ms` is how long that took |
+| Progress: `staleStart` | An update at the start of a drive that still carried where the drive before ended; nothing on the screen and no start plan acted on it. None are expected after a `trip_session_reset` |
+| `trip_summary` | One for each drive: `trip` (the session id of `session_state`), `simulated`, `ending`, `seconds`, `meters`, `reroutes`, `offRouteEpisodes`, `firstProgressS`, `longestGapS`, `mapErrors`, `offlineSeconds`, `staleStart`, `staleUpdates`, `receivedBytes`, `batteryUsedPercent`. With `ending` `process_death` the numbers are those of the last minute before Android closed the app |
+| `process_start`: `matched`, `found` | How the start's record was found: `pid`, `bindTime` or `complete` (handed over at the first frame). `found` false with `records`: Android had none for this start |
+| `camera_settled` | With Smooth follow, how long after a `camera_state` line with `ms` the camera came to rest (`ms`). `settled` false: not within 5 s, with the gaps left |
+| `offline_region`, `offline_style_pack`: `inTrip`, `why` | `inTrip` true: the download ended during a drive. `stopped` with `trip_end`: the drive ended first |
+| Step fields `trafficSignals`, `stopSigns`, `yieldSigns`, `railwayCrossings`, `roadClass`; route `congestionRuns`; progress `speedLimit` | What the roads were like: signs and signals per step (null: the service sent nothing), the class of each step's road, the runs of heavy and of severe traffic with their meters, and the speed limit (value, unit, sign) whenever it changed |
+| `routes_committed`: `routeId`; `session_state`: `simulated` | The route a drive started on. In the Idle state, `simulated` is that of the drive that just ended; it is left out before the first drive of a run |
 
 Reading the connectivity lines:
 

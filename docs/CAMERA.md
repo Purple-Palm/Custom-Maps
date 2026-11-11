@@ -48,7 +48,8 @@ are starting points for tuning.
 - **One update per navigator update.** The data source is evaluated once, on the progress. The
   location evaluates only when no progress came for 1.5 s, because the navigator drops progress
   while it replaces routes. A teleport (a jump of the matched position) snaps the puck and the
-  camera instead of sliding them across the map.
+  camera instead of sliding them across the map; the puck then glides on from its new place, along
+  its heading at its speed, until the next position, instead of standing still for a second.
 - **Calmer frame updates.** An own following transition (a `NavigationCameraStateTransition` given
   to `NavigationCamera`) plays longer linear animators: centre 1.1 s, bearing 1.3 s, zoom 2.5 s,
   tilt 2.0 s, padding 1.5 s, at most 2.5 s. Each update restarts them from where they are, so they
@@ -417,7 +418,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
 | `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. |
-| `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport; for Mapbox standard it glides 1.0 s and never jumps. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
+| `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport, from where it glides on for one glide along its heading at its speed (`PuckGlide`); for Mapbox standard it glides 1.0 s and never jumps. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
 | `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
 | `LaneDetails`, `RouteLineWidths` | `:engine-mapbox`, `map/LaneDetails.kt`, `map/RouteLineWidths.kt` | Lane markings on the map, set after the SDK has turned them off, and the route line that stays thin close in while they are on. |
 | `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log. |
@@ -700,6 +701,14 @@ Other lines:
   change has arrived, `ms`: how long it took. Besides the states above there is `IDLE_FOLLOW`, the
   camera on the car before guidance. For the Mapbox styles a transition that should take 673 ms or
   more and ends within a few ms means animations are off.
+- A **camera_settled** line with Smooth follow, after each move between modes that ended (a
+  `camera_state` line with `ms`): `state`, `ms`, the time from that line until the springs came to
+  rest, and `settled`. The line that says a move ended comes when its path is done, while the
+  springs still settle for a second or two; checks that measure the camera can leave out the time
+  up to this line. With `settled` false the camera had not come to rest within 5 s, as while it
+  turns through a curve, and `zoomGap`, `pitchGap`, `bearingGap` and `paddingGap` say how far it
+  still was. The camera is asked ten times a second for those 5 s at most, never on every frame;
+  the Mapbox styles have no springs of their own and write no such line.
 - A **camera_taken** line when something else takes the camera: `owner`, who started the animator
   (`Maps-Gestures` for a touch, `Maps-Compass` for the compass), `animator`, its kind, and `from`,
   the camera's state. The first drive's log could not say why the camera went idle about 22 s

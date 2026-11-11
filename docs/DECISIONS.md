@@ -163,7 +163,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen:**
   - Events are written as JSON lines, one file per day, in the app's private files: routes with every step, guidance once a second, searches, trip sessions and errors.
   - Logging never blocks the main thread: a single background writer drains a bounded queue.
-  - The oldest days are deleted past 50 MB. The log is never backed up or transferred. Clear deletes it together with the copies made for sharing.
+  - Days that are over are kept gzipped (44), and the oldest days are deleted once the log, as stored, passes 50 MB. The log is never backed up or transferred. Clear deletes it together with the copies made for sharing.
   - The owner shares it from Settings through the share sheet as plain text files, for example to Google Drive, where it can be read for diagnosis.
   - Every line passes a filter that masks Mapbox tokens and `access_token` parameters.
 - **Alternatives:**
@@ -404,7 +404,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Only the route in use counts, not its alternatives. Nothing is kept for search.
 - **Before guidance, the street map along the previewed routes is downloaded.** When routes appear in the preview, one tile region is loaded: the Standard map from zoom 11 to 16 along the first 100 km of every previewed route, outward from where the routes start. The first preview after the app starts also loads the style's own files, which the Maps SDK keeps outside the tile store, so the map can open without a connection.
   - It is always the same region, and each new preview takes it over. A load still under way is ended then, and the log calls that `replaced`, not an error.
-  - Start ends a load still under way (`stopped`). During a drive only predictive caching loads, within its distances, and the routes not taken are not paid for in mobile data. What was loaded stays. A preview closed without Start lets its load finish.
+  - A load goes on after Start until it is done (44): a preview is often open for a few seconds only. It ends early, as `stopped` with `trip_end`, only when the drive ends first, by End or at the destination; a newer preview takes it over as before. During the drive it loads next to predictive caching, on the tile store's own threads. What was loaded stays. A preview closed without Start lets its load finish.
   - Tiles the phone has are taken as they are, also past their date. The style's files are loaded anew when past theirs: Mapbox's guide says a style saved this way is not brought up to date otherwise.
   - The store gets the routes as lines with a point about every 100 m, put together off the main thread. A route has a point every few meters, and the smallest tile asked for is 300 to 600 m wide.
   - Each route counts only for its first 100 km along the road (`PreviewDownload.MAX_ROUTE_METERS`). Mapbox refuses a region whole when it would take the phone past 750 tile packs, its squares of zoom 11 and 12 counted for each tileset of the style. Without a limit a long trip's preview would save nothing at all, not even its first kilometers, on Wi-Fi as on mobile data. The first 100 km are the ones driven first; during guidance predictive caching keeps the rest ahead. Counted by those squares, three routes of 100 km stay below the limit even for a style of four tilesets.
@@ -421,7 +421,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The SDK's default distances. More mobile data for the same drive.
   - A tile store in a directory of the app's own. It would start empty and leave what is cached behind.
   - `READ_AND_UPDATE`, where the map loads only whole tile packs through the store. Mapbox's guide suggests it for a map that cannot be panned freely; this one can.
-  - Letting a preview's download run on into the drive. It would load the routes not taken over mobile data. It is one call to remove if drives show that previews are too short to load anything.
+  - Ending a preview's download at Start, the first choice. During a drive the routes not taken cost no mobile data, but a preview is often too short for the download to save anything.
   - Each route at its whole length. A long trip's region would be refused whole and save nothing.
   - The full sentence during guidance. It would need a second row under the card and more of the map.
 - **Why:** the first drive lost its connection 37 s after Start and stayed offline until End. Nothing had been saved ahead, although the routes had been on screen on home Wi-Fi for 8 minutes, and nothing on the screen said why the map stopped loading ([DRIVES.md](DRIVES.md)).
@@ -469,3 +469,19 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - A theme of the app's own (a color table for the whole basemap): one more file to keep, and every color of the map changes with it.
   - An aerial photo at the close view: planned separately, with its own switch.
 - **Cost:** the other routes' grey (`#6F747C`) is now close to a freeway's, so on a freeway another route shows mostly by its dark casing. One commit to undo.
+
+## 44. Fixes from the drive logs
+
+- **Chosen:**
+  - **A drive forgets where the last one ended.** When a drive ends and its routes are cleared, the engine resets the navigator's trip session (`MapboxNavigation.resetTripSession`). The navigator keeps its last position from one trip session to the next, and a later drive of the same run began there, often far away, and was rerouted for nothing. By the SDK's sources the reset starts and ends no trip session, sets no routes and changes none of what Mapbox bills by; the SDK calls it itself at the start of every simulated drive. The map before a drive shows the phone's own location and does not change.
+  - **Behind it, a guard in the app.** Until a drive's own first position has come in, an update that still carries an older one is left alone by the camera, the drawn car, the card and its Then chip, the lane choices and the start plan (`StaleStart`). It is told by when its position was measured, on the drive's own clock, never by where it is. Such updates are still logged, marked `staleStart`.
+  - **The preview's download goes on after Start** (41 changed). A preview is often open for a few seconds only, so a download ended at Start rarely finished, and a phone that lost its network soon after drove without the map ahead. It now runs until it is done, a newer preview takes the region over, or the drive ends.
+  - **The debug log keeps closed days compressed** (20 changed). The camera and guidance lines of the newer builds fill 50 MB in a few days. Days that are over are gzipped in the background, the limit counts what is stored, and **Share debug log** still writes each day as plain text.
+  - **One summary line per drive**, numbers only, and a month's trip count that says since when it runs when the app was installed during the month.
+  - **The start line on Android 15 and newer** looks for this process's record among Android's newest, by its pid or by when the app was bound, or takes it as the start completes. Android notes a launch before the process has a pid, so its newest record was often not this one's, and no line was written.
+- **Alternatives:**
+  - Only the guard in the app, without the reset: the navigator's own reroute would still act on the old position.
+  - Telling old updates by the moment the trip session started: it would also drop the phone's newest position when the location service hands over one taken just before Start, every update of a start without satellites, and every update of a simulated drive, whose positions are stamped ahead of the phone's clock.
+  - Ending the preview's download at Start, as before: less mobile data for routes not taken, but it rarely saved anything.
+  - Keeping the log as plain text and raising the limit: the same days take far more room on the phone.
+- **Cost:** a download that goes on into the drive also loads the routes not taken, up to the region's limit, over mobile data; sharing the log takes a moment longer while compressed days are written out; one more navigator call at the end of each drive. None of it has run on a phone yet.
