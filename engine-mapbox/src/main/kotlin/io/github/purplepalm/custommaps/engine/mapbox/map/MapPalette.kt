@@ -17,15 +17,19 @@ internal object MapPalette {
      * The ground, the buildings and the roads at night, from the darkest to the lightest: a
      * graphite ground, the buildings one small step above it, and the roads a clear step above
      * both, so a street reads as a band on the ground also close in, where it is a plain surface.
-     * Without them Mapbox's own ground was a grey only a little darker than its roads. These are
-     * configured colors: the night light and the monochrome theme change them a little on the
-     * way to the screen, so they are a first setting, to be judged on the phone.
+     * Without them Mapbox's own ground was a grey only a little darker than its roads. Water and
+     * parks lie a step below the ground: the monochrome theme takes their hue, so only being
+     * darker tells a river or a park from the ground. These are configured colors: the night
+     * light and the theme change them a little on the way to the screen, so they are a first
+     * setting, to be judged on the phone.
      */
-    const val LAND = "#16181B"
+    const val LAND = "#1A1D21"
     const val BUILDINGS = "#282B31"
     const val ROADS = "#4A4F57"
     const val TRUNKS = "#5A5F67"
     const val MOTORWAYS = "#6A6F77"
+    const val WATER = "#080B0E"
+    const val GREENSPACE = "#090C0A"
 
     private val nightConfig: Map<String, Value> = mapOf(
         "lightPreset" to Value.valueOf("night"),
@@ -39,8 +43,8 @@ internal object MapPalette {
         // The road surface where lane details are drawn. Only the color is set here: whether they
         // are drawn at all is LaneDetails' to set, and never while the style loads.
         "colorHdRoads" to Value.valueOf("#4A4F57"),
-        "colorWater" to Value.valueOf("#0B151D"),
-        "colorGreenspace" to Value.valueOf("#101A15"),
+        "colorWater" to Value.valueOf(WATER),
+        "colorGreenspace" to Value.valueOf(GREENSPACE),
         "colorPlaceLabels" to Value.valueOf("#D6D7D9"),
         "colorRoadLabels" to Value.valueOf("#A9ADB3"),
         "colorModePointOfInterestLabels" to Value.valueOf("single"),

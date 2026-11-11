@@ -40,6 +40,15 @@ class MapPaletteTest {
     }
 
     @Test
+    fun `water and parks lie a step below the ground`() {
+        val land = luminance(MapPalette.LAND)
+        for ((name, color) in listOf("water" to MapPalette.WATER, "parks" to MapPalette.GREENSPACE)) {
+            val luminance = luminance(color)
+            assertTrue(luminance < land && contrast(land, luminance) >= 1.1, "$name against the ground ${contrast(land, luminance)}")
+        }
+    }
+
+    @Test
     fun `larger roads are lighter`() {
         assertTrue(luminance(MapPalette.ROADS) < luminance(MapPalette.TRUNKS))
         assertTrue(luminance(MapPalette.TRUNKS) < luminance(MapPalette.MOTORWAYS))

@@ -460,10 +460,11 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 43. Streets lighter than the ground at night
 
-- **Chosen (the owner left it to the build):** the night map has a graphite ground (`colorLand` `#16181B`) and buildings one small step above it (`colorBuildings` `#282B31`), and every road class is one step lighter than before: streets `#4A4F57`, trunk roads `#5A5F67`, freeways `#6A6F77`. As configured, a street stands about 2.2 to 1 against the ground. Mapbox's own ground, which the app left as it was, showed only about 1.3 to 1 darker than the streets on the phone.
+- **Chosen (the owner left it to the build):** the night map has a graphite ground (`colorLand` `#1A1D21`) and buildings one small step above it (`colorBuildings` `#282B31`), and every road class is one step lighter than before: streets `#4A4F57`, trunk roads `#5A5F67`, freeways `#6A6F77`. As configured, a street stands about 2 to 1 against the ground. Mapbox's own ground, which the app left as it was, showed only about 1.3 to 1 darker than the streets on the phone.
 - **Why:** close in, as Large goes, a street is a plain band, since the map's road data ends at zoom 16 and draws no markings outside the areas of lane details (39). A band that stands out from the ground reads as a road, and the median of a divided road as a median, not as a block of houses.
 - **These are the night look's colors, and a first setting.** The night light and the monochrome theme change the configured colors on their way to the screen, in a way only the phone shows (a street configured `#3B4047` showed as `#3A3A3A`). The owner judges them on the phone; a day look sets its own.
-- **Unchanged:** the road surface under lane details (`colorHdRoads`, the street's grey now, darker than a freeway's), water, parks, labels, and the route's amber, which stands about 4 to 1 against a street.
+- **Water and parks moved with the ground:** `colorWater` `#080B0E` and `colorGreenspace` `#090C0A`, each about 1.16 to 1 below the ground, about as far below it as before. Left as they were, they would have been as dark as the darker ground, and the monochrome theme takes their hue, so a river or a park would have shown only by its label.
+- **Unchanged:** the road surface under lane details (`colorHdRoads`, the street's grey now, darker than a freeway's), labels, and the route's amber, which stands about 4 to 1 against a street.
 - **Alternatives:**
   - Mapbox's own ground and the darker streets, as before: the streets hardly part from the ground close in.
   - A theme of the app's own (a color table for the whole basemap): one more file to keep, and every color of the map changes with it.

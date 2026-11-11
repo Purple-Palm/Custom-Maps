@@ -724,7 +724,8 @@ On the drive:
 12. **Streets against the ground.** The streets should be clearly lighter than the ground, the
     buildings only a little, and the amber route still the strongest thing on the map. Close in at
     a divided road, the median should read as a median, not as a block. On a freeway, note whether
-    another route's grey line is still easy to see on the freeway's band. Screenshots, as above.
+    another route's grey line is still easy to see on the freeway's band. A river, a lake or a
+    park should still show darker than the ground. Screenshots, as above.
 13. **A turn whose road bends later.** With Large and Smooth follow, at a left turn where the turn
     lane or a split begins well before the road visibly turns (a simulated drive through such a
     turn will do): from about 20 ft before the turn the bend and some road past it should stay on
