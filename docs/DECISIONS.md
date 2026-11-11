@@ -64,14 +64,14 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Alternatives:**
   - A temporary key per CI run: updates would not install over each other and would need an uninstall, which loses the token and adds a Mapbox monthly active user.
   - A keystore committed to the repository: never.
-- This is not the Play release key (stage 3).
+- This is not the upload key for Google Play (42).
 
 ## 8. Continuous integration
 
 - **Triggers and pinning:** GitHub Actions run on pushes to `main` and on demand. Every action is pinned to a commit SHA.
-- **Where the logic lives:** the job only calls `scripts/ci.sh`, so build changes do not require editing the workflow file.
+- **Where the logic lives:** the build job only calls `scripts/ci.sh`, and the publish job `scripts/play-upload.sh` (42), so build changes do not require editing the workflow file. `scripts/ci.sh` first tests the CI scripts themselves.
 - **Checks:** build, unit tests, lint, and the 16 KB check, which covers both ELF LOAD alignment and zip alignment.
-- **Artifact:** the debug APK is uploaded on every run and kept for 30 days.
+- **Artifacts:** the debug APK is uploaded on every run and kept for 30 days; with the upload key, the app bundle for Google Play too (42).
 - **Caching:** `setup-gradle` uses `cache-provider: basic`, which is open source with no extra terms. The default "enhanced" provider is proprietary. Cost: caches start cold after catalog changes.
 
 ## 9. No build-logic module yet
@@ -426,3 +426,21 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Mobile data, by estimate tens of MB for a new area; the log has the preview's real numbers and an upper bound for a drive.
   - The Maps and Common native libraries now load when the app starts, with the tile store, not with the first map.
   - None of it has run on a phone. Whether Mapbox resolves the Standard style for a tile region, its 3D buildings included, shows only in the first `offline_region` line on the phone. The distances, the zooms and the 100 m are first settings.
+
+## 42. Release through Google Play internal testing
+
+- **Chosen:** the Play build reaches the phone through Google Play's internal testing track, and from the second release on CI publishes every green build of `main` there by itself.
+- **Play App Signing with a key Google generates.** Google signs the APKs it delivers and keeps that key, the default for a new app. A leaked or lost key on the owner's side can then never stop updates.
+- **The upload key.** A separate PKCS12 keystore with an RSA 2048 key, made for this and never the debug key (7). It lives only in four repository secrets (`RELEASE_KEYSTORE_BASE64`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`) and with the owner; locally the same four values with `RELEASE_KEYSTORE_FILE`, read like the debug key: all four or none, a partial set fails and names what is missing. Play Console can reset it; the app signing key stays.
+- **Version code.** `scripts/version.sh` (tested by `scripts/test/version-test.sh`): run number × 100 + run attempt on CI, so every run and every re-run rises (GitHub allows at most 50 re-runs of a run); version name `0.1.<run>`. Only release builds take that code. Debug builds keep 1, so a build from Android Studio still installs over a CI build; a build on a computer is 1 and `0.1.0`. A base constant in the script must go above Play's highest code if the workflow is ever renamed, since run numbers then start again at 1.
+- **R8 and resource shrinking off for now.** The Play build runs the same code as the debug builds that were driven, and its stack traces and the debug log read the same. R8 builds cleanly, but nothing proves it safe with the Mapbox SDKs on a phone (reflection, JNI names, plugins that Mapbox's rules do not keep), obfuscation renames the class names the debug log writes, and with R8 the Compose plugin wants one more artifact. Cost: by bundletool's estimate about 11 MB more per download and about 32 MB more on the phone. To be tried on the internal track, preferably without obfuscation.
+- **The bundle.** Built by `scripts/ci.sh` only with the upload key, in its own Gradle run with both ABIs; every native library in it is checked for 16 KB alignment through the universal APK that AGP's bundletool makes from it. Published as the artifact `custommaps-release-<versionCode>-<commit>.aab` for 30 days: any signed-in GitHub user can download it, which is fine, since it holds no secret.
+- **The project's own upload script, no Action and no plugin.** `scripts/play-upload.sh` uses only bash, curl, jq and openssl from the runner: a JWT signed with the service account key, an edit, the resumable upload, a completed release, the commit. The key, the JWT, the access token and the upload URL never reach a command line or the log, live only in a private temporary folder that is deleted on exit, and are also masked on GitHub Actions. Its test runs in CI against a local stand-in for Google's servers, with a throwaway key, and needs no network.
+- **Internal testing only.** The script accepts no other track. The publish job needs the build job (tests, lint, 16 KB check), runs only for `main`, one at a time, and only once the service account key (`PLAY_SERVICE_ACCOUNT_JSON_BASE64`) is set; it skips a bundle that is not newer than the track's and never cancels a review in progress (`changesInReviewBehavior=ERROR_IF_IN_REVIEW`). The commit is never retried. No release notes: their language must match the store listing, and the release name is the version name.
+- **First release by hand.** Google's API works only for an app whose first release was rolled out in Play Console; the owner does that once with a CI bundle and adds the service account key after it. Until then the publish job is skipped, and with the key set too early it fails with a plain explanation while the build stays green.
+- **Alternatives:**
+  - A third-party Action (r0adkll/upload-google-play) or Gradle Play Publisher: someone else's code holding the Play key or running inside the Gradle build that holds the upload key, and one more dependency to keep up with.
+  - Internal app sharing: no automatic updates, links that expire, and another signing key, so its installs and the track's cannot update each other.
+  - The release secrets in a separate job with a GitHub environment for `main`: narrower, but the secrets are repository secrets and the bundle is built by `scripts/ci.sh`; the Play key reaches only the upload step either way.
+  - Workload Identity Federation instead of a service account key: no long-lived key at all, but more setup and not documented by Google for the Play API. A later hardening step that changes only the sign-in part of the script.
+- **Cost:** two apps on the phone (the Play app and the debug APK), each one Mapbox monthly active user with its own token. Production needs a closed test with 12 testers for 14 days first (personal developer account), the store listing, the content rating and the Data safety form ([ROADMAP.md](ROADMAP.md), stage 3).

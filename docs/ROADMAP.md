@@ -9,7 +9,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
 | 1.1 | Guidance polish after the first drives, trip history and prediction (next build) | In progress |
 | 2 | Android Auto: car screen on the navigation template | Designed; after stage 1.1 |
-| 3 | Signed release build and Google Play internal testing | Planned |
+| 3 | Signed release build and Google Play: internal testing, later production | Internal testing built (2026-11-11); production later |
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
 | 6 | Junction view in the car's routing card (variant A) | Planned |
@@ -123,10 +123,34 @@ The full design is in [STAGE-2.md](STAGE-2.md).
   on the phone and that stays only there. The public code repository never gets logs.
 - Desktop Head Unit profiles for 800×480 and 1280×720 head units.
 
-## Stage 3: release and Google Play (planned)
+## Stage 3: release and Google Play (internal testing built, production later)
 
-- Signed release app bundle, versioning, keys from a local file or environment variables.
-- Google Play Console: app, internal testing track, install from Play (required for Android Auto in a real car).
+Brought forward on the owner's request of 2026-11-11, so the phone gets updates through Google Play
+now. How it works and the owner's one-time steps: README, "Release through Google Play"; the
+decision: [DECISIONS.md](DECISIONS.md), 42.
+
+Done:
+
+- [x] Release build: not debuggable, R8 and resource shrinking off for now, signed with the upload
+  key from four values (environment or `local.properties`, all four or none).
+- [x] Version code that rises with every CI run and re-run; version name `0.1.<run>`.
+- [x] App bundle built by CI when the upload key is set, 16 KB checked, kept 30 days as an artifact.
+- [x] The project's own upload script, tested offline in CI; a publish job that puts every green
+  build of `main` on internal testing once the Google Play key is set, and nowhere else.
+- [x] Privacy policy ([PRIVACY.md](PRIVACY.md)), linked from Settings → About.
+
+Owner checks: roll out the first bundle by hand on internal testing, join as a tester and install
+from the Play Store, paste the token in the Play app; then add the service account key and see the
+next green build of `main` arrive on the phone.
+
+Left, for production (not scheduled; the owner decides when):
+
+- A closed test with at least 12 testers opted in for 14 days in a row (personal developer
+  account), then the application for production.
+- Store listing, app category, content rating, target audience, the Data safety form and the
+  privacy policy link in Play Console.
+- The background location declaration and its video once stage 2 asks for "Allow all the time".
+- R8 on the internal track with drives, preferably without obfuscation.
 
 ## Stage 4: smart camera (planned)
 

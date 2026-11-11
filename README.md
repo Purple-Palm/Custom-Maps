@@ -56,6 +56,9 @@ token, and every new installation counts as one more monthly active user at Mapb
 place only works when all builds are signed with the same key, see the next section.
 **Settings → About** shows the version and the commit of the installed build.
 
+The same builds also reach the phone through Google Play, where they update by themselves; see
+[Release through Google Play](#release-through-google-play).
+
 ## Using the app
 
 1. On first launch, paste the Mapbox token, then allow location access. The map centers on you.
@@ -138,12 +141,18 @@ Android backs up only the app's settings and its trip session log. The token, th
 the data the Mapbox SDKs keep on the phone (map and routing caches) stay out of cloud backups and
 device transfers. The app keeps no search history.
 
+### Privacy
+
+The [privacy policy](docs/PRIVACY.md) says what stays on the phone, what Mapbox receives and how
+to turn off Mapbox's telemetry; **Settings → About → Privacy policy** opens it.
+
 ## Shared debug signing key
 
 Android installs an update over an existing app only if both are signed with the same key. Without
 the setup below, every CI run signs the APK with a new temporary key, and each new build would have
-to replace the app by uninstalling it first. This key is for debug builds only; the Play release
-key is set up in stage 3.
+to replace the app by uninstalling it first. This key is for debug builds only; Google Play builds
+are signed with a different key, the upload key (see
+[Release through Google Play](#release-through-google-play)).
 
 1. Create the key. `keytool` ships with every JDK, including the one inside Android Studio
    (`<Android Studio>/jbr/bin/keytool`; on macOS
@@ -195,6 +204,118 @@ key is set up in stage 3.
    absolute path with forward slashes, also on Windows.
 
 Set all four values or none: a partial setup fails the build with a message listing what is missing.
+
+## Release through Google Play
+
+Android Auto in a real car runs only apps installed from Google Play, and Play keeps the app up to
+date by itself. The Play build reaches the phone through Google Play's **internal testing** track.
+It is built from the same code as the debug APK, with three differences: its package is
+`io.github.purplepalm.custommaps` (no `.debug`), it is not debuggable (no **Crash now**), and it is
+signed with the upload key below and then by Google.
+
+The Play app and the debug APK are two apps: both can stay installed, each keeps its own token and
+settings (paste the token once more in the Play app), and each installation counts as one Mapbox
+monthly active user.
+
+### The upload key and the release secrets
+
+Google Play signs the APKs it delivers with an app signing key that Google generates and keeps
+(Play App Signing). CI signs each app bundle with the **upload key**, which shows Google that the
+bundle comes from the owner. It is a PKCS12 keystore with an RSA 2048 key, kept outside the
+repository; it is not the debug key. Its certificate's SHA-256 fingerprint, which Play Console shows
+on the Play app signing page, is
+`AB:19:35:13:3F:7C:B9:D1:8C:09:B2:C0:F6:72:60:28:8D:7D:33:4C:E5:DD:D5:C7:4C:24:53:CA:AA:7E:3D:00`.
+
+Four repository secrets hold it (**Settings → Secrets and variables → Actions**):
+
+| Name | What it is |
+|---|---|
+| `RELEASE_KEYSTORE_BASE64` | the keystore file as one line of base64, encoded as in step 2 of the debug key |
+| `RELEASE_KEYSTORE_PASSWORD` | the keystore's password |
+| `RELEASE_KEY_ALIAS` | the alias of the key in the keystore |
+| `RELEASE_KEY_PASSWORD` | the key's password: in a PKCS12 keystore the same as the keystore password |
+
+Set all four or none. Without them CI builds the debug APK exactly as before and no app bundle; with
+only some, the build fails and names the missing secrets. CI decodes the keystore into a folder of
+the runner's temporary directory that only the build can read and deletes it when the build ends;
+the passwords reach Gradle only as environment variables. A release build on a computer takes the
+same four values in `local.properties`, with `RELEASE_KEYSTORE_FILE` instead of the base64 (see
+[local.properties.example](local.properties.example)).
+
+If the upload key is ever lost or leaked, Play Console resets it (**Request upload key reset** on the
+Play app signing page). The app signing key stays with Google, so the installed app keeps updating.
+
+### The app bundle
+
+With the four secrets, every CI run also builds the app bundle for Google Play, with both ABIs (Play
+sends each phone only its own), checks that every native library in it is 16 KB aligned, and
+publishes it for 30 days as the artifact `custommaps-release-<versionCode>-<commit>.aab` of the run.
+Like the APK, any signed-in GitHub user can download it; it holds no secret, only the compiled public
+code, the commit and the public part of the upload certificate.
+
+Every CI run gets a higher versionCode, as Google Play needs: the run number times 100 plus the run
+attempt, so a re-run also counts higher. The version name is `0.1.<run>`; **Settings → About** shows
+it with the commit. Debug builds keep versionCode 1, so a build from Android Studio still installs
+over a CI build. A release build on a computer is versionCode 1 and is not meant for Google Play.
+
+### The first release, by hand
+
+Google Play takes uploads through its API only for an app whose first release was rolled out in
+Play Console. Once:
+
+1. Download the newest `custommaps-release-<versionCode>-<commit>.aab` from a green CI run.
+2. In Play Console open the app, then **Test and release → Testing → Internal testing → Create new
+   release**. Keep Play App Signing with the key Google generates, the default for a new app. Upload
+   the bundle, click **Next**, then **Save** and **Start rollout**.
+3. If Play Console asks for the foreground service declaration (**App content**), declare the
+   location type: the Mapbox navigation service keeps turn-by-turn guidance going after the driver
+   taps **Start**, and ends with the drive. Google asks for a link to a short video that shows a
+   drive being started.
+4. On the **Testers** tab create an email list with the Google account the phone's Play Store uses,
+   select it, **Save changes**, and copy the shareable link. Open the link on the phone, accept the
+   invitation and install Custom Maps from the Play Store page it leads to. The link works once the
+   release is out; the first time that can take a few hours.
+
+### Automatic updates
+
+After the first rollout, CI can publish each green build of `main` on internal testing. It needs a
+Google Cloud service account that Play Console allows to release to testing tracks:
+
+1. In Google Cloud Console: create a project, enable the **Google Play Android Developer API**, and
+   under **IAM & Admin → Service accounts** create a service account with no Google Cloud roles. Under
+   its **Keys** tab choose **Add key → Create new key → JSON**.
+2. In Play Console: **Users and permissions → Invite new users**, enter the service account's email
+   address, add Custom Maps under **App permissions** with **Release apps to testing tracks** and
+   **View app information (read-only)**, and send the invitation.
+3. Encode the JSON key as one line of base64, as in step 2 of the debug key, save it as the
+   repository secret `PLAY_SERVICE_ACCOUNT_JSON_BASE64`, and delete the downloaded file.
+
+From then on the **publish** job of each green run on `main` (a push, or **Run workflow** on `main`)
+uploads the run's app bundle with [`scripts/play-upload.sh`](scripts/play-upload.sh) and makes it
+the release of internal testing. The phone gets it from the Play Store within minutes, or with the
+next automatic update, as its Play Store settings say. The job:
+
+- runs only after the build, its tests, lint and the 16 KB check passed, only for `main`, and only
+  once the key is set; until then it is skipped;
+- publishes only on internal testing, never on closed or open testing or production;
+- runs one upload at a time; one that waits gives way to a newer one, and a bundle that is not newer
+  than the one on internal testing is not uploaded, so the track never goes back to an older build;
+- never cancels changes that are in review in Play Console; the upload then fails, and the first
+  run after the review publishes;
+- says in plain words what to do when Google refuses, for example when the first rollout by hand is
+  missing or the service account lacks the permission.
+
+When the publish job fails, the build job stays green and the bundle stays in the run's artifacts,
+to upload by hand or with **Re-run failed jobs**. **Actions → CI → Run workflow** on `main` builds
+and publishes the newest commit again, with a new versionCode.
+
+### Production
+
+Internal testing is enough for the owner's phone and car. To publish on Google Play for everyone, a
+personal developer account first has to run a closed test with at least 12 testers who stay opted
+in for 14 days in a row, and then apply for production in Play Console. Closed testing also needs
+the store listing, the content rating, the Data safety form and the link to the
+[privacy policy](docs/PRIVACY.md).
 
 ## Build and run locally
 
@@ -253,16 +374,21 @@ app yet. To prepare:
    used with `-c`, for example `./desktop-head-unit --usb -c /path/to/repo/dhu/800x480.ini`.
 5. Switch between day and night with the `day` and `night` console commands, or Shift+N and Ctrl+N.
 
-In a real car, a navigation app built with the Car App Library has to come from Google Play;
-stage 3 sets up an internal testing track for that.
+In a real car, a navigation app built with the Car App Library has to come from Google Play: the
+build from the internal testing track does (see
+[Release through Google Play](#release-through-google-play)).
 
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on demand.
 It builds the debug APK for arm64 phones (every current phone), runs the unit tests and lint, checks
 16 KB page alignment and uploads the APK, unzipped, as an artifact that is kept for 30 days. Local
-builds also include x86_64 for the emulator. The steps themselves live in
-[`scripts/ci.sh`](scripts/ci.sh). CI needs no Mapbox token, and the debug signing secrets are optional.
+builds also include x86_64 for the emulator. With the release secrets it also builds, checks and
+uploads the app bundle for Google Play, and with the Google Play key a second job publishes it on
+internal testing (see [Release through Google Play](#release-through-google-play)). The steps
+themselves live in [`scripts/ci.sh`](scripts/ci.sh), which first tests the CI scripts, the upload to
+Google Play included, against a local stand-in for Google's servers. CI needs no Mapbox token, and
+all signing secrets are optional.
 
 ## Mapbox usage
 

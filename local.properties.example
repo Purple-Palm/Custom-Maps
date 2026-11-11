@@ -16,8 +16,8 @@ DEBUG_KEYSTORE_PASSWORD=
 DEBUG_KEY_ALIAS=
 DEBUG_KEY_PASSWORD=
 #
-# Optional upload key for Google Play, for release builds made on this computer. Without it a release
-# build is unsigned. CI signs with the RELEASE_* secrets instead.
+# Optional upload key for Google Play, for release builds made on this computer (README, "Release
+# through Google Play"). Without it a release build is unsigned. CI signs with the RELEASE_* secrets.
 RELEASE_KEYSTORE_FILE=
 RELEASE_KEYSTORE_PASSWORD=
 RELEASE_KEY_ALIAS=
