@@ -231,27 +231,9 @@ internal class OfflineData(
     private fun onRegionLoaded(load: Download<TileRegionLoadProgress>, result: Expected<TileRegionError, TileRegion>) {
         load.finished = true
         try {
-            val region = result.value
             val error = result.error
-            val progress = load.progress
-            val counts = when {
-                // The region's own numbers; what came over the network is only in the progress.
-                region != null -> DownloadCounts(
-                    required = region.requiredResourceCount,
-                    completed = region.completedResourceCount,
-                    completedBytes = region.completedResourceSize,
-                    loadedBytes = progress?.loadedResourceSize,
-                    errored = progress?.erroredResourceCount ?: 0,
-                )
-                progress != null -> DownloadCounts(
-                    required = progress.requiredResourceCount,
-                    completed = progress.completedResourceCount,
-                    completedBytes = progress.completedResourceSize,
-                    loadedBytes = progress.loadedResourceSize,
-                    errored = progress.erroredResourceCount,
-                )
-                else -> null
-            }
+            // The region's own numbers; what came over the network is only in the progress.
+            val counts = downloadCounts(result.value, load.progress)
             debugLog.log(
                 "offline_region",
                 OfflineLines.region(load.number, load.routes, error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos)),
@@ -292,26 +274,8 @@ internal class OfflineData(
         // A load that failed or was ended is asked for again with the next preview.
         stylePack.ended(loaded = result.isValue)
         try {
-            val pack = result.value
             val error = result.error
-            val progress = load.progress
-            val counts = when {
-                pack != null -> DownloadCounts(
-                    required = pack.requiredResourceCount,
-                    completed = pack.completedResourceCount,
-                    completedBytes = pack.completedResourceSize,
-                    loadedBytes = progress?.loadedResourceSize,
-                    errored = progress?.erroredResourceCount ?: 0,
-                )
-                progress != null -> DownloadCounts(
-                    required = progress.requiredResourceCount,
-                    completed = progress.completedResourceCount,
-                    completedBytes = progress.completedResourceSize,
-                    loadedBytes = progress.loadedResourceSize,
-                    errored = progress.erroredResourceCount,
-                )
-                else -> null
-            }
+            val counts = downloadCounts(result.value, load.progress)
             debugLog.log(
                 "offline_style_pack",
                 OfflineLines.stylePack(error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos)),
