@@ -482,7 +482,9 @@ Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a p
     for a tap while the car moves.
   - In both forms the chip is outside the measured panels, so neither the panels nor the camera
     move when it comes or goes. It is not shown over an open list of suggestions and not in the
-    route preview, where it would lie over the far end of the routes.
+    route preview, where it would lie over the far end of the routes. The sentence is also left
+    out where it would reach the strip of the Mapbox logo, as in a short window, or with a very
+    large font and the keyboard up.
   - The compass keeps clear of it. During guidance it now sits under the band, for the whole
     drive; before a drive it moves below the sentence while that is up.
   - Which sentence shows follows what Android reports for the app's network. "Blocked" is only
@@ -696,7 +698,7 @@ Then share the debug log. What to read in it:
 | `offline_style_pack` | The size of the map's style, loaded once after the app starts, and again with the next preview if that failed |
 | `device`: `appRxBytes` | All the bytes the app has received, Wi-Fi and mobile data alike. Its growth from the first to the last `device` line of a drive is the most that predictive caching can have loaded; Mapbox gives no count of its own for it |
 | `offline_cache`, `offline_cache_error` | That predictive caching was set up, once for each navigator, with its distances, and what it could not do |
-| `offline_chip` | When the chip came and went, with its reason and the guidance state. `shown` true should follow a `network` line that reports the app offline by about 3 s, and `shown` false should come with the line that reports it online again. A block that Android reports while the app is not on screen is left out, so it brings no chip lines |
+| `offline_chip` | When the chip came and went, with its reason and the guidance state. `shown` true should follow a `network` line that reports the app offline by about 3 s, and `shown` false should come with the line that reports it online again. A block that Android reports while the app is not on screen is left out, so it brings no chip lines. `shown` is about the reason: in a window too short for the sentence it is true while nothing is drawn |
 | `offline_settings` | The system page the chip's Settings button opened; null when the phone has neither the data usage page nor the app's details page |
 | Map errors | A few lines a minute instead of thousands |
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |

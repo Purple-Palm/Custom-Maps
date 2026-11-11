@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -299,16 +300,20 @@ fun MapScreen(
         }
 
         // The offline chip under the search bar. It is no part of the column above, so nothing
-        // that is measured there changes when it comes or goes.
+        // that is measured there changes when it comes or goes. It shows only where it ends above
+        // the strip of the Mapbox logo.
         if (showsOfflineSentence(state.guidance, suggestionsShown = state.suggestions.isNotEmpty())) {
+            val chipTop = topPanelBottom + with(density) { OFFLINE_CHIP_GAP.roundToPx() }
+            val chipMaxBottom = screenHeight - ornamentInset - with(density) { ornamentStrip.roundToPx() }
             OfflineChipSlot(
                 reason = offline,
                 onOpenSettings = { context.openDataSettings(debugLog) },
                 onBottomChanged = { offlineChipBottom = it },
+                fits = { height -> offlineChipFits(chipTop, height, chipMaxBottom) },
                 modifier = Modifier
                     // From the search bar's bottom edge, as far below it as its suggestions are.
                     .offset { IntOffset(0, topPanelBottom) }
-                    .padding(start = 12.dp, top = 8.dp, end = 12.dp),
+                    .padding(start = 12.dp, top = OFFLINE_CHIP_GAP, end = 12.dp),
             )
         }
 
@@ -407,24 +412,39 @@ private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, offline: State
 
 /**
  * The offline chip under the search bar. It reads [reason] itself and reports where its bottom
- * edge is, 0 while there is no chip, so that the compass can keep clear of it.
+ * edge is, 0 while there is no chip, so that the compass can keep clear of it. A chip [fits] does
+ * not let in at its measured height in pixels is left out, and reported as none.
  */
 @Composable
 private fun OfflineChipSlot(
     reason: State<OfflineReason>,
     onOpenSettings: () -> Unit,
     onBottomChanged: (Int) -> Unit,
+    fits: (Int) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     if (reason.value != OfflineReason.NONE) {
         OfflineChip(
             reason = reason,
             onOpenSettings = onOpenSettings,
-            modifier = modifier.onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) },
+            modifier = modifier
+                // Ahead of the layout below, so a chip left out is reported with no height.
+                .onGloballyPositioned { onBottomChanged(if (it.size.height > 0) it.boundsInRoot().bottom.toInt() else 0) }
+                .layout { measurable, constraints ->
+                    val chip = measurable.measure(constraints)
+                    if (fits(chip.height)) layout(chip.width, chip.height) { chip.place(0, 0) } else layout(0, 0) {}
+                },
         )
         DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
     }
 }
+
+/**
+ * Whether the offline sentence fits above the strip of the Mapbox logo: from [top], its top edge,
+ * [height] tall, it must end no lower than [maxBottom], where the strip begins. In pixels from the
+ * top of the screen. A screen not measured yet has room for nothing.
+ */
+internal fun offlineChipFits(top: Int, height: Int, maxBottom: Int): Boolean = top + height <= maxBottom
 
 /**
  * Whether the offline chip may show as the whole sentence under the search bar: only while the
@@ -491,6 +511,9 @@ private fun UserMessage.textRes(): Int = when (this) {
 
 /** Lowest bottom inset for the Mapbox logo, so a rounded screen corner never clips it. */
 private val MIN_ORNAMENT_INSET = 16.dp
+
+/** Between the search bar, or its suggestions, and the offline sentence under it. */
+private val OFFLINE_CHIP_GAP = 8.dp
 
 private enum class LocationAccess { NONE, APPROXIMATE, PRECISE }
 
