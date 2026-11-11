@@ -28,6 +28,12 @@ data class RouteProgressSnapshot(
      * place of [lanes], with its distance.
      */
     val laneChoiceAhead: LanesAhead? = null,
+    /**
+     * True right after a new route, before the navigator's first instruction for it: [nextManeuver]
+     * is then the new route's next maneuver as the route has it, and the card shows it dimmed and
+     * without its distance. Never a maneuver of the route before (`CardContinuity`).
+     */
+    val pending: Boolean = false,
 ) {
     /** The maneuver the Then chip shows, or null. The phone and the car screen both read this. */
     val thenManeuver: FollowingManeuver? get() = if (showThen) following else null

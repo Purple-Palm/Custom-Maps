@@ -35,6 +35,7 @@ import com.mapbox.navigation.core.trip.session.NavigationSessionStateObserver
 import com.mapbox.navigation.core.trip.session.OffRouteObserver
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.tripdata.maneuver.api.MapboxManeuverApi
+import com.mapbox.navigation.tripdata.maneuver.model.Maneuver as MapboxManeuver
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.NavigationEngine
@@ -42,6 +43,8 @@ import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.guidance.CardContinuity
+import io.github.purplepalm.custommaps.nav.guidance.CardUpdate
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
@@ -107,6 +110,9 @@ internal class MapboxNavigationEngine(
 
     /** What the Then chip remembers from one progress update to the next; every drive starts it over. */
     private val thenTracker = ThenTracker()
+
+    /** The route of the maneuver card on screen; null while there is none. */
+    private var cardRouteId: String? = null
 
     /**
      * The points with lanes ahead of the car, read from the route once for each step. The engine
@@ -585,6 +591,7 @@ internal class MapboxNavigationEngine(
                 _previewRoutes.value = emptyList()
                 _routeOptions.value = emptyList()
                 _routeProgress.value = null
+                cardRouteId = null
                 thenTracker.reset()
                 laneChoices.clear()
             }
@@ -593,13 +600,28 @@ internal class MapboxNavigationEngine(
 
     private val routeProgressObserver = RouteProgressObserver { progress ->
         val active = _guidanceState.value == GuidanceState.ACTIVE
-        val snapshot = if (active) snapshotOf(progress) else null
+        val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
+        // Without the next maneuver the card stays as it is, but never with a maneuver of the route
+        // before a reroute or another change of route: it waits, dimmed, for the new route's.
+        val card = if (active) CardContinuity.next(cardRouteId, progress.navigationRoute.id, hasManeuver = next != null) else null
+        val snapshot = when {
+            next != null -> snapshotOf(progress, next)
+            card == CardUpdate.PENDING -> progress.toPendingSnapshot()
+            else -> null
+        }
         debugLog.log(
             "progress",
-            progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "thenShown" to snapshot?.showThen),
+            progress.debugFields() + mapOf(
+                "match" to lastMatch?.debugFields(),
+                "thenShown" to snapshot?.showThen,
+                "card" to card?.logName,
+            ),
         )
         if (active) logLaneChoices(progress)
-        if (snapshot != null) _routeProgress.value = snapshot
+        if (snapshot != null) {
+            _routeProgress.value = snapshot
+            cardRouteId = progress.navigationRoute.id
+        }
         // The first progress of a trip, the next one after a cancelled refresh, and the first one
         // after an answer to its replan.
         if (active && startRefresher.awaitsProgress) {
@@ -626,12 +648,8 @@ internal class MapboxNavigationEngine(
         for (i in entering.indices) debugLog.log("lane_choice", laneChoices.debugFields(entering[i], speed))
     }
 
-    /**
-     * The UI's view of [progress], with the Then rule applied and the lanes of a lane choice ahead;
-     * null when the maneuver API has nothing.
-     */
-    private fun snapshotOf(progress: RouteProgress): RouteProgressSnapshot? {
-        val next = maneuverApi.getManeuvers(progress).value?.firstOrNull() ?: return null
+    /** The UI's view of [progress] with its [next] maneuver, the Then rule applied and the lanes of a lane choice ahead. */
+    private fun snapshotOf(progress: RouteProgress, next: MapboxManeuver): RouteProgressSnapshot {
         val decided = thenTracker.decide(progress.toSnapshot(next))
         // The speed the camera gets with this update, so the card's lanes and the close view come together.
         val lanes = laneChoices.lanesAhead(laneChoices.ahead(progress), lastMatch?.enhancedLocation?.speed)

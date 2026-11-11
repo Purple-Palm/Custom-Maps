@@ -20,8 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -49,7 +51,11 @@ private const val TABULAR_DIGITS = "tnum"
 /** Corner radius of the maneuver card; the Then chip tucks this far under its bottom edge. */
 internal val CARD_CORNER = 24.dp
 
-/** Next maneuver: the arrow, a large distance and the road, with lane guidance below. */
+/**
+ * Next maneuver: the arrow, a large distance and the road, with lane guidance below. Right after a
+ * new route, until the navigator's first instruction for it ([RouteProgressSnapshot.pending]), the
+ * card shows the new route's maneuver dimmed, with no distance and no lanes.
+ */
 @Composable
 fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier) {
     val maneuver = progress.nextManeuver
@@ -59,7 +65,7 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
         shape = RoundedCornerShape(CARD_CORNER),
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(16.dp).alpha(cardContentAlpha(progress.pending))) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ManeuverGlyph(
                     type = maneuver.type,
@@ -70,7 +76,9 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
                 )
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    // A pending card keeps the row's place, but shows and says no distance.
+                    val distanceRow = if (progress.pending) Modifier.alpha(0f).clearAndSetSemantics {} else Modifier
+                    Row(modifier = distanceRow, verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = distance.value,
                             style = MaterialTheme.typography.displayMedium.copy(fontFeatureSettings = TABULAR_DIGITS),
@@ -117,6 +125,12 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
         }
     }
 }
+
+/** How opaque the card's content is: dimmed while the card waits for a new route's first instruction. */
+internal fun cardContentAlpha(pending: Boolean): Float = if (pending) PENDING_CARD_ALPHA else 1f
+
+/** The content of a pending card, dimmed. */
+private const val PENDING_CARD_ALPHA = 0.45f
 
 /**
  * Lanes from left to right; the ones to use are amber, the others dim. Every lane is shown: when

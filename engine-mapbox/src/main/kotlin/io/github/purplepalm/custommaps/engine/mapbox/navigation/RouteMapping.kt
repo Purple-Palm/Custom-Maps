@@ -11,6 +11,7 @@ import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.Maneuver
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
@@ -99,6 +100,34 @@ internal fun RouteProgress.toSnapshot(next: MapboxManeuver): RouteProgressSnapsh
         offRoute = currentState == RouteProgressState.OFF_ROUTE,
     )
 }
+
+/**
+ * The card of a route that has just come in, before the navigator's first instruction for it
+ * ([RouteProgressSnapshot.pending]): the maneuver the step ends with, as the route's own step
+ * describes it, and the trip's totals. Its distance is set, but the card does not show it.
+ */
+internal fun RouteProgress.toPendingSnapshot(): RouteProgressSnapshot {
+    val leg = currentLegProgress
+    val step = leg?.currentStepProgress
+    val next = step?.let { nextManeuverOf(leg?.routeLeg?.steps().orEmpty(), it.stepIndex) }
+    return RouteProgressSnapshot(
+        nextManeuver = next ?: Maneuver(type = ManeuverType.UNKNOWN, modifier = null, primaryText = ""),
+        distanceToNextManeuver = Distance.meters((step?.distanceRemaining?.toDouble() ?: 0.0).coerceAtLeast(0.0)),
+        lanes = null,
+        distanceRemaining = Distance.meters(distanceRemaining.toDouble().coerceAtLeast(0.0)),
+        durationRemaining = durationRemaining.coerceAtLeast(0.0).seconds,
+        durationToNextManeuver = step?.durationRemaining.knownSeconds(),
+        stepKey = "${navigationRoute.id}/${leg?.legIndex}/${step?.stepIndex}",
+        offRoute = currentState == RouteProgressState.OFF_ROUTE,
+        pending = true,
+    )
+}
+
+/**
+ * The maneuver step [stepIndex] of [steps] ends with, the next one while the car is on that step,
+ * as the step's first banner describes it; null for the last step and for a step without banners.
+ */
+internal fun nextManeuverOf(steps: List<LegStep>, stepIndex: Int): Maneuver? = maneuverAtEndOf(steps, stepIndex)?.maneuver
 
 /** The maneuver after the next one at this moment of the drive; null when none follows in this leg. */
 internal fun RouteProgress.followingManeuver(): FollowingManeuver? {

@@ -179,4 +179,16 @@ class FollowingManeuverTest {
         val noTime = leg.toMutableList().also { it[1] = step("turn", "left", 150.0, Double.NaN, banner("Pine Street", "turn", "right")) }
         assertEquals(Duration.ZERO, requireNotNull(followingManeuver(noTime, stepIndex = 0)).durationAfterNext)
     }
+
+    @Test
+    fun `a new route's card names the maneuver its step ends with, as the route has it`() {
+        val next = requireNotNull(nextManeuverOf(leg, stepIndex = 0))
+        assertEquals(ManeuverType.TURN, next.type)
+        assertEquals(TurnModifier.LEFT, next.modifier)
+        assertEquals("Oak Street", next.primaryText)
+        assertEquals(ManeuverType.ARRIVE, nextManeuverOf(leg, stepIndex = 2)?.type)
+        // The arrival's own step ends with nothing.
+        assertNull(nextManeuverOf(leg, stepIndex = 3))
+        assertNull(nextManeuverOf(emptyList(), stepIndex = 0))
+    }
 }
