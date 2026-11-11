@@ -4,8 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Tests of the CI scripts themselves; they need no network, no Android SDK and no secret.
+# Tests of the CI scripts themselves; they need no network, no Android SDK and no secret. The upload
+# to Google Play is tested against a local stand-in for Google's endpoints with a throwaway key.
 scripts/test/version-test.sh
+scripts/test/play-upload-test.sh
 
 # The version of this build (scripts/version.sh): on CI the versionCode rises with every run and re-run.
 version="$(scripts/version.sh)"
