@@ -99,6 +99,43 @@ class UTurnArrowTest {
     }
 
     @Test
+    fun `openings from 4 to 40 m wide are one u, and a narrower one is not`() {
+        assertNull(UTurnArrow.shape(approach, divided(3.0)))
+        // 4 m: an arc of 2 m around a center 2 m across and 2 m down.
+        val narrow = UTurnArrow.shape(approach, divided(4.0))!!
+        val center = p(-2.0, -2.0)
+        narrow.filter { it.y > center.y + 1e-9 }.forEach { assertEquals(2.0, it.distanceTo(center), 1e-6) }
+        assertNotNull(UTurnArrow.shape(approach, divided(40.0)))
+    }
+
+    @Test
+    fun `a road that turns back by less than 135 degrees is no u`() {
+        // Two left corners of 60 degrees, 13 m apart: it turns back by 120 degrees.
+        val bend = p(-sin(Math.toRadians(60.0)) * 13.0, cos(Math.toRadians(60.0)) * 13.0)
+        val onward = listOf(p(0.0, 0.0), bend, p(bend.x + sin(Math.toRadians(240.0)) * 100.0, bend.y + cos(Math.toRadians(240.0)) * 100.0))
+        assertNull(UTurnArrow.shape(approach, onward))
+    }
+
+    @Test
+    fun `a step that ends right after the far corner leaves no room for a curve`() {
+        // 1.5 m past the far corner: a curve would have a radius of half a meter.
+        assertNull(UTurnArrow.shape(approach, listOf(p(0.0, 0.0), p(-13.0, 0.0), p(-13.0, -1.5))))
+    }
+
+    @Test
+    fun `a slight veer before the opening is not taken for a corner`() {
+        // 40 degrees left at the maneuver point, then two corners of 70 degrees 13 m apart, back
+        // down the far side: the U is the two sharp corners.
+        fun step(from: LocalPoint, bearing: Double, meters: Double) =
+            p(from.x + sin(Math.toRadians(bearing)) * meters, from.y + cos(Math.toRadians(bearing)) * meters)
+        val veer = step(p(0.0, 0.0), 320.0, 10.0)
+        val far = step(veer, 250.0, 13.0)
+        val arrow = UTurnArrow.shape(approach, listOf(p(0.0, 0.0), veer, far, step(far, 180.0, 100.0)))
+        assertNotNull(arrow)
+        assertEquals(180.0, headBearing(arrow!!), 1e-6)
+    }
+
+    @Test
     fun `with traffic on the left the u turns right, the mirror of the same arrow`() {
         val left = UTurnArrow.shape(approach, divided(13.0))!!
         val right = UTurnArrow.shape(approach, divided(13.0, side = 1.0))!!
