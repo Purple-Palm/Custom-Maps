@@ -126,3 +126,16 @@ class RunUpLatch(private val tuning: CameraTuning) {
         private fun knownSpeed(speedMps: Double?): Double = if (speedMps != null && speedMps > 0.0) speedMps else 0.0
     }
 }
+
+/**
+ * The maneuver that ends the step the car is on, where the camera frames it as a junction: a
+ * maneuver the camera's own rule counts, as a turn at the end of an exit's ramp. A camera makes one
+ * per progress update; [LaneFocus] keeps its close view for a lane choice until this framing
+ * begins, when it comes right after the choice.
+ */
+data class TurnAhead(
+    /** The route, leg and step, as the progress snapshot keys it. */
+    val stepKey: String,
+    /** Along the route, from the car to where the camera begins to frame the maneuver: the meters to it less the framing distance. */
+    val metersToFraming: Double,
+)

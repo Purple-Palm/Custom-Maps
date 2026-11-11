@@ -130,6 +130,8 @@ enum class LaneChoiceSkip {
  * - On a run-up to a freeway exit or fork ([RunUpLatch]), the exit holds the view between the
  *   choices on the way, from where the run-up begins to the gore: one approach, one move in. The
  *   latch is shared and passed in, so a camera made anew in the middle of one stays in.
+ * - A turn the camera frames as a junction, coming right after the hold ([TurnAhead]), keeps the
+ *   view in until its framing begins: no way out and back in just before a turn. Never past it.
  * - A reversal starts from where the focus is and takes the share of the time that is left to go.
  */
 class LaneFocus(private val tuning: CameraTuning) {
@@ -143,6 +145,9 @@ class LaneFocus(private val tuning: CameraTuning) {
 
     /** When the car passed that choice; not a number while it is still ahead. */
     private var passedAt = Double.NaN
+
+    /** The step of the turn the view is kept in for after a choice ([TurnAhead]); null when none. */
+    private var bridgeStep: String? = null
     private var lastRouteMeters = Double.NaN
 
     /** The choice that holds the view close, for the log; null on the road. */
@@ -167,6 +172,8 @@ class LaneFocus(private val tuning: CameraTuning) {
      * @param speedMps the car's speed; unknown counts as standing
      * @param onRoute false while the navigator has the car off the route, where [routeMeters]
      *   stands still and [choices] is empty
+     * @param turnAhead the maneuver of this step the camera frames as a junction, where it counts
+     *   one; null where it does not, and then the view is let go as it always was
      * @param runUpKey the exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up,
      *   and then the view is held as it always was
      */
@@ -176,6 +183,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         choices: List<LaneChoice>,
         speedMps: Double?,
         onRoute: Boolean = true,
+        turnAhead: TurnAhead? = null,
         runUpKey: String? = null,
     ) {
         // A new route counts its meters from its own start, and off the route they stand still.
@@ -205,11 +213,20 @@ class LaneFocus(private val tuning: CameraTuning) {
             current = ahead
             choiceAt = routeMeters + ahead.metersAhead
             passedAt = Double.NaN
+            bridgeStep = null
             this.runUpKey = exit?.key
         } else if (current != null) {
             if (passedAt.isNaN()) passedAt = now
             val holding = now - passedAt < tuning.laneHoldSeconds || routeMeters < choiceAt + tuning.laneHoldMeters
-            if (!holding && !soon) {
+            // Past the hold, a turn that the camera begins to frame within this much driving keeps
+            // the view in until then, on the same step and on the route.
+            val bridgeMeters = knownSpeed(speedMps) * (tuning.descentSeconds + tuning.laneCoalesceSeconds)
+            if (!holding && bridgeStep == null && turnAhead != null && turnAhead.metersToFraming > 0.0 && turnAhead.metersToFraming <= bridgeMeters) {
+                bridgeStep = turnAhead.stepKey
+            }
+            val bridged = bridgeStep != null && onRoute && turnAhead != null && turnAhead.stepKey == bridgeStep && turnAhead.metersToFraming > 0.0
+            if (!bridged) bridgeStep = null
+            if (!holding && !soon && !bridged) {
                 current = null
                 passedAt = Double.NaN
                 this.runUpKey = null
@@ -225,6 +242,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         choiceAt = Double.NaN
         passedAt = Double.NaN
         lastRouteMeters = Double.NaN
+        bridgeStep = null
         runUpKey = null
         if (goal != 0.0) animateTo(0.0, now)
     }

@@ -528,6 +528,114 @@ class LaneZoomTest {
         }
     }
 
+    /**
+     * A lane choice 50 m ahead at 25 m/s, passed between the updates at 2 s and 3 s; its hold of
+     * 2 s ends at 5 s. The step after it ends in a turn whose framing begins [framingAfterHold]
+     * meters after the car's place at 5 s. Returns the goal at each second, from 0 s to [seconds].
+     */
+    private fun turnAfterHold(
+        framingAfterHold: Double,
+        seconds: Int = 30,
+        turnAhead: (t: Int, metersToFraming: Double) -> TurnAhead? = { _, meters -> TurnAhead("r1/0/4", meters) },
+        onRoute: (t: Int) -> Boolean = { true },
+    ): List<Double> {
+        val focus = LaneFocus(tuning)
+        val goals = ArrayList<Double>()
+        for (t in 0..seconds) {
+            val routeMeters = 25.0 * t
+            val ahead = 50.0 - routeMeters
+            val choices = if (ahead >= 0.0) listOf(choice(5, 3, ahead = ahead, atManeuver = true, key = "r1/0/3/end")) else emptyList()
+            val turn = if (ahead >= 0.0) null else turnAhead(t, framingAfterHold + 25.0 * (5 - t))
+            focus.onProgress(t.toDouble(), routeMeters, choices, 25.0, onRoute = onRoute(t), turnAhead = turn)
+            goals.add(focus.goal)
+        }
+        return goals
+    }
+
+    @Test
+    fun `a turn framed within 13,5 s of driving after the hold keeps the view in`() {
+        // At 25 m/s the descent and the coalesce, 13.5 s of driving, are 337.5 m.
+        for ((seconds, bridged) in listOf(5.0 to true, 13.0 to true, 13.5 to true, 14.0 to false)) {
+            val goals = turnAfterHold(framingAfterHold = 25.0 * seconds)
+            assertEquals(1.0, goals[4], "held for 2 s past the choice")
+            assertEquals(if (bridged) 1.0 else 0.0, goals[5], "framing $seconds s after the hold")
+        }
+        // Without a turn ahead the view is let go at the end of the hold, as it always was.
+        assertEquals(0.0, turnAfterHold(125.0, turnAhead = { _, _ -> null })[5])
+    }
+
+    @Test
+    fun `the turn is judged at the speed the car has when the hold ends`() {
+        // Within 13.5 s at 25 m/s while the hold lasts; the car has slowed to 10 m/s when it ends,
+        // and the framing is 30 s away then: no reason to stay close.
+        val focus = LaneFocus(tuning)
+        focus.onProgress(0.0, 0.0, listOf(choice(5, 3, ahead = 20.0, atManeuver = true, key = "r1/0/3/end")), 25.0)
+        focus.onProgress(1.0, 25.0, emptyList(), 25.0, turnAhead = TurnAhead("r1/0/4", 300.0))
+        focus.onProgress(2.0, 45.0, emptyList(), 20.0, turnAhead = TurnAhead("r1/0/4", 280.0))
+        assertEquals(1.0, focus.goal, "still in the hold")
+        focus.onProgress(3.0, 55.0, emptyList(), 10.0, turnAhead = TurnAhead("r1/0/4", 270.0))
+        assertEquals(0.0, focus.goal)
+        // The same turn at the same place, the car still at 25 m/s: kept in.
+        val fast = LaneFocus(tuning)
+        fast.onProgress(0.0, 0.0, listOf(choice(5, 3, ahead = 20.0, atManeuver = true, key = "r1/0/3/end")), 25.0)
+        fast.onProgress(1.0, 25.0, emptyList(), 25.0, turnAhead = TurnAhead("r1/0/4", 300.0))
+        fast.onProgress(3.0, 75.0, emptyList(), 25.0, turnAhead = TurnAhead("r1/0/4", 250.0))
+        assertEquals(1.0, fast.goal)
+    }
+
+    @Test
+    fun `the view kept for a turn is let go where the turn's framing begins`() {
+        // Framing 5 s after the hold, 125 m: it begins at 10 s, where the junction view takes over.
+        val goals = turnAfterHold(framingAfterHold = 125.0)
+        assertTrue(goals.subList(0, 10).all { it == 1.0 }, "$goals")
+        assertTrue(goals.subList(10, goals.size).all { it == 0.0 }, "never held past it: $goals")
+        // A framing that has begun already keeps nothing.
+        assertEquals(0.0, turnAfterHold(framingAfterHold = 0.0)[5])
+        assertEquals(0.0, turnAfterHold(framingAfterHold = -40.0)[5])
+    }
+
+    @Test
+    fun `the view kept for a turn is let go on another step or off the route`() {
+        // The turn was on the step after the choice; a new route or the next step names another.
+        val newStep = turnAfterHold(250.0, turnAhead = { t, meters -> TurnAhead(if (t < 8) "r1/0/4" else "r2/0/1", meters) })
+        assertEquals(1.0, newStep[7])
+        assertEquals(0.0, newStep[8])
+        // A step whose maneuver the camera does not frame is no turn to wait for.
+        val notFramed = turnAfterHold(250.0, turnAhead = { t, meters -> if (t < 8) TurnAhead("r1/0/4", meters) else null })
+        assertEquals(1.0, notFramed[7])
+        assertEquals(0.0, notFramed[8])
+        // Off the route.
+        val off = turnAfterHold(250.0, onRoute = { t -> t < 8 })
+        assertEquals(1.0, off[7])
+        assertEquals(0.0, off[8])
+        // And once let go it is not taken up again for the same turn.
+        val back = turnAfterHold(250.0, onRoute = { t -> t != 8 })
+        assertEquals(0.0, back[8])
+        assertTrue(back.subList(8, back.size).all { it == 0.0 }, "$back")
+    }
+
+    @Test
+    fun `a run-up whose ramp ends in a turn stays close until the turn is framed`() {
+        // The design's S11, synthetic: no points on the way, the exit at the gore, a turn 400 m
+        // past the gore, framed from 180 m before it. 27 m/s, one update a second from 2,800 m.
+        val latch = RunUpLatch(tuning)
+        val focus = LaneFocus(tuning)
+        val goals = ArrayList<Pair<Double, Double>>()
+        for (t in 0..120) {
+            val toGore = 2_800.0 - 27.0 * t
+            val choices = if (toGore >= 0.0) listOf(LaneChoice("r1/0/3/end", toGore, 5, 1, 1, onFreeway = true, atManeuver = true)) else emptyList()
+            latch.onProgress(t.toDouble(), choices, 27.0)
+            val turn = if (toGore < 0.0) TurnAhead("r1/0/4", 400.0 + toGore - tuning.maneuverFramingMeters) else null
+            focus.onProgress(t.toDouble(), 27.0 * t, choices, 27.0, turnAhead = turn, runUpKey = latch.exitKey)
+            goals.add(toGore to focus.goal)
+        }
+        // In at the exit's own window, 675 m at 27 m/s: the update at 667 m.
+        assertEquals(667.0, goals.first { it.second == 1.0 }.first, 1e-9)
+        // Held past the gore until the turn's framing begins, 220 m past it: let go at 224 m.
+        assertEquals(-224.0, goals.first { it.first < 0.0 && it.second == 0.0 }.first, 1e-9)
+        assertTrue(goals.filter { it.first in -197.0..667.0 }.all { it.second == 1.0 })
+    }
+
     @Test
     fun `the end of guidance forgets the run-up`() {
         val focus = LaneFocus(tuning)
