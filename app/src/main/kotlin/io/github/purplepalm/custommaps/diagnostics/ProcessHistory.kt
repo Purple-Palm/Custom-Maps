@@ -11,17 +11,26 @@ import androidx.annotation.RequiresApi
 import io.github.purplepalm.custommaps.nav.debug.AnrTrace
 import io.github.purplepalm.custommaps.nav.debug.ExitKey
 import io.github.purplepalm.custommaps.nav.debug.LoggedExits
+import io.github.purplepalm.custommaps.nav.debug.StartMatch
+import io.github.purplepalm.custommaps.nav.debug.StartRecord
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
+import io.github.purplepalm.custommaps.nav.debug.ThisStart
 import io.github.purplepalm.custommaps.nav.debug.UrgentDebugLog
 import io.github.purplepalm.custommaps.nav.debug.error
 import java.io.File
 import java.io.IOException
 import java.time.Instant
+import java.util.concurrent.Executor
+import java.util.function.Consumer
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * What the debug log cannot record by itself: how earlier processes ended (an uncaught exception,
  * a crash in native code, an ANR, the system or the user killing it) and why this one started.
- * Android keeps both. [logOnStart] reads them once per process; call it off the main thread.
+ * Android keeps both. [logOnStart] reads them once per process; call it off the main thread. On
+ * Android 15 and newer every start writes one "process_start" line.
  */
 internal class ProcessHistory(private val context: Context, private val debugLog: UrgentDebugLog) {
 
@@ -30,7 +39,8 @@ internal class ProcessHistory(private val context: Context, private val debugLog
     /** Not backed up: on another phone the records it points to do not exist. */
     private val exitsLogged = LoggedExits(File(context.noBackupFilesDir, EXITS_LOGGED_FILE))
 
-    fun logOnStart() {
+    /** Suspends at most [START_WAIT_MILLIS] on Android 15 and newer, while a start completes. */
+    suspend fun logOnStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) logEarlierExits()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) logThisStart()
     }
@@ -67,14 +77,78 @@ internal class ProcessHistory(private val context: Context, private val debugLog
     @RequiresApi(Build.VERSION_CODES.R)
     private fun ApplicationExitInfo.key() = ExitKey(pid, timestamp)
 
+    /**
+     * Writes one "process_start" line for this start. Android's newest record is often not this
+     * process's: the record of a start that launches an activity is noted before the process has a
+     * pid. So the record is looked for among the newest few ([ThisStart]); when none is this one
+     * yet, Android hands over the start as it completes, at its first frame; after
+     * [START_WAIT_MILLIS] without that, the records are looked at once more, as for a start without
+     * an activity. Without any, the line says that no record was found.
+     */
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
-    private fun logThisStart() {
-        val start = try {
-            activityManager?.getHistoricalProcessStartReasons(1)?.firstOrNull()
+    private suspend fun logThisStart() {
+        val manager = activityManager ?: return
+        val pid = Process.myPid()
+        findThisStart(manager, pid)?.let { (start, match) -> return logStart(start, match) }
+        val completed = withTimeoutOrNull(START_WAIT_MILLIS) { completedStart(manager) }
+        if (completed != null && ThisStart.isCompletedStart(completed.record(), pid)) return logStart(completed, StartMatch.COMPLETE)
+        findThisStart(manager, pid)?.let { (start, match) -> return logStart(start, match) }
+        debugLog.log("process_start", mapOf("found" to false, "records" to startRecords(manager).size))
+    }
+
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    private fun startRecords(manager: ActivityManager): List<ApplicationStartInfo> =
+        try {
+            manager.getHistoricalProcessStartReasons(MAX_STARTS)
         } catch (e: RuntimeException) {
-            null
+            emptyList()
         }
-        if (start == null || start.pid != Process.myPid()) return
+
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    private fun findThisStart(manager: ActivityManager, pid: Int): Pair<ApplicationStartInfo, StartMatch>? {
+        val records = startRecords(manager)
+        val (index, match) = ThisStart.find(
+            records.map { it.record() },
+            pid,
+            requestedUptimeMillis = Process.getStartRequestedUptimeMillis(),
+            startedUptimeMillis = Process.getStartUptimeMillis(),
+        ) ?: return null
+        return records[index] to match
+    }
+
+    /**
+     * The next start of this app that Android completes, which for a start with an activity is
+     * this one; Android hands it over once the first frame is drawn. The listener goes when the
+     * wait is given up.
+     */
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    private suspend fun completedStart(manager: ActivityManager): ApplicationStartInfo =
+        suspendCancellableCoroutine { continuation ->
+            val listener = Consumer<ApplicationStartInfo> { start -> if (continuation.isActive) continuation.resume(start) }
+            try {
+                manager.addApplicationStartInfoCompletionListener(DIRECT, listener)
+            } catch (e: RuntimeException) {
+                // Refused: the wait runs out, and the records are looked at once more.
+                debugLog.error("process_start.listener", e)
+            }
+            continuation.invokeOnCancellation {
+                try {
+                    manager.removeApplicationStartInfoCompletionListener(listener)
+                } catch (e: RuntimeException) {
+                    // Already gone with its one call.
+                }
+            }
+        }
+
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    private fun ApplicationStartInfo.record() = StartRecord(
+        pid = pid,
+        cold = startType == ApplicationStartInfo.START_TYPE_COLD,
+        bindUptimeMillis = startupTimestamps[ApplicationStartInfo.START_TIMESTAMP_BIND_APPLICATION]?.let { it / NANOS_PER_MILLI },
+    )
+
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    private fun logStart(start: ApplicationStartInfo, match: StartMatch) {
         debugLog.log(
             "process_start",
             mapOf(
@@ -86,6 +160,12 @@ internal class ProcessHistory(private val context: Context, private val debugLog
                     startComponentName(start.startComponent)
                 } else {
                     null
+                },
+                // How the record was told to be this start's: pid, bindTime or complete.
+                "matched" to when (match) {
+                    StartMatch.PID -> "pid"
+                    StartMatch.BIND_TIME -> "bindTime"
+                    StartMatch.COMPLETE -> "complete"
                 },
             ).filterValues { it != null },
         )
@@ -126,6 +206,17 @@ internal class ProcessHistory(private val context: Context, private val debugLog
 
         /** Android keeps a short ring buffer per app; the first start after an update logs all of it. */
         const val MAX_EXITS = 16
+
+        /** This start's record is among the newest few: later launches in this process add records too. */
+        const val MAX_STARTS = 8
+
+        /** How long a start may take to complete, from the process's start to its first frame. */
+        const val START_WAIT_MILLIS = 15_000L
+
+        const val NANOS_PER_MILLI = 1_000_000L
+
+        /** Runs the listener on the thread Android calls back on; it only resumes the wait. */
+        val DIRECT = Executor { it.run() }
 
         // The constants are compiled in; phones that predate a reason never report it.
         @SuppressLint("InlinedApi")

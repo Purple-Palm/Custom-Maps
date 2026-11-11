@@ -153,3 +153,64 @@ object AnrTrace {
         return mapOf("subject" to subject, "mainThread" to stack)
     }
 }
+
+/**
+ * One of Android's records of a start of this app, as far as telling this process's own start
+ * needs: [pid], the process as Android noted it, 0 when the process had none yet; [cold], the
+ * start of a new process; [bindUptimeMillis], when Android bound the app to its process, on the
+ * uptime clock, null when the record has no such time.
+ */
+data class StartRecord(val pid: Int, val cold: Boolean, val bindUptimeMillis: Long?)
+
+/** How the record of this process's start was told from the others. */
+enum class StartMatch {
+
+    /** It carries this process's pid. */
+    PID,
+
+    /** Android bound the app to a process while this one was being started. */
+    BIND_TIME,
+
+    /** Android handed it over as the start that just completed, with its first frame. */
+    COMPLETE,
+}
+
+/**
+ * Finds the record of this process's start among the ones Android keeps (Android 15 and newer).
+ *
+ * The newest record is not always it: Android notes the pid of a start that launches an activity
+ * when the launch is noted, often before the process has one, so the record says pid 0; and a
+ * record can be added only later. A record is this process's start when it is the start of a new
+ * process and carries this pid, or when Android bound the app to its process between the moment
+ * this process was asked for and the moment it began to run, [SLACK_MILLIS] either way.
+ */
+object ThisStart {
+
+    /** Rounding of the two clocks, and the time between Android's note and the process's own. */
+    const val SLACK_MILLIS = 1_000L
+
+    /**
+     * The index in [records], newest first, of this process's start, and how it was told; null
+     * when no record is.
+     *
+     * @param pid this process
+     * @param requestedUptimeMillis when this process was asked for, on the uptime clock
+     * @param startedUptimeMillis when this process began to run, on the uptime clock
+     */
+    fun find(records: List<StartRecord>, pid: Int, requestedUptimeMillis: Long, startedUptimeMillis: Long): Pair<Int, StartMatch>? {
+        val byPid = records.indexOfFirst { it.cold && it.pid == pid }
+        if (byPid >= 0) return byPid to StartMatch.PID
+        val byBind = records.indexOfFirst { record ->
+            val bound = record.bindUptimeMillis
+            record.cold && bound != null && bound in (requestedUptimeMillis - SLACK_MILLIS)..(startedUptimeMillis + SLACK_MILLIS)
+        }
+        return if (byBind >= 0) byBind to StartMatch.BIND_TIME else null
+    }
+
+    /**
+     * Whether a record that Android handed over as just completed is this process's start: the
+     * start of a new process, with this pid or with none noted yet. A later launch of an activity
+     * in this process is no start of it.
+     */
+    fun isCompletedStart(record: StartRecord, pid: Int): Boolean = record.cold && (record.pid == pid || record.pid == 0)
+}
