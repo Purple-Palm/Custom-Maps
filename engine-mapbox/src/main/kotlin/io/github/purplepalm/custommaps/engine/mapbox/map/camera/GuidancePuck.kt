@@ -1,11 +1,15 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
+import android.animation.TypeEvaluator
 import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
 import com.mapbox.common.location.Location
+import com.mapbox.geojson.Point
 import com.mapbox.maps.plugin.locationcomponent.LocationConsumer
 import com.mapbox.maps.plugin.locationcomponent.LocationProvider
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import com.mapbox.navigation.ui.maps.location.NavigationLocationProvider
+import io.github.purplepalm.custommaps.nav.camera.PuckGlide
 
 /**
  * The puck during guidance: it glides to each matched position of the navigator, through the points
@@ -26,7 +30,8 @@ internal class GuidancePuck : LocationProvider {
 
     /**
      * Whether a jump of the matched position, as when the navigator matches the car to another road,
-     * moves the puck there at once. Otherwise it slides across the map like any other move.
+     * moves the puck there at once, from where it glides on ([PuckGlide]). Otherwise it slides
+     * across the map like any other move.
      */
     var jumpOnTeleport = false
 
@@ -47,8 +52,41 @@ internal class GuidancePuck : LocationProvider {
     }
 
     fun onFix(result: LocationMatcherResult) {
-        val jump = if (jumpOnTeleport && result.isTeleport) JUMP else null
-        provider.changePosition(result.enhancedLocation, result.keyPoints, jump, jump)
+        val location = result.enhancedLocation
+        if (!jumpOnTeleport || !result.isTeleport) {
+            provider.changePosition(location, result.keyPoints, null, null)
+            return
+        }
+        // Put on the new position at once, and from there on along the road for one glide, so the
+        // car does not stand still until the next position.
+        val ahead = PuckGlide.ahead(location.latitude, location.longitude, location.bearing, location.speed, glideMillis / MILLIS_PER_SECOND)
+        if (ahead == null) {
+            provider.changePosition(location, result.keyPoints, JUMP, JUMP)
+            return
+        }
+        val glide = JumpThenGlide(
+            from = Point.fromLngLat(location.longitude, location.latitude),
+            to = Point.fromLngLat(ahead.longitude, ahead.latitude),
+        )
+        provider.changePosition(location, emptyList(), latLngTransitionOptions = glide.options, bearingTransitionOptions = JUMP)
+    }
+
+    /**
+     * The puck's animation after a jump: it starts on [from], the new position, whatever point the
+     * animation was given to start from, and goes on to [to] at a steady speed. The animation has
+     * two values, where the puck is drawn and the new position; this replaces both.
+     */
+    private class JumpThenGlide(private val from: Point, private val to: Point) : TypeEvaluator<Point> {
+
+        override fun evaluate(fraction: Float, startValue: Point, endValue: Point): Point = Point.fromLngLat(
+            from.longitude() + fraction * (to.longitude() - from.longitude()),
+            from.latitude() + fraction * (to.latitude() - from.latitude()),
+        )
+
+        val options: ValueAnimator.() -> Unit = {
+            interpolator = LINEAR
+            setEvaluator(this@JumpThenGlide)
+        }
     }
 
     override fun registerLocationConsumer(locationConsumer: LocationConsumer) {
@@ -73,5 +111,9 @@ internal class GuidancePuck : LocationProvider {
         const val SMOOTH_GLIDE_MS = 1_100L
 
         private val JUMP: ValueAnimator.() -> Unit = { duration = 0L }
+
+        private val LINEAR = LinearInterpolator()
+
+        private const val MILLIS_PER_SECOND = 1_000.0
     }
 }
