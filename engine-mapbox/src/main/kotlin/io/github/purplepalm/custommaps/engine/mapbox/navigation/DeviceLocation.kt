@@ -1,9 +1,11 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
 import android.os.SystemClock
+import com.mapbox.bindgen.Value
 import com.mapbox.common.location.AccuracyLevel
 import com.mapbox.common.location.DeviceLocationProvider
 import com.mapbox.common.location.Location
+import com.mapbox.common.location.LocationExtraKeys
 import com.mapbox.common.location.LocationProviderRequest
 import com.mapbox.common.location.LocationServiceFactory
 import com.mapbox.geojson.Point
@@ -20,13 +22,17 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  *
  * @param bearing the direction of travel in degrees clockwise from north; null when none came
  * @param speed the speed over the ground in meters a second; null when none came
- * @param ageMillis how long ago the position was measured; never below zero
+ * @param ageMillis how long ago the position was measured; never below zero, and zero for a
+ *   [replayed] one
+ * @param replayed a position of a simulated drive ([isReplayed]): the car's position at the
+ *   moment it is played, stamped on the replayer's clock, which is not the phone's
  */
 internal data class DeviceFix(
     val point: Point,
     val bearing: Double?,
     val speed: Double?,
     val ageMillis: Long,
+    val replayed: Boolean = false,
 ) {
 
     /** True when the position is no older than [DeviceLocation.MAX_AGE]: it says where the car is now. */
@@ -43,13 +49,21 @@ internal data class DeviceFix(
         /** From this speed on a car counts as moving, and its direction as known: about 7 mph. */
         const val MOVING_METERS_PER_SECOND = 3.0
 
-        /** The position of [location] with its age at the given moment; see [fixAgeMillis]. */
-        fun of(location: Location, nowNanos: Long, nowMillis: Long): DeviceFix = DeviceFix(
-            point = Point.fromLngLat(location.longitude, location.latitude),
-            bearing = location.bearing,
-            speed = location.speed,
-            ageMillis = fixAgeMillis(location.monotonicTimestamp, location.timestamp, nowNanos, nowMillis).coerceAtLeast(0L),
-        )
+        /**
+         * The position of [location] with its age at the given moment; see [fixAgeMillis]. A
+         * replayed position is as new as the moment it is played: its own times run ahead of the
+         * phone's clock and say nothing about its age.
+         */
+        fun of(location: Location, nowNanos: Long, nowMillis: Long): DeviceFix {
+            val replayed = location.isReplayed()
+            return DeviceFix(
+                point = Point.fromLngLat(location.longitude, location.latitude),
+                bearing = location.bearing,
+                speed = location.speed,
+                ageMillis = if (replayed) 0L else fixAgeMillis(location.monotonicTimestamp, location.timestamp, nowNanos, nowMillis).coerceAtLeast(0L),
+                replayed = replayed,
+            )
+        }
 
         /** The position of [location] with its age now. Reads two clocks and nothing else. */
         fun of(location: Location): DeviceFix = of(location, SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis())
@@ -66,6 +80,17 @@ internal fun fixAgeMillis(monotonicNanos: Long?, timestampMillis: Long, nowNanos
     if (monotonicNanos != null) (nowNanos - monotonicNanos) / NANOS_PER_MILLI else nowMillis - timestampMillis
 
 private const val NANOS_PER_MILLI = 1_000_000L
+
+/**
+ * Whether this position was played by a simulated drive. The replayer marks its positions as mock
+ * positions (`LocationExtraKeys.IS_MOCK`), and the navigator keeps the mark on the positions it
+ * matches; so does Android for positions of a mock location app, which count the same. Their times
+ * are those of the replayer, which runs ahead of the phone's clock.
+ */
+internal fun Location.isReplayed(): Boolean {
+    val extras = extra?.contents as? Map<*, *> ?: return false
+    return (extras[LocationExtraKeys.IS_MOCK] as? Value)?.contents == true
+}
 
 /** When this position was measured, on both of its clocks, as [StaleStart] compares them. */
 internal fun Location.fixTime(): FixTime = FixTime(elapsedNanos = monotonicTimestamp, wallMillis = timestamp)

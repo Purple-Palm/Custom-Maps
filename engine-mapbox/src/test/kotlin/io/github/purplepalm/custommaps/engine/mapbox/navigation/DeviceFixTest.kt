@@ -1,5 +1,8 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import com.mapbox.bindgen.Value
+import com.mapbox.common.location.Location
+import com.mapbox.common.location.LocationExtraKeys
 import com.mapbox.geojson.Point
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -76,5 +79,47 @@ class DeviceFixTest {
         assertEquals(4_000L, fixAgeMillis(null, measured, nowNanos = 123L, nowMillis = measured + 4_000L))
         // A wall clock that was set back in between gives an age below zero, which callers bring to zero.
         assertEquals(-1_000L, fixAgeMillis(null, measured, nowNanos = 123L, nowMillis = measured - 1_000L))
+    }
+
+    /** A position as the replayer of a simulated drive makes it: marked as mock, stamped 100 s ahead. */
+    private fun replayedLocation(mock: Boolean): Location = Location.Builder()
+        .latitude(0.001)
+        .longitude(0.002)
+        .timestamp(946_684_900_000L)
+        .monotonicTimestamp(105_000_000_000L)
+        .speed(12.0)
+        .bearing(44.0)
+        .extra(Value.valueOf(hashMapOf(LocationExtraKeys.IS_MOCK to Value(mock))))
+        .build()
+
+    @Test
+    fun `a replayed position is as new as the moment it is played`() {
+        // Read at 5 s of the monotonic clock and on 2000-01-01 00:00:00 UTC: the replayer's own
+        // times lie 100 s ahead.
+        val fix = DeviceFix.of(replayedLocation(mock = true), nowNanos = 5_000_000_000L, nowMillis = 946_684_800_000L)
+
+        assertTrue(fix.replayed)
+        assertEquals(0L, fix.ageMillis)
+        assertTrue(fix.live)
+        assertEquals(mapOf("ageMs" to null, "speedMps" to 12.0, "bearing" to 44.0, "replayed" to true), fix.debugFields())
+    }
+
+    @Test
+    fun `a position from the phone keeps its age`() {
+        val location = replayedLocation(mock = false)
+
+        val fix = DeviceFix.of(location, nowNanos = 135_000_000_000L, nowMillis = 946_685_000_000L)
+
+        assertFalse(fix.replayed)
+        assertFalse(location.isReplayed())
+        assertEquals(30_000L, fix.ageMillis)
+        assertEquals(mapOf("ageMs" to 30_000L, "speedMps" to 12.0, "bearing" to 44.0), fix.debugFields())
+    }
+
+    @Test
+    fun `a position without the mark is the phone's`() {
+        val plain = Location.Builder().latitude(0.0).longitude(0.0).timestamp(946_684_800_000L).build()
+
+        assertFalse(plain.isReplayed())
     }
 }

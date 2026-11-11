@@ -215,15 +215,23 @@ internal fun LocationMatcherResult.debugFields(): Map<String, Any?> = mapOf(
     "keyPoints" to keyPoints.size,
 )
 
-internal fun Location.debugFields(): Map<String, Any?> = mapOf(
-    "lat" to latitude,
-    "lon" to longitude,
-    "speedMps" to speed,
-    "bearing" to bearing,
-    "accuracyMeters" to horizontalAccuracy,
-    "source" to source,
-    "fixAgeMs" to ageMillis(),
-)
+/**
+ * A position for the debug log. "fixAgeMs" is how old the position is; a replayed one, of a
+ * simulated drive, has "replayed" true instead, since its times are the replayer's ([isReplayed]).
+ */
+internal fun Location.debugFields(): Map<String, Any?> {
+    val replayed = isReplayed()
+    val fields = mapOf(
+        "lat" to latitude,
+        "lon" to longitude,
+        "speedMps" to speed,
+        "bearing" to bearing,
+        "accuracyMeters" to horizontalAccuracy,
+        "source" to source,
+        "fixAgeMs" to if (replayed) null else ageMillis(),
+    )
+    return if (replayed) fields + ("replayed" to true) else fields
+}
 
 /**
  * What a route request says about the position it starts from: how old it was, and the speed and
@@ -231,10 +239,10 @@ internal fun Location.debugFields(): Map<String, Any?> = mapOf(
  * fresh position of a moving car ([DeviceFix.originBearing]).
  */
 internal fun DeviceFix.debugFields(): Map<String, Any?> = mapOf(
-    "ageMs" to ageMillis,
+    "ageMs" to ageMillis.takeUnless { replayed },
     "speedMps" to speed,
     "bearing" to bearing,
-)
+) + if (replayed) mapOf("replayed" to true) else emptyMap()
 
 /** How old the fix is now, when its line is made; see [fixAgeMillis]. */
 private fun Location.ageMillis(): Long =
