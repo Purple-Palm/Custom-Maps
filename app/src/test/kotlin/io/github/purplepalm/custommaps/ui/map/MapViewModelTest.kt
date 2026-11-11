@@ -42,8 +42,8 @@ import org.junit.jupiter.api.Test
 class MapViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
-    private val place = Place("Blue Bottle Coffee", "1 Ferry Building, San Francisco, CA", GeoPoint(37.7955, -122.3937))
-    private val suggestion = PlaceSuggestion("s1", "Blue Bottle Coffee", "Ferry Building", null)
+    private val place = Place("Oak Cafe", "1 Oak Street", GeoPoint(0.0100, 0.0200))
+    private val suggestion = PlaceSuggestion("s1", "Oak Cafe", "Oak Street", null)
 
     private lateinit var navigation: FakeNavigationEngine
     private lateinit var search: FakeSearchProvider
@@ -128,7 +128,7 @@ class MapViewModelTest {
         viewModel.onSuggestionPicked(suggestion)
         advanceUntilIdle()
         assertEquals(place, viewModel.state.value.selectedPlace)
-        assertEquals("Blue Bottle Coffee", viewModel.state.value.searchText)
+        assertEquals("Oak Cafe", viewModel.state.value.searchText)
         assertEquals(listOf("blue"), search.queries)
     }
 
@@ -217,7 +217,7 @@ class MapViewModelTest {
 
     @Test
     fun `only the latest pick is kept`() = runTest(dispatcher) {
-        val other = Place("Sightglass Coffee", "270 7th St, San Francisco, CA", GeoPoint(37.7770, -122.4085))
+        val other = Place("Pine Cafe", "2 Pine Street", GeoPoint(0.0300, 0.0100))
         val viewModel = viewModel()
         search.resolveGate = CompletableDeferred()
         viewModel.onSuggestionPicked(suggestion)
@@ -225,7 +225,7 @@ class MapViewModelTest {
         val slowGate = search.resolveGate
         search.resolveGate = null
         search.place = other
-        viewModel.onSuggestionPicked(PlaceSuggestion("s2", "Sightglass Coffee", "7th St", null))
+        viewModel.onSuggestionPicked(PlaceSuggestion("s2", "Pine Cafe", "Pine Street", null))
         runCurrent()
         search.place = place
         slowGate?.complete(Unit)

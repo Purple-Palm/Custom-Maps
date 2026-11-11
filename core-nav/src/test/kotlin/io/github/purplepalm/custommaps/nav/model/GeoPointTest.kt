@@ -9,9 +9,9 @@ class GeoPointTest {
 
     @Test
     fun `accepts coordinates in range`() {
-        val point = GeoPoint(37.7749, -122.4194)
-        assertEquals(37.7749, point.latitude)
-        assertEquals(-122.4194, point.longitude)
+        val point = GeoPoint(0.25, -0.5)
+        assertEquals(0.25, point.latitude)
+        assertEquals(-0.5, point.longitude)
     }
 
     @Test
