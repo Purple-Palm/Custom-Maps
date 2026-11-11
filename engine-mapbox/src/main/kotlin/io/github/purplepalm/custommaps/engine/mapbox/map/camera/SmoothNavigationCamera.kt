@@ -19,6 +19,7 @@ import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSou
 import com.mapbox.navigation.ui.maps.camera.data.ViewportData
 import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserver
 import io.github.purplepalm.custommaps.nav.camera.Angles
+import io.github.purplepalm.custommaps.nav.camera.CameraSettling
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
@@ -441,6 +442,22 @@ internal class SmoothNavigationCamera(
         maxGapMs = 0.0
         return fields
     }
+
+    // Reads what the frames left; computes nothing new.
+    override fun settling(): CameraSettling = CameraSettling(
+        zoomGap = toZoom - zoom.value,
+        zoomSpeed = zoom.velocity,
+        pitchGap = toPitch - pitch.value,
+        pitchSpeed = pitch.velocity,
+        bearingGap = Angles.wrap180(toBearing - bearing.value),
+        bearingSpeed = bearing.velocity,
+        paddingGap = maxOf(
+            abs(toPad[TOP] - pad[TOP].value),
+            abs(toPad[LEFT] - pad[LEFT].value),
+            abs(toPad[BOTTOM] - pad[BOTTOM].value),
+            abs(toPad[RIGHT] - pad[RIGHT].value),
+        ),
+    )
 
     override fun destroy() {
         cancelFrame()

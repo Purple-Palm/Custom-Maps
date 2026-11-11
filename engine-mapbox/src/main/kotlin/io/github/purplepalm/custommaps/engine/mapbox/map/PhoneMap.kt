@@ -244,6 +244,9 @@ class PhoneMap internal constructor(
      */
     val accessDenied: StateFlow<Boolean> = _accessDenied.asStateFlow()
 
+    /** Watches a camera that ended a move until its springs are at rest ([watchSettling]); null otherwise. */
+    private var settleWatch: Job? = null
+
     /** Tile and style errors; offline, the same error comes for every tile, so repeats are only counted. */
     private val mapErrorFolder = RepeatFolder(debugLog, scope)
 
@@ -346,6 +349,8 @@ class PhoneMap internal constructor(
             val tookMs = if (transitionStartedAt != 0L && !moving) now - transitionStartedAt else null
             transitionStartedAt = if (moving) now else 0L
             debugLog.log("camera_state", mapOf("state" to state, "ms" to tookMs, "style" to cameraStyle).filterValues { it != null })
+            settleWatch?.cancel()
+            if (tookMs != null) watchSettling(state, now)
         }
 
         // Says why the camera stopped following: a gesture, the compass, or something else.
@@ -482,6 +487,7 @@ class PhoneMap internal constructor(
         if (style == cameraStyle) return
         // What the camera was doing is asked of the new one again, so a drive goes on being followed.
         val mode = _cameraMode.value
+        settleWatch?.cancel()
         camera.destroy()
         // The old camera took back what it had set on the data source, and the frames are set up
         // for the new style and the lane zoom. The frame the data source holds was computed for
@@ -634,6 +640,28 @@ class PhoneMap internal constructor(
                     // The car has no position to go to yet.
                     camera.requestIdle()
                 }
+            }
+        }
+    }
+
+    /**
+     * A move of the camera into [state] ended at [endedAt]; its springs still have some way to go.
+     * Ten times a second, for at most [SETTLE_WATCH_MS], the camera is asked how far it still is,
+     * and one "camera_settled" line says when it came to rest ("ms" after the move's end), or that
+     * it had not by then, with how far it still was. Only a camera with springs of its own, Smooth
+     * follow, has anything to say; nothing runs on the display's frames for it.
+     */
+    private fun watchSettling(state: String, endedAt: Long) {
+        settleWatch = scope.launch {
+            while (true) {
+                val settling = camera.settling() ?: return@launch
+                val waited = SystemClock.elapsedRealtime() - endedAt
+                if (settling.atRest || waited >= SETTLE_WATCH_MS) {
+                    val fields = mapOf("state" to state, "ms" to waited, "settled" to settling.atRest)
+                    debugLog.log("camera_settled", if (settling.atRest) fields else fields + settling.gapFields())
+                    return@launch
+                }
+                delay(SETTLE_POLL_MS)
             }
         }
     }
@@ -1076,5 +1104,9 @@ class PhoneMap internal constructor(
 
         /** The map reports its frame rate about once a second; an older value means it stopped drawing. */
         private const val FPS_FRESH_NANOS = 2_000_000_000L
+
+        /** How long, and how often, a camera that ended a move is asked whether its springs are at rest. */
+        private const val SETTLE_WATCH_MS = 5_000L
+        private const val SETTLE_POLL_MS = 100L
     }
 }

@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import io.github.purplepalm.custommaps.nav.camera.CameraSettling
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
@@ -81,6 +82,12 @@ internal interface GuidanceCamera {
      * since the last call and start again.
      */
     fun diagnostics(): Map<String, Any?>
+
+    /**
+     * How far the camera's own springs still are from where they go, as of its last frame; null for
+     * a camera without springs of its own. Read now and then after a move between modes.
+     */
+    fun settling(): CameraSettling? = null
 
     /**
      * Stops for good, as when another camera takes its place: the camera lets go of the map, takes
