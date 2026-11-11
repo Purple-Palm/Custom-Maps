@@ -15,11 +15,11 @@
 #
 # Secrets: the decoded key, the signed JWT, the access token and the upload session URL are never
 # printed and never put on a command line, which other processes can read. They exist only as files
-# in a private temporary folder (mode 700, files 600) that is deleted on exit; the key files are
-# deleted as soon as the JWT is signed. On GitHub Actions the JWT, the access token, the session URL
-# and its upload_id are also registered with ::add-mask::, so the runner hides them should anything
-# print them. Errors show only Google's error text, with email addresses and long numbers masked,
-# because the logs of a public repository are public.
+# in a private temporary folder (mode 700, files 600) that is deleted on exit, also when the job is
+# cancelled; the key files are deleted as soon as the JWT is signed. On GitHub Actions the JWT, the
+# access token, the session URL and its upload_id are also registered with ::add-mask::, so the
+# runner hides them should anything print them. Errors show only Google's error text, with email
+# addresses and long numbers masked, because the logs of a public repository are public.
 
 set +x # Never trace this script: a trace would print the access token.
 set -euo pipefail
@@ -107,9 +107,11 @@ cleanup() {
     rm -rf "$work"
     exit "$status"
 }
+# A cancelled run on GitHub sends SIGINT and, 7.5 s later, SIGTERM to the step's own process, which
+# is this script (the workflow starts it with exec); the SIGTERM at the latest ends it and runs this
+# cleanup at once, even during an upload. There is deliberately no INT or TERM trap: bash would hold
+# it back until the running curl ends, and the runner kills the script 2.5 s after the SIGTERM.
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 # Registers a value derived from a secret with the GitHub runner, which then hides it in the log.
 # printf is a shell builtin, so the value never appears on a command line.

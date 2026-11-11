@@ -131,7 +131,9 @@ jobs:
           path: ${{ runner.temp }}/bundle
           skip-decompress: true
 
-      # Of all steps, only this one has the Google Play key in its environment.
+      # Of all steps, only this one has the Google Play key in its environment. exec, as in the
+      # build job: the signals of a cancelled run then reach the script, which deletes its unfinished
+      # edit and its private folder at once.
       - name: Upload to internal testing
         if: env.PLAY_KEY_SET == 'true'
         env:
@@ -141,5 +143,5 @@ jobs:
           shopt -s nullglob
           bundles=("$RUNNER_TEMP"/bundle/*)
           [[ ${#bundles[@]} -eq 1 ]] || { echo "Expected one downloaded bundle, found ${#bundles[@]}." >&2; exit 1; }
-          scripts/play-upload.sh --package io.github.purplepalm.custommaps --track internal \
+          exec scripts/play-upload.sh --package io.github.purplepalm.custommaps --track internal \
             --version-code "$VERSION_CODE" "${bundles[0]}"

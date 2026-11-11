@@ -330,6 +330,8 @@ settings say. The job:
 - sends the final commit to Google Play only once; when no clear answer comes back, it says that the
   build may already be on internal testing, and **Re-run failed jobs** then publishes it or finds it
   there;
+- stops within seconds when the run is cancelled and deletes its unfinished edit, so nothing is
+  published; if the final commit was already sent, it says so, as when no answer comes back;
 - says in plain words what to do when Google refuses, for example when the first rollout by hand is
   missing or the service account lacks the permission.
 
