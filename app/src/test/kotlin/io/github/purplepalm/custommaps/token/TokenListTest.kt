@@ -146,6 +146,10 @@ class TokenListTest {
     fun `renaming keeps the active entry`() {
         val list = saved(3).activate("t2")
 
+        // Another entry renamed, before or after the active one: the active one stays.
+        assertEquals("t2", list.rename("t3", "Test").activeId)
+        assertEquals("t2", list.rename("t1", "Office").activeId)
+
         val renamed = list.rename("t3", "Test").rename("t2", "Spare")
 
         assertEquals("t2", renamed.activeId)
@@ -174,6 +178,9 @@ class TokenListTest {
 
         assertEquals("t2", list.activeId)
         assertEquals(listOf("Token 2", "Token 3"), list.names())
+        // Also when the active one is not the first entry left.
+        assertEquals("t3", saved(3).activate("t3").remove("t1").activeId)
+        assertEquals("t3", saved(3).activate("t3").remove("t2").activeId)
     }
 
     @Test

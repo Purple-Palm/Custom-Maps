@@ -127,12 +127,17 @@ class DataStoreTokenStoreTest {
         assertNull(store.activate("id2"))
         assertEquals(fake(2), store.token.first())
 
+        // Renaming the other entry leaves the active one.
+        assertNull(store.rename("id1", "Office"))
+        assertEquals(fake(2), store.token.first())
+        assertEquals("id2", store.list.first().activeId)
+
         assertNull(store.rename("id2", "Spare"))
         assertEquals(fake(2), store.token.first())
         assertEquals(TokenEntry("id2", "Spare", fake(2)), store.active.first())
         assertEquals(TokenProblem.NotFound, store.activate("id9"))
         assertEquals(TokenProblem.NotFound, store.rename("id9", "Gym"))
-        assertEquals(TokenProblem.BadName(NameProblem.TAKEN), store.rename("id2", "main"))
+        assertEquals(TokenProblem.BadName(NameProblem.TAKEN), store.rename("id2", "office"))
     }
 
     @Test
@@ -155,6 +160,18 @@ class DataStoreTokenStoreTest {
 
     /** The list a version before the list leaves, its one token [token] moved: Main, active, with the move's own id. */
     private fun migrated(token: String) = TokenList(listOf(TokenEntry(DataStoreTokenStore.MIGRATED_ID, "Main", token)), DataStoreTokenStore.MIGRATED_ID)
+
+    @Test
+    fun `deleting another token keeps the active one, also past the first`() = runBlocking {
+        val store = store()
+        for (n in 1..3) store.add(null, fake(n))
+        store.activate("id3")
+
+        assertNull(store.remove("id1"))
+
+        assertEquals("id3", store.list.first().activeId)
+        assertEquals(fake(3), store.token.first())
+    }
 
     @Test
     fun `the token of a version before the list becomes Main and active, once`() = runBlocking {

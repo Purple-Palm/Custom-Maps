@@ -195,6 +195,35 @@ class TokenViewModelTest {
     }
 
     @Test
+    fun `renaming another token during a trip leaves the active one`() = runTest(dispatcher) {
+        val viewModel = saved(3)
+        guidance.value = GuidanceState.ACTIVE
+        runCurrent()
+
+        assertNull(viewModel.rename("id2", "Test"))
+        runCurrent()
+
+        assertEquals("id1", store.stored.value.activeId)
+        assertEquals(listOf("Main", "Test", "Token 3"), store.stored.value.entries.map { it.name })
+        assertEquals(listOf(true, false, false), viewModel.ready().rows.map { it.active })
+    }
+
+    @Test
+    fun `deleting another token during a trip leaves the active one, also past the first`() = runTest(dispatcher) {
+        val viewModel = saved(3)
+        viewModel.use("id3")
+        runCurrent()
+        guidance.value = GuidanceState.ACTIVE
+        runCurrent()
+
+        viewModel.delete("id1")
+        runCurrent()
+
+        assertEquals("id3", store.stored.value.activeId)
+        assertEquals(listOf("Token 2", "Token 3"), store.stored.value.entries.map { it.name })
+    }
+
+    @Test
     fun `right after the trip ends the token can be switched again`() = runTest(dispatcher) {
         val viewModel = saved(2)
         guidance.value = GuidanceState.ACTIVE
