@@ -44,8 +44,9 @@ alternatives are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 Every push to `main` builds a debug APK.
 
-1. On GitHub, open **Actions → CI** and the latest successful run. Downloads need a signed-in
-   GitHub account.
+1. On GitHub, open **Actions → CI** and the latest run that lists the APK under **Artifacts**: the
+   latest successful run, or a newer one that failed only in the app bundle part, for example with a
+   wrong release secret. Downloads need a signed-in GitHub account.
 2. Under **Artifacts**, download `custommaps-debug-<run>-<commit>.apk`. It is the APK itself, not a zip.
 3. Open the APK on the phone (download it there, or copy it over), and allow installing apps from
    that source when Android asks.
@@ -241,6 +242,11 @@ the runner's temporary directory that only the build can read and deletes it whe
 the passwords reach Gradle only as environment variables. A release build on a computer takes the
 same four values in `local.properties`, with `RELEASE_KEYSTORE_FILE` instead of the base64 (see
 [local.properties.example](local.properties.example)).
+
+A wrong release secret, or any other failure in the app bundle part, turns the run red after the
+debug APK is published: that APK passed its tests, lint and 16 KB check and can be installed, but no
+bundle is published. Correct the secret and use **Re-run failed jobs**, or delete all four secrets
+to go back to debug builds only.
 
 If the upload key is ever lost or leaked, Play Console resets it (**Request upload key reset** on the
 Play app signing page). The app signing key stays with Google, so the installed app keeps updating.

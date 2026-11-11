@@ -71,7 +71,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Triggers and pinning:** GitHub Actions run on pushes to `main` and on demand. Every action is pinned to a commit SHA.
 - **Where the logic lives:** the build job only calls `scripts/ci.sh`, and the publish job `scripts/play-upload.sh` (42), so build changes do not require editing the workflow file. `scripts/ci.sh` first tests the CI scripts themselves.
 - **Checks:** build, unit tests, lint, and the 16 KB check, which covers both ELF LOAD alignment and zip alignment.
-- **Artifacts:** the debug APK is uploaded on every run and kept for 30 days; with the upload key, the app bundle for Google Play too (42).
+- **Artifacts:** the debug APK is uploaded on every run whose debug build passes, even when the app bundle part after it fails, and kept for 30 days; with the upload key, the app bundle for Google Play too (42).
 - **Caching:** `setup-gradle` uses `cache-provider: basic`, which is open source with no extra terms. The default "enhanced" provider is proprietary. Cost: caches start cold after catalog changes.
 
 ## 9. No build-logic module yet
