@@ -1,13 +1,22 @@
 package io.github.purplepalm.custommaps.nav.debug
 
 import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
 
 /**
  * Writes debug events as single-line JSON objects. Covers what events carry: strings, numbers,
- * booleans, null, enums, lists and maps; anything else is written as its string form.
- * Numbers that JSON cannot represent (NaN, infinity) become null.
+ * booleans, null, enums, lists and maps; anything else is written as its string form. A time
+ * ([Instant]) is written as [time] writes it. Numbers that JSON cannot represent (NaN, infinity)
+ * become null.
  */
 object JsonLines {
+
+    /** UTC with exactly three digits of the second, such as 2000-01-01T00:00:00.000Z. */
+    private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatterBuilder().appendInstant(MILLIS_DIGITS).toFormatter()
+
+    /** [instant] as every time in the debug log is written: UTC, to the millisecond, always three digits. */
+    fun time(instant: Instant): String = TIME_FORMAT.format(instant)
 
     /**
      * `{"t":"<time>","type":"<type>", ...fields}`. A field named "t" or "type" is written as
@@ -16,7 +25,7 @@ object JsonLines {
     fun event(time: Instant, type: String, fields: Map<String, Any?>): String {
         val out = StringBuilder(INITIAL_CAPACITY)
         out.append("{\"$TIME_KEY\":")
-        appendString(out, time.toString())
+        appendString(out, time(time))
         out.append(",\"$TYPE_KEY\":")
         appendString(out, type)
         for ((key, value) in fields) {
@@ -40,6 +49,7 @@ object JsonLines {
             is Float -> if (value.isFinite()) out.append(value) else out.append("null")
             is Number -> appendValue(out, value.toDouble())
             is Enum<*> -> appendString(out, value.name)
+            is Instant -> appendString(out, time(value))
             is Map<*, *> -> {
                 out.append('{')
                 var first = true
@@ -92,6 +102,7 @@ object JsonLines {
     }
 
     private const val INITIAL_CAPACITY = 256
+    private const val MILLIS_DIGITS = 3
     private const val TIME_KEY = "t"
     private const val TYPE_KEY = "type"
 }

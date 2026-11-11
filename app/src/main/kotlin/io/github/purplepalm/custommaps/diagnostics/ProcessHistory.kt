@@ -173,7 +173,7 @@ internal class ProcessHistory(private val context: Context, private val debugLog
 
     @RequiresApi(Build.VERSION_CODES.R)
     private fun ApplicationExitInfo.debugFields(): Map<String, Any?> = mapOf(
-        "diedAt" to Instant.ofEpochMilli(timestamp).toString(),
+        "diedAt" to Instant.ofEpochMilli(timestamp),
         "reason" to exitReasonName(reason),
         // Free text from the system, such as "remove task" or the crash's exception.
         "description" to description,

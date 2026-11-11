@@ -10,13 +10,13 @@ class JsonLinesTest {
     @Test
     fun `an event starts with its time and type`() {
         val line = JsonLines.event(Instant.parse("2026-11-03T17:00:00Z"), "route_request", mapOf("alternatives" to true))
-        assertEquals("""{"t":"2026-11-03T17:00:00Z","type":"route_request","alternatives":true}""", line)
+        assertEquals("""{"t":"2026-11-03T17:00:00.000Z","type":"route_request","alternatives":true}""", line)
     }
 
     @Test
     fun `a field cannot replace the event time or type`() {
         val line = JsonLines.event(Instant.parse("2026-11-03T17:00:00Z"), "map_error", mapOf("type" to "STYLE", "t" to 1))
-        assertEquals("""{"t":"2026-11-03T17:00:00Z","type":"map_error","field_type":"STYLE","field_t":1}""", line)
+        assertEquals("""{"t":"2026-11-03T17:00:00.000Z","type":"map_error","field_type":"STYLE","field_t":1}""", line)
     }
 
     @Test
@@ -47,6 +47,21 @@ class JsonLinesTest {
 
     @Test
     fun `other values are written as text`() {
-        assertEquals("\"2026-11-03T17:00:00Z\"", JsonLines.encode(Instant.parse("2026-11-03T17:00:00Z")))
+        assertEquals("\"30s\"", JsonLines.encode(kotlin.time.Duration.parse("30s")))
+        // A time is text too, to the millisecond.
+        assertEquals("\"2026-11-03T17:00:00.000Z\"", JsonLines.encode(Instant.parse("2026-11-03T17:00:00Z")))
+    }
+
+    @Test
+    fun `every time has three digits of the second`() {
+        assertEquals("2000-01-01T00:00:00.000Z", JsonLines.time(Instant.parse("2000-01-01T00:00:00Z")))
+        assertEquals("2000-01-01T00:00:00.120Z", JsonLines.time(Instant.parse("2000-01-01T00:00:00.12Z")))
+        // Finer than a millisecond is cut, never rounded up into the next one.
+        assertEquals("2000-01-01T00:00:00.123Z", JsonLines.time(Instant.parse("2000-01-01T00:00:00.123456789Z")))
+        assertEquals("2000-01-01T00:00:00.999Z", JsonLines.time(Instant.parse("2000-01-01T00:00:00.999999Z")))
+        assertEquals(
+            """{"t":"2000-01-01T00:00:00.500Z","type":"process_exit","diedAt":"1999-12-31T23:59:59.000Z"}""",
+            JsonLines.event(Instant.parse("2000-01-01T00:00:00.5Z"), "process_exit", mapOf("diedAt" to Instant.parse("1999-12-31T23:59:59Z"))),
+        )
     }
 }

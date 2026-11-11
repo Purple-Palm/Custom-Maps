@@ -88,8 +88,8 @@ class RepeatFolder(
         if (window.count == 0) return null
         val fields = mapOf(
             "count" to window.count,
-            "from" to window.from.toString(),
-            "to" to window.to.toString(),
+            "from" to window.from,
+            "to" to window.to,
             "origins" to window.origins.takeIf { it.isNotEmpty() }?.let { LinkedHashMap(it) },
             "first" to window.first,
         )

@@ -56,11 +56,11 @@ class FileDebugLogTest {
 
         // The first day is over, and compressed.
         assertEquals(
-            listOf("""{"t":"2000-01-01T11:59:00Z","type":"route_request","to":"Elm Street"}"""),
+            listOf("""{"t":"2000-01-01T11:59:00.000Z","type":"route_request","to":"Elm Street"}"""),
             gunzip(File(logDirectory, "2000-01-01.jsonl.gz")).lines().filter { it.isNotEmpty() },
         )
         assertEquals(
-            listOf("""{"t":"2000-01-01T12:01:00Z","type":"arrival"}"""),
+            listOf("""{"t":"2000-01-01T12:01:00.000Z","type":"arrival"}"""),
             File(logDirectory, "2000-01-02.jsonl").readLines(),
         )
     }
@@ -81,7 +81,7 @@ class FileDebugLogTest {
         runCurrent()
 
         assertEquals(1, encoded)
-        assertEquals(listOf("""{"t":"2000-01-01T00:00:00Z","type":"event","value":"value"}"""), firstDay.readLines())
+        assertEquals(listOf("""{"t":"2000-01-01T00:00:00.000Z","type":"event","value":"value"}"""), firstDay.readLines())
     }
 
     @Test
@@ -95,7 +95,7 @@ class FileDebugLogTest {
         runCurrent()
 
         assertEquals(
-            listOf("""{"t":"2000-01-01T00:00:00Z","type":"log_error","failedType":"event","error":"java.lang.IllegalStateException: no text"}"""),
+            listOf("""{"t":"2000-01-01T00:00:00.000Z","type":"log_error","failedType":"event","error":"java.lang.IllegalStateException: no text"}"""),
             firstDay.readLines(),
         )
     }
@@ -124,7 +124,7 @@ class FileDebugLogTest {
 
         assertEquals(listOf("custom-maps-debug-2000-01-01.txt", "custom-maps-debug-2000-01-02.txt"), files.map { it.name })
         val lines = files.last().readLines()
-        assertEquals("""{"t":"2000-01-02T09:00:00Z","type":"export","app":"0.1.0"}""", lines.first())
+        assertEquals("""{"t":"2000-01-02T09:00:00.000Z","type":"export","app":"0.1.0"}""", lines.first())
         assertEquals(2, lines.size)
         assertTrue(lines.last().contains("\"type\":\"second\""))
     }
@@ -319,9 +319,9 @@ class FileDebugLogTest {
         assertTrue(written)
         assertEquals(
             listOf(
-                """{"t":"2000-01-01T00:00:00Z","type":"progress","step":1}""",
-                """{"t":"2000-01-01T00:00:00Z","type":"progress","step":2}""",
-                """{"t":"2000-01-01T00:00:00Z","type":"crash","error":"boom"}""",
+                """{"t":"2000-01-01T00:00:00.000Z","type":"progress","step":1}""",
+                """{"t":"2000-01-01T00:00:00.000Z","type":"progress","step":2}""",
+                """{"t":"2000-01-01T00:00:00.000Z","type":"crash","error":"boom"}""",
             ),
             firstDay.readLines(),
         )

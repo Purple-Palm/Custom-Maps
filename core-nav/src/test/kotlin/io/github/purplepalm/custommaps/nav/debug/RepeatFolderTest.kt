@@ -60,8 +60,8 @@ class RepeatFolderTest {
         assertEquals(listOf("map_error", "map_error_repeats"), log.events.map { it.first })
         val repeats = log.events[1].second
         assertEquals(2, repeats["count"])
-        assertEquals("2000-01-01T00:00:01Z", repeats["from"])
-        assertEquals("2000-01-01T00:00:02Z", repeats["to"])
+        assertEquals(Instant.parse("2000-01-01T00:00:01Z"), repeats["from"])
+        assertEquals(Instant.parse("2000-01-01T00:00:02Z"), repeats["to"])
         assertEquals(mapOf("composite" to 1, "3dbuildings" to 1), repeats["origins"])
         assertEquals(tileError("composite"), repeats["first"])
     }

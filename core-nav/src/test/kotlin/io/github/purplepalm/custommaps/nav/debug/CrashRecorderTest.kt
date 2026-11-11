@@ -70,7 +70,7 @@ class CrashRecorderTest {
         assertEquals(2, linesWhenPreviousRan.size)
         assertTrue(linesWhenPreviousRan[0].contains("\"type\":\"progress\""))
         val crash = linesWhenPreviousRan[1]
-        assertTrue(crash.startsWith("""{"t":"2000-01-01T00:00:00Z","type":"crash","thread":""""))
+        assertTrue(crash.startsWith("""{"t":"2000-01-01T00:00:00.000Z","type":"crash","thread":""""))
         assertTrue(crash.contains("\"error\":\"java.lang.IllegalStateException: boom\""))
         assertTrue(crash.contains("\"causes\":[{\"error\":\"java.io.IOException: disk\""))
         assertTrue(crash.contains("\"context\":{\"guidance\":\"ACTIVE\"}"))

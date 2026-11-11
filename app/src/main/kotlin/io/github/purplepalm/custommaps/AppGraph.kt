@@ -17,6 +17,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
+import io.github.purplepalm.custommaps.nav.debug.JsonLines
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.network.NetworkMonitor
@@ -157,7 +158,7 @@ class AppGraph(private val application: Application) {
                         mapOf(
                             "guidance" to guidance,
                             "visible" to visible,
-                            "since" to Instant.now().truncatedTo(ChronoUnit.SECONDS),
+                            "since" to JsonLines.time(Instant.now().truncatedTo(ChronoUnit.SECONDS)),
                         ),
                     )
                     withContext(Dispatchers.IO) { processHistory.setStateSummary(summary) }
