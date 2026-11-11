@@ -697,6 +697,19 @@ On the drive:
     buildings only a little, and the amber route still the strongest thing on the map. Close in at
     a divided road, the median should read as a median, not as a block. On a freeway, note whether
     another route's grey line is still easy to see on the freeway's band. Screenshots, as above.
+13. **A turn whose road bends later.** With Large and Smooth follow, at a left turn where the turn
+    lane or a split begins well before the road visibly turns (a simulated drive through such a
+    turn will do): from about 20 ft before the turn the bend and some road past it should stay on
+    the map between the card and the bottom panel, with the view a little farther out if it needs
+    the room; after the turn the map should turn only a little toward the road ahead while the
+    view is still down. An ordinary turn should look as before. The log: on the `camera` lines
+    before the turn, `bendM` and `bendDeg` (where the road bends past the maneuver point) and
+    `extraPts` above 0; in `route_response` and `routes_updated`, each step's `bendM`, `bendDeg`,
+    `bearingBefore` and `bearingAfter`. Screenshots, as above.
+14. **The card after a reroute.** Leave the route once, where it is safe to. Right after the new
+    route appears the card may dim for a moment and show no distance; it must never show a
+    maneuver of the old route next to the new route's line. The log: `progress` lines with `card`
+    `pending` right after a `routes_updated` line, then `fresh`.
 
 Then share the debug log. What to read in it:
 
@@ -729,6 +742,8 @@ Then share the debug log. What to read in it:
 | `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
 | Camera: `laneDetails`, `hdRoads`, `hdRoadsReapplied`; `lane_details` | Whether lane details stayed on once set |
 | `map_layers` | `arrowAboveLine` true at every style load: the maneuver arrow is drawn above the route line. `middle` lists the order of the route's layers |
+| Camera: `bendM`, `bendDeg`, `extraPts`; step fields `bendM`, `bendDeg`, `bearingBefore`, `bearingAfter` | Where the road bends past each maneuver point, and whether the junction frame held it: how often a step begins well before its bend, and at what angle, to check the rule's 20 degrees and 4 m |
+| Progress: `card` | `pending` only in the first second or so after a new route, never for long; `kept` for a second now and then |
 
 Reading the connectivity lines:
 

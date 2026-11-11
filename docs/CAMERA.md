@@ -659,6 +659,8 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `laneDetails` | the switch for lane details on the map | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
+| `bendM`, `bendDeg` | with Large, while the SDK frames a maneuver: how far past the maneuver point the road bends, in metres, and by how many degrees off the way in, negative to the left ([The frame reaches the bend](#the-frame-reaches-the-bend)); left out at other times | 0 at an ordinary turn |
+| `extraPts` | how many points of the road to the bend the data source frames besides its own | 0 but where a step begins well before its bend |
 
 `puckLagM`, `sinceFixMs` and `keyPoints` are left out until the guidance has had its first position.
 
@@ -727,8 +729,16 @@ Other lines:
   intersections that have lanes (`laneIntersections`): `meters` from the start of the step,
   `lanes`, `usable`, `active`, `designated`, the `classes` of the road that leaves it, and
   `freeway`, whether the road that leads to it counts as one. With these the rule can be tried with
-  other numbers after a drive. These two lines are put together off the main thread and are
-  written a moment after the lines that follow them in the code.
+  other numbers after a drive. Every step also has `bearingBefore` and `bearingAfter`, the
+  compass directions into and out of its maneuver as the route gives them, and `bendM` and
+  `bendDeg`, where its road bends after the maneuver point by the rule of the junction frame (none
+  for the departure, or where it does not bend within 150 m). Numbers only. These two lines are put
+  together off the main thread and are written a moment after the lines that follow them in the
+  code.
+- The **progress** line, once a second during guidance, has `card`: `fresh` when the update
+  brought the next maneuver, `kept` when it brought none and the card stayed as it was, and
+  `pending` when it was of a new route without its first instruction yet, and the card showed that
+  route's next maneuver dimmed and without a distance, never one of the route before.
 - An **animations** line: `reason`, `enabled` (`areAnimatorsEnabled()`), `durationScale` (the
   setting `Settings.Global.ANIMATOR_DURATION_SCALE`) and `powerSave`. It is written when the first
   activity starts and at every Start, not at app start: a process learns the real scale only when
@@ -896,8 +906,11 @@ and the arrival.
 - **What Large changes on the data source** (Smooth follow, `LaneZoomFrames`): the frame of a
   maneuver may be fitted as close as zoom 20 instead of 16.35, and it holds 30 m of road after the
   turn instead of 100 m. The SDK still fits that frame, flat and within the padding, around the
-  car, the rest of the step and any maneuver that follows within 150 m. So the car and the
-  junction are both on screen all the way, and the frame gets closer as the car does.
+  car, the rest of the step and any maneuver that follows within 150 m: a next step of 150 m or
+  less it frames whole, with 30 m of the step after it. Where the road bends well after the
+  maneuver point, the frame also holds the road to 30 m past the bend
+  ([The frame reaches the bend](#the-frame-reaches-the-bend)). So the car and the junction are
+  both on screen all the way, and the frame gets closer as the car does.
 - **The upper limit is raised only for that frame.** With every navigator update the camera gives
   the data source the progress, sets the limit, and has the frame computed
   (`LaneZoomFrames.beforeSmoothEvaluate`): zoom 20 while the SDK frames a maneuver, by its own
@@ -950,6 +963,56 @@ and the arrival.
   speeds, the tilt has begun to come back up when the next turn takes the view and turns it down
   again. The zoom that was let go by then is not taken up again: it waits where it is until the
   SDK frames the next turn, and goes in once, with that frame.
+
+#### The frame reaches the bend
+
+A route's step begins at its maneuver point, which is where the card counts down to, and that is
+not always where the road visibly turns. At a turn bay, or a split that the map has as a road of
+its own, the step of a left turn can begin 50 m or more before the bend. The SDK's frame of the
+maneuver then holds only 30 m past the maneuver point, and the card covers about 22 m more: a
+bend 45 to 65 m on lay under the card, a farther one above the screen, and after the point the
+view turned up to 45 degrees toward a bend that was still ahead, close in. So, with Large:
+
+- **The road to the bend joins the frame** (`TurnBend`, `JunctionFrame`, `JunctionPoints`). The
+  bend is the first point of the next step that heads 20 degrees or more off the way in, or else,
+  for a road that only veers, the first place more than 4 m (about one lane) to the side of the
+  way in, looked for within 150 m of the maneuver point. While the SDK frames the maneuver, the
+  road from the maneuver point to 30 m past the bend goes to the data source as more points to
+  frame, ordered back toward the maneuver point. The SDK takes the frame's bearing from the car to
+  the last point it frames, and that is then the maneuver point: the bearing stays on the road
+  the car is on. The frame comes out as far as the bend needs, and no farther.
+- **Only where it is needed.** A bend nearer than 15 m to the maneuver point is in the frame
+  already, as at an ordinary turn or a U-turn, and so is all of a next step of 150 m or less: no
+  points then. The points are worked out once for each step, from the route's own shape, and the
+  data source gets none in any frame of the road, at a new route or after guidance. With Default,
+  and in Mapbox standard, none of this runs.
+- **The view turns less while it looks down onto a turn.** In Smooth follow with Large the view
+  turns at most 20 degrees toward the road ahead while its focus is on a maneuver, as it does near
+  a lane choice. After the point the bend then stays in view while the tilt is still down, and
+  the map turns no more than that until the tilt is back up.
+
+In the replay with the built camera (a phone screen with the card and the bottom panel; made-up
+roads at latitude 35; the next step longer than 3 km unless named; at 25 mph, at the update
+nearest 20 ft, half a second later):
+
+| Road after the maneuver point | Before: the bend | Now: lane width, the bend, the first 30 m past it |
+|---|---|---|
+| Straight 62 m, then 26 degrees left | under the card | 13.2 dp, clear, all 30 m |
+| The same veer 45 m on | under the card | 15.8 dp, clear, all 30 m |
+| The same veer 90 m on | above the screen | 10.4 dp, clear, all 30 m |
+| Straight 62 m, then 15 degrees left (found 4 m to the side, 77 m on) | under the card | 11.3 dp, clear, all 30 m |
+| A left curve of radius 160 m (20 degrees 56 m on) | above the screen | 14.2 dp, clear, 26 of 30 m |
+| A right angle 60 m on | under the card | 18.4 dp, clear, all 30 m |
+| A right angle 60 m on, next step only 120 m | clear: the SDK frames the step whole | unchanged |
+| A turn at the maneuver point; a U-turn 13 m across | clear | unchanged |
+
+At 35 mph every bend is clear with 29 to 31 of its 30 m, at lanes of 9.4 to 15.6 dp. That is the
+cost: where a step begins well before its bend, the junction comes out to lanes of 9 to 18 dp
+instead of 27 to 28. After the point (a right angle 60 m on, 30 mph) the bend stays on the clear
+map all the way, where before it went off the right edge from 26 to 38 m past the point, and the
+bearing turns no more than 20 degrees until the tilt is back up. A plain turn moves as before. The
+replay models the data source's fit without its margins; real frames can differ by a few tenths
+of a zoom level.
 
 Simulated with the compiled camera at 60 frames a second, against a model of the data source (the
 car on its focal point on the road; from 180 m a flat fit of the rest of the step and the road
@@ -1227,6 +1290,9 @@ All in `CameraTuning`, the same for the phone and the car.
 | Held after a lane choice (`laneHoldMeters`, `laneHoldSeconds`) | 30 m and 2 s |
 | A next lane choice this near keeps the view in (`laneCoalesceSeconds`) | 10 s of driving from its own start |
 | Bearing lead near a lane choice (`laneMaxBearingLead`) | 20° (the SDK: 45°) |
+| Bearing lead while the view looks down onto a turn, Smooth follow (`junctionMaxBearingLead`) | 20° (the SDK: 45°) |
+| Where the road bends after a maneuver (`bendDegrees`, `bendSideMeters`, `bendSearchMeters`) | 20° off the way in, else 4 m to its side, within 150 m |
+| A bend nearer than this is in the frame already (`bendMinMeters`) | 15 m |
 | The centre trails the car by no more than (`maxPuckLagDp`) | 12 dp |
 
 ## System animations
