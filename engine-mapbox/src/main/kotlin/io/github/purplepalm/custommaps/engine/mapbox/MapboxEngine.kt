@@ -17,8 +17,10 @@ import io.github.purplepalm.custommaps.engine.mapbox.search.MapboxSearchProvider
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import java.util.Locale
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Entry point of the Mapbox implementation; create one per process in Application.onCreate.
@@ -29,12 +31,13 @@ class MapboxEngine private constructor(
     tripLog: TripLogStore,
     private val debugLog: DebugLog,
     tileStore: TileStore,
+    network: StateFlow<NetworkStatus>,
 ) {
 
     /** What is kept on the phone for stretches without a connection, in the one tile store. */
     private val offlineData = OfflineData(tileStore, application.resources.displayMetrics.density, debugLog)
 
-    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog, offlineData)
+    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog, offlineData, network)
 
     val navigation: NavigationEngine get() = navigationEngine
 
@@ -65,7 +68,13 @@ class MapboxEngine private constructor(
          * engine made: every map and offline manager of the app comes from the engine, and the
          * navigator is made from these options when a screen or a drive first needs it.
          */
-        fun create(application: Application, tripLog: TripLogStore, debugLog: DebugLog): MapboxEngine {
+        fun create(
+            application: Application,
+            tripLog: TripLogStore,
+            debugLog: DebugLog,
+            /** This app's network as Android reports it; the summary of each trip counts its time offline. */
+            network: StateFlow<NetworkStatus>,
+        ): MapboxEngine {
             // One tile store for the map and the navigator. This is the store at the default
             // location, the one each of them used by itself before, so nothing saved so far is
             // lost. How the map uses it stays as the SDK has it: it reads tile packs from the
@@ -81,7 +90,7 @@ class MapboxEngine private constructor(
                         .build(),
                 )
             }
-            return MapboxEngine(application, tripLog, debugLog, tileStore)
+            return MapboxEngine(application, tripLog, debugLog, tileStore, network)
         }
 
         internal fun distanceFormatterOptions(context: Context): DistanceFormatterOptions =

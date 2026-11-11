@@ -58,9 +58,17 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.network.NetworkStatus
+import io.github.purplepalm.custommaps.nav.network.OfflineReason
+import io.github.purplepalm.custommaps.nav.network.offlineReason
+import io.github.purplepalm.custommaps.nav.trip.TripEnding
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
+import io.github.purplepalm.custommaps.nav.trip.TripMarker
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
+import io.github.purplepalm.custommaps.nav.trip.TripTally
+import io.github.purplepalm.custommaps.nav.trip.TripVitals
+import java.io.File
 import java.io.IOException
 import java.time.Instant
 import com.mapbox.common.location.Location as MapboxLocation
@@ -71,8 +79,11 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 /**
  * [NavigationEngine] on the Mapbox Navigation SDK. Every trip session start and stop goes through
@@ -87,6 +98,8 @@ internal class MapboxNavigationEngine(
     private val tripLog: TripLogStore,
     private val debugLog: DebugLog,
     private val offlineData: OfflineData,
+    /** This app's network as Android reports it, for the time a trip spends offline. */
+    private val network: StateFlow<NetworkStatus>,
 ) : NavigationEngine, MapboxNavigationObserver {
 
     private val appContext = context.applicationContext
@@ -120,6 +133,30 @@ internal class MapboxNavigationEngine(
      * the trip's own. Begun with each trip session, ended when it stops.
      */
     private val staleStart = StaleStart()
+
+    /** Adds up each trip for its "trip_summary" line, written when the trip ends. */
+    private val tripTally = TripTally()
+
+    /** How the trip under way ends, set when guidance learns it; null while the trip runs. */
+    private var tripEnding: TripEnding? = null
+
+    /** The phone's counters at the start of the trip under way; null until read. */
+    private var startVitals: TripVitals? = null
+
+    private val phoneVitals = PhoneVitals(appContext)
+
+    /**
+     * There while a trip runs, with what it has added up, renewed once a minute: a process that
+     * ends during a trip leaves it behind, and the next start writes that trip's summary. Not
+     * backed up, like the debug log it is for.
+     */
+    private val tripMarker = TripMarker(File(appContext.noBackupFilesDir, TRIP_MARKER_FILE))
+
+    /** The marker's writes, one at a time and in order, off the main thread. */
+    private val markerWrites = Dispatchers.IO.limitedParallelism(1)
+
+    /** When the marker was last written, in milliseconds since boot. */
+    private var markerWrittenAt = 0L
 
     /**
      * The points with lanes ahead of the car, read from the route once for each step. The engine
@@ -269,6 +306,18 @@ internal class MapboxNavigationEngine(
 
     init {
         MapboxNavigationApp.registerObserver(this)
+        // The time a trip spends without internet, as the offline chip counts it.
+        scope.launch {
+            network.map { it.offlineReason() != OfflineReason.NONE }.distinctUntilChanged().collect { offline ->
+                tripTally.onOffline(offline, SystemClock.elapsedRealtime())
+            }
+        }
+        // A trip that was under way when the last process of the app ended.
+        scope.launch(markerWrites) {
+            val left = tripMarker.read() ?: return@launch
+            debugLog.log("trip_summary", summaryLine(left, TripEnding.PROCESS_DEATH, emptyMap()))
+            tripMarker.clear()
+        }
     }
 
     override fun onAttached(mapboxNavigation: MapboxNavigation) {
@@ -508,6 +557,13 @@ internal class MapboxNavigationEngine(
     private fun dispatch(event: GuidanceEvent) {
         val from = _guidanceState.value
         val transition = GuidanceStateMachine.reduce(from, event)
+        if (from == GuidanceState.ACTIVE) {
+            when (event) {
+                GuidanceEvent.Arrived -> tripEnding = TripEnding.ARRIVED
+                is GuidanceEvent.Stopped -> tripEnding = TripEnding.of(event.reason)
+                else -> Unit
+            }
+        }
         debugLog.log(
             "guidance",
             mapOf(
@@ -572,6 +628,7 @@ internal class MapboxNavigationEngine(
                 // navigator held from the trip before must not count as this trip's.
                 staleStart.begin()
                 lastMatch = null
+                beginTripTally(command.simulated)
                 if (command.simulated) {
                     replaying = true
                     navigation?.let(replay::onAttached)
@@ -592,6 +649,7 @@ internal class MapboxNavigationEngine(
                 // Before the session stops: a refresh or a request still under way is given up,
                 // and its answer finds no trip to change.
                 startRefresher.end()
+                endTripTally()
                 staleStart.end()
                 tripSessionRunning = false
                 if (replaying) {
@@ -642,6 +700,56 @@ internal class MapboxNavigationEngine(
         }
     }
 
+    /** A trip session starts: its summary starts over, and the phone's counters are read off the main thread. */
+    private fun beginTripTally(simulated: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        tripTally.begin(now, simulated, offline = network.value.offlineReason() != OfflineReason.NONE)
+        tripEnding = null
+        startVitals = null
+        val trip = commitCount
+        scope.launch {
+            val read = withContext(Dispatchers.IO) { phoneVitals.read() }
+            if (trip == commitCount) startVitals = read
+        }
+        writeTripMarker(now)
+    }
+
+    /** A progress update of the trip, one that carries the trip's own position. */
+    private fun onTripProgress() {
+        val now = SystemClock.elapsedRealtime()
+        tripTally.onProgress(now)
+        if (now - markerWrittenAt >= MARKER_EVERY_MILLIS) writeTripMarker(now)
+    }
+
+    private fun writeTripMarker(now: Long) {
+        markerWrittenAt = now
+        val fields = tripTally.fields(now, staleStart.staleUpdates)
+        scope.launch(markerWrites) { tripMarker.write(fields) }
+    }
+
+    /**
+     * The trip session stops: one "trip_summary" line, with how the trip ended and what it cost
+     * the phone, and the marker goes. Nothing for a start whose session never began.
+     */
+    private fun endTripTally() {
+        if (!tripTally.running) return
+        val ending = tripEnding ?: TripEnding.END_IN_APP
+        val fields = tripTally.fields(SystemClock.elapsedRealtime(), staleStart.staleUpdates)
+        tripTally.end()
+        tripEnding = null
+        val start = startVitals
+        scope.launch {
+            val end = withContext(Dispatchers.IO) { phoneVitals.read() }
+            debugLog.log("trip_summary", summaryLine(fields, ending, TripTally.vitalsFields(start, end)))
+            withContext(markerWrites) { tripMarker.clear() }
+        }
+    }
+
+    /** A map error of the drive's map, by the name of its kind, for the trip's summary. */
+    internal fun onMapError(kind: String) {
+        tripTally.onMapError(kind)
+    }
+
     private val routeProgressObserver = RouteProgressObserver { progress ->
         val active = _guidanceState.value == GuidanceState.ACTIVE
         // An update that still carries where the trip before left the car: logged, and otherwise
@@ -651,6 +759,7 @@ internal class MapboxNavigationEngine(
             debugLog.log("progress", progress.debugFields() + mapOf("match" to lastMatch?.debugFields(), "staleStart" to true))
             return@RouteProgressObserver
         }
+        if (active) onTripProgress()
         val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
         // Without the next maneuver the card stays as it is, but never with a maneuver of the route
         // before a reroute or another change of route: it waits, dimmed, for the new route's.
@@ -724,10 +833,15 @@ internal class MapboxNavigationEngine(
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
             lastMatch = locationMatcherResult
+            if (tripTally.running && !carriesOldPosition(locationMatcherResult)) {
+                val location = locationMatcherResult.enhancedLocation
+                tripTally.onPosition(location.latitude, location.longitude, jump = locationMatcherResult.isTeleport)
+            }
         }
     }
 
     private val offRouteObserver = OffRouteObserver { offRoute ->
+        tripTally.onOffRoute(offRoute)
         debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to lastMatch?.debugFields()))
         // The navigator reroutes a car that left the route; the start plan steps back for it.
         if (offRoute) startRefresher.onReroute()
@@ -738,7 +852,10 @@ internal class MapboxNavigationEngine(
         val routes = result.navigationRoutes
         val reason = result.reason
         // A reroute, or any other route the navigator put in place of the one the trip started on.
-        if (reason == RoutesExtra.ROUTES_UPDATE_REASON_REROUTE) startRefresher.onReroute()
+        if (reason == RoutesExtra.ROUTES_UPDATE_REASON_REROUTE) {
+            startRefresher.onReroute()
+            tripTally.onReroute()
+        }
         startRefresher.onRoutesChanged(routes.firstOrNull()?.id)
         logRoutes("routes_updated") {
             mapOf(
@@ -775,6 +892,11 @@ internal class MapboxNavigationEngine(
                 if (tripSessionRunning) onTripSessionStoppedOutsideApp()
                 return@NavigationSessionStateObserver
             }
+        }
+        if (kind == TripKind.ACTIVE_GUIDANCE && tripTally.running) {
+            tripTally.onTripId(state.sessionId)
+            // The marker gets the trip's id at once, so that it says which trip a process ended in.
+            writeTripMarker(SystemClock.elapsedRealtime())
         }
         if (state.sessionId == lastSessionId) return@NavigationSessionStateObserver
         lastSessionId = state.sessionId
@@ -841,5 +963,25 @@ internal class MapboxNavigationEngine(
     private companion object {
         const val TAG = "TripSession"
         const val MILLIS_PER_SECOND = 1_000L
+
+        /** Under the app's no-backup files. */
+        const val TRIP_MARKER_FILE = "trip-running"
+
+        /** How often the marker of a running trip is written again. */
+        const val MARKER_EVERY_MILLIS = 60_000L
     }
+}
+
+/**
+ * The "trip_summary" line: the trip's id and whether it was simulated, how it ended, then the rest
+ * of [fields] ([TripTally.fields]) and what the trip cost the phone ([TripTally.vitalsFields]).
+ */
+internal fun summaryLine(fields: Map<String, Any?>, ending: TripEnding, vitals: Map<String, Any?>): Map<String, Any?> {
+    val line = LinkedHashMap<String, Any?>()
+    line["trip"] = fields["trip"]
+    line["simulated"] = fields["simulated"]
+    line["ending"] = ending.logName
+    line.putAll(fields)
+    line.putAll(vitals)
+    return line
 }

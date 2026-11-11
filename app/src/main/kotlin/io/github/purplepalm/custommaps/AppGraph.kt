@@ -90,7 +90,7 @@ class AppGraph(private val application: Application) {
     val network = NetworkMonitor(application, debugLog, applicationScope)
 
     /** Sets up the navigator; starts no trip session. */
-    val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog)
+    val engine: MapboxEngine = MapboxEngine.create(application, tripLogStore, debugLog, network.status)
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()

@@ -322,6 +322,8 @@ class PhoneMap internal constructor(
      */
     private val mapErrors = mapboxMap.subscribeMapLoadingError { error ->
         if (AccessErrors.isAccessDenied(error.message)) _accessDenied.value = true
+        // Counted for the summary of a trip under way, by kind only.
+        engine.onMapError(error.type.name)
         mapErrorFolder.record(
             type = "map_error",
             key = RepeatFolder.keyOf(error.type.name, error.message),
