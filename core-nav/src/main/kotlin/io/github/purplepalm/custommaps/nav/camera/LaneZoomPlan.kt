@@ -57,6 +57,14 @@ data class LaneChoice(
     val onFreeway: Boolean,
     /** The point is the next maneuver itself, an exit or a fork; false where the route goes straight on. */
     val atManeuver: Boolean,
+    /**
+     * Where the route goes straight on: the lane at the side the step's exit leaves on leaves the
+     * route here while another lane goes on, as at an earlier exit, a split or a lane that ends on
+     * that side. Such a point ahead begins the run-up to the exit at once ([RunUpLatch]), whether
+     * or not it counts as a lane choice itself. False at the exit itself and where its side is not
+     * known.
+     */
+    val edgeLeaves: Boolean = false,
 ) {
     /** The lanes that leave the route here. */
     val leavingLanes: Int get() = laneCount - usableLanes
@@ -119,6 +127,9 @@ enum class LaneChoiceSkip {
  * - Out over [CameraTuning.laneOutSeconds], unless the next choice is no more than
  *   [CameraTuning.laneCoalesceSeconds] of driving from its own window: choices close together keep
  *   the view in.
+ * - On a run-up to a freeway exit or fork ([RunUpLatch]), the exit holds the view between the
+ *   choices on the way, from where the run-up begins to the gore: one approach, one move in. The
+ *   latch is shared and passed in, so a camera made anew in the middle of one stays in.
  * - A reversal starts from where the focus is and takes the share of the time that is left to go.
  */
 class LaneFocus(private val tuning: CameraTuning) {
@@ -142,6 +153,10 @@ class LaneFocus(private val tuning: CameraTuning) {
     var goal = 0.0
         private set
 
+    /** The run-up whose exit holds the view now or held it last, for the log; null outside a run-up. */
+    var runUpKey: String? = null
+        private set
+
     fun focusAt(now: Double) = lerp(from, to, easeInOut((now - start) / duration))
 
     fun isAnimating(now: Double) = from != to && now - start < duration
@@ -152,8 +167,17 @@ class LaneFocus(private val tuning: CameraTuning) {
      * @param speedMps the car's speed; unknown counts as standing
      * @param onRoute false while the navigator has the car off the route, where [routeMeters]
      *   stands still and [choices] is empty
+     * @param runUpKey the exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up,
+     *   and then the view is held as it always was
      */
-    fun onProgress(now: Double, routeMeters: Double, choices: List<LaneChoice>, speedMps: Double?, onRoute: Boolean = true) {
+    fun onProgress(
+        now: Double,
+        routeMeters: Double,
+        choices: List<LaneChoice>,
+        speedMps: Double?,
+        onRoute: Boolean = true,
+        runUpKey: String? = null,
+    ) {
         // A new route counts its meters from its own start, and off the route they stand still.
         // Where the last choice lay says nothing then: only the time still holds the view, and a
         // car that never reaches the choice does not keep it close.
@@ -165,6 +189,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         val currentKey = current?.key
         var inWindow: LaneChoice? = null
         var held: LaneChoice? = null
+        var exit: LaneChoice? = null
         var soon = false
         for (i in choices.indices) {
             val choice = choices[i]
@@ -172,18 +197,22 @@ class LaneFocus(private val tuning: CameraTuning) {
             if (choice.metersAhead <= window && (inWindow == null || choice.metersAhead < inWindow.metersAhead)) inWindow = choice
             if (choice.key == currentKey) held = choice
             if (choice.metersAhead <= reach) soon = true
+            if (runUpKey != null && choice.key == runUpKey) exit = choice
         }
-        val ahead = inWindow ?: held
+        // On a run-up its exit holds the view between the choices on the way.
+        val ahead = inWindow ?: held ?: exit
         if (ahead != null) {
             current = ahead
             choiceAt = routeMeters + ahead.metersAhead
             passedAt = Double.NaN
+            this.runUpKey = exit?.key
         } else if (current != null) {
             if (passedAt.isNaN()) passedAt = now
             val holding = now - passedAt < tuning.laneHoldSeconds || routeMeters < choiceAt + tuning.laneHoldMeters
             if (!holding && !soon) {
                 current = null
                 passedAt = Double.NaN
+                this.runUpKey = null
             }
         }
         val newGoal = if (current != null) 1.0 else 0.0
@@ -196,6 +225,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         choiceAt = Double.NaN
         passedAt = Double.NaN
         lastRouteMeters = Double.NaN
+        runUpKey = null
         if (goal != 0.0) animateTo(0.0, now)
     }
 

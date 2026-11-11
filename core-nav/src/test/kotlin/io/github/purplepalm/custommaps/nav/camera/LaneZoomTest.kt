@@ -374,6 +374,171 @@ class LaneZoomTest {
         assertFalse(focus.isAnimating(6.1))
     }
 
+    /**
+     * The design's brief-shaped approach, synthetic and rounded: a car pool lane and four lanes,
+     * points 2,000 m (P0), 1,500, 1,470, 1,460 and 1,440 m (P1a to P1d) and 400 m (P2) before the
+     * gore; the lanes at the exit's side leave at P0 (one, no lane choice of its own) and at P1
+     * (two); the exit takes the rightmost of five lanes.
+     */
+    private val briefPoints = listOf(
+        BriefPoint("P0", 2_000.0, usable = 3, edgeLeaves = true),
+        BriefPoint("P1a", 1_500.0, usable = 2, edgeLeaves = true),
+        BriefPoint("P1b", 1_470.0, usable = 2, edgeLeaves = true),
+        BriefPoint("P1c", 1_460.0, usable = 2, edgeLeaves = true),
+        BriefPoint("P1d", 1_440.0, usable = 2, edgeLeaves = true),
+        BriefPoint("P2", 400.0, usable = 1, edgeLeaves = false),
+    )
+
+    private class BriefPoint(val key: String, val toGore: Double, val usable: Int, val edgeLeaves: Boolean)
+
+    private val briefExit = "r1/0/3/end"
+
+    /** The points ahead with the car [toGore] meters before the gore, and the exit while it is ahead. */
+    private fun briefChoices(toGore: Double): List<LaneChoice> {
+        val ahead = ArrayList<LaneChoice>()
+        for (p in briefPoints) {
+            if (p.toGore > toGore) continue
+            ahead.add(LaneChoice("r1/0/3/${p.key}", toGore - p.toGore, 4, p.usable, 1, onFreeway = true, atManeuver = false, edgeLeaves = p.edgeLeaves))
+        }
+        if (toGore >= 0.0) ahead.add(LaneChoice(briefExit, toGore, 5, 1, 1, onFreeway = true, atManeuver = true))
+        return ahead
+    }
+
+    /** 25 m/s, rising to 29 m/s over the last 1,500 m before the gore. */
+    private fun briefSpeed(toGore: Double) = if (toGore > 1_500.0) 25.0 else lerp(25.0, 29.0, 1.0 - toGore.coerceAtLeast(0.0) / 1_500.0)
+
+    private class BriefUpdate(val t: Int, val toGore: Double, val goal: Double, val key: String?)
+
+    /**
+     * Drives the brief-shaped approach at one update a second, from 2,800 m before the gore to
+     * 150 m past it, with the run-up latch when one is given, and returns each update.
+     */
+    private fun briefDrive(
+        latch: RunUpLatch?,
+        focus: LaneFocus = LaneFocus(tuning),
+        each: (BriefUpdate, List<LaneChoice>, Double, Double) -> Unit = { _, _, _, _ -> },
+    ): List<BriefUpdate> {
+        var toGore = 2_800.0
+        var routeMeters = 0.0
+        val out = ArrayList<BriefUpdate>()
+        var t = 0
+        while (toGore > -150.0) {
+            val speed = briefSpeed(toGore)
+            val choices = briefChoices(toGore)
+            latch?.onProgress(t.toDouble(), choices, speed)
+            val key = latch?.exitKey
+            focus.onProgress(t.toDouble(), routeMeters, choices, speed, runUpKey = key)
+            val update = BriefUpdate(t, toGore, focus.goal, key)
+            each(update, choices, speed, routeMeters)
+            out.add(update)
+            repeat(10) {
+                val v = briefSpeed(toGore)
+                toGore -= v * 0.1
+                routeMeters += v * 0.1
+            }
+            t++
+        }
+        return out
+    }
+
+    @Test
+    fun `on a run-up the view comes in once and stays to the gore`() {
+        val focus = LaneFocus(tuning)
+        val updates = briefDrive(RunUpLatch(tuning), focus) { update, _, _, _ ->
+            if (update.goal == 1.0 && update.toGore >= 0.0) assertEquals(briefExit, focus.runUpKey, "at ${update.toGore} m")
+        }
+        // In at the run-up's reach, 2,125 m before the gore at 25 m/s.
+        val first = updates.first { it.key != null }
+        assertEquals(2_125.0, first.toGore, 1e-6)
+        assertEquals(1.0, first.goal)
+        assertTrue(updates.filter { it.t < first.t }.all { it.goal == 0.0 })
+        // Held to the gore with no gap, and 2 s past it: the first update past it and one more.
+        val pastGore = updates.first { it.toGore < 0.0 }
+        assertTrue(updates.filter { it.t in first.t..pastGore.t + 1 }.all { it.goal == 1.0 }, "no gap")
+        assertEquals(0.0, updates.first { it.t == pastGore.t + 2 }.goal)
+        assertTrue(updates.filter { it.t >= pastGore.t + 2 }.all { it.goal == 0.0 })
+        assertNull(focus.runUpKey, "out of the run-up's hold")
+        // The latch gave the key up to the gore.
+        assertTrue(updates.filter { it.t in first.t until pastGore.t }.all { it.key == briefExit })
+        assertNull(pastGore.key)
+    }
+
+    @Test
+    fun `without a run-up the same approach lets the view out between its lane choices`() {
+        val today = briefDrive(latch = null)
+        // Past P1d the next choice, P2, is more than 10 s of driving from its window.
+        assertTrue(today.any { it.toGore in 400.0..1_440.0 && it.goal == 0.0 })
+        // No key, or a key that is null, is the same view.
+        val explicit = ArrayList<Double>()
+        val other = LaneFocus(tuning)
+        briefDrive(latch = null) { update, choices, speed, routeMeters ->
+            other.onProgress(update.t.toDouble(), routeMeters, choices, speed, onRoute = true, runUpKey = null)
+            explicit.add(other.goal)
+        }
+        assertEquals(today.map { it.goal }, explicit)
+        assertNull(other.runUpKey)
+    }
+
+    @Test
+    fun `a camera made anew in the middle of a run-up stays in at once`() {
+        var second: LaneFocus? = null
+        val goals = ArrayList<Pair<Double, Double>>()
+        briefDrive(RunUpLatch(tuning)) { update, choices, speed, routeMeters ->
+            if (second == null && update.toGore <= 1_300.0) second = LaneFocus(tuning)
+            second?.let {
+                it.onProgress(update.t.toDouble(), routeMeters, choices, speed, runUpKey = update.key)
+                goals.add(update.toGore to it.goal)
+            }
+        }
+        assertEquals(1.0, goals.first().second, "its first update, at ${goals.first().first} m")
+        assertTrue(goals.filter { it.first >= 0.0 }.all { it.second == 1.0 })
+    }
+
+    @Test
+    fun `the run-up's exit brings the view in before any window`() {
+        // A lane drop on the exit's side 500 m before the exit begins the run-up at its reach.
+        val focus = LaneFocus(tuning)
+        val drop = LaneChoice("r1/0/3/2", 1_952.0, 4, 3, 0, onFreeway = true, atManeuver = false, edgeLeaves = true)
+        val exit = LaneChoice("r1/0/3/end", 2_452.0, 4, 1, 0, onFreeway = true, atManeuver = true)
+        focus.onProgress(0.0, 0.0, listOf(drop, exit), 29.0, runUpKey = "r1/0/3/end")
+        assertEquals(1.0, focus.goal)
+        assertEquals(exit, focus.current)
+        assertEquals("r1/0/3/end", focus.runUpKey)
+        // The same choices without the key: no window is open yet.
+        val today = LaneFocus(tuning)
+        today.onProgress(0.0, 0.0, listOf(drop, exit), 29.0)
+        assertEquals(0.0, today.goal)
+    }
+
+    @Test
+    fun `a run-up key holds only an exit that counts and lies ahead`() {
+        val keys = listOf("r1/0/3/end", "r1/0/3/2")
+        for (choices in listOf(
+            emptyList(),
+            listOf(LaneChoice("r1/0/3/end", 1_500.0, 2, 1, 0, onFreeway = true, atManeuver = true)),
+            listOf(LaneChoice("r1/0/3/end", -2.0, 5, 1, 0, onFreeway = true, atManeuver = true)),
+            listOf(LaneChoice("r1/0/3/2", 1_500.0, 4, 3, 0, onFreeway = true, atManeuver = false, edgeLeaves = true)),
+        )) {
+            for (key in keys) {
+                val focus = LaneFocus(tuning)
+                focus.onProgress(0.0, 0.0, choices, 25.0, runUpKey = key)
+                assertEquals(0.0, focus.goal, "$key over $choices")
+                assertNull(focus.runUpKey)
+            }
+        }
+    }
+
+    @Test
+    fun `the end of guidance forgets the run-up`() {
+        val focus = LaneFocus(tuning)
+        focus.onProgress(0.0, 0.0, listOf(LaneChoice("r1/0/3/end", 1_500.0, 5, 1, 0, onFreeway = true, atManeuver = true)), 25.0, runUpKey = "r1/0/3/end")
+        assertEquals("r1/0/3/end", focus.runUpKey)
+        focus.reset(1.0)
+        assertNull(focus.runUpKey)
+        assertNull(focus.current)
+        assertEquals(0.0, focus.goal)
+    }
+
     @Test
     fun `default keeps the frame zoom`() {
         val plan = ZoomPlanner(tuning)

@@ -101,6 +101,19 @@ data class CameraTuning(
     /** A lane choice no more than this much driving from its own close view keeps the view close until then. */
     val laneCoalesceSeconds: Double = 10.0,
     /**
+     * The run-up to a freeway exit or fork, over which the close view stays in once ([RunUpLatch]),
+     * begins no farther from the exit than the close view's window plus this much driving, and
+     * [runUpMinMeters] at the least: the road does not get shorter when the car is slower.
+     */
+    val runUpSeconds: Double = 60.0,
+    val runUpMinMeters: Double = 1_500.0,
+    /**
+     * A run-up that ended less than this long ago begins again on its reach alone: after a new
+     * route, a moment off the route, a seek, or at the gore of a run-up right before. The close
+     * view's own hold of [laneHoldSeconds] plus one update.
+     */
+    val runUpResumeSeconds: Double = 3.0,
+    /**
      * Near a lane choice the view turns at most this far from the car's heading toward the road
      * ahead, so the lanes at the car stay close to upright. Elsewhere the navigation SDK's 45
      * degrees apply.
