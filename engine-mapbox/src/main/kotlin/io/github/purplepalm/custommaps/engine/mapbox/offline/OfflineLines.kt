@@ -8,8 +8,45 @@ internal enum class EndedBy {
     /** A newer preview loads the region again, with its own routes. */
     NEWER_PREVIEW,
 
-    /** Guidance started. From then on only predictive caching loads, within its own areas. */
-    GUIDANCE,
+    /**
+     * The trip that began on the previewed routes ended: End in the app or in the trip
+     * notification, or the arrival. The next preview loads the routes it shows.
+     */
+    TRIP_END,
+}
+
+/** What happens to a preview, as far as it decides whether the preview's download goes on. */
+internal enum class PreviewEvent {
+
+    /** Start: a trip begins on the previewed routes. */
+    START,
+
+    /** The preview was closed without a trip. */
+    CLOSED,
+
+    /** A newer preview loads the region with its own routes. */
+    NEWER_PREVIEW,
+
+    /** The trip that began on the previewed routes ended. */
+    TRIP_ENDED,
+}
+
+/**
+ * When the download of a preview's routes ends before it is done. A preview is often open for a few
+ * seconds only before Start, so its download goes on into the trip: it is the map along the routes
+ * for a phone that loses its network soon after Start. It ends early only when a newer preview takes
+ * the region over or when the trip ends. The network rule is the tile store's own: the download may
+ * use the networks [PreviewDownload.NETWORK] allows, which is any network, mobile data included, and
+ * without a network the store waits; no change of network ends it.
+ */
+internal object PreviewDownloadRules {
+
+    /** Who ends a download still under way at [event]; null when it goes on. */
+    fun endedBy(event: PreviewEvent): EndedBy? = when (event) {
+        PreviewEvent.START, PreviewEvent.CLOSED -> null
+        PreviewEvent.NEWER_PREVIEW -> EndedBy.NEWER_PREVIEW
+        PreviewEvent.TRIP_ENDED -> EndedBy.TRIP_END
+    }
 }
 
 /**
@@ -71,8 +108,8 @@ internal object OfflineLines {
      * - No error: "done".
      * - PARTIAL_LOAD: "partial". Some resources failed; what did load can be used.
      * - CANCELED after the app ended it: "replaced" for a newer preview, which is how the one
-     *   region is meant to change hands, or "stopped" with the reason "guidance". Neither is a
-     *   fault.
+     *   region is meant to change hands, or "stopped" with the reason "trip_end" when the trip
+     *   that began on the previewed routes ended first. Neither is a fault.
      * - Anything else is "failed", with the error type in lower case as the reason: a full disk,
      *   a style that could not be resolved, too many tiles, or a cancel nobody here asked for.
      *
@@ -82,7 +119,7 @@ internal object OfflineLines {
         errorType == null -> Outcome(DONE)
         errorType == PARTIAL_LOAD -> Outcome(PARTIAL)
         errorType == CANCELED && endedBy == EndedBy.NEWER_PREVIEW -> Outcome(REPLACED)
-        errorType == CANCELED && endedBy == EndedBy.GUIDANCE -> Outcome(STOPPED, "guidance")
+        errorType == CANCELED && endedBy == EndedBy.TRIP_END -> Outcome(STOPPED, "trip_end")
         else -> Outcome(FAILED, errorType.lowercase())
     }
 
@@ -133,13 +170,28 @@ internal object OfflineLines {
         endedBy: EndedBy?,
         counts: DownloadCounts?,
         seconds: Double,
-    ): Map<String, Any?> = mapOf("load" to load, "routes" to routes) + download(errorType, message, endedBy, counts, seconds)
+        inTrip: Boolean = false,
+    ): Map<String, Any?> = mapOf("load" to load, "routes" to routes) + download(errorType, message, endedBy, counts, seconds, inTrip)
 
     /** The "offline_style_pack" line: how a load of the style's own files ended; fields as in [region]. */
-    fun stylePack(errorType: String?, message: String?, endedBy: EndedBy?, counts: DownloadCounts?, seconds: Double): Map<String, Any?> =
-        download(errorType, message, endedBy, counts, seconds)
+    fun stylePack(
+        errorType: String?,
+        message: String?,
+        endedBy: EndedBy?,
+        counts: DownloadCounts?,
+        seconds: Double,
+        inTrip: Boolean = false,
+    ): Map<String, Any?> = download(errorType, message, endedBy, counts, seconds, inTrip)
 
-    private fun download(errorType: String?, message: String?, endedBy: EndedBy?, counts: DownloadCounts?, seconds: Double): Map<String, Any?> {
+    /** "inTrip" is there, as true, only for a download that ended while a trip ran. */
+    private fun download(
+        errorType: String?,
+        message: String?,
+        endedBy: EndedBy?,
+        counts: DownloadCounts?,
+        seconds: Double,
+        inTrip: Boolean,
+    ): Map<String, Any?> {
         val outcome = outcome(errorType, endedBy)
         return mapOf(
             "result" to outcome.result,
@@ -152,6 +204,7 @@ internal object OfflineLines {
             "loadedBytes" to counts?.loadedBytes,
             "errored" to counts?.errored?.takeIf { it > 0 },
             "seconds" to Motion.round(seconds, 1),
+            "inTrip" to true.takeIf { inTrip },
         ).filterValues { it != null }
     }
 

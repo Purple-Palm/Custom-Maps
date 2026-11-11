@@ -354,10 +354,10 @@ internal class MapboxNavigationEngine(
                     previewOrigin = origin
                     showPreview(response.routes)
                     dispatch(GuidanceEvent.RoutesReady(response.routes.size))
-                    // While the routes are looked at, the street map along them is put on the
-                    // phone, for a drive that loses its connection. A download of map tiles: no
-                    // route request and no trip session. Only here, never for routes that come
-                    // inside a trip.
+                    // While the routes are looked at, and on into the drive, the street map along
+                    // them is put on the phone, for a drive that loses its connection. A download of
+                    // map tiles: no route request and no trip session. Only here, never for routes
+                    // that come inside a trip.
                     offlineData.downloadPreview(response.routes, origin)
                     RouteRequestResult.Success
                 }
@@ -520,6 +520,11 @@ internal class MapboxNavigationEngine(
         // The state changes first, so SDK callbacks that fire while the commands run already see it.
         _guidanceState.value = transition.state
         if (transition.state == GuidanceState.IDLE) _destination.value = null
+        // A drive that ends, by End or at the destination; a start whose routes were refused goes
+        // back to the preview, whose download goes on.
+        if (from == GuidanceState.ACTIVE && (transition.state == GuidanceState.IDLE || transition.state == GuidanceState.ARRIVED)) {
+            offlineData.onTripEnded()
+        }
         transition.commands.forEach(::execute)
     }
 
@@ -527,8 +532,8 @@ internal class MapboxNavigationEngine(
         val navigation = navigation
         when (command) {
             is GuidanceCommand.CommitRoutes -> {
-                // The preview's download ends here: during a drive only predictive caching loads.
-                offlineData.stopPreviewDownload()
+                // The preview's download goes on into the drive until it is done.
+                offlineData.onTripStarted()
                 // Keeps the navigator alive for the drive, even without a screen.
                 MapboxNavigationApp.attach(guidanceLifecycle)
                 // A new drive: the Then chip and the lane choices know nothing of the last one.

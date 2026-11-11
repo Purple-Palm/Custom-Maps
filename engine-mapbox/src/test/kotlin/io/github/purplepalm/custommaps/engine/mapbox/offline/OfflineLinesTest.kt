@@ -54,13 +54,13 @@ class OfflineLinesTest {
     @Test
     fun `a download that finished before the app ended it is still done`() {
         assertEquals(OfflineLines.Outcome("done"), OfflineLines.outcome(errorType = null, endedBy = EndedBy.NEWER_PREVIEW))
-        assertEquals(OfflineLines.Outcome("done"), OfflineLines.outcome(errorType = null, endedBy = EndedBy.GUIDANCE))
+        assertEquals(OfflineLines.Outcome("done"), OfflineLines.outcome(errorType = null, endedBy = EndedBy.TRIP_END))
     }
 
     @Test
     fun `a download with resources that failed is partial, whoever ended it`() {
         assertEquals(OfflineLines.Outcome("partial"), OfflineLines.outcome("PARTIAL_LOAD", endedBy = null))
-        assertEquals(OfflineLines.Outcome("partial"), OfflineLines.outcome("PARTIAL_LOAD", endedBy = EndedBy.GUIDANCE))
+        assertEquals(OfflineLines.Outcome("partial"), OfflineLines.outcome("PARTIAL_LOAD", endedBy = EndedBy.TRIP_END))
     }
 
     @Test
@@ -69,8 +69,8 @@ class OfflineLinesTest {
     }
 
     @Test
-    fun `a cancel at the start of guidance is a stop with its reason`() {
-        assertEquals(OfflineLines.Outcome("stopped", "guidance"), OfflineLines.outcome("CANCELED", EndedBy.GUIDANCE))
+    fun `a cancel at the end of the trip is a stop with its reason`() {
+        assertEquals(OfflineLines.Outcome("stopped", "trip_end"), OfflineLines.outcome("CANCELED", EndedBy.TRIP_END))
     }
 
     @Test
@@ -86,7 +86,7 @@ class OfflineLinesTest {
         assertEquals(5, others.size)
 
         for (type in others) {
-            for (endedBy in listOf(null, EndedBy.NEWER_PREVIEW, EndedBy.GUIDANCE)) {
+            for (endedBy in listOf(null, EndedBy.NEWER_PREVIEW, EndedBy.TRIP_END)) {
                 assertEquals(OfflineLines.Outcome("failed", type.name.lowercase()), OfflineLines.outcome(type.name, endedBy), "$type $endedBy")
             }
         }
@@ -159,10 +159,10 @@ class OfflineLinesTest {
     }
 
     @Test
-    fun `a region stopped by guidance says so`() {
-        val line = OfflineLines.region(2, 1, "CANCELED", "Canceled", EndedBy.GUIDANCE, counts = null, seconds = 1.0)
+    fun `a region stopped by the end of the trip says so`() {
+        val line = OfflineLines.region(2, 1, "CANCELED", "Canceled", EndedBy.TRIP_END, counts = null, seconds = 1.0)
 
-        assertEquals(mapOf("load" to 2, "routes" to 1, "result" to "stopped", "why" to "guidance", "seconds" to 1.0), line)
+        assertEquals(mapOf("load" to 2, "routes" to 1, "result" to "stopped", "why" to "trip_end", "seconds" to 1.0), line)
     }
 
     @Test
@@ -237,8 +237,8 @@ class OfflineLinesTest {
             OfflineLines.stylePack(errorType = null, message = null, endedBy = null, counts = pack, seconds = 3.04),
         )
         assertEquals(
-            mapOf("result" to "stopped", "why" to "guidance", "seconds" to 0.5),
-            OfflineLines.stylePack("CANCELED", "Canceled", EndedBy.GUIDANCE, counts = null, seconds = 0.5),
+            mapOf("result" to "stopped", "why" to "trip_end", "seconds" to 0.5),
+            OfflineLines.stylePack("CANCELED", "Canceled", EndedBy.TRIP_END, counts = null, seconds = 0.5),
         )
         val failed = OfflineLines.stylePack("OTHER", "no connection", endedBy = null, counts = null, seconds = 0.5)
         assertEquals(listOf("failed", "other", "no connection"), listOf(failed["result"], failed["why"], failed["message"]))

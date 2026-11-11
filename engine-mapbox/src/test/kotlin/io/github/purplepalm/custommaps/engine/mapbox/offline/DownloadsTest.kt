@@ -44,12 +44,12 @@ class DownloadsTest {
     @Test
     fun `a download that was ended keeps its first reason`() {
         val download = started()
-        download.end(EndedBy.GUIDANCE)
+        download.end(EndedBy.TRIP_END)
 
         // A new preview opens before the SDK has answered the cancel.
         assertFalse(download.end(EndedBy.NEWER_PREVIEW))
 
-        assertEquals(EndedBy.GUIDANCE, download.endedBy)
+        assertEquals(EndedBy.TRIP_END, download.endedBy)
         assertEquals(1, cancels.count)
     }
 
@@ -58,7 +58,7 @@ class DownloadsTest {
         val download = started()
         download.finished = true
 
-        assertFalse(download.end(EndedBy.GUIDANCE))
+        assertFalse(download.end(EndedBy.TRIP_END))
 
         assertNull(download.endedBy)
         assertEquals(0, cancels.count)
@@ -132,24 +132,24 @@ class DownloadsTest {
     }
 
     @Test
-    fun `a load stopped at Start keeps that reason when a preview comes after it`() {
+    fun `a load stopped at the end of a trip keeps that reason when a preview comes after it`() {
         val loads = LatestDownload<Long>()
         val first = Load(1)
         loads.replace(first.download)
 
-        loads.stop(EndedBy.GUIDANCE)
+        loads.stop(EndedBy.TRIP_END)
         // Back in a preview before the store has answered the cancel.
         loads.replace(Load(2).download)
 
-        assertEquals(listOf(EndedBy.GUIDANCE), first.endedByAtCancels)
-        assertEquals(OfflineLines.Outcome(OfflineLines.STOPPED, "guidance"), OfflineLines.outcome("CANCELED", first.download.endedBy))
+        assertEquals(listOf(EndedBy.TRIP_END), first.endedByAtCancels)
+        assertEquals(OfflineLines.Outcome(OfflineLines.STOPPED, "trip_end"), OfflineLines.outcome("CANCELED", first.download.endedBy))
     }
 
     @Test
     fun `stopping with no load started does nothing`() {
         val loads = LatestDownload<Long>()
 
-        loads.stop(EndedBy.GUIDANCE)
+        loads.stop(EndedBy.TRIP_END)
 
         assertNull(loads.current)
     }

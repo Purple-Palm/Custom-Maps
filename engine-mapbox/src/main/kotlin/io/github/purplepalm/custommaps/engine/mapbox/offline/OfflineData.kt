@@ -47,8 +47,11 @@ import kotlinx.coroutines.withContext
  * Before guidance, [downloadPreview] puts the street map along the previewed routes on the phone:
  * one tile region that each new preview takes over, and the style's own files. These are map
  * tiles, as the map loads them itself when it shows a place; road data is not asked for outside a
- * trip. Starting guidance ends it ([stopPreviewDownload]), so that during a drive nothing loads
- * but predictive caching, within its areas.
+ * trip. A preview is often open for a few seconds only, so its download goes on after Start until
+ * it is done, and ends early only when a newer preview takes the region over or the trip ends
+ * ([onTripEnded], [PreviewDownloadRules]). During a drive it loads on the store's own threads next
+ * to predictive caching; the main thread only hands the store its work and, at the trip's end,
+ * cancels what is left.
  *
  * Every download costs the driver data. Each preview download, of the region and of the style
  * pack, says in the debug log how many bytes came over the network for it; the SDK gives no such
@@ -105,6 +108,12 @@ internal class OfflineData(
 
     /** The load of the style pack that was started last; it may have finished. */
     private var stylePackLoad: Download<StylePackLoadProgress>? = null
+
+    /**
+     * Whether a trip runs, for the lines of the downloads that end meanwhile. Written on the main
+     * thread, read where the store answers.
+     */
+    @Volatile private var tripRunning = false
 
     init {
         MapboxNavigationApp.registerObserver(this)
@@ -165,21 +174,37 @@ internal class OfflineData(
                     null
                 }
             }
-            // Back on the main thread, and neither a newer preview nor guidance has come since.
+            // Back on the main thread, and neither a newer preview nor the end of a trip has come since.
             loadRegion(routes.size, shape, origin)
         }
     }
 
     /**
-     * Ends what [downloadPreview] started and has not finished. Called when guidance starts: from
-     * then on predictive caching keeps the route in use, and the routes not taken are not paid for
-     * in data. What was loaded so far stays on the phone.
+     * A trip began on the previewed routes. What [downloadPreview] started goes on into the trip
+     * until it is done: the map along the routes for a phone that loses its network soon after
+     * Start. It starts no trip session and asks for no route.
      */
-    fun stopPreviewDownload() {
+    fun onTripStarted() {
+        tripRunning = true
+        endPreviewDownload(PreviewEvent.START)
+    }
+
+    /**
+     * The trip ended: End in the app or in the trip notification, or the arrival. What the
+     * preview's download has not loaded yet is no longer needed; what it loaded stays on the phone.
+     */
+    fun onTripEnded() {
+        tripRunning = false
+        endPreviewDownload(PreviewEvent.TRIP_ENDED)
+    }
+
+    /** Ends what [downloadPreview] started and has not finished, if [event] ends it ([PreviewDownloadRules]). */
+    private fun endPreviewDownload(event: PreviewEvent) {
+        val by = PreviewDownloadRules.endedBy(event) ?: return
         previewGeometry?.cancel()
         previewGeometry = null
-        guarded("offline.cancel") { regionLoad.stop(EndedBy.GUIDANCE) }
-        end(stylePackLoad, EndedBy.GUIDANCE)
+        guarded("offline.cancel") { regionLoad.stop(by) }
+        end(stylePackLoad, by)
     }
 
     private fun loadRegion(routes: Int, shape: PreviewDownload.Shape?, origin: Point) {
@@ -239,7 +264,16 @@ internal class OfflineData(
             val counts = downloadCounts(result.value, load.progress)
             debugLog.log(
                 "offline_region",
-                OfflineLines.region(load.number, load.routes, error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos)),
+                OfflineLines.region(
+                    load.number,
+                    load.routes,
+                    error?.type?.name,
+                    error?.message,
+                    load.endedBy,
+                    counts,
+                    secondsSince(load.startedNanos),
+                    inTrip = tripRunning,
+                ),
             )
         } catch (e: RuntimeException) {
             debugLog.error("offline_region", e)
@@ -281,7 +315,7 @@ internal class OfflineData(
             val counts = downloadCounts(result.value, load.progress)
             debugLog.log(
                 "offline_style_pack",
-                OfflineLines.stylePack(error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos)),
+                OfflineLines.stylePack(error?.type?.name, error?.message, load.endedBy, counts, secondsSince(load.startedNanos), inTrip = tripRunning),
             )
         } catch (e: RuntimeException) {
             debugLog.error("offline_style_pack", e)
