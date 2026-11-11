@@ -413,7 +413,8 @@ private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, offline: State
 /**
  * The offline chip under the search bar. It reads [reason] itself and reports where its bottom
  * edge is, 0 while there is no chip, so that the compass can keep clear of it. A chip [fits] does
- * not let in at its measured height in pixels is left out, and reported as none.
+ * not let in at its measured height in pixels is left out, and reported as none. A chip left out
+ * is not placed, and Compose calls no positioned callback for it, so its own layout reports the 0.
  */
 @Composable
 private fun OfflineChipSlot(
@@ -428,11 +429,11 @@ private fun OfflineChipSlot(
             reason = reason,
             onOpenSettings = onOpenSettings,
             modifier = modifier
-                // Ahead of the layout below, so a chip left out is reported with no height.
-                .onGloballyPositioned { onBottomChanged(if (it.size.height > 0) it.boundsInRoot().bottom.toInt() else 0) }
+                // Called only while the chip is placed, so only for a chip that fits.
+                .onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) }
                 .layout { measurable, constraints ->
                     val chip = measurable.measure(constraints)
-                    if (fits(chip.height)) layout(chip.width, chip.height) { chip.place(0, 0) } else layout(0, 0) {}
+                    if (fits(chip.height)) layout(chip.width, chip.height) { chip.place(0, 0) } else layout(0, 0) { onBottomChanged(0) }
                 },
         )
         DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
