@@ -16,7 +16,10 @@ Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#ch
   app sends Mapbox the phone's location, what you search for, where you plan routes to, your Mapbox
   access token, and usage and device details. You can turn off Mapbox's telemetry with the (i) button
   on the map.
-- Everything else stays on the phone. Uninstalling the app deletes it.
+- Everything else stays on the phone, with two exceptions: Android's backup copies the settings and
+  the trip session log to your Google account, and a debug log leaves the phone when you share it.
+  Uninstalling the app deletes everything it keeps on the phone, but not that backup, which comes
+  back if you install the app again; see [Deleting your data](#deleting-your-data).
 
 ## What stays on the phone
 
@@ -107,9 +110,11 @@ The app is meant for adult drivers and is not directed to children.
 ## Deleting your data
 
 - **On the phone:** **Clear** under Settings, Debug log deletes the debug log and the copies made
-  for sharing. **Remove token** deletes the token. Uninstalling the app deletes everything it keeps,
-  including the map data Mapbox saved for it. A backup in your Google account can be deleted in the
-  backup settings of that account.
+  for sharing. **Remove token** deletes the token. Uninstalling the app deletes everything it keeps
+  on the phone, including the map data Mapbox saved for it.
+- **In your Google account:** uninstalling does not delete Android's backup of the settings and the
+  trip session log, and it is restored when the app is installed again. It can be deleted with the
+  phone's backup in the backup settings of that account.
 - **At Mapbox:** use Mapbox's [data request form](https://www.mapbox.com/legal/ccpa-deletion-request);
   the [Mapbox Privacy Policy](https://www.mapbox.com/legal/privacy) describes your other rights.
 - **With the developer:** there is nothing to delete, because the developer receives no data. A debug
