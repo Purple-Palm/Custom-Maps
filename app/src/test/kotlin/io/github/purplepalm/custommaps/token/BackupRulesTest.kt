@@ -46,6 +46,21 @@ class BackupRulesTest {
         }
     }
 
+    @Test
+    fun `every token key is kept in the token file, which no rule reaches`() {
+        // The store writes only to the DataStore it is given, which AppGraph opens on FILE_NAME;
+        // DataStoreTokenStoreTest checks that each key it writes is one of these.
+        assertEquals(setOf("mapbox_access_token", "mapbox_tokens", "mapbox_active_token"), DataStoreTokenStore.KEY_NAMES)
+        assertEquals("datastore/${DataStoreTokenStore.FILE_NAME}.preferences_pb", DataStoreTokenStore.RELATIVE_PATH)
+        for (name in listOf("backup_rules.xml", "data_extraction_rules.xml")) {
+            for (path in includedFiles(parse(name))) {
+                val folder = path.trimEnd('/')
+                val reaches = folder.isEmpty() || folder == "." || DataStoreTokenStore.RELATIVE_PATH.startsWith("$folder/")
+                assertFalse(reaches || path == DataStoreTokenStore.RELATIVE_PATH, "$name: $path")
+            }
+        }
+    }
+
     private fun parse(name: String): Element =
         DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(xmlDirectory, name)).documentElement
 

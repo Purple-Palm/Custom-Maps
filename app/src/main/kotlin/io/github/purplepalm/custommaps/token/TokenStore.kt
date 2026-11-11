@@ -1,54 +1,197 @@
 package io.github.purplepalm.custommaps.token
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import java.io.IOException
+import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.transform
 
 /**
- * The Mapbox public token entered on this phone. No build contains a token; this store is the
- * only place it lives, and its file is excluded from cloud backup and device transfer.
+ * The Mapbox public tokens entered on this phone, at most [TokenList.MAX_ENTRIES], and the one in
+ * use. No build contains a token; this store is the only place they live, and its file is excluded
+ * from cloud backup and device transfer.
  */
 interface TokenStore {
-    /** The stored token, or null when none has been entered. */
-    val token: Flow<String?>
+    /** Every saved token in the driver's order, with the active one; empty when none is saved. */
+    val list: Flow<TokenList>
 
-    /** Stores [token]; only a valid public token is accepted. */
+    /** The active entry, or null when no token is saved. A rename changes it, a switch too. */
+    val active: Flow<TokenEntry?> get() = list.map { it.active }.distinctUntilChanged()
+
+    /** The token the SDKs use: the active entry's, or null when none is saved. A rename leaves it as it is. */
+    val token: Flow<String?> get() = active.map { it?.token }.distinctUntilChanged()
+
+    /** Adds [token] under [name], the default name when null or blank. Null when it was added, else why not. */
+    suspend fun add(name: String?, token: String): TokenProblem?
+
+    /** Calls the entry [id] [name]. Null when it was renamed, else why not. */
+    suspend fun rename(id: String, name: String): TokenProblem?
+
+    /** Deletes the entry [id]; when it was the active one, the first entry left becomes active. */
+    suspend fun remove(id: String): TokenProblem?
+
+    /** Makes the entry [id] the active one. */
+    suspend fun activate(id: String): TokenProblem?
+
+    /**
+     * Settings' Replace token, as long as Settings shows one token: the active entry's token
+     * becomes [token], under the same name; with none saved it becomes the first entry. Only a
+     * valid public token is accepted.
+     */
     suspend fun save(token: String)
 
+    /** Settings' Remove token, as long as Settings shows one token: deletes every saved token. */
     suspend fun clear()
 }
 
-class DataStoreTokenStore(private val dataStore: DataStore<Preferences>) : TokenStore {
+/**
+ * The tokens in the DataStore file [FILE_NAME]: the list in one key and the active entry's id in
+ * another, both written in one go. [newId] makes the id of a new entry: random, never derived from
+ * the token.
+ */
+class DataStoreTokenStore(
+    private val dataStore: DataStore<Preferences>,
+    private val newId: () -> String = ::randomId,
+    /** The wait before a failed read is tried again, growing with each attempt. */
+    private val readRetryMillis: Long = READ_RETRY_MS,
+) : TokenStore {
 
-    /** A read error counts as no token for the moment; reading is tried again, so a token is not lost for good. */
-    override val token: Flow<String?> = dataStore.data
+    /**
+     * A read error counts as no token for the moment; reading is tried again, so a token is not
+     * lost for good.
+     *
+     * The first read after an update from a version with one token moves that token into the list
+     * ([TokenMigration]): one write adds it while the old key stays, a second one removes the old
+     * key, and only then is the list emitted, so every entry shown has the id it keeps. When the
+     * second write fails, the list is emitted with the old key still there; the next change of the
+     * list removes it, and until then it is read again harmlessly, as its token is in the list.
+     */
+    override val list: Flow<TokenList> = dataStore.data
+        .transform { preferences ->
+            val list = stored(preferences)
+            when (TokenMigration.of(list, preferences[LEGACY_KEY])) {
+                TokenMigration.NONE -> emit(list)
+                // Each write brings the next read, one step further.
+                TokenMigration.ADD_ENTRY -> dataStore.edit(::migrateOneStep)
+                TokenMigration.REMOVE_OLD_KEY -> try {
+                    dataStore.edit(::migrateOneStep)
+                } catch (e: IOException) {
+                    emit(list)
+                }
+            }
+        }
         .retryWhen { error, attempt ->
             if (error !is IOException) return@retryWhen false
-            emit(emptyPreferences())
-            delay(READ_RETRY_MS * (attempt + 1).coerceAtMost(MAX_RETRY_STEPS))
+            emit(TokenList.EMPTY)
+            delay(readRetryMillis * (attempt + 1).coerceAtMost(MAX_RETRY_STEPS))
             true
         }
-        .map { preferences -> preferences[TOKEN_KEY] }
         .distinctUntilChanged()
+
+    override suspend fun add(name: String?, token: String): TokenProblem? = change { list ->
+        list.problemAdding(name, token)?.let(Change::Refused) ?: Change.To(list.add(name, token, freshId(list)))
+    }
+
+    override suspend fun rename(id: String, name: String): TokenProblem? = change { list ->
+        list.problemRenaming(id, name)?.let(Change::Refused) ?: Change.To(list.rename(id, name))
+    }
+
+    override suspend fun remove(id: String): TokenProblem? = change { list ->
+        if (list.slotOf(id) == null) Change.Refused(TokenProblem.NotFound) else Change.To(list.remove(id))
+    }
+
+    override suspend fun activate(id: String): TokenProblem? = change { list ->
+        if (list.slotOf(id) == null) Change.Refused(TokenProblem.NotFound) else Change.To(list.activate(id))
+    }
 
     override suspend fun save(token: String) {
         val trimmed = token.trim()
         require(MapboxAccessTokens.check(trimmed) == AccessTokenCheck.VALID) { "Only a valid public token can be stored" }
-        dataStore.edit { preferences -> preferences[TOKEN_KEY] = trimmed }
+        change { list ->
+            val active = list.active
+            when {
+                active == null -> Change.To(list.add(null, trimmed, freshId(list)))
+                active.token == trimmed -> Change.To(list)
+                else -> {
+                    // A new entry under the old name in place of the active one, so the id stays the token's own.
+                    val others = list.remove(active.id)
+                    val id = freshId(list)
+                    others.problemAdding(active.name, trimmed)?.let(Change::Refused)
+                        ?: Change.To(others.add(active.name, trimmed, id).activate(id))
+                }
+            }
+        }
     }
 
     override suspend fun clear() {
-        dataStore.edit { preferences -> preferences.remove(TOKEN_KEY) }
+        dataStore.edit { preferences -> KEYS.forEach { preferences.remove(it) } }
+    }
+
+    /**
+     * Changes the list in one write. Whatever the migration still has to do comes first in the
+     * same write, so a token an older version left under the old key is neither lost nor brought
+     * back after the driver deleted it. Returns why [update] refused, or null.
+     */
+    private suspend fun change(update: (TokenList) -> Change): TokenProblem? {
+        var problem: TokenProblem? = null
+        dataStore.edit { preferences ->
+            repeat(MIGRATION_STEPS) { migrateOneStep(preferences) }
+            when (val result = update(stored(preferences))) {
+                is Change.To -> write(preferences, result.list)
+                is Change.Refused -> problem = result.problem
+            }
+        }
+        return problem
+    }
+
+    /** The next step of [TokenMigration] on [preferences], and only that one. */
+    private fun migrateOneStep(preferences: MutablePreferences) {
+        val list = stored(preferences)
+        val oldToken = preferences[LEGACY_KEY]
+        when (TokenMigration.of(list, oldToken)) {
+            TokenMigration.NONE -> Unit
+            TokenMigration.ADD_ENTRY -> write(preferences, list.add(null, checkNotNull(oldToken), freshId(list)))
+            TokenMigration.REMOVE_OLD_KEY -> preferences.remove(LEGACY_KEY)
+        }
+    }
+
+    private fun stored(preferences: Preferences): TokenList = TokenList.decode(preferences[LIST_KEY], preferences[ACTIVE_KEY])
+
+    private fun write(preferences: MutablePreferences, list: TokenList) {
+        val active = list.activeId
+        if (active == null) {
+            preferences.remove(LIST_KEY)
+            preferences.remove(ACTIVE_KEY)
+        } else {
+            preferences[LIST_KEY] = TokenList.encode(list)
+            preferences[ACTIVE_KEY] = active
+        }
+    }
+
+    /** An id no entry of [list] has. */
+    private fun freshId(list: TokenList): String {
+        repeat(ID_ATTEMPTS) {
+            val id = newId()
+            if (TokenList.isId(id) && list.slotOf(id) == null) return id
+        }
+        error("No unused entry id")
+    }
+
+    /** What a change of the list comes to: the new list, or why there is none. */
+    private sealed interface Change {
+        data class To(val list: TokenList) : Change
+
+        data class Refused(val problem: TokenProblem) : Change
     }
 
     companion object {
@@ -58,8 +201,22 @@ class DataStoreTokenStore(private val dataStore: DataStore<Preferences>) : Token
         /** Location of the file relative to the app's files directory. */
         const val RELATIVE_PATH = "datastore/$FILE_NAME.preferences_pb"
 
-        private val TOKEN_KEY = stringPreferencesKey("mapbox_access_token")
+        /** The single token of the versions before the list; only ever read, to move it into the list, and removed. */
+        private val LEGACY_KEY = stringPreferencesKey("mapbox_access_token")
+        private val LIST_KEY = stringPreferencesKey("mapbox_tokens")
+        private val ACTIVE_KEY = stringPreferencesKey("mapbox_active_token")
+        private val KEYS = listOf(LEGACY_KEY, LIST_KEY, ACTIVE_KEY)
+
+        /** Every key the store writes, all of them in the one file [FILE_NAME]. */
+        val KEY_NAMES: Set<String> = KEYS.map { it.name }.toSet()
+
         private const val READ_RETRY_MS = 1_000L
         private const val MAX_RETRY_STEPS = 30L
+        private const val MIGRATION_STEPS = 2
+        private const val ID_ATTEMPTS = 10
+        private const val ID_LENGTH = 12
+
+        /** 12 random hex digits. */
+        private fun randomId(): String = UUID.randomUUID().toString().replace("-", "").take(ID_LENGTH)
     }
 }
