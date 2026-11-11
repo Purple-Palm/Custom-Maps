@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import com.mapbox.common.Cancelable
+import com.mapbox.api.directions.v5.models.ManeuverModifier
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.maps.EdgeInsets
@@ -42,6 +43,7 @@ import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import com.mapbox.navigation.ui.maps.route.arrow.api.MapboxRouteArrowApi
 import com.mapbox.navigation.ui.maps.route.arrow.api.MapboxRouteArrowView
+import com.mapbox.navigation.ui.maps.route.arrow.model.ManeuverArrow
 import com.mapbox.navigation.ui.maps.route.arrow.model.RouteArrowOptions
 import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineApi
 import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
@@ -66,7 +68,10 @@ import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
+import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.geo.LocalMeters
+import io.github.purplepalm.custommaps.nav.guidance.UTurnArrow
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -165,6 +170,12 @@ class PhoneMap internal constructor(
 
     /** When the traveled part of the route line last took the puck's position, in nanoseconds. */
     private var routeLineUpdatedAt = 0L
+
+    /** The step whose maneuver arrow was worked out last: route, leg and step; null before any. */
+    private var arrowStep: String? = null
+
+    /** The arrow of that step when it is a U-turn drawn as one curve; null while the SDK's own arrow is shown. */
+    private var uTurnArrow: ManeuverArrow? = null
 
     /** Lane markings on the map where Mapbox has them; off until Settings says otherwise. */
     private val laneDetails = LaneDetails.on(mapboxMap, debugLog)
@@ -368,7 +379,7 @@ class PhoneMap internal constructor(
             // its layers. Left to the first renders, the arrow came first and the line covered it.
             // Both kinds of layer stay in the style, in this order, for as long as the map lives.
             routeLineView.initializeLayers(loaded)
-            routeArrowView.render(loaded, routeArrowApi.clearArrows())
+            clearArrows()
             logLayerOrder(loaded)
             // Lane details are set a moment after this callback, never within it (see LaneDetails).
             laneDetails.onStyleLoaded()
@@ -609,7 +620,7 @@ class PhoneMap internal constructor(
         if (guidanceState != GuidanceState.ACTIVE) return
         val style = style ?: return
         routeLineApi.updateWithRouteProgress(progress) { update -> routeLineView.renderRouteLineUpdate(style, update) }
-        routeArrowView.renderManeuverUpdate(style, routeArrowApi.addUpcomingManeuverArrow(progress))
+        renderManeuverArrow(style, progress)
         lastProgress = progress
         // The engine reads the lane choices once for each update; its own observer got the same list.
         camera.onRouteProgress(progress, engine.laneChoices.ahead(progress))
@@ -703,7 +714,65 @@ class PhoneMap internal constructor(
 
     private fun clearArrows() {
         val style = style ?: return
+        arrowStep = null
+        uTurnArrow = null
         routeArrowView.render(style, routeArrowApi.clearArrows())
+    }
+
+    /**
+     * The arrow of the next maneuver. The navigation SDK works its arrow out again with every
+     * update: the last 30 m of the step and the first 30 m of the next one, which is the same
+     * shape for the whole step. A U-turn across a median opening is drawn as one curve instead
+     * ([UTurnArrow]), worked out once for its step and then left on the map until the step
+     * changes. It is kept in memory only, like everything else of the route.
+     */
+    private fun renderManeuverArrow(style: Style, progress: RouteProgress) {
+        val leg = progress.currentLegProgress
+        val step = leg?.let { "${progress.navigationRoute.id}/${it.legIndex}/${it.currentStepProgress?.stepIndex}" }
+        if (step != arrowStep) {
+            arrowStep = step
+            val shaped = if (isUTurn(progress)) uTurnArrowOf(progress) else null
+            // The arrow of the step before goes first, whichever kind it was: an update of the
+            // SDK's arrow draws only the first arrow the arrow API holds.
+            if (shaped != null || uTurnArrow != null) routeArrowApi.clearArrows()
+            uTurnArrow = shaped
+            if (shaped != null) {
+                routeArrowView.render(style, routeArrowApi.showManeuverArrow())
+                routeArrowView.render(style, routeArrowApi.addArrow(shaped))
+            }
+        }
+        if (uTurnArrow == null) routeArrowView.renderManeuverUpdate(style, routeArrowApi.addUpcomingManeuverArrow(progress))
+    }
+
+    /** Whether the next maneuver is a U-turn, as its banner says, or the route's step where there is no banner yet. */
+    private fun isUTurn(progress: RouteProgress): Boolean {
+        val modifier = progress.bannerInstructions?.primary()?.modifier()
+            ?: progress.currentLegProgress?.upcomingStep?.maneuver()?.modifier()
+        return modifier == ManeuverModifier.UTURN
+    }
+
+    /**
+     * The U-turn's arrow as one curve, from the shape of the step and of the next one around the
+     * maneuver point; null where the road does not turn back through two corners, and the SDK's
+     * arrow is the right one.
+     */
+    private fun uTurnArrowOf(progress: RouteProgress): ManeuverArrow? = try {
+        val approach = progress.currentLegProgress?.currentStepProgress?.stepPoints
+        val onward = progress.upcomingStepPoints
+        val maneuver = onward?.firstOrNull()
+        if (approach == null || maneuver == null) {
+            null
+        } else {
+            val local = LocalMeters(maneuver.latitude(), maneuver.longitude())
+            UTurnArrow.shape(
+                StepShapes.tail(approach, local, UTurnArrow.ARROW_METERS),
+                StepShapes.head(onward, local, UTurnArrow.ONWARD_METERS),
+            )?.let { points -> ManeuverArrow(points.map { StepShapes.toPoint(it, local) }) }
+        }
+    } catch (e: RuntimeException) {
+        // A shape that cannot be read costs the curve, never the drive: the SDK's arrow shows.
+        debugLog.error("uTurnArrow", e)
+        null
     }
 
     /**

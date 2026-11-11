@@ -132,7 +132,14 @@ object UTurnArrow {
      * where it joins the road that goes on along [outbound]; [tanHalf] is the tangent of half the
      * corner's angle.
      */
-    private fun fillet(corner: LocalPoint, inbound: Unit2, outbound: Unit2, radius: Double, tanHalf: Double, left: Boolean): List<LocalPoint> {
+    private fun fillet(
+        corner: LocalPoint,
+        inbound: Unit2,
+        outbound: Unit2,
+        radius: Double,
+        tanHalf: Double,
+        left: Boolean,
+    ): List<LocalPoint> {
         val reach = radius * tanHalf
         val start = LocalPoint(corner.x - inbound.x * reach, corner.y - inbound.y * reach)
         // The center lies to the side the road turns to, one radius from where the arc starts.
