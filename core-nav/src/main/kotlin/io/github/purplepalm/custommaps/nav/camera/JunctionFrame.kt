@@ -45,7 +45,7 @@ object JunctionFrame {
         tuning: CameraTuning,
     ): Plan {
         if (mode != LaneZoom.LARGE) return NONE
-        val bend = TurnBend.bend(road, approachBearing, tuning.bendDegrees, tuning.bendSideMeters, tuning.bendSearchMeters)
+        val bend = TurnBend.bend(road, approachBearing, tuning.bendDegrees, tuning.bendSideMeters, tuning.bendSearchMeters, tuning.bendMinMeters)
         // A bend near the maneuver point is in the SDK's frame already, and so is all of a short step.
         if (bend == null || bend.meters < tuning.bendMinMeters || stepMeters <= coalesceMeters) return Plan(bend, emptyList())
         return Plan(bend, LocalLine.head(road, bend.meters + tuning.largeMetersAfterManeuver).asReversed().toList())

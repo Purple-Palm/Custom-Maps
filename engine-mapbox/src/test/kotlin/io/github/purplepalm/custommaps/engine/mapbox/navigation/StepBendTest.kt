@@ -35,6 +35,12 @@ class StepBendTest {
     }
 
     @Test
+    fun `a step that leaves its maneuver point a few degrees off the way in logs no bend`() {
+        val a = Math.toRadians(5.0)
+        assertNull(stepBend("new name", bearingBefore = 0.0, shape = listOf(at(0.0, 0.0), at(-sin(a) * 3000.0, cos(a) * 3000.0))))
+    }
+
+    @Test
     fun `the departure, a step without the bearing in and an arrival log no bend`() {
         assertNull(stepBend("depart", bearingBefore = 0.0, shape = veer))
         assertNull(stepBend("turn", bearingBefore = null, shape = veer))

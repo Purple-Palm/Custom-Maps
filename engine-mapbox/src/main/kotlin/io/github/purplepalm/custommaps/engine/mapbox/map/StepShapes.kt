@@ -44,6 +44,6 @@ internal object StepShapes {
         val origin = shape.firstOrNull() ?: return null
         val local = LocalMeters(origin.latitude(), origin.longitude())
         val road = head(shape, local, tuning.bendSearchMeters)
-        return TurnBend.bend(road, bearingBefore, tuning.bendDegrees, tuning.bendSideMeters, tuning.bendSearchMeters)
+        return TurnBend.bend(road, bearingBefore, tuning.bendDegrees, tuning.bendSideMeters, tuning.bendSearchMeters, tuning.bendMinMeters)
     }
 }

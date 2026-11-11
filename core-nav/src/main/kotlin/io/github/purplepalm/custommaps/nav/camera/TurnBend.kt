@@ -23,8 +23,11 @@ data class Bend(val meters: Double, val degrees: Double)
  * The bend is the first point after the maneuver point where the road's direction is
  * [minDegrees] or more off the direction the car comes in on. A road that only veers, by less
  * than that, bends where it has moved more than [sideMeters], about one lane, to the side of the
- * line the car comes in on. Both are looked for within [searchMeters] of the maneuver point, the
- * angle first. A turn at the maneuver point itself is a bend at 0 m.
+ * line the car comes in on, as long as it also moves that far from the line it leaves the
+ * maneuver point on, along its own first [nearMeters]. A road that leaves the point at a slight
+ * angle and runs on straight drifts away from the line in without ever bending: it has no bend.
+ * Both are looked for within [searchMeters] of the maneuver point, the angle first. A turn at the
+ * maneuver point itself is a bend at 0 m.
  */
 object TurnBend {
 
@@ -34,9 +37,10 @@ object TurnBend {
     /**
      * The first bend of [points], the road from the maneuver point on (its first point), or null
      * when it goes on within [minDegrees] and [sideMeters] of the way in for [searchMeters] or to
-     * its end.
+     * its end, or only drifts away from the way in along the line it leaves the point on.
      *
      * @param approachBearing the compass bearing the car comes in on, in degrees
+     * @param nearMeters how much of the road from the maneuver point gives the line it leaves on
      */
     fun bend(
         points: List<LocalPoint>,
@@ -44,10 +48,16 @@ object TurnBend {
         minDegrees: Double = 20.0,
         sideMeters: Double = 4.0,
         searchMeters: Double = 150.0,
+        nearMeters: Double = 15.0,
     ): Bend? {
         val road = spaced(points)
         if (road.size < 2) return null
-        return byAngle(road, approachBearing, minDegrees, searchMeters) ?: bySide(road, approachBearing, sideMeters, searchMeters)
+        byAngle(road, approachBearing, minDegrees, searchMeters)?.let { return it }
+        val side = bySide(road, approachBearing, approachBearing, sideMeters, searchMeters) ?: return null
+        // Only a road that also leaves the line it set out on bends: one that left the maneuver
+        // point a few degrees off the way in and runs on along that line does not.
+        val outset = LocalLine.bearing(road[0], LocalLine.pointAt(road, nearMeters))
+        return side.takeIf { bySide(road, outset, approachBearing, sideMeters, searchMeters) != null }
     }
 
     /** The first point whose way on is [minDegrees] or more off the way in. */
@@ -62,12 +72,15 @@ object TurnBend {
         return null
     }
 
-    /** The first place more than [sideMeters] to either side of the line in through the maneuver point. */
-    private fun bySide(road: List<LocalPoint>, approach: Double, sideMeters: Double, searchMeters: Double): Bend? {
-        val ux = sin(Math.toRadians(approach))
-        val uy = cos(Math.toRadians(approach))
+    /**
+     * The first place more than [sideMeters] to either side of the line through the maneuver point
+     * along the compass bearing [line]; its degrees are the road's there off the way in, [approach].
+     */
+    private fun bySide(road: List<LocalPoint>, line: Double, approach: Double, sideMeters: Double, searchMeters: Double): Bend? {
+        val ux = sin(Math.toRadians(line))
+        val uy = cos(Math.toRadians(line))
         val start = road[0]
-        // How far a point is to the left of the line in, in meters; negative to the right.
+        // How far a point is to the left of the line, in meters; negative to the right.
         fun offset(p: LocalPoint) = ux * (p.y - start.y) - uy * (p.x - start.x)
         var along = 0.0
         for (i in 0 until road.size - 1) {

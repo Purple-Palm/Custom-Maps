@@ -993,7 +993,10 @@ view turned up to 45 degrees toward a bend that was still ahead, close in. So, w
 - **The road to the bend joins the frame** (`TurnBend`, `JunctionFrame`, `JunctionPoints`). The
   bend is the first point of the next step that heads 20 degrees or more off the way in, or else,
   for a road that only veers, the first place more than 4 m (about one lane) to the side of the
-  way in, looked for within 150 m of the maneuver point. While the SDK frames the maneuver, the
+  way in, looked for within 150 m of the maneuver point. A road that leaves the maneuver point at
+  a slight angle and runs on along that line does not count as bending, however far it gets from
+  the way in: the veer counts only where the road also gets 4 m off the line of its own first
+  15 m. While the SDK frames the maneuver, the
   road from the maneuver point to 30 m past the bend goes to the data source as more points to
   frame, ordered back toward the maneuver point. The SDK takes the frame's bearing from the car to
   the last point it frames, and that is then the maneuver point: the bearing stays on the road
@@ -1308,8 +1311,8 @@ All in `CameraTuning`, the same for the phone and the car.
 | A next lane choice this near keeps the view in (`laneCoalesceSeconds`) | 10 s of driving from its own start |
 | Bearing lead near a lane choice (`laneMaxBearingLead`) | 20° (the SDK: 45°) |
 | Bearing lead while the view looks down onto a turn, Smooth follow (`junctionMaxBearingLead`) | 20° (the SDK: 45°) |
-| Where the road bends after a maneuver (`bendDegrees`, `bendSideMeters`, `bendSearchMeters`) | 20° off the way in, else 4 m to its side, within 150 m |
-| A bend nearer than this is in the frame already (`bendMinMeters`) | 15 m |
+| Where the road bends after a maneuver (`bendDegrees`, `bendSideMeters`, `bendSearchMeters`) | 20° off the way in, else 4 m to its side and to the side of the road's own first 15 m, within 150 m |
+| A bend nearer than this is in the frame already, and the road's first stretch that gives the line it leaves on (`bendMinMeters`) | 15 m |
 | The centre trails the car by no more than (`maxPuckLagDp`) | 12 dp |
 
 ## System animations

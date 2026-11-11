@@ -71,7 +71,8 @@ data class CameraTuning(
     /**
      * Where the road bends after a maneuver ([TurnBend]): the first point that heads this many
      * degrees or more off the way in, or else the first place more than [bendSideMeters] to its
-     * side, looked for within [bendSearchMeters] of the maneuver point.
+     * side and to the side of the road's own first [bendMinMeters], looked for within
+     * [bendSearchMeters] of the maneuver point.
      */
     val bendDegrees: Double = 20.0,
     val bendSideMeters: Double = 4.0,
@@ -79,7 +80,8 @@ data class CameraTuning(
     /**
      * With Large, a bend at least this far past the maneuver point, and the road
      * [largeMetersAfterManeuver] past it, join the frame of the junction ([JunctionFrame]). A
-     * nearer bend is in that frame already.
+     * nearer bend is in that frame already. The road's first this many meters also give the line
+     * it leaves the maneuver point on, which a bend found to the side has to leave too.
      */
     val bendMinMeters: Double = 15.0,
     /** A lane choice takes at least this many lanes, not counting lanes kept for buses, car pools and the like. */

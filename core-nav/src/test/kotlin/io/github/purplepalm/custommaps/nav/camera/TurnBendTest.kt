@@ -24,6 +24,12 @@ class TurnBendTest {
         return listOf(p(0.0, 0.0), p(0.0, late), p(-sin(a) * 3000.0, late + cos(a) * 3000.0))
     }
 
+    /** Straight from the maneuver point for 3 km, [degrees] off the way in, to the left when positive. */
+    private fun leave(degrees: Double): List<LocalPoint> {
+        val a = Math.toRadians(degrees)
+        return listOf(p(0.0, 0.0), p(-sin(a) * 3000.0, cos(a) * 3000.0))
+    }
+
     /** A curve to the left of [radius] meters from the maneuver point, a point every 2 m, as the replay drew it. */
     private fun curve(radius: Double): List<LocalPoint> {
         val points = arrayListOf(p(0.0, 0.0))
@@ -57,6 +63,36 @@ class TurnBendTest {
         // 15 degrees from 62 m on: 4 m to the side after 4 / sin 15 = 15.5 m more. The replay,
         // which looked once a meter, found it at 78 m.
         assertBend(62.0 + 4.0 / sin(Math.toRadians(15.0)), -15.0, TurnBend.bend(veer(62.0, 15.0), 0.0))
+    }
+
+    @Test
+    fun `a road that leaves the maneuver point a few degrees off the way in and runs on straight has no bend`() {
+        // It drifts a lane away from the line in, 4 / sin 5 = 46 m on for 5 degrees, but never
+        // leaves the line it set out on.
+        for (degrees in listOf(1.6, 2.0, 5.0, 10.0, 15.0, 19.0, -5.0)) {
+            assertNull(TurnBend.bend(leave(degrees), 0.0), "$degrees degrees")
+        }
+    }
+
+    @Test
+    fun `a short jog or taper back alongside the way in has no bend`() {
+        // A meter to the side within 8 m, then on alongside the way in: never a lane off it,
+        // although it does leave the line of its own first 15 m.
+        assertNull(TurnBend.bend(listOf(p(0.0, 0.0), p(-1.0, 8.0), p(-1.0, 3000.0)), 0.0))
+        // 5 degrees for 30 m, 2.6 m to the side, then alongside the way in again.
+        val a = Math.toRadians(5.0)
+        assertNull(TurnBend.bend(listOf(p(0.0, 0.0), p(-sin(a) * 30.0, cos(a) * 30.0), p(-sin(a) * 30.0, 3000.0)), 0.0))
+    }
+
+    @Test
+    fun `a slight angle at the maneuver point and a veer after it bend where the road is a lane off the way in`() {
+        // 5 degrees at the point, then 10 degrees more from 62 m on: the road leaves its own line
+        // there, so it bends where it is 4 m off the line in, 4 / sin 5 = 45.9 m on.
+        val a = Math.toRadians(5.0)
+        val b = Math.toRadians(15.0)
+        val kink = p(-sin(a) * 62.0, cos(a) * 62.0)
+        val road = listOf(p(0.0, 0.0), kink, p(kink.x - sin(b) * 3000.0, kink.y + cos(b) * 3000.0))
+        assertBend(4.0 / sin(a), -5.0, TurnBend.bend(road, 0.0))
     }
 
     @Test

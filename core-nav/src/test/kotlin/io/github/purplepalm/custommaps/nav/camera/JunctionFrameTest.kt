@@ -84,6 +84,14 @@ class JunctionFrameTest {
     }
 
     @Test
+    fun `a road that leaves the maneuver point a few degrees off and runs on adds nothing`() {
+        val a = Math.toRadians(5.0)
+        val plan = plan(listOf(p(0.0, 0.0), p(-sin(a) * 3000.0, cos(a) * 3000.0)))
+        assertNull(plan.bend)
+        assertTrue(plan.points.isEmpty())
+    }
+
+    @Test
     fun `the bend comes with the tuning's own numbers`() {
         // With 30 degrees the screenshot's 26 degree veer is found only where it is 4 m to the side.
         val wider = tuning.copy(bendDegrees = 30.0)
