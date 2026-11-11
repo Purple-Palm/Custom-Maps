@@ -11,11 +11,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.net.ConnectivityManager
+import android.net.TrafficStats
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Debug
 import android.os.PowerManager
+import android.os.Process
 import android.provider.Settings
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
@@ -106,7 +108,10 @@ internal class DeviceLog(
         }
     }
 
-    /** Battery, heat and memory; once a minute during guidance. Asks the system: call it off the main thread. */
+    /**
+     * Battery, heat, memory and the bytes the app has received; once a minute during guidance.
+     * Asks the system: call it off the main thread.
+     */
     fun logSample() {
         // The sticky battery broadcast: no receiver is registered.
         val battery = application.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -126,6 +131,10 @@ internal class DeviceLog(
                 "powerSave" to powerManager?.isPowerSaveMode,
                 "javaHeapMb" to (runtime.totalMemory() - runtime.freeMemory()) / BYTES_PER_MB,
                 "nativeHeapMb" to Debug.getNativeHeapAllocatedSize() / BYTES_PER_MB,
+                // Everything the app has received since the phone started, Wi-Fi and mobile data
+                // alike. Predictive caching has no byte count of its own, so the growth from one
+                // line to the next is the most it can have loaded meanwhile.
+                "appRxBytes" to TrafficStats.getUidRxBytes(Process.myUid()).takeIf { it >= 0 },
             ),
         )
     }

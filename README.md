@@ -93,7 +93,9 @@ The app saves what a drive needs for stretches without a connection:
 
 Both use mobile data when the phone is not on Wi-Fi, by estimate tens of MB for a new area, and
 what is saved is used again on later drives. Mapbox does not charge extra for it. The debug log
-records how much each download really loaded.
+records how much the download along the shown routes really loaded. Mapbox gives no such count for
+what guidance keeps ahead, so during guidance the log also notes, once a minute, how much the app
+has received in all.
 
 Three seconds after the app loses its internet a chip on the map says so: a sentence with the
 reason under the search bar, or a short **Offline** tab under the maneuver card during guidance.
@@ -111,10 +113,11 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 - crashes, written before the app closes, and at each start how earlier runs ended as Android
   recorded it (a crash, the system freeing memory, a swipe from Recents) and why this one started;
 - the phone's state: on screen or not, the screen, charging, Power saving, heat and memory, with a
-  sample once a minute during guidance, and whether Android's animations run;
+  sample once a minute during guidance that also has the bytes the app has received, and whether
+  Android's animations run;
 - the app's network on every change, and the phone settings that can keep only this app offline;
-- what is saved for stretches without a connection: each download with its size and the bytes it
-  loaded, and when the offline chip showed;
+- what is saved for stretches without a connection: each download along the shown routes with its
+  size and the bytes it loaded, and when the offline chip showed;
 - one camera line a second during guidance while the map is on screen: where the camera is and
   where it is heading, how smoothly the camera and the car move, and the map's frame rate;
 - map errors, the first of each kind in full and the repeats as one count a minute.

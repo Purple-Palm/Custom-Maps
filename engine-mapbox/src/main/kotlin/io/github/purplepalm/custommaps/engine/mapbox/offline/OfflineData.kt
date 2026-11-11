@@ -50,8 +50,9 @@ import kotlinx.coroutines.withContext
  * trip. Starting guidance ends it ([stopPreviewDownload]), so that during a drive nothing loads
  * but predictive caching, within its areas.
  *
- * Every download costs the driver data, so each one says in the debug log how many bytes came
- * over the network for it.
+ * Every download costs the driver data. Each preview download, of the region and of the style
+ * pack, says in the debug log how many bytes came over the network for it; the SDK gives no such
+ * count for predictive caching.
  *
  * Main thread only, like the SDK calls it makes. The tile store and the offline manager answer on
  * threads of their own; what runs there remembers the latest numbers and writes to the debug log,
