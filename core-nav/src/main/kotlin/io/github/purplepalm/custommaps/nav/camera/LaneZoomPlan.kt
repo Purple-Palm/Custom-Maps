@@ -116,8 +116,8 @@ enum class LaneChoiceSkip {
 /**
  * How far the view has moved in for a lane choice, as a smooth function of time: 0 on the road, 1
  * near a lane choice. Like [ManeuverFocus] it is fed once a second from the route progress and read
- * on every frame. The tilt stays as it is: at freeway speed a view from straight above would show
- * only a few seconds of road.
+ * on every frame. It never tilts the view down: at freeway speed a view from straight above would
+ * show only a few seconds of road. Smooth follow tilts it up a little instead ([guidancePitch]).
  *
  * - In over [CameraTuning.laneInSeconds], from [windowMeters] before the choice. Once a choice
  *   holds the view it keeps it: a car that brakes, and so shortens the window, stays close.
@@ -291,10 +291,10 @@ class LaneFocus(private val tuning: CameraTuning) {
  *   Where the view stays down for a next maneuver, it is kept until that one is framed. What was
  *   let go is not taken up again: when the tilt turns back down for a next maneuver that is not
  *   framed yet, the zoom waits where it is;
- * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve. In
- *   the frame of a maneuver that is no closer than the frame was fitted: its center is the
- *   frame's own point, not the car, and closer than its fit the car and the junction would be
- *   pushed off the map.
+ * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve, and
+ *   no closer than the zoom that still shows enough road ahead ([LookAhead]). In the frame of a
+ *   maneuver that is no closer than the frame was fitted: its center is the frame's own point,
+ *   not the car, and closer than its fit the car and the junction would be pushed off the map.
  *
  * Called on every frame; it allocates nothing.
  */
@@ -323,6 +323,9 @@ class ZoomPlanner(private val tuning: CameraTuning) {
      * @param laneFocus [LaneFocus.focusAt] now
      * @param roadFrame the frame is one of the open road, with the car on its usual place; false
      *   for a frame fitted around the car and a maneuver
+     * @param lanesCap the closest zoom the lanes may go to and still show enough road ahead
+     *   ([LookAhead.zoomFor]); infinity, or not a number, for none. It never takes the zoom below
+     *   the road's, and the junction's zoom is not its business
      */
     fun target(
         mode: LaneZoom,
@@ -332,6 +335,7 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         afterManeuver: Boolean,
         laneFocus: Double,
         roadFrame: Boolean,
+        lanesCap: Double = Double.POSITIVE_INFINITY,
     ): Double {
         if (mode == LaneZoom.DEFAULT) {
             reset()
@@ -355,7 +359,9 @@ class ZoomPlanner(private val tuning: CameraTuning) {
             }
             lerp(road, full, junctionFocus)
         }
-        val lanesGoal = max(road, closest(tuning.freewayLaneDp, latitude))
+        val lanesZoom = closest(tuning.freewayLaneDp, latitude)
+        // The lower of the two; a cap that is not a number fails the test and caps nothing.
+        val lanesGoal = max(road, if (lanesCap < lanesZoom) lanesCap else lanesZoom)
         // A lane choice that still holds the view when a maneuver is framed stays within that frame.
         val lanes = lerp(road, if (roadFrame) lanesGoal else min(lanesGoal, max(road, frameZoom)), laneFocus)
         val zoom = max(junction, lanes)

@@ -830,6 +830,53 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `a look-ahead cap holds the lanes back, never below the road and never at a junction`() {
+        val lanes = MapScale.zoomForLaneDp(14.0, 35.0)
+        val cap28 = MapScale.zoomForLaneDp(28.0, 35.0)
+        val plan = ZoomPlanner(tuning)
+        // Under the 14 dp zoom it is the lanes' goal, along the lane curve.
+        assertEquals(17.5, plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, roadFrame = true, lanesCap = 17.5), 1e-9)
+        assertEquals(ZoomPlanner.Kind.LANES, plan.kind)
+        assertEquals(lerp(14.0, 17.5, 0.5), plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 0.5, roadFrame = true, lanesCap = 17.5), 1e-9)
+        // Above it, it changes nothing.
+        assertEquals(lanes, plan.target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, roadFrame = true, lanesCap = lanes + 0.3), 1e-9)
+        // Never under the road's zoom.
+        assertEquals(16.35, plan.target(LaneZoom.LARGE, 18.0, 35.0, 0.0, false, 1.0, roadFrame = true, lanesCap = 15.0), 1e-9)
+        assertEquals(15.2, plan.target(LaneZoom.LARGE, 15.2, 35.0, 0.0, false, 1.0, roadFrame = true, lanesCap = 15.0), 1e-9)
+        // The junction goes to its own frame, also while a lane choice holds the view.
+        assertEquals(18.5, ZoomPlanner(tuning).target(LaneZoom.LARGE, 18.5, 35.0, 1.0, false, 1.0, roadFrame = false, lanesCap = 17.0), 1e-9)
+        assertEquals(cap28, ZoomPlanner(tuning).target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false, lanesCap = 15.0), 1e-9)
+        // In a maneuver's frame the lanes stay within it, and within the cap.
+        assertEquals(16.9, ZoomPlanner(tuning).target(LaneZoom.LARGE, 17.4, 35.0, 0.0, false, 1.0, roadFrame = false, lanesCap = 16.9), 1e-9)
+        // Default has no lane zoom to cap.
+        assertEquals(17.2, ZoomPlanner(tuning).target(LaneZoom.DEFAULT, 17.2, 35.0, 0.0, false, 1.0, roadFrame = true, lanesCap = 15.0))
+        // A cap that is not a number is none.
+        assertEquals(lanes, ZoomPlanner(tuning).target(LaneZoom.LARGE, 14.0, 35.0, 0.0, false, 1.0, roadFrame = true, lanesCap = Double.NaN), 1e-9)
+    }
+
+    @Test
+    fun `without a cap the zoom is what it always was`() {
+        // The same inputs to a planner without the cap and to ones with a cap that never binds.
+        val random = java.util.Random(7)
+        val plain = ZoomPlanner(tuning)
+        val infinite = ZoomPlanner(tuning)
+        val high = ZoomPlanner(tuning)
+        repeat(2_000) {
+            val mode = if (random.nextInt(8) == 0) LaneZoom.DEFAULT else LaneZoom.LARGE
+            val frameZoom = 13.0 + random.nextDouble() * 7.0
+            val latitude = random.nextDouble() * 120.0 - 60.0
+            val junction = listOf(0.0, 1.0, random.nextDouble())[random.nextInt(3)]
+            val after = random.nextBoolean()
+            val lane = listOf(0.0, 1.0, random.nextDouble())[random.nextInt(3)]
+            val roadFrame = random.nextBoolean()
+            val expected = plain.target(mode, frameZoom, latitude, junction, after, lane, roadFrame)
+            assertEquals(expected, infinite.target(mode, frameZoom, latitude, junction, after, lane, roadFrame, lanesCap = Double.POSITIVE_INFINITY), 0.0)
+            assertEquals(expected, high.target(mode, frameZoom, latitude, junction, after, lane, roadFrame, lanesCap = tuning.maxZoom + 1.0), 0.0)
+            assertEquals(plain.kind, infinite.kind)
+        }
+    }
+
+    @Test
     fun `large never goes closer than its limit`() {
         val close = ZoomPlanner(tuning.copy(maxZoom = 18.0))
         assertEquals(18.0, close.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, false), 1e-9)

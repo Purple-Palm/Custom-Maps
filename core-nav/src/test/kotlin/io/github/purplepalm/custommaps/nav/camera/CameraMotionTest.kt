@@ -208,6 +208,32 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `the guidance tilt rises for the lanes and goes down over a junction`() {
+        assertEquals(45.0, guidancePitch(tuning, laneShare = 0.0, junctionFocus = 0.0), 1e-9)
+        assertEquals(55.0, guidancePitch(tuning, laneShare = 1.0, junctionFocus = 0.0), 1e-9)
+        assertEquals(0.0, guidancePitch(tuning, laneShare = 0.0, junctionFocus = 1.0), 1e-9)
+        // Over a junction the junction wins, whatever the lanes ask.
+        assertEquals(0.0, guidancePitch(tuning, laneShare = 1.0, junctionFocus = 1.0), 1e-9)
+        assertEquals(50.0, guidancePitch(tuning, laneShare = 0.5, junctionFocus = 0.0), 1e-9)
+        assertEquals(27.5, guidancePitch(tuning, laneShare = 1.0, junctionFocus = 0.5), 1e-9)
+        // With the lane tilt equal to the cruise tilt the lanes tilt nothing.
+        val flat = tuning.copy(lanePitch = tuning.cruisePitch)
+        assertEquals(45.0, guidancePitch(flat, laneShare = 1.0, junctionFocus = 0.0), 1e-9)
+    }
+
+    @Test
+    fun `without the lanes the guidance tilt is the maneuver focus's own`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 300.0, 0.0, "turn", excluded, 15.0)
+        focus.onProgress(20.0, "r/0/1", 900.0, 5.0, "turn", excluded, 15.0)
+        var t = 0.0
+        while (t < 30.0) {
+            assertEquals(focus.pitchAt(t), guidancePitch(tuning, 0.0, focus.focusAt(t)), 0.0, "at $t s")
+            t += frame
+        }
+    }
+
+    @Test
     fun `braking never tilts the view back up before the turn`() {
         val focus = ManeuverFocus(tuning)
         focus.onProgress(0.0, "r/0/0", 250.0, 0.0, "turn", excluded, 25.0)

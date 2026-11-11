@@ -64,7 +64,7 @@ data class CameraTuning(
     val maxZoom: Double = 20.0,
     /** Large at a junction: a lane is this wide on the screen, about 4.4 mm. */
     val junctionLaneDp: Double = 28.0,
-    /** Large near a lane choice on a freeway, with the tilt kept at [cruisePitch]: about 2.2 mm. */
+    /** Large near a lane choice on a freeway: a lane at the car is this wide on the screen, about 2.2 mm. */
     val freewayLaneDp: Double = 14.0,
     /** How much road after a maneuver Large keeps in the frame of that maneuver; the navigation SDK keeps 100 m. */
     val largeMetersAfterManeuver: Double = 30.0,
@@ -113,6 +113,19 @@ data class CameraTuning(
      * view's own hold of [laneHoldSeconds] plus one update.
      */
     val runUpResumeSeconds: Double = 3.0,
+    /**
+     * With Large, Smooth follow tilts the close view for a lane choice to this, along the same
+     * curve as the zoom ([guidancePitch]): the lanes at the car keep [freewayLaneDp], and more of
+     * the road ahead shows above them.
+     */
+    val lanePitch: Double = 55.0,
+    /**
+     * The close view for a lane choice goes no closer than the zoom that still shows this much
+     * driving of road above the car ([LookAhead]), at the highest speed of the last
+     * [laneCapSpeedSeconds] ([PeakSpeed]).
+     */
+    val laneLookAheadSeconds: Double = 12.0,
+    val laneCapSpeedSeconds: Double = 10.0,
     /**
      * Near a lane choice the view turns at most this far from the car's heading toward the road
      * ahead, so the lanes at the car stay close to upright. Elsewhere the navigation SDK's 45
@@ -253,6 +266,18 @@ fun easeInOut(t: Double): Double {
 
 /** The point at fraction [f] of the way from [a] to [b]. */
 fun lerp(a: Double, b: Double, f: Double) = a + (b - a) * f
+
+/**
+ * The tilt of the camera that follows the car in Smooth follow: [CameraTuning.cruisePitch] on the
+ * road, up to [CameraTuning.lanePitch] along the lane focus, and down to
+ * [CameraTuning.maneuverPitch] over a junction, which wins over the lanes. With a lane share of 0
+ * it is [ManeuverFocus.pitchAt].
+ *
+ * @param laneShare [LaneFocus.focusAt] with the Large lane zoom, 0 otherwise
+ * @param junctionFocus [ManeuverFocus.focusAt]
+ */
+fun guidancePitch(tuning: CameraTuning, laneShare: Double, junctionFocus: Double): Double =
+    lerp(lerp(tuning.cruisePitch, tuning.lanePitch, laneShare), tuning.maneuverPitch, junctionFocus)
 
 /**
  * How far the view has moved from the road onto the next maneuver, as a smooth function of time:
