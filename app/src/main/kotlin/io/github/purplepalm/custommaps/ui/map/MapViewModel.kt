@@ -13,6 +13,7 @@ import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
 import io.github.purplepalm.custommaps.settings.AppSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -104,6 +105,12 @@ class MapViewModel(
      * that an update reaches only what shows the progress and the rest of the screen stays as it is.
      */
     val progress: StateFlow<RouteProgressSnapshot?> = navigation.routeProgress
+
+    /**
+     * Where a simulated drive is, for its replay slider; null unless one runs. Once a second, and
+     * kept out of [state] as the progress is.
+     */
+    val replay: StateFlow<ReplayPosition?> = navigation.replay
 
     val state: StateFlow<MapUiState> = combine(engineState, local, settings.simulateDrive) { engine, local, simulate ->
         engine.copy(
@@ -215,6 +222,9 @@ class MapViewModel(
         debugLog.log("ui_start", mapOf("simulated" to state.value.simulateDrive))
         navigation.startGuidance(simulated = state.value.simulateDrive)
     }
+
+    /** The replay slider of a simulated drive was let go at [fraction] of its length; its "replay_seek" line says what came of it. */
+    fun onReplaySeek(fraction: Double) = navigation.seekReplay(fraction)
 
     fun onEnd() {
         debugLog.log("ui_end")

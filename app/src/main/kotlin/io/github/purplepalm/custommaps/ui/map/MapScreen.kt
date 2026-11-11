@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -79,10 +80,12 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.network.OfflineReason
+import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.ui.guidance.ArrivedCard
 import io.github.purplepalm.custommaps.ui.guidance.GuidanceBar
 import io.github.purplepalm.custommaps.ui.guidance.ManeuverPanel
+import io.github.purplepalm.custommaps.ui.guidance.ReplaySlider
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
 import kotlinx.coroutines.flow.StateFlow
 
@@ -108,6 +111,9 @@ fun MapScreen(
     // Guidance progress changes about once a second. It is passed on unread, so an update
     // recomposes only the two panels that show it, not this screen.
     val progress = viewModel.progress.collectAsStateWithLifecycle()
+    // Where a simulated drive is, once a second; null unless one runs. Passed on unread as well:
+    // only the replay slider reads it.
+    val replay = viewModel.replay.collectAsStateWithLifecycle()
     // What the offline chip says, if anything. It is passed on unread as well: a change draws the
     // chip again and nothing else, and the wait before the chip comes goes on whatever the screen
     // shows meanwhile. A block Android reports only while the app is in the background is left out.
@@ -334,6 +340,8 @@ fun MapScreen(
                         .padding(bottom = 8.dp),
                 )
             }
+            // Over the guidance bar, clear of the maneuver card and of the Mapbox logo's strip.
+            if (state.guidance == GuidanceState.ACTIVE) ReplaySlot(replay, onSeek = viewModel::onReplaySeek)
             when {
                 state.guidance == GuidanceState.PREVIEW -> RouteSheet(
                     destination = state.destination,
@@ -474,6 +482,17 @@ internal fun compassTopInset(guiding: Boolean, maneuverPanelBottom: Int, band: I
     } else {
         maxOf(topPanelBottom, offlineChipBottom)
     }
+
+/**
+ * The replay slider while a simulated drive runs, from its start to its end. It asks [replay] only
+ * whether there is a simulated drive; the slider reads the position itself, so a new position
+ * composes nothing here.
+ */
+@Composable
+private fun ReplaySlot(replay: State<ReplayPosition?>, onSeek: (Double) -> Unit) {
+    val simulated by remember(replay) { derivedStateOf { replay.value != null } }
+    if (simulated) ReplaySlider(position = replay, onSeek = onSeek, modifier = Modifier.padding(bottom = 4.dp))
+}
 
 /** The guidance bar, reading the progress itself. */
 @Composable

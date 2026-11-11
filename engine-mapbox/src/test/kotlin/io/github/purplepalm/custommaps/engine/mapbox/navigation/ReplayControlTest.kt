@@ -6,6 +6,7 @@ import com.mapbox.navigation.base.ExperimentalPreviewMapboxNavigationAPI
 import com.mapbox.navigation.core.replay.route.ReplayRouteOptions
 import com.mapbox.navigation.core.replay.route.ReplayRouteSessionOptions
 import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
+import io.github.purplepalm.custommaps.nav.replay.ReplaySeek
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -42,5 +43,26 @@ class ReplayControlTest {
     fun `an empty replayer holds nothing`() {
         assertEquals(ReplayPosition(seconds = 0.0, durationSeconds = 0.0), replayPosition(5.0, 5.0, 0.0, null))
         assertEquals(ReplayPosition(seconds = 0.0, durationSeconds = 0.0), replayPosition(5.0, 5.0, -1.0, null))
+    }
+
+    @Test
+    fun `a seek that went somewhere names where from and to, and how long it took`() {
+        val from = ReplayPosition(seconds = 150.04, durationSeconds = 600.0, metres = 1_234.5)
+        val fields = replaySeekFields(from, toSeconds = 450.0, ok = true, why = null, ms = 180)
+        assertEquals(listOf("fromS", "toS", "ok", "durationS", "fromM", "ms"), fields.keys.toList())
+        assertEquals(150.0, fields["fromS"])
+        assertEquals(450.0, fields["toS"])
+        assertEquals(true, fields["ok"])
+        assertEquals(600.0, fields["durationS"])
+        assertEquals(1_235L, fields["fromM"])
+        assertEquals(180L, fields["ms"])
+    }
+
+    @Test
+    fun `a release that moved nothing says why, and leaves out what is not known`() {
+        val near = replaySeekFields(ReplayPosition(seconds = 300.0, durationSeconds = 600.0), 301.2, ok = false, why = ReplaySeek.Why.NEAR, ms = null)
+        assertEquals(mapOf("fromS" to 300.0, "toS" to 301.2, "ok" to false, "durationS" to 600.0, "why" to "near"), near)
+        val none = replaySeekFields(null, null, ok = false, why = ReplaySeek.Why.NO_REPLAY, ms = null)
+        assertEquals(mapOf("ok" to false, "why" to "no_replay"), none)
     }
 }

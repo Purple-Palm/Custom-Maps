@@ -303,6 +303,22 @@ class MapViewModelTest {
     }
 
     @Test
+    fun `a simulated drive's position is handed on without a new screen state, and a release goes to the engine`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        navigation.guidanceState.value = GuidanceState.ACTIVE
+        runCurrent()
+        val screen = viewModel.state.value
+        assertNull(viewModel.replay.value)
+        val position = ReplayPosition(seconds = 150.0, durationSeconds = 600.0)
+        navigation.replay.value = position
+        runCurrent()
+        assertSame(position, viewModel.replay.value)
+        assertSame(screen, viewModel.state.value)
+        viewModel.onReplaySeek(0.75)
+        assertEquals(listOf(0.75), navigation.seeks)
+    }
+
+    @Test
     fun `ending guidance is a user cancel and clears the search`() = runTest(dispatcher) {
         val viewModel = viewModel()
         viewModel.onSuggestionPicked(suggestion)
@@ -447,7 +463,11 @@ class MapViewModelTest {
             goIdle()
         }
 
-        override fun seekReplay(fraction: Double) = Unit
+        val seeks = mutableListOf<Double>()
+
+        override fun seekReplay(fraction: Double) {
+            seeks += fraction
+        }
 
         override fun clearPreview() = goIdle()
 

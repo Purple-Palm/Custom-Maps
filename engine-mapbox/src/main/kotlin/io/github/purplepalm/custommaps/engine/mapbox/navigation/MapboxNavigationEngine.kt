@@ -393,6 +393,7 @@ internal class MapboxNavigationEngine(
         startRefresher.end()
         // Nor can a simulated drive be moved. The navigator goes; a new one reroutes as usual.
         if (replaying) mapboxNavigation.mapboxReplayer.unregisterObserver(replayObserver)
+        seekAsk?.let { logSeek(it, ok = false, why = ReplaySeek.Why.ENDED) }
         seekAsk = null
         seekResetting = false
         seekHold.end()
@@ -543,7 +544,8 @@ internal class MapboxNavigationEngine(
      * there and plays on. The routes stay as they are, and the trip session runs on: nothing is
      * started, ended, set or asked for that Mapbox bills. From the drive's first seek on, the
      * navigator's own reroutes are off until the drive ends, so no jump can make it fetch a route.
-     * Until the new place has come in, the navigator's updates are held ([SeekHold]).
+     * Until the new place has come in, the navigator's updates are held ([SeekHold]). Each release
+     * ends in one "replay_seek" line.
      */
     override fun seekReplay(fraction: Double) {
         val navigator = navigation
@@ -553,15 +555,30 @@ internal class MapboxNavigationEngine(
         } else {
             ReplaySeek.Answer.Stay(ReplaySeek.Why.NO_REPLAY)
         }
-        if (answer !is ReplaySeek.Answer.Go || navigator == null || position == null) return
-        // The newest release goes; one that still waits is replaced.
-        seekAsk = SeekAsk(toTimestamp = replayStart + answer.toSeconds, routeId = navigator.getNavigationRoutes().firstOrNull()?.id)
+        if (answer !is ReplaySeek.Answer.Go || navigator == null || position == null) {
+            val why = (answer as? ReplaySeek.Answer.Stay)?.why ?: ReplaySeek.Why.NO_REPLAY
+            // Where the finger let go, for a release that moved nothing.
+            val asked = position?.let { fraction.coerceIn(0.0, 1.0) * it.durationSeconds }?.takeIf { it.isFinite() }
+            logSeek(from = if (replaying) played ?: position else null, toSeconds = asked, ok = false, why = why, ms = null)
+            return
+        }
+        // The newest release goes; one that still waits for the navigator is replaced.
+        seekAsk?.let { logSeek(it, ok = false, why = ReplaySeek.Why.REPLACED) }
+        val ask = SeekAsk(
+            from = played ?: position,
+            toSeconds = answer.toSeconds,
+            toTimestamp = replayStart + answer.toSeconds,
+            routeId = navigator.getNavigationRoutes().firstOrNull()?.id,
+            askedAt = SystemClock.elapsedRealtime(),
+        )
+        seekAsk = ask
         // The slider shows where the drive goes until the replay plays from there.
         _replay.value = position.copy(seconds = answer.toSeconds, seeking = true)
         if (seekResetting) return
         if (!holdReroutes(navigator)) {
             seekAsk = null
             showPlayed()
+            logSeek(ask, ok = false, why = ReplaySeek.Why.REFUSED)
             return
         }
         seekResetting = true
@@ -578,6 +595,7 @@ internal class MapboxNavigationEngine(
             seekHold.cancel()
             navigator.mapboxReplayer.play()
             showPlayed()
+            logSeek(ask, ok = false, why = ReplaySeek.Why.REFUSED)
         }
     }
 
@@ -589,12 +607,16 @@ internal class MapboxNavigationEngine(
         seekResetting = false
         val ask = seekAsk ?: return
         seekAsk = null
-        if (trip != commitCount || !replaying || navigation !== navigator) return
+        if (trip != commitCount || !replaying || navigation !== navigator) {
+            logSeek(ask, ok = false, why = ReplaySeek.Why.ENDED)
+            return
+        }
         val replayer = navigator.mapboxReplayer
         // The replayer counts its seconds from the first position it holds now.
         val first = -replayer.eventSeconds(0.0)
         val duration = replayer.durationSeconds()
-        val moved = ask.routeId == navigator.getNavigationRoutes().firstOrNull()?.id && duration > 0.0 &&
+        val sameRoute = ask.routeId == navigator.getNavigationRoutes().firstOrNull()?.id
+        val moved = sameRoute && duration > 0.0 &&
             try {
                 replayer.seekTo((ask.toTimestamp - first).coerceIn(0.0, duration))
                 true
@@ -613,11 +635,21 @@ internal class MapboxNavigationEngine(
             showPlayed()
         }
         replayer.play()
+        logSeek(ask, ok = moved, why = if (moved) null else if (sameRoute) ReplaySeek.Why.REFUSED else ReplaySeek.Why.ENDED)
     }
 
     /** The slider shows the replay's newest played position again, after a seek that was not made. */
     private fun showPlayed() {
         if (replaying) _replay.value = played ?: _replay.value?.copy(seeking = false)
+    }
+
+    /** The "replay_seek" line of a release that went somewhere, or was given up on the way. */
+    private fun logSeek(ask: SeekAsk, ok: Boolean, why: ReplaySeek.Why?) {
+        logSeek(ask.from, ask.toSeconds, ok, why, ms = if (ok) SystemClock.elapsedRealtime() - ask.askedAt else null)
+    }
+
+    private fun logSeek(from: ReplayPosition?, toSeconds: Double?, ok: Boolean, why: ReplaySeek.Why?, ms: Long?) {
+        debugLog.log("replay_seek", replaySeekFields(from, toSeconds, ok, why, ms))
     }
 
     /**
@@ -837,6 +869,7 @@ internal class MapboxNavigationEngine(
                 staleStart.end()
                 tripSessionRunning = false
                 // A seek still waiting for the navigator is given up with the drive.
+                seekAsk?.let { logSeek(it, ok = false, why = ReplaySeek.Why.ENDED) }
                 seekAsk = null
                 seekHold.end()
                 if (replaying) {
@@ -1225,10 +1258,35 @@ internal class MapboxNavigationEngine(
 }
 
 /**
- * One release of the replay slider that a seek goes to: [toTimestamp] on the replay's own clock, on
- * the route [routeId] the drive was on.
+ * One release of the replay slider that a seek goes to: from where the drive was, [from], to
+ * [toSeconds] of its replay, which is [toTimestamp] on the replay's own clock, on the route
+ * [routeId] the drive was on; asked for at [askedAt], in milliseconds since boot.
  */
-private class SeekAsk(val toTimestamp: Double, val routeId: String?)
+private class SeekAsk(
+    val from: ReplayPosition?,
+    val toSeconds: Double,
+    val toTimestamp: Double,
+    val routeId: String?,
+    val askedAt: Long,
+)
+
+/**
+ * The "replay_seek" line of one release of the replay slider: where the drive was ([from]: `fromS`
+ * of `durationS` seconds of its replay, `fromM` metres along the route), where it was sent
+ * (`toS`; for a release that moved nothing, where the finger let go), whether the replay plays
+ * from there (`ok`), how long that took from the release (`ms`), and else why not (`why`).
+ * Numbers and names only.
+ */
+internal fun replaySeekFields(from: ReplayPosition?, toSeconds: Double?, ok: Boolean, why: ReplaySeek.Why?, ms: Long?): Map<String, Any?> =
+    mapOf(
+        "fromS" to from?.seconds?.let { Motion.round(it, 1) },
+        "toS" to toSeconds?.let { Motion.round(it, 1) },
+        "ok" to ok,
+        "durationS" to from?.durationSeconds?.let { Motion.round(it, 1) },
+        "fromM" to from?.metres?.let { Math.round(it) },
+        "ms" to ms,
+        "why" to why?.logName,
+    ).filterValues { it != null }
 
 /**
  * The replay of a simulated drive. It decodes the whole route at once, so the replayer holds the

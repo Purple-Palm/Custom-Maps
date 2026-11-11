@@ -53,6 +53,8 @@
     <string name="guidance_then_on_left">On the left</string>
     <string name="guidance_then_on_right">On the right</string>
     <string name="guidance_then_destination">Destination</string>
+    <string name="replay_position">Simulated drive position</string>
+    <string name="replay_position_percent">%1$d%%</string>
     <string name="then_sharp_right">sharp right</string>
     <string name="then_right">right</string>
     <string name="then_slight_right">slight right</string>
