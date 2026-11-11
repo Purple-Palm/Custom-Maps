@@ -44,6 +44,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.Distance
@@ -72,9 +74,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
 /**
  * How long the app has to be without internet before the chip says so. A phone that leaves Wi-Fi
@@ -83,8 +89,31 @@ import kotlinx.coroutines.flow.map
 internal const val OFFLINE_CHIP_WAIT_MILLIS = 3_000L
 
 /**
+ * [status] as the offline chip counts it, while [onScreen] says whether the screen is started.
+ *
+ * Android keeps an app off the network a few seconds after it leaves the screen (Android 15 does
+ * so for every app, Data saver and Battery saver for apps in the background) and lets it back on
+ * a moment after the screen is up again. A block that comes while the screen is stopped is
+ * therefore left out; only one that has lasted since the screen was last started counts. A lost
+ * network, or one without internet, counts wherever the screen is.
+ */
+internal fun countedStatus(status: Flow<NetworkStatus>, onScreen: Flow<Boolean>): Flow<NetworkStatus> = flow {
+    // Whether the app has been blocked since the screen was last started.
+    var blockedOnScreen = false
+    combine(status, onScreen, ::Pair).collect { (current, started) ->
+        if (started) {
+            blockedOnScreen = current.blocked
+        } else if (!current.blocked) {
+            blockedOnScreen = false
+        }
+        emit(if (started || blockedOnScreen) current else current.copy(blocked = false))
+    }
+}
+
+/**
  * What the offline chip says, as it changes: why the app has no internet, or [OfflineReason.NONE]
- * while there is no chip.
+ * while there is no chip. [onScreen] says whether the screen is started; see [countedStatus] for
+ * what that changes.
  *
  * The chip comes [waitMillis] after the app lost its internet, if it is still without it, and goes
  * at once when the internet is back. The wait is counted from the loss: a reason that changes on
@@ -94,9 +123,14 @@ internal const val OFFLINE_CHIP_WAIT_MILLIS = 3_000L
  * The wait runs in whoever collects this, so it starts when the collecting does: a screen made
  * while the app is offline gets its chip [waitMillis] later.
  */
-internal fun shownOfflineReason(status: StateFlow<NetworkStatus>, waitMillis: Long = OFFLINE_CHIP_WAIT_MILLIS): Flow<OfflineReason> =
+internal fun shownOfflineReason(
+    status: Flow<NetworkStatus>,
+    onScreen: Flow<Boolean> = flowOf(true),
+    waitMillis: Long = OFFLINE_CHIP_WAIT_MILLIS,
+): Flow<OfflineReason> =
     channelFlow {
-        val reasons = status.map { it.offlineReason() }
+        // Worked out once, so that both collections below see the same reasons.
+        val reasons = countedStatus(status, onScreen).map { it.offlineReason() }.stateIn(this)
         // Only going offline and coming back start something new; the reason alone does not.
         reasons.map { it != OfflineReason.NONE }.distinctUntilChanged().collectLatest { offline ->
             if (offline) {
@@ -137,14 +171,18 @@ internal fun offlineChipLine(reason: OfflineReason, guidance: GuidanceState): Ma
  *
  * Call it once for a screen and pass the result on unread: only what draws the chip reads it, so
  * a change draws the chip again and nothing else. It keeps following while the screen is in the
- * background, so the chip is right the moment the screen is back.
+ * background, so the chip is right the moment the screen is back. A block that Android reports
+ * only while the screen is stopped is left out ([countedStatus]): it is lifted a moment after the
+ * screen returns, and no one saw it.
  */
 @Composable
 internal fun rememberOfflineChip(network: StateFlow<NetworkStatus>, debugLog: DebugLog, guidance: () -> GuidanceState): State<OfflineReason> {
     val guidanceNow by rememberUpdatedState(guidance)
-    return produceState(OfflineReason.NONE, network, debugLog) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    return produceState(OfflineReason.NONE, network, debugLog, lifecycle) {
+        val onScreen = lifecycle.currentStateFlow.map { it.isAtLeast(Lifecycle.State.STARTED) }.distinctUntilChanged()
         try {
-            shownOfflineReason(network).collect { reason ->
+            shownOfflineReason(network, onScreen).collect { reason ->
                 if (reason != value) {
                     value = reason
                     debugLog.log("offline_chip", offlineChipLine(reason, guidanceNow()))

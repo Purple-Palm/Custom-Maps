@@ -486,7 +486,9 @@ Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a p
   - The compass keeps clear of it. During guidance it now sits under the band, for the whole
     drive; before a drive it moves below the sentence while that is up.
   - Which sentence shows follows what Android reports for the app's network. "Blocked" is only
-    what Android itself marks as blocked for the app. How Samsung's Wi-Fi only setting for one
+    what Android itself marks as blocked for the app, and only a block that has lasted since the
+    screen was last on: Android keeps apps in the background off the network and lets them back a
+    moment after they return. How Samsung's Wi-Fi only setting for one
     app is reported is not known yet; see the next drive's checks.
 - **Car map (stage 2).** The car map uses the same saved map data as the phone.
 - **Trip-log upload (stage 2).** The first drive ended offline, so an upload at End would have
@@ -694,7 +696,7 @@ Then share the debug log. What to read in it:
 | `offline_style_pack` | The size of the map's style, loaded once after the app starts, and again with the next preview if that failed |
 | `device`: `appRxBytes` | All the bytes the app has received, Wi-Fi and mobile data alike. Its growth from the first to the last `device` line of a drive is the most that predictive caching can have loaded; Mapbox gives no count of its own for it |
 | `offline_cache`, `offline_cache_error` | That predictive caching was set up, once for each navigator, with its distances, and what it could not do |
-| `offline_chip` | When the chip came and went, with its reason and the guidance state. `shown` true should follow a `network` line that reports the app offline by about 3 s, and `shown` false should come with the line that reports it online again |
+| `offline_chip` | When the chip came and went, with its reason and the guidance state. `shown` true should follow a `network` line that reports the app offline by about 3 s, and `shown` false should come with the line that reports it online again. A block that Android reports while the app is not on screen is left out, so it brings no chip lines |
 | `offline_settings` | The system page the chip's Settings button opened; null when the phone has neither the data usage page nor the app's details page |
 | Map errors | A few lines a minute instead of thousands |
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
@@ -715,4 +717,5 @@ Reading the connectivity lines:
 | No network, no other network available, and no SIM or Mobile data off | The phone had no mobile data |
 | No network, but a mobile network available | Mobile data existed, but Android kept it from this app, for example Wi-Fi only |
 | Mobile, blocked | Data saver, background data or battery limits |
+| Blocked only while the `activity` lines show the app stopped, and unblocked when it starts again | Android's limit for apps in the background (Android 15, Data saver, Battery saver); no fault, and the chip leaves it out |
 | Not validated | A network without internet |

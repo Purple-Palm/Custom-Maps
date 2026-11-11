@@ -109,7 +109,7 @@ fun MapScreen(
     val progress = viewModel.progress.collectAsStateWithLifecycle()
     // What the offline chip says, if anything. It is passed on unread as well: a change draws the
     // chip again and nothing else, and the wait before the chip comes goes on whatever the screen
-    // shows meanwhile.
+    // shows meanwhile. A block Android reports only while the app is in the background is left out.
     val offline = rememberOfflineChip(network, debugLog) { engine.navigation.guidanceState.value }
 
     // The navigator lives while this screen does (and for the length of any drive).

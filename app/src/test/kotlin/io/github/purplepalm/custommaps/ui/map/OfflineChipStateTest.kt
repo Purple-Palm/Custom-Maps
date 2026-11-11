@@ -7,7 +7,9 @@ import io.github.purplepalm.custommaps.nav.network.OfflineReason
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -30,9 +32,9 @@ class OfflineChipStateTest {
     private val blocked = online.copy(transport = "cellular", metered = true, blocked = true)
 
     /** Everything the chip said, from hidden at the start, as the test moves the clock. */
-    private fun TestScope.chip(status: MutableStateFlow<NetworkStatus>): List<OfflineReason> {
+    private fun TestScope.chip(status: MutableStateFlow<NetworkStatus>, onScreen: Flow<Boolean> = flowOf(true)): List<OfflineReason> {
         val said = mutableListOf<OfflineReason>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { shownOfflineReason(status).toList(said) }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { shownOfflineReason(status, onScreen).toList(said) }
         runCurrent()
         return said
     }
@@ -180,6 +182,95 @@ class OfflineChipStateTest {
         assertEquals(emptyList<OfflineReason>(), said)
         wait(3_000)
         assertEquals(listOf(OfflineReason.BLOCKED), said)
+    }
+
+    @Test
+    fun `a block Android reports while the screen is stopped never shows`() = runTest {
+        val status = MutableStateFlow(online)
+        val onScreen = MutableStateFlow(true)
+        val said = chip(status, onScreen)
+        // The app goes to the background, and Android keeps it off the network a few seconds later.
+        onScreen.value = false
+        wait(5_000)
+        status.value = blocked
+        wait(60_000)
+        // Back on screen: Android lifts the block a moment later.
+        onScreen.value = true
+        wait(50)
+        status.value = online
+        wait(60_000)
+        assertEquals(listOf(OfflineReason.NONE), said)
+    }
+
+    @Test
+    fun `back on screen while still blocked, the chip comes after the wait`() = runTest {
+        val status = MutableStateFlow(online)
+        val onScreen = MutableStateFlow(false)
+        val said = chip(status, onScreen)
+        status.value = blocked
+        wait(60_000)
+        onScreen.value = true
+        wait(2_999)
+        assertEquals(listOf(OfflineReason.NONE), said)
+        wait(1)
+        assertEquals(listOf(OfflineReason.NONE, OfflineReason.BLOCKED), said)
+    }
+
+    @Test
+    fun `a block that was there before the screen stopped stays shown`() = runTest {
+        val status = MutableStateFlow(blocked)
+        val onScreen = MutableStateFlow(true)
+        val said = chip(status, onScreen)
+        wait(3_000)
+        // The Settings button leaves the screen for the system's page, and the driver comes back.
+        onScreen.value = false
+        wait(60_000)
+        onScreen.value = true
+        wait(60_000)
+        assertEquals(listOf(OfflineReason.BLOCKED), said)
+        // Allowed on the system's page: the chip goes at once.
+        status.value = online
+        runCurrent()
+        assertEquals(listOf(OfflineReason.BLOCKED, OfflineReason.NONE), said)
+    }
+
+    @Test
+    fun `a block lifted while the screen is stopped and put back is left out`() = runTest {
+        val status = MutableStateFlow(blocked)
+        val onScreen = MutableStateFlow(true)
+        val said = chip(status, onScreen)
+        wait(3_000)
+        onScreen.value = false
+        status.value = online
+        runCurrent()
+        status.value = blocked
+        wait(60_000)
+        assertEquals(listOf(OfflineReason.BLOCKED, OfflineReason.NONE), said)
+    }
+
+    @Test
+    fun `a lost network counts while the screen is stopped, so the chip is up on return`() = runTest {
+        val status = MutableStateFlow(online)
+        val onScreen = MutableStateFlow(true)
+        val said = chip(status, onScreen)
+        onScreen.value = false
+        status.value = noNetwork
+        wait(3_000)
+        assertEquals(listOf(OfflineReason.NONE, OfflineReason.NO_NETWORK), said)
+        onScreen.value = true
+        wait(60_000)
+        assertEquals(listOf(OfflineReason.NONE, OfflineReason.NO_NETWORK), said)
+    }
+
+    @Test
+    fun `while the screen is stopped a blocked network is still seen for what else it is`() = runTest {
+        val status = MutableStateFlow(online)
+        val onScreen = MutableStateFlow(false)
+        val said = chip(status, onScreen)
+        // Blocked, and without internet as well: the second still counts.
+        status.value = blocked.copy(validated = false)
+        wait(3_000)
+        assertEquals(listOf(OfflineReason.NONE, OfflineReason.NO_INTERNET), said)
     }
 
     @Test
