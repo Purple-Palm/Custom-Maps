@@ -370,9 +370,10 @@ internal class SmoothNavigationCamera(
             speedMps = speedMps,
             onRoute = progress.currentState != RouteProgressState.OFF_ROUTE,
         )
-        // Near a lane choice Large keeps the lanes at the car close to upright: the view turns
+        // Near a lane choice, and while the view looks down onto a turn, Large turns the view
         // less toward the road ahead. The data source reads this with every frame it computes.
-        setBearingLead(if (laneZoom == LaneZoom.LARGE && laneFocus.goal > 0.0) tuning.laneMaxBearingLead else LaneZoomFrames.SDK_BEARING_LEAD)
+        val laneWindow = laneFocus.goal > 0.0
+        setBearingLead(LaneZoomFrames.smoothBearingLead(laneZoom, tuning, laneWindow, junctionFocus = maneuverFocus.focusAt(now)))
         // The data source fits the zoom and the frame around a maneuver for the tilt it is told.
         // It gets the tilt the camera will have when this frame has been reached.
         dataSource.followingPitchPropertyOverride(maneuverFocus.pitchAt(now + tuning.sampleHoldSeconds))

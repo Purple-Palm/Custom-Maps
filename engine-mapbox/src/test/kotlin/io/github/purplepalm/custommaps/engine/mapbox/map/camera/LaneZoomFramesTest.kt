@@ -137,4 +137,25 @@ class LaneZoomFramesTest {
         assertTrue(LaneZoomFrames.framesManeuver(StepManeuver.TURN, 300f, wide))
         assertTrue(LaneZoomFrames.framesManeuver(StepManeuver.FORK, 300f, wide))
     }
+
+    @Test
+    fun `smooth follow turns less toward the road ahead only with large, near a lane choice or onto a turn`() {
+        for (laneWindow in listOf(false, true)) {
+            for (focus in listOf(0.0, 0.5, 1.0)) {
+                assertEquals(sdkLead, LaneZoomFrames.smoothBearingLead(LaneZoom.DEFAULT, tuning, laneWindow, focus))
+            }
+        }
+        assertEquals(sdkLead, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuning, laneWindow = false, junctionFocus = 0.0))
+        assertEquals(tuning.junctionMaxBearingLead, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuning, false, junctionFocus = 0.01))
+        assertEquals(tuning.junctionMaxBearingLead, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuning, false, junctionFocus = 1.0))
+        assertEquals(tuning.laneMaxBearingLead, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuning, laneWindow = true, junctionFocus = 0.0))
+        assertEquals(20.0, tuning.junctionMaxBearingLead)
+    }
+
+    @Test
+    fun `near a lane choice onto a turn the smaller of the two leads holds`() {
+        val tuned = tuning.copy(laneMaxBearingLead = 15.0, junctionMaxBearingLead = 25.0)
+        assertEquals(15.0, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuned, laneWindow = true, junctionFocus = 1.0))
+        assertEquals(25.0, LaneZoomFrames.smoothBearingLead(LaneZoom.LARGE, tuned, laneWindow = false, junctionFocus = 1.0))
+    }
 }

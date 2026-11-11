@@ -104,6 +104,12 @@ data class CameraTuning(
      * degrees apply.
      */
     val laneMaxBearingLead: Double = 20.0,
+    /**
+     * With Large, while the view looks down onto a turn, it also turns at most this far toward the
+     * road ahead. A bend past the turn is then not swung to the top of the screen while the car is
+     * still close in and driving straight. Elsewhere the navigation SDK's 45 degrees apply.
+     */
+    val junctionMaxBearingLead: Double = 20.0,
     /** Close in, the camera aims ahead of the moving car so that its center trails the car by no more than this. */
     val maxPuckLagDp: Double = 12.0,
 ) {

@@ -195,6 +195,24 @@ internal object LaneZoomFrames {
         junction.update(progress, framesManeuver, coalesceMeters(options), tuning)
     }
 
+    /**
+     * How far Smooth follow lets the view turn toward the road ahead, in degrees. With Large it
+     * turns less near a lane choice ([laneWindow]), so the lanes at the car stay close to upright,
+     * and while the view looks down onto a turn ([junctionFocus] above 0), so a bend past the turn
+     * is not swung to the top of the screen while the car still drives straight, close in. Every
+     * other time, and always with Default, the SDK's own 45 degrees.
+     *
+     * @param laneWindow the lane choices' schedule is in for one now
+     * @param junctionFocus how far the view has moved onto the next maneuver, from 0 to 1
+     */
+    fun smoothBearingLead(mode: LaneZoom, tuning: CameraTuning, laneWindow: Boolean, junctionFocus: Double): Double {
+        if (mode != LaneZoom.LARGE) return SDK_BEARING_LEAD
+        var lead = SDK_BEARING_LEAD
+        if (laneWindow) lead = min(lead, tuning.laneMaxBearingLead)
+        if (junctionFocus > 0.0) lead = min(lead, tuning.junctionMaxBearingLead)
+        return lead
+    }
+
     /** The zooms a following frame is fitted within, and how far the view may turn toward the road ahead, in degrees. */
     class Limits(val minZoom: Double, val maxZoom: Double, val bearingLead: Double)
 
