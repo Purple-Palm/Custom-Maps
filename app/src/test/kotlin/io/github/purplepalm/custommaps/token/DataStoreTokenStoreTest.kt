@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
+import io.github.purplepalm.custommaps.nav.trip.TripLog
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
@@ -26,6 +27,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -102,6 +104,30 @@ class DataStoreTokenStoreTest {
         assertEquals(listOf("Main", "Test", "Token 2", "Token 3", "Token 4"), list.names())
         assertEquals("id1", list.activeId)
         assertEquals(fake(1), store.token.first())
+    }
+
+    @Test
+    fun `the ids the store makes itself fit the list and the trip log, one for each entry`() = runBlocking {
+        writeRaw(oldKey.name to fake(1))
+        // Without newId, as on the phone.
+        val store = DataStoreTokenStore(file, readRetryMillis = 10)
+
+        store.list.first()
+        for (n in 2..TokenList.MAX_ENTRIES) assertNull(store.add(null, fake(n)))
+
+        val made = store.list.first().entries.map { it.id }
+        assertEquals(TokenList.MAX_ENTRIES, made.toSet().size, made.toString())
+        for (id in made) {
+            assertTrue(TokenList.isId(id), id)
+            assertTrue(TripLog.isTokenId(id), id)
+        }
+        // Not made from the token: the same token added in another file gets another id.
+        val other = DataStoreTokenStore(
+            PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(directory, "other.preferences_pb") }),
+            readRetryMillis = 10,
+        )
+        assertNull(other.add(null, fake(2)))
+        assertNotEquals(made[1], other.list.first().entries.single().id)
     }
 
     @Test
