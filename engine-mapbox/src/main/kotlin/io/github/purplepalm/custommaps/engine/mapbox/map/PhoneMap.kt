@@ -35,6 +35,7 @@ import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
+import com.mapbox.navigation.core.routealternatives.AlternativeRouteMetadata
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
 import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
@@ -135,6 +136,9 @@ class PhoneMap internal constructor(
 
     /** The navigator's routes; they change on reroute and are empty outside guidance. */
     private var navigatorRoutes: List<NavigationRoute> = emptyList()
+
+    /** The navigator while it is attached: it knows where each of its alternatives leaves the route. */
+    private var navigation: MapboxNavigation? = null
 
     /**
      * Read from the engine rather than copied from its flow: a map created during a drive gets the
@@ -244,6 +248,9 @@ class PhoneMap internal constructor(
 
     private val navigationObserver = object : MapboxNavigationObserver {
         override fun onAttached(mapboxNavigation: MapboxNavigation) {
+            // First: the routes observer hears the routes at once, and draws them with what it
+            // asks of the navigator.
+            navigation = mapboxNavigation
             mapboxNavigation.registerRoutesObserver(routesObserver)
             mapboxNavigation.registerRouteProgressObserver(routeProgressObserver)
             mapboxNavigation.registerLocationObserver(locationObserver)
@@ -253,6 +260,7 @@ class PhoneMap internal constructor(
             mapboxNavigation.unregisterRoutesObserver(routesObserver)
             mapboxNavigation.unregisterRouteProgressObserver(routeProgressObserver)
             mapboxNavigation.unregisterLocationObserver(locationObserver)
+            navigation = null
         }
     }
 
@@ -658,7 +666,11 @@ class PhoneMap internal constructor(
     private fun showNavigatorRoutes() {
         val routes = navigatorRoutes
         if (routes.isEmpty()) return
-        drawRoutes(routes)
+        // Where an alternative still shares the road with the route, as behind the car and up to
+        // where it turns off, only the route is drawn. The navigator knows where each alternative
+        // leaves the route; it is read on the phone, with no request. It is valid until the routes
+        // change again, and every change comes through here.
+        drawRoutes(routes, navigation?.getAlternativeMetadataFor(routes).orEmpty())
         frameRoute(routes.first())
         viewportDataSource.evaluate()
     }
@@ -669,9 +681,14 @@ class PhoneMap internal constructor(
         viewportDataSource.onRouteChanged(route)
     }
 
-    private fun drawRoutes(routes: List<NavigationRoute>) {
+    /**
+     * Draws [routes], the first one as the route. With [alternatives], the navigator's account of
+     * where each other route leaves the first one, the part they share is drawn only once, as the
+     * route; the preview has no such account and draws every route whole.
+     */
+    private fun drawRoutes(routes: List<NavigationRoute>, alternatives: List<AlternativeRouteMetadata> = emptyList()) {
         val style = style ?: return
-        routeLineApi.setNavigationRoutes(routes) { value -> routeLineView.renderRouteDrawData(style, value) }
+        routeLineApi.setNavigationRoutes(routes, alternatives) { value -> routeLineView.renderRouteDrawData(style, value) }
     }
 
     private fun clearRoutes() {
