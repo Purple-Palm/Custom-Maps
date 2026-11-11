@@ -30,19 +30,35 @@ jobs:
         with:
           cache-provider: basic
 
-      # All build steps live in scripts/ci.sh. The signing secrets are optional.
+      # All build steps live in scripts/ci.sh. The signing secrets are optional: without the four
+      # release secrets no app bundle is built.
       - name: Build, test, lint and check 16 KB alignment
+        id: build
         run: scripts/ci.sh
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
           DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
           DEBUG_KEY_ALIAS: ${{ secrets.DEBUG_KEY_ALIAS }}
           DEBUG_KEY_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: Publish the debug APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: build/ci/*.apk
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      # The bundle holds no secret; like the APK, anyone signed in to GitHub can download it.
+      - name: Publish the app bundle for Google Play
+        if: steps.build.outputs.bundle != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: build/ci/${{ steps.build.outputs.bundle }}
           archive: false
           if-no-files-found: error
           retention-days: 30

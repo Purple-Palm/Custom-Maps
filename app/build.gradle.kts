@@ -98,7 +98,14 @@ android {
                 signingConfig = signingConfigs.getByName("sharedDebug")
             }
         }
+        // The build for Google Play. Not debuggable, so Settings has no Crash now there. R8 and resource
+        // shrinking stay off for now: the Play build runs the same code as the debug builds driven so
+        // far, and its stack traces in the debug log read the same; Mapbox's own rules were never
+        // tried on a phone with R8.
         release {
+            isDebuggable = false
+            isMinifyEnabled = false
+            isShrinkResources = false
             if (releaseKey != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
