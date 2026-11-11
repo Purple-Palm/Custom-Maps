@@ -96,6 +96,11 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     /** Null hides Crash now: release builds never offer it. */
     onCrashNow: (() -> Unit)? = null,
+    /**
+     * True for a debug build signed with the default Android debug key, which the next CI build
+     * cannot be installed over; the Play build never says so.
+     */
+    temporaryDebugKey: Boolean = false,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -126,7 +131,7 @@ fun SettingsScreen(
             SectionDivider()
             GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
             SectionDivider()
-            DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow)
+            DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow, temporaryDebugKey)
             SectionDivider()
 
             SectionTitle(R.string.about_title)
@@ -330,6 +335,7 @@ private fun DebugSection(
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onCrashNow: (() -> Unit)?,
+    temporaryDebugKey: Boolean,
 ) {
     val uriHandler = LocalUriHandler.current
     SectionTitle(R.string.debug_title)
@@ -395,6 +401,14 @@ private fun DebugSection(
     }
 
     Spacer(Modifier.height(16.dp))
+    if (temporaryDebugKey) {
+        Text(
+            text = stringResource(R.string.debug_temporary_key),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
     DebugLogBlock(debug.logBytes, onShareLog, onClearLog)
 
     if (onCrashNow != null) {
@@ -557,6 +571,7 @@ private fun SettingsScreenPreview() {
             onClearLog = {},
             onBack = {},
             onCrashNow = {},
+            temporaryDebugKey = true,
         )
     }
 }

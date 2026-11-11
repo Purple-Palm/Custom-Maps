@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
 import io.github.purplepalm.custommaps.ui.settings.crashNow
 import io.github.purplepalm.custommaps.ui.settings.isDebuggable
 import io.github.purplepalm.custommaps.ui.settings.shareDebugLog
+import io.github.purplepalm.custommaps.ui.settings.signedWithDefaultDebugKey
 import io.github.purplepalm.custommaps.ui.token.TokenSetupScreen
 import io.github.purplepalm.custommaps.ui.token.TokenViewModel
 import kotlinx.coroutines.launch
@@ -73,6 +75,8 @@ fun CustomMapsApp(graph: AppGraph) {
             val guidanceSettings by settingsViewModel.guidance.collectAsStateWithLifecycle()
             val debug by settingsViewModel.debug.collectAsStateWithLifecycle()
             val guidance by graph.engine.navigation.guidanceState.collectAsStateWithLifecycle()
+            // Debug builds only: read once from the app's own signing certificate.
+            val temporaryDebugKey = remember { context.isDebuggable() && context.signedWithDefaultDebugKey() }
             SettingsScreen(
                 tokenState = tokenState,
                 tokenEditable = guidance != GuidanceState.ACTIVE,
@@ -97,6 +101,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 onClearLog = settingsViewModel::clearLog,
                 onBack = { showSettings = false },
                 onCrashNow = if (context.isDebuggable()) ::crashNow else null,
+                temporaryDebugKey = temporaryDebugKey,
             )
         }
     }
