@@ -134,8 +134,8 @@ internal class MapboxNavigationEngine(
     /** What the Then chip remembers from one progress update to the next; every drive starts it over. */
     private val thenTracker = ThenTracker()
 
-    /** The route of the maneuver card on screen; null while there is none. */
-    private var cardRouteId: String? = null
+    /** Which route the maneuver card on screen is of, so it never keeps one of the route before. */
+    private val cardContinuity = CardContinuity()
 
     /**
      * Tells the first updates of a trip that still carry where the trip before left the car from
@@ -929,7 +929,7 @@ internal class MapboxNavigationEngine(
                 _previewRoutes.value = emptyList()
                 _routeOptions.value = emptyList()
                 _routeProgress.value = null
-                cardRouteId = null
+                cardContinuity.reset()
                 thenTracker.reset()
                 laneChoices.clear()
             }
@@ -1042,7 +1042,7 @@ internal class MapboxNavigationEngine(
         val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
         // Without the next maneuver the card stays as it is, but never with a maneuver of the route
         // before a reroute or another change of route: it waits, dimmed, for the new route's.
-        val card = if (active) CardContinuity.next(cardRouteId, progress.navigationRoute.id, hasManeuver = next != null) else null
+        val card = if (active) cardContinuity.next(progress.navigationRoute.id, hasManeuver = next != null) else null
         val snapshot = when {
             next != null -> snapshotOf(progress, next)
             card == CardUpdate.PENDING -> progress.toPendingSnapshot()
@@ -1057,10 +1057,7 @@ internal class MapboxNavigationEngine(
             ) + speedLimitChange(active),
         )
         if (active) logLaneChoices(progress)
-        if (snapshot != null) {
-            _routeProgress.value = snapshot
-            cardRouteId = progress.navigationRoute.id
-        }
+        if (snapshot != null) _routeProgress.value = snapshot
         // The first progress of a trip, the next one after a cancelled refresh, and the first one
         // after an answer to its replan.
         if (active && startRefresher.awaitsProgress) {

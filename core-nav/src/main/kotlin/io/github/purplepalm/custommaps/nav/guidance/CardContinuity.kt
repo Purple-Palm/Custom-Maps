@@ -21,17 +21,33 @@ enum class CardUpdate(val logName: String) {
  * Keeps the maneuver card true to the route on the map. The navigator can send the first updates of
  * a new route before it has an instruction for it; a card that kept the last one would then show a
  * maneuver of a route no longer driven, next to the new route's line and arrow.
+ *
+ * It remembers which route the card on screen is of, from one update of a drive to the next, and
+ * forgets it when there is no card any more ([reset]). Main thread only, like the updates.
  */
-object CardContinuity {
+class CardContinuity {
+
+    /** The route of the card on screen; null before the first card of a drive. */
+    private var shownRouteId: String? = null
 
     /**
-     * @param shownRouteId the route of the card on screen; null before the first card of a drive
-     * @param progressRouteId the route of this update
+     * What the card does with an update of the route [progressRouteId]; the card is of that route
+     * from then on, whatever it does.
+     *
      * @param hasManeuver whether this update brings the next maneuver
      */
-    fun next(shownRouteId: String?, progressRouteId: String, hasManeuver: Boolean): CardUpdate = when {
-        hasManeuver -> CardUpdate.FRESH
-        shownRouteId == progressRouteId -> CardUpdate.KEEP
-        else -> CardUpdate.PENDING
+    fun next(progressRouteId: String, hasManeuver: Boolean): CardUpdate {
+        val update = when {
+            hasManeuver -> CardUpdate.FRESH
+            shownRouteId == progressRouteId -> CardUpdate.KEEP
+            else -> CardUpdate.PENDING
+        }
+        shownRouteId = progressRouteId
+        return update
+    }
+
+    /** No card any more, as at the end of a drive: the next update finds none to keep. */
+    fun reset() {
+        shownRouteId = null
     }
 }
