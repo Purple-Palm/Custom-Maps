@@ -355,6 +355,13 @@ class PhoneMap internal constructor(
         mapboxMap.loadStyle(Style.STANDARD) { loaded ->
             debugLog.log("map_style_loaded", mapOf("refreshHz" to mapView.display?.refreshRate))
             style = loaded
+            // The route line's layers first, then the arrow's, before anything is drawn: the arrow
+            // goes above the route line only if the line's top layer is there when the arrow makes
+            // its layers. Left to the first renders, the arrow came first and the line covered it.
+            // Both kinds of layer stay in the style, in this order, for as long as the map lives.
+            routeLineView.initializeLayers(loaded)
+            routeArrowView.render(loaded, routeArrowApi.clearArrows())
+            logLayerOrder(loaded)
             // Lane details are set a moment after this callback, never within it (see LaneDetails).
             laneDetails.onStyleLoaded()
             applyRouteLineWidths()
@@ -681,6 +688,19 @@ class PhoneMap internal constructor(
         val style = style ?: return
         routeArrowView.render(style, routeArrowApi.clearArrows())
     }
+
+    /**
+     * The "map_layers" line, once per style load: the ids of the layers in the route's slot, in the
+     * order they are drawn, and whether the maneuver arrow lies above the route line in it.
+     */
+    private fun logLayerOrder(style: Style) {
+        val ids = style.styleLayers.map { it.id }.filter { slotOf(style, it) == ROUTE_SLOT }
+        debugLog.log("map_layers", mapOf("arrowAboveLine" to LayerOrder.arrowAboveLine(ids), "middle" to ids))
+    }
+
+    /** The slot a layer of the style is in; null for one in none. */
+    private fun slotOf(style: Style, layerId: String): String? =
+        style.getStyleLayerProperty(layerId, "slot").value.contents as? String
 
     /**
      * Gives the route line the widths that go with lane details: on, the line stays thin close in,
