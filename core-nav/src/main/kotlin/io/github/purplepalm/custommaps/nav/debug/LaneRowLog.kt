@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.nav.debug
 
 import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.guidance.CardLanes
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
@@ -19,6 +20,8 @@ import io.github.purplepalm.custommaps.nav.model.TurnModifier
  *
  * The card measures the words itself and leaves out those that do not fit (the app's lane row).
  * It says so through [onWordsShown]; the line that follows has no words and the reason [ODD_NO_FIT].
+ * A row whose only lit lanes are kept for car pools and the like says so
+ * ([RunUpRule.ODD_DESIGNATED_ONLY]), whichever row it is.
  */
 class LaneRowLog {
 
@@ -112,7 +115,12 @@ class LaneRowLog {
     private fun fields(row: Row): Map<String, Any?> {
         val lanes = row.card.lanes?.lanes
         val shown = row.shownWords
-        val odd = if (row.card.target != null && shown == null) ODD_NO_FIT else row.odd
+        val odd = when {
+            row.card.target != null && shown == null -> ODD_NO_FIT
+            row.odd != null -> row.odd
+            lanes != null && litOnlyDesignated(lanes) -> RunUpRule.ODD_DESIGNATED_ONLY
+            else -> null
+        }
         val label = row.card.distance?.takeIf { row.card.source == CardLanes.Source.CHOICE }?.let { ImperialFormat.distance(it).toString() }
         return mapOf(
             "source" to row.card.source.name.lowercase(),
@@ -190,6 +198,21 @@ class LaneRowLog {
                 if (lit != null && !(arrows == 1 && lit in lane.indications)) out.append('>').append(arrowToken(lit))
             }
             return out.toString()
+        }
+
+        /**
+         * Whether the only lit lanes of a row are kept for car pools, buses and the like: the maps
+         * that read the route light such a lane only where they mark no other lane, whichever row
+         * the card draws.
+         */
+        private fun litOnlyDesignated(lanes: List<Lane>): Boolean {
+            var lit = false
+            for (lane in lanes) {
+                if (!lane.isRecommended) continue
+                if (!lane.designated) return false
+                lit = true
+            }
+            return lit
         }
 
         /**

@@ -179,6 +179,30 @@ class LaneRowLogTest {
     }
 
     @Test
+    fun `a row lit only on a lane kept for car pools says so, whichever row it is`() {
+        val carPoolLit = Lane(setOf(TurnModifier.SLIGHT_LEFT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_LEFT, designated = true)
+        val onlyCarPool = LaneInfo(listOf(carPoolLit, off, off, off))
+        val log = LaneRowLog()
+        // The maneuver's own row, where the route marks no other lane.
+        val maneuver = requireNotNull(log.at(snapshot(lanes = onlyCarPool, toManeuver = 900.0)))
+        assertEquals("maneuver", maneuver["source"])
+        assertEquals(listOf("sl*", "s", "s", "s"), maneuver["row"])
+        assertEquals(listOf(0), maneuver["lit"])
+        assertEquals(listOf(0), maneuver["des"])
+        assertEquals(RunUpRule.ODD_DESIGNATED_ONLY, maneuver["odd"])
+        // A lane choice's row the same.
+        val choice = requireNotNull(log.at(snapshot(laneChoiceAhead = LanesAhead(Distance.miles(0.4), onlyCarPool)), choiceKey = "r/0/2/3"))
+        assertEquals("choice", choice["source"])
+        assertEquals(RunUpRule.ODD_DESIGNATED_ONLY, choice["odd"])
+        // And a run-up's, which says so itself.
+        val runUp = RunUpLanes(onlyCarPool, target = null, key = "r/0/2/end", odd = RunUpRule.ODD_DESIGNATED_ONLY, need = null)
+        assertEquals(RunUpRule.ODD_DESIGNATED_ONLY, log.at(snapshot(runUpLanes = runUp), runUpMeters = 800.0)?.get("odd"))
+        // An open lane lit beside it, or no lane lit at all: nothing odd.
+        assertFalse("odd" in requireNotNull(log.at(snapshot(lanes = LaneInfo(listOf(carPoolLit, on, off, off))))))
+        assertFalse("odd" in requireNotNull(log.at(snapshot(lanes = LaneInfo(listOf(carPool, off, off, off))))))
+    }
+
+    @Test
     fun `words the card could not fit write a line without them, once, and a line again when they fit`() {
         val log = LaneRowLog()
         requireNotNull(log.at(snapshot(runUpLanes = edgeRow), runUpMeters = 400.0, runUp = "r/0/2/end", start = "edge"))

@@ -841,10 +841,10 @@ On the drive:
     the camera line's `render` and `renderFps` on a run-up with the open road, and note the app's
     mobile data use for the drive (check 2): the tilt draws more of the map ahead.
 31. **The new lines.** After the drive: `lane_row` lines at each change of the card's row, with
-    `odd` where a run-up's row had no words (`composed`, `pieces`, `unknown_branch`,
-    `designated_only`, `no_fit`); a `missed_maneuver` line for an exit missed, if one was, and
-    `diverge_taken` lines for exits and points on the way where the route was kept; and on every
-    `progress` and `off_route` line `match.raw`.
+    `odd` where a run-up's row had no words (`composed`, `pieces`, `unknown_branch`, `no_fit`) and
+    `designated_only` where any row lit only lanes for car pools or buses; a `missed_maneuver` line
+    for an exit missed, if one was, and `diverge_taken` lines for exits and points on the way where
+    the route was kept; and on every `progress` and `off_route` line `match.raw`.
 
 Then share the debug log. What to read in it:
 
@@ -877,7 +877,7 @@ Then share the debug log. What to read in it:
 | `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
 | Camera: `runUp`, `laneChoice.key`, `laneCapZoom`, `capSpeed`, `aheadM` | Which run-up held the close view and from where to where; the closest zoom the floor of 12 s allowed and the speed it was worked out for; the road the camera showed above the car, to check the 12 s and the model behind them against a screenshot |
 | `lane_choice`: `key`, `fromLeft`, `edgeLeaves` | Every lane of each point as the route has it, from the left: which lanes the route marked where, which side's lanes left at each point on the way to an exit, and so which row the card should have shown |
-| `lane_row` | What the card's lane row drew and when it changed: `source`, the lanes (`row`, `lit`, `des`), `words`, `need`, the run-up (`runUp`, `start`) and, where a run-up's row had no words, why (`odd`). One to four lines for each run-up; a distance alone writes none |
+| `lane_row` | What the card's lane row drew and when it changed: `source`, the lanes (`row`, `lit`, `des`), `words`, `need`, the run-up (`runUp`, `start`) and, where a run-up's row had no words, why (`odd`), or that a row lit only lanes for car pools or buses (`odd` `designated_only`). One to four lines for each run-up; a distance alone writes none |
 | `missed_maneuver`, `diverge_taken` | One line for each place the road divided: the step change past an exit, fork or on ramp, or a point passed on the way (`kind`); missed when the navigator found the car off the route within 30 s or 1,000 m. How sure the navigator was (`probAt`, `probMin`, `probMax`, `probLast`, `uncertainS`), how far the phone's positions lay to the side (`sideAt`, `sideMin`, `sideMax`) and what the card showed on the way (`card`, `words`, `runUp`): whether a rule could find a missed exit sooner than the navigator without false alarms |
 | `progress`, `off_route`: `match.raw` | Where the phone's own position lay against the matched one: `sideM` to the side (right positive), `aheadM` along the way (about minus the speed, since the navigator puts the car a second ahead), `accM`, `ageMs`, `bearingDiff` |
 | `route_response`, `routes_updated`: a step's `lanes` | The lanes of each step's last banner that has them, the one shown near its maneuver |

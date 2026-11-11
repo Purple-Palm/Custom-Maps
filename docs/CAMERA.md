@@ -751,10 +751,11 @@ Other lines:
   distance), `words` (`R1`, `R2`, `R3`, `R1+1` and `R1+2` for Right lane, 2 right, 3 right, 2nd and
   3rd from right, and `L...` for the left), `need` (the composed lane, counted from the exit's edge),
   `metersAhead`, `runUp` and `start` (the run-up's exit, and what began it: a point's key, `edge` or
-  `resume`), `odd` (why a run-up's row has no words: `composed`, `pieces`, `unknown_branch`,
-  `designated_only`, or `no_fit` when the card left words out that did not fit), `pending` and
-  `offRoute`. Words that do not fit are found when the card lays the row out, so such a row has a
-  second line a moment after its first. Keys, indices and tokens only.
+  `resume`), `odd` (why a run-up's row has no words: `composed`, `pieces`, `unknown_branch`, or
+  `no_fit` when the card left words out that did not fit; and `designated_only` on any row, the
+  maneuver's and a lane choice's too, whose only lit lanes are kept for car pools or buses),
+  `pending` and `offRoute`. Words that do not fit are found when the card lays the row out, so such
+  a row has a second line a moment after its first. Keys, indices and tokens only.
 - A **missed_maneuver** or **diverge_taken** line for each place the road divides, to tell later
   whether a rule could find a car that stayed on the freeway sooner than the navigator does. A
   watch starts when the step changes past an exit, a fork or an on ramp (`kind` `maneuver`), and
@@ -1702,7 +1703,7 @@ zoom of 14 dp lanes: the model's 198 m and 301 m at 45° and 55°, its inverse, 
 `RunUpRuleTest` (29: the exit's side, edge points and points taken as one, the composed lane with
 lanes added, gone and kept for car pools, the clamps, the exit's row and every case without words,
 and the synthetic replays' rows), `CardLanesTest` (3), `LaneTargetTest` (4: which lanes have
-words), `LaneRowLogTest` (10), `RawOffsetTest` (6) and `DivergeWatchTest` (14: an exit missed on the
+words), `LaneRowLogTest` (11), `RawOffsetTest` (6) and `DivergeWatchTest` (14: an exit missed on the
 synthetic approach, a car that leaves at an edge point, a ramp taken, the limits, the time the
 navigator was unsure, a return from off the route, a new route, a seek and the end of guidance).
 
