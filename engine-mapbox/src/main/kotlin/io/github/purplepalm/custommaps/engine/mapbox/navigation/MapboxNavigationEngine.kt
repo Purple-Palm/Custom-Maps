@@ -50,6 +50,7 @@ import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.CardContinuity
 import io.github.purplepalm.custommaps.nav.guidance.CardUpdate
 import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
+import io.github.purplepalm.custommaps.nav.guidance.FixTime
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
@@ -1115,10 +1116,8 @@ internal class MapboxNavigationEngine(
      * the trip before ([StaleStart]), or one from before a seek of a simulated drive ([SeekHold]);
      * the map's camera and drawn car leave such a position alone. False outside a trip.
      */
-    internal fun carriesOldPosition(result: LocationMatcherResult): Boolean {
-        val fix = result.enhancedLocation.fixTime()
-        return staleStart.isStale(fix) || seekHold.isHeld(fix)
-    }
+    internal fun carriesOldPosition(result: LocationMatcherResult): Boolean =
+        progressHeld(result.enhancedLocation.fixTime(), staleStart, seekHold)
 
     /**
      * How many seeks have moved a simulated drive in this run of the app. The first position after
@@ -1134,7 +1133,7 @@ internal class MapboxNavigationEngine(
      * a run-up.
      */
     internal fun runUpKey(progress: RouteProgress): String? {
-        if (_guidanceState.value == GuidanceState.ACTIVE && !progressHeld()) {
+        if (_guidanceState.value == GuidanceState.ACTIVE && !latestHeld()) {
             laneChoices.runUp(progress, lastMatch?.enhancedLocation?.speed, nowSeconds())
         }
         return laneChoices.runUpKey
@@ -1142,13 +1141,9 @@ internal class MapboxNavigationEngine(
 
     /**
      * Whether the progress update that comes with the latest matched position is one the screen
-     * leaves alone: it still carries where the trip before left the car ([StaleStart]), or it is
-     * from before a seek's new place ([SeekHold]).
+     * leaves alone ([progressHeld]).
      */
-    private fun progressHeld(): Boolean {
-        val fix = lastMatch?.enhancedLocation?.fixTime()
-        return staleStart.isStale(fix) || seekHold.isHeld(fix)
-    }
+    private fun latestHeld(): Boolean = progressHeld(lastMatch?.enhancedLocation?.fixTime(), staleStart, seekHold)
 
     /**
      * The "match" fields of a "progress" or "off_route" line: the navigator's latest matched
@@ -1307,7 +1302,7 @@ internal class MapboxNavigationEngine(
         debugLog.log("off_route", mapOf("offRoute" to offRoute, "match" to matchFields()))
         // A diverge watched since the car passed it was missed, unless the guards hold the drive's
         // updates back: then the navigator does not know where the car is.
-        if (offRoute && _guidanceState.value == GuidanceState.ACTIVE && !progressHeld()) {
+        if (offRoute && _guidanceState.value == GuidanceState.ACTIVE && !latestHeld()) {
             val match = lastMatch
             divergeWatch.onOffRoute(nowSeconds(), match?.roadEdgeMatchProbability?.toDouble(), rawSideMeters(), match?.enhancedLocation?.speed, match?.isTeleport)
                 ?.let(::logDiverge)
@@ -1514,3 +1509,12 @@ internal fun summaryLine(fields: Map<String, Any?>, ending: TripEnding, vitals: 
     line.putAll(vitals)
     return line
 }
+
+/**
+ * Whether a progress update whose matched position was measured at [fix] is one the screen leaves
+ * alone: it still carries where the trip before left the car ([StaleStart]), or it is from before a
+ * seek's new place ([SeekHold]). Such an update moves neither the run-up's latch nor the watch of
+ * diverges, and the map's camera and drawn car leave its position alone.
+ */
+internal fun progressHeld(fix: FixTime?, staleStart: StaleStart, seekHold: SeekHold): Boolean =
+    staleStart.isStale(fix) || seekHold.isHeld(fix)
