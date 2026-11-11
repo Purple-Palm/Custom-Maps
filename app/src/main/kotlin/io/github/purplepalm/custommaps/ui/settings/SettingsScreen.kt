@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.ui.settings
 
+import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -127,7 +129,23 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            PrivacyPolicyButton()
         }
+    }
+}
+
+/** Opens the privacy policy in the browser; a phone without one gets a short note instead. */
+@Composable
+private fun PrivacyPolicyButton() {
+    val context = LocalContext.current
+    TextButton(
+        onClick = {
+            if (!context.openWebPage(PRIVACY_POLICY_URL)) {
+                Toast.makeText(context, R.string.about_no_browser, Toast.LENGTH_LONG).show()
+            }
+        },
+    ) {
+        Text(stringResource(R.string.about_privacy_policy))
     }
 }
 
