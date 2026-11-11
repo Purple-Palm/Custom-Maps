@@ -16,9 +16,10 @@ import io.github.purplepalm.custommaps.nav.model.LaneZoom
  * ([JunctionFrame]), handed to one map's viewport data source as more points to frame.
  *
  * It is worked out once for each step, from the route's shape of the next step, when the SDK first
- * frames that step's maneuver. The data source keeps the points it was given until it is given
- * others, also in frames of the open road. So they are taken back with the first progress that does
- * not frame the maneuver, at a new route, and at the end of guidance. Main thread only.
+ * frames that step's maneuver with Large. The data source keeps the points it was given until it
+ * is given others, also in frames of the open road. So they are taken back with the first progress
+ * that does not frame the maneuver, with Default, at a new route, and at the end of guidance. Main
+ * thread only.
  *
  * @param frame hands the data source the points to frame besides its own; an empty list for none
  */
@@ -27,10 +28,8 @@ internal class JunctionPoints(private val frame: (List<Point>) -> Unit) {
     constructor(dataSource: MapboxNavigationViewportDataSource) :
         this({ points -> dataSource.additionalPointsToFrameForFollowing(points) })
 
-    // The step whose maneuver the plan is for: its route, leg and step.
-    private var routeId: String? = null
-    private var legIndex = -1
-    private var stepIndex = -1
+    /** The step whose maneuver [planned] is for, as "route/leg/step"; null before the first. */
+    private var plannedStep: String? = null
     private var planned = Planned.NONE
 
     /** Whether the last update was one where the SDK framed the maneuver of [planned] with Large. */
@@ -41,32 +40,47 @@ internal class JunctionPoints(private val frame: (List<Point>) -> Unit) {
 
     /**
      * Before the frame of [progress] is computed, after the data source was given it: the points
-     * of the next maneuver while [framing] says that Large has the SDK frame it, none otherwise.
+     * of the next maneuver while [framing] says that the SDK frames it and [mode] is Large, none
+     * otherwise.
      *
      * @param coalesceMeters the SDK frames a next step of at most this length whole
      */
-    fun update(progress: RouteProgress?, framing: Boolean, coalesceMeters: Double, tuning: CameraTuning) {
+    fun update(progress: RouteProgress?, mode: LaneZoom, framing: Boolean, coalesceMeters: Double, tuning: CameraTuning) {
         val leg = progress?.currentLegProgress
         val step = leg?.currentStepProgress
-        if (!framing || progress == null || leg == null || step == null) {
+        // Named only when it can be asked for: with Default nothing of the drive is read.
+        val stepKey = if (mode == LaneZoom.LARGE && framing && progress != null && leg != null && step != null) {
+            "${progress.navigationRoute.id}/${leg.legIndex}/${step.stepIndex}"
+        } else {
+            null
+        }
+        update(stepKey, mode, framing) {
+            val next = leg?.upcomingStep
+            plan(progress?.upcomingStepPoints.orEmpty(), next?.maneuver()?.bearingBefore(), next?.distance(), coalesceMeters, tuning)
+        }
+    }
+
+    /**
+     * The rule of [update] on plain values. [stepKey] names the route, leg and step of the progress,
+     * null without one; [plan] works out the plan of that step's next maneuver, and is called once
+     * for each step, the first time the SDK frames its maneuver with Large.
+     */
+    fun update(stepKey: String?, mode: LaneZoom, framing: Boolean, plan: () -> Planned) {
+        if (mode != LaneZoom.LARGE || !framing || stepKey == null) {
             this.framing = false
             return give(emptyList())
         }
         this.framing = true
-        if (progress.navigationRoute.id != routeId || leg.legIndex != legIndex || step.stepIndex != stepIndex) {
-            routeId = progress.navigationRoute.id
-            legIndex = leg.legIndex
-            stepIndex = step.stepIndex
-            val next = leg.upcomingStep
-            val road = progress.upcomingStepPoints.orEmpty()
-            planned = plan(road, next?.maneuver()?.bearingBefore(), next?.distance(), coalesceMeters, tuning)
+        if (stepKey != plannedStep) {
+            plannedStep = stepKey
+            planned = plan()
         }
         give(planned.points)
     }
 
     /** No route, a new route, or no guidance: the data source frames nothing of a junction's road. */
     fun clear() {
-        routeId = null
+        plannedStep = null
         planned = Planned.NONE
         framing = false
         give(emptyList())

@@ -85,7 +85,7 @@ internal object LaneZoomFrames {
         options.minZoom = SDK_MIN_ZOOM
         options.bearingSmoothing.maxBearingAngleDiff = SDK_BEARING_LEAD
         setMetersAfterManeuver(dataSource, metersAfterManeuver(large, tuning), route, progress)
-        junction.update(framed, maneuver, coalesceMeters(options), tuning)
+        junction.update(framed, mode, maneuver, coalesceMeters(options), tuning)
     }
 
     /**
@@ -105,7 +105,7 @@ internal object LaneZoomFrames {
         setMetersAfterManeuver(dataSource, metersAfterManeuver(large, tuning), route, progress)
         val options = dataSource.options.followingFrameOptions
         val framed = progressOf(route, progress)
-        junction.update(framed, large && framesManeuver(framed, options), coalesceMeters(options), tuning)
+        junction.update(framed, mode, large && framesManeuver(framed, options), coalesceMeters(options), tuning)
     }
 
     /** Mapbox standard: the SDK's own values, whatever the lane zoom is. */
@@ -138,12 +138,12 @@ internal object LaneZoomFrames {
         junction: JunctionPoints,
     ) {
         val options = dataSource.options.followingFrameOptions
-        // With Default nothing of the drive is asked: the limit is the same on every update, and
-        // nothing is written.
+        // With Default nothing of the drive is asked: the limit is the same on every update,
+        // nothing is written, and the junction frame gets none of the bend's points.
         val maneuver = mode == LaneZoom.LARGE && framesManeuver(progress, options)
         val maxZoom = smoothMaxZoom(mode, tuning, framesManeuver = maneuver)
         if (options.maxZoom != maxZoom) options.maxZoom = maxZoom
-        junction.update(progress, maneuver, coalesceMeters(options), tuning)
+        junction.update(progress, mode, maneuver, coalesceMeters(options), tuning)
     }
 
     /**
@@ -186,13 +186,14 @@ internal object LaneZoomFrames {
         junction: JunctionPoints,
     ) {
         val options = dataSource.options.followingFrameOptions
-        // With Default nothing of the drive is asked: the limits are the same on every update.
+        // With Default nothing of the drive is asked: the limits are the same on every update,
+        // and the junction frame gets none of the bend's points.
         val framesManeuver = mode == LaneZoom.LARGE && framesManeuver(progress, options)
         val limits = tunedLimits(mode, tuning, framesManeuver, laneWindow, latitude)
         options.minZoom = limits.minZoom
         options.maxZoom = limits.maxZoom
         options.bearingSmoothing.maxBearingAngleDiff = limits.bearingLead
-        junction.update(progress, framesManeuver, coalesceMeters(options), tuning)
+        junction.update(progress, mode, framesManeuver, coalesceMeters(options), tuning)
     }
 
     /**
