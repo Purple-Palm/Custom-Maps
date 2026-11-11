@@ -24,7 +24,10 @@ import io.github.purplepalm.custommaps.network.NetworkMonitor
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
 import io.github.purplepalm.custommaps.token.DataStoreTokenStore
+import io.github.purplepalm.custommaps.token.TokenEntry
+import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenStore
+import io.github.purplepalm.custommaps.token.TokenSwitch
 import io.github.purplepalm.custommaps.trip.DataStoreTripLogStore
 import java.io.File
 import java.time.Instant
@@ -177,22 +180,53 @@ class AppGraph(private val application: Application) {
                     }
                 }
         }
-        // Hand the stored token to the SDKs before any map exists, and again whenever it changes.
+        // Hand the active token to the SDKs before any map exists, and again whenever the driver
+        // picks another one. A change while guidance runs waits for the trip to end, and one while
+        // routes are previewed closes the preview first (TokenSwitch).
         applicationScope.launch {
             var generation = 0
-            tokenStore.token.collect { token ->
-                if (token != null && MapboxAccessTokens.check(token) == AccessTokenCheck.VALID) {
-                    MapboxAccessTokens.apply(token)
-                    generation += 1
-                    _mapsAccess.value = MapsAccess.Ready(generation)
-                } else {
-                    _mapsAccess.value = MapsAccess.NeedsToken
+            var applied: TokenEntry? = null
+            var held: TokenEntry? = null
+            combine(tokenStore.list, engine.navigation.guidanceState, ::Pair).collect { (list, guidance) ->
+                val wanted = list.active?.takeIf { MapboxAccessTokens.check(it.token) == AccessTokenCheck.VALID }
+                val first = _mapsAccess.value == MapsAccess.Checking
+                when (val step = TokenSwitch.step(first, applied?.token, wanted?.token, guidance)) {
+                    // A rename: the same token under its new name.
+                    TokenSwitch.Step.Keep -> {
+                        applied = wanted
+                        held = null
+                    }
+                    TokenSwitch.Step.Hold -> if (held != wanted) {
+                        held = wanted
+                        debugLog.log("token_switch_held", entryFields(list, wanted) + ("guidance" to guidance))
+                    }
+                    is TokenSwitch.Step.Apply -> {
+                        held = null
+                        if (step.closePreview) engine.navigation.clearPreview()
+                        if (wanted != null) {
+                            MapboxAccessTokens.apply(wanted.token)
+                            generation += 1
+                            _mapsAccess.value = MapsAccess.Ready(generation)
+                        } else {
+                            _mapsAccess.value = MapsAccess.NeedsToken
+                        }
+                        applied = wanted
+                        debugLog.log(
+                            "maps_access",
+                            mapOf("access" to _mapsAccess.value.toString()) + entryFields(list, wanted) + ("previewClosed" to step.closePreview),
+                        )
+                    }
                 }
-                // Only whether a token is set: the token itself never goes into the log.
-                debugLog.log("maps_access", mapOf("access" to _mapsAccess.value.toString()))
             }
         }
     }
+
+    /**
+     * Which entry, by its place in the list counted from 1 and the name the driver gave it. The
+     * token itself never goes into the log, nor anything read from it.
+     */
+    private fun entryFields(list: TokenList, entry: TokenEntry?): Map<String, Any?> =
+        if (entry == null) emptyMap() else mapOf("slot" to list.slotOf(entry.id), "name" to entry.name)
 
     companion object {
         /** Under the app's files directory; the backup rules never include it. */
