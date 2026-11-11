@@ -58,6 +58,15 @@ class MapboxEngine private constructor(
     /** A map for the phone screen. Call [PhoneMap.release] when its view leaves the screen. */
     fun createPhoneMap(context: Context): PhoneMap = PhoneMap(context, navigationEngine, debugLog, offlineData)
 
+    /**
+     * What the maneuver card did with the words of a run-up's lane row: [shown] false when they did
+     * not fit beside the lanes and were left out. [key] is the row's own key, as the progress gave
+     * it. For the debug log only; it changes nothing on the screen or in the drive.
+     */
+    fun onRunUpWordsShown(key: String, shown: Boolean) {
+        navigationEngine.onRunUpWordsShown(key, shown)
+    }
+
     companion object {
 
         /**

@@ -43,6 +43,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.LaneRowLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.CardContinuity
@@ -220,6 +221,9 @@ internal class MapboxNavigationEngine(
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
+
+    /** What the maneuver card's lane row drew at the last "lane_row" line; every drive starts it over. */
+    private val laneRowLog = LaneRowLog()
 
     /** Writes the request of every reroute to the debug log, and changes none of them. */
     private val rerouteOptionsLogger = RerouteOptionsLogger(debugLog) { _destination.value }
@@ -835,6 +839,7 @@ internal class MapboxNavigationEngine(
                 // A new drive: the Then chip and the lane choices know nothing of the last one.
                 thenTracker.reset()
                 laneChoices.clear()
+                laneRowLog.reset()
                 val commit = ++commitCount
                 // What follows inside the trip waits for its first progress; a start that made no
                 // plan is as previewed.
@@ -934,6 +939,7 @@ internal class MapboxNavigationEngine(
                 cardContinuity.reset()
                 thenTracker.reset()
                 laneChoices.clear()
+                laneRowLog.reset()
             }
         }
     }
@@ -1062,7 +1068,10 @@ internal class MapboxNavigationEngine(
             ) + speedLimitChange(active),
         )
         if (active) logLaneChoices(progress)
-        if (snapshot != null) _routeProgress.value = snapshot
+        if (snapshot != null) {
+            logLaneRow(progress, snapshot)
+            _routeProgress.value = snapshot
+        }
         // The first progress of a trip, the next one after a cancelled refresh, and the first one
         // after an answer to its replan.
         if (active && startRefresher.awaitsProgress) {
@@ -1130,6 +1139,27 @@ internal class MapboxNavigationEngine(
         val speed = lastMatch?.enhancedLocation?.speed
         val entering = laneChoices.entering(laneChoices.ahead(progress), speed)
         for (i in entering.indices) debugLog.log("lane_choice", laneChoices.debugFields(entering[i], speed))
+    }
+
+    /**
+     * Writes a "lane_row" line when what the maneuver card's lane row draws changes with [snapshot],
+     * the update about to be published ([LaneRowLog]): with every camera style and either lane zoom.
+     */
+    private fun logLaneRow(progress: RouteProgress, snapshot: RouteProgressSnapshot) {
+        val runUpRowKey = snapshot.runUpLanes?.key
+        val runUpMeters = if (runUpRowKey == null) null else laneChoices.ahead(progress).firstOrNull { it.key == runUpRowKey }?.metersAhead
+        val fields = laneRowLog.onSnapshot(snapshot, laneChoices.choiceKey, runUpMeters, laneChoices.runUpKey, laneChoices.runUpStartKey) ?: return
+        debugLog.log("lane_row", fields)
+    }
+
+    /**
+     * What the maneuver card did with the words of the run-up's row whose key is [key]: [shown]
+     * false when they did not fit beside the lanes and were left out. A change of that writes a
+     * "lane_row" line ([LaneRowLog.onWordsShown]).
+     */
+    internal fun onRunUpWordsShown(key: String, shown: Boolean) {
+        val fields = laneRowLog.onWordsShown(key, shown) ?: return
+        debugLog.log("lane_row", fields)
     }
 
     /**

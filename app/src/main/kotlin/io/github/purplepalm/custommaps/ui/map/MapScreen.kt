@@ -280,7 +280,12 @@ fun MapScreen(
                 },
         ) {
             when (state.guidance) {
-                GuidanceState.ACTIVE -> ManeuverSlot(progress, offline, onBottomChanged = { maneuverPanelBottom = it })
+                GuidanceState.ACTIVE -> ManeuverSlot(
+                    progress,
+                    offline,
+                    onBottomChanged = { maneuverPanelBottom = it },
+                    onRunUpWords = { key, shown -> engine.onRunUpWordsShown(key, shown) },
+                )
                 GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                     SearchBar(
                         text = state.searchText,
@@ -405,13 +410,20 @@ fun MapScreen(
  * reports where its bottom edge is, 0 while it is not shown, for the camera's padding. The panel
  * is as large as the maneuver card alone: the Then chip under it is not measured, and neither is
  * the offline chip, here a tab at the other end of the same band, which reads [offline] itself.
+ * Whether a run-up's words fitted on the card goes to [onRunUpWords], for the debug log.
  */
 @Composable
-private fun ManeuverSlot(progress: State<RouteProgressSnapshot?>, offline: State<OfflineReason>, onBottomChanged: (Int) -> Unit) {
+private fun ManeuverSlot(
+    progress: State<RouteProgressSnapshot?>,
+    offline: State<OfflineReason>,
+    onBottomChanged: (Int) -> Unit,
+    onRunUpWords: (key: String, shown: Boolean) -> Unit,
+) {
     progress.value?.let { current ->
         ManeuverPanel(
             progress = current,
             modifier = Modifier.onGloballyPositioned { onBottomChanged(it.boundsInRoot().bottom.toInt()) },
+            onRunUpWords = onRunUpWords,
             endTab = { OfflinePill(offline) },
         )
         DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }

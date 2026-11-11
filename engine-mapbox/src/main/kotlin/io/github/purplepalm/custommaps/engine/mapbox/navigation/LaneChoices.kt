@@ -58,6 +58,8 @@ internal class LaneChoices(
         val routeLanes: List<RouteLane>,
         /** The lane at the side the step's exit leaves on leaves the route here ([RunUpRule.edgeLeaves]). */
         val edgeLeaves: Boolean,
+        /** Every lane as the route lists it, from the leftmost, as the "lane_choice" line writes it ([fromLeftFields]). */
+        val fromLeft: List<Map<String, Any?>>,
     )
 
     private var stepKey: String? = null
@@ -180,14 +182,32 @@ internal class LaneChoices(
             val read = stepLanes(intersections, stepPoints).map {
                 val intersection = intersections[it.index]
                 val lanes = intersection?.routeLanes().orEmpty()
-                LanePoint("$stepKey/${it.index}", it.metersFromStepStart, it.counts, it.onFreeway, intersection?.lanesAhead(), lanes, RunUpRule.edgeLeaves(lanes, edge))
+                LanePoint(
+                    "$stepKey/${it.index}",
+                    it.metersFromStepStart,
+                    it.counts,
+                    it.onFreeway,
+                    intersection?.lanesAhead(),
+                    lanes,
+                    RunUpRule.edgeLeaves(lanes, edge),
+                    intersection?.fromLeftFields().orEmpty(),
+                )
             }
             val counts = maneuver?.laneCounts()
             // The road that leads to the maneuver leaves the step's last intersection. The card
             // has the maneuver's lanes already, so none are drawn for it here.
             val atManeuver = if (maneuver != null && counts != null) {
                 val approach = intersections.lastOrNull() ?: maneuver
-                LanePoint("$stepKey/end", Double.NaN, counts, approach.isFreeway(), lanes = null, routeLanes = exitLanes, edgeLeaves = false)
+                LanePoint(
+                    "$stepKey/end",
+                    Double.NaN,
+                    counts,
+                    approach.isFreeway(),
+                    lanes = null,
+                    routeLanes = exitLanes,
+                    edgeLeaves = false,
+                    fromLeft = maneuver.fromLeftFields(),
+                )
             } else {
                 null
             }
@@ -309,6 +329,9 @@ internal class LaneChoices(
     /** The exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up. */
     val runUpKey: String? get() = latch.exitKey
 
+    /** The key of the lane choice whose lanes [lanesAhead] gave the card at its last call; null when it gave none. */
+    val choiceKey: String? get() = cardKey
+
     /** What began the run-up on now ([RunUpLatch.startKey]): a choice's key, `edge` or `resume`; null outside a run-up. */
     val runUpStartKey: String? get() = latch.startKey
 
@@ -359,13 +382,16 @@ internal class LaneChoices(
     }
 
     /**
-     * The "lane_choice" line of the debug log for [choice]: how far ahead it is and how far the
-     * close view's start, in meters, its lanes, the speed in meters a second, and why it is passed
-     * over when it is. No coordinates. The lane counts are what a looser rule would be judged by
-     * after a drive.
+     * The "lane_choice" line of the debug log for [choice]: its key, how far ahead it is and how far
+     * the close view's start, in meters, its lanes, the speed in meters a second, and why it is
+     * passed over when it is. No coordinates. The lane counts are what a looser rule would be
+     * judged by after a drive. Then whether the lane at the side the step's exit leaves on leaves
+     * the route there, and every lane as the route lists it, from the leftmost ([fromLeftFields]),
+     * which tells after a drive which lanes the route marked where.
      */
     fun debugFields(choice: LaneChoice, speedMps: Double?): Map<String, Any?> = mapOf(
         "kind" to if (choice.atManeuver) "maneuver" else "straight",
+        "key" to choice.key,
         "metersAhead" to Math.round(choice.metersAhead),
         "window" to Math.round(LaneFocus.windowMeters(tuning, speedMps)),
         "lanes" to choice.laneCount,
@@ -375,7 +401,12 @@ internal class LaneChoices(
         "freeway" to choice.onFreeway,
         "speed" to speedMps?.let { Motion.round(it, 1) },
         "skipped" to choice.skipReason(tuning),
+        "edgeLeaves" to choice.edgeLeaves,
+        "fromLeft" to pointOf(choice.key)?.fromLeft,
     ).filterValues { it != null }
+
+    /** The loaded point with [key]: one on the way, or the maneuver's own. */
+    private fun pointOf(key: String): LanePoint? = points.firstOrNull { it.key == key } ?: maneuverPoint?.takeIf { it.key == key }
 
     /** A drive ended or a new one begins: nothing is kept of the last step, nor of a run-up. */
     fun clear() {
@@ -520,6 +551,31 @@ internal fun StepIntersection.routeLanes(): List<RouteLane> {
                 designated = lane.isDesignated(),
             ),
         )
+    }
+    return lanes
+}
+
+/**
+ * Every lane of this intersection as the route lists it, from the leftmost, for the debug log: its
+ * arrows ("ind"), whether the route can be followed from it ("valid") and prefers it ("active"),
+ * the arrow it takes from there ("validInd"), and, only where the lane has any, the vehicles it is
+ * kept for ("des"). A field the route does not give is null. Arrows and kinds of vehicle only, as
+ * the route names them. Empty when the route has no lanes for it.
+ */
+internal fun StepIntersection.fromLeftFields(): List<Map<String, Any?>> {
+    val all = lanes() ?: return emptyList()
+    val lanes = ArrayList<Map<String, Any?>>(all.size)
+    for (lane in all) {
+        if (lane == null) continue
+        // Copied: the route may hand out a view of its own data.
+        val designated = lane.access()?.designated()?.toList()
+        val fields = mapOf(
+            "ind" to lane.indications()?.toList(),
+            "valid" to lane.valid(),
+            "active" to lane.active(),
+            "validInd" to lane.validIndication(),
+        )
+        lanes.add(if (designated.isNullOrEmpty()) fields else fields + ("des" to designated))
     }
     return lanes
 }

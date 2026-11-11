@@ -499,13 +499,14 @@ class LaneChoicesTest {
     }
 
     @Test
-    fun `the log line of a lane choice has its counts and no place`() {
+    fun `the log line of a lane choice has its counts, its key and its lanes, and no place`() {
         // One more lane goes on than at the usual split, so that no two of the counts are the same.
         val lanes = loaded(listOf(intersection(0), intersection(4), intersection(7, splitLanes + lane(true))))
         val fields = lanes.debugFields(beforeSplit(lanes, 612.4), speedMps = 29.04)
         assertEquals(
             mapOf(
                 "kind" to "straight",
+                "key" to "r/0/2/2",
                 "metersAhead" to 612L,
                 "window" to 726L,
                 "lanes" to 5,
@@ -514,9 +515,52 @@ class LaneChoicesTest {
                 "designated" to 1,
                 "freeway" to true,
                 "speed" to 29.0,
+                "edgeLeaves" to false,
+                "fromLeft" to listOf(
+                    mapOf("ind" to listOf("straight"), "valid" to true, "active" to true, "validInd" to null, "des" to listOf("hov")),
+                    mapOf("ind" to listOf("straight"), "valid" to true, "active" to true, "validInd" to null),
+                    mapOf("ind" to listOf("straight", "slight right"), "valid" to true, "active" to true, "validInd" to "straight"),
+                    mapOf("ind" to listOf("slight right"), "valid" to false, "active" to false, "validInd" to null),
+                    mapOf("ind" to listOf("slight right"), "valid" to false, "active" to false, "validInd" to null),
+                    mapOf("ind" to listOf("straight"), "valid" to true, "active" to true, "validInd" to null),
+                ),
             ),
             fields,
         )
+    }
+
+    @Test
+    fun `the log gets every lane as the route lists it, what it leaves out as null, and the exit's lanes too`() {
+        val odd = listOf(
+            // No arrows, no marks: every field the route leaves out is null.
+            IntersectionLanes.builder().build(),
+            null,
+            lane(valid = null, active = true, designated = emptyList()),
+            lane(false, designated = listOf("bus", "taxi")),
+        )
+        val fromLeft = intersection(3).toBuilder().lanes(odd).build().fromLeftFields()
+        assertEquals(
+            listOf(
+                mapOf("ind" to null, "valid" to null, "active" to null, "validInd" to null),
+                mapOf("ind" to listOf("straight"), "valid" to null, "active" to true, "validInd" to null),
+                mapOf("ind" to listOf("straight"), "valid" to false, "active" to false, "validInd" to null, "des" to listOf("bus", "taxi")),
+            ),
+            fromLeft,
+            "a lane that is null is skipped, as the card and the counts skip it",
+        )
+        assertTrue(intersection(3).fromLeftFields().isEmpty(), "no lanes")
+        // The exit's own point, and an edge point on the way to it.
+        val lanes = LaneChoices()
+        runUpStep(lanes, "r/0/2")
+        val ahead = lanes.choices(0.0, 1_000.0, maneuverIsChoice = true)
+        val atExit = lanes.debugFields(ahead.single { it.atManeuver }, speedMps = 25.0)
+        assertEquals("r/0/2/end", atExit["key"])
+        assertEquals(false, atExit["edgeLeaves"])
+        assertEquals(6, (atExit["fromLeft"] as List<*>).size)
+        assertEquals(mapOf("ind" to listOf("slight right"), "valid" to true, "active" to true, "validInd" to "slight right"), (atExit["fromLeft"] as List<*>)[5])
+        val edge = lanes.debugFields(ahead.single { it.key == "r/0/2/2" }, speedMps = 25.0)
+        assertEquals(true, edge["edgeLeaves"])
+        assertEquals(listOf("hov"), ((edge["fromLeft"] as List<*>)[0] as Map<*, *>)["des"])
     }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
 import android.os.SystemClock
+import com.mapbox.api.directions.v5.models.BannerInstructions
 import com.mapbox.api.directions.v5.models.LegStep
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.api.directions.v5.models.StepIntersection
@@ -128,9 +129,7 @@ private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
         "seconds" to duration(),
         "drivingSide" to drivingSide(),
         "speedLimitSign" to speedLimitSign(),
-        "lanes" to bannerInstructions()?.firstOrNull()?.sub()?.components()
-            ?.filter { it.type() == "lane" }
-            ?.map { mapOf("directions" to it.directions(), "active" to it.active(), "activeDirection" to it.activeDirection()) },
+        "lanes" to stepLaneFields(bannerInstructions()),
         "laneIntersections" to laneIntersectionFields(intersections().orEmpty(), shape),
         // The class of the step's road, as it leaves the maneuver, and what the step has on the way.
         "roadClass" to intersections()?.firstOrNull()?.mapboxStreetsV8()?.roadClass(),
@@ -142,6 +141,21 @@ private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
         "bendDeg" to bend?.degrees?.let { Motion.round(it, 1) },
     )
 }
+
+/**
+ * The lanes of a step's banner, for the route lines: each lane's arrows, whether it is active and
+ * the arrow active on it, from the leftmost. From the step's last banner that has lanes: lanes come
+ * with the banner shown near the maneuver, so the first of a step's two banners has none. Null when
+ * no banner of the step has lanes.
+ */
+internal fun stepLaneFields(banners: List<BannerInstructions>?): List<Map<String, Any?>>? {
+    val lanes = banners?.lastOrNull { banner -> banner.sub()?.components()?.any { it.type() == LANE_COMPONENT } == true }
+        ?.sub()?.components() ?: return null
+    return lanes.filter { it.type() == LANE_COMPONENT }
+        .map { mapOf("directions" to it.directions(), "active" to it.active(), "activeDirection" to it.activeDirection()) }
+}
+
+private const val LANE_COMPONENT = "lane"
 
 /**
  * How many of a step's intersections have traffic signals, a stop sign, a yield sign or a railway

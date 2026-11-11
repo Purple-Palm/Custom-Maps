@@ -64,9 +64,16 @@ internal val CARD_CORNER = 24.dp
  * card shows the new route's maneuver dimmed, with no distance and no lanes. Which lane row it
  * shows is [CardLanes]' decision: the run-up's to an exit with its words, a lane choice's ahead
  * with its distance, or the maneuver's own.
+ *
+ * [onRunUpWords] hears, for the debug log, whether the words of a run-up's row fitted beside its
+ * lanes, with the row's key ([RunUpLanes.key]): false when they were left out.
  */
 @Composable
-fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier) {
+fun ManeuverCard(
+    progress: RouteProgressSnapshot,
+    modifier: Modifier = Modifier,
+    onRunUpWords: (key: String, shown: Boolean) -> Unit = NO_WORDS_REPORT,
+) {
     val maneuver = progress.nextManeuver
     val distance = ImperialFormat.distance(progress.distanceToNextManeuver)
     Surface(
@@ -134,11 +141,13 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
                 when (row.source) {
                     CardLanes.Source.RUN_UP -> {
                         val words = row.target?.let(::laneWordsRes)
+                        val key = progress.runUpLanes?.key
                         LanesRow(
                             lanes,
                             label = words?.let { stringResource(it.short) },
                             description = words?.let { stringResource(it.long) },
                             labelShare = LANE_WORDS_MAX_WIDTH_SHARE,
+                            onLabelShown = if (words != null && key != null) { shown -> onRunUpWords(key, shown) } else null,
                         )
                     }
                     CardLanes.Source.CHOICE -> LanesRow(lanes, label = row.distance?.let { ImperialFormat.distance(it).toString() })
@@ -148,6 +157,9 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
         }
     }
 }
+
+/** Tells nobody whether a run-up's words fitted: for the previews. */
+private val NO_WORDS_REPORT: (String, Boolean) -> Unit = { _, _ -> }
 
 /** How opaque the card's content is: dimmed while the card waits for a new route's first instruction. */
 internal fun cardContentAlpha(pending: Boolean): Float = if (pending) PENDING_CARD_ALPHA else 1f
@@ -168,7 +180,8 @@ private const val PENDING_CARD_ALPHA = 0.45f
  * narrower, when there is not. The row is as high as its lanes are without a label
  * ([laneRowHeight]), so a label that comes or goes never changes the card's height; lanes made
  * narrower by it stand in the middle of that height. A [description] is what the screen reader
- * says for the row.
+ * says for the row. [onLabelShown] hears, each time the row is placed with a label, whether the
+ * label was shown or left out.
  */
 @Composable
 fun LanesRow(
@@ -177,6 +190,7 @@ fun LanesRow(
     label: String? = null,
     description: String? = null,
     labelShare: Float = LANE_LABEL_MAX_WIDTH_SHARE,
+    onLabelShown: ((Boolean) -> Unit)? = null,
 ) {
     val highlight = MaterialTheme.colorScheme.primary
     val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
@@ -213,6 +227,8 @@ fun LanesRow(
         layout(width, height) {
             shown?.placeRelative(0, (height - shown.height) / 2)
             glyphs.forEachIndexed { index, glyph -> glyph.placeRelative(row.start + index * row.slot + gap, top + gap) }
+            // Once placed, so whoever listens hears what is on the screen.
+            if (label != null) onLabelShown?.invoke(shown != null)
         }
     }
 }
