@@ -414,7 +414,11 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `IdleFollow` | `:core-nav`, `nav/camera/IdleFollow.kt` | Decides when the camera follows the car before guidance, and holds the browsing view's zoom and tilt and the distance from which a new position is a jump. |
 | `GuidancePadding` | `:core-nav`, `nav/camera/GuidancePadding.kt` | The map's top inset: from the maneuver card alone, only growing during guidance, plus a constant band under the card for the Then chip. |
 | `MapScale`, `LaneChoice`, `LaneFocus`, `ZoomPlanner`, `centerLeadSeconds` | `:core-nav`, `nav/camera/LaneZoomPlan.kt` | The Large lane zoom's math: a lane's width on the screen at a zoom, which points of a route count as a lane choice, when the view goes close for one, the zoom the camera aims at, and how far ahead of the car its centre aims. See [Lane zoom](#lane-zoom). |
-| `LaneChoices` | `:engine-mapbox`, `navigation/LaneChoices.kt` | The points with lanes ahead of the car, read from the route once for each step. The engine owns the one copy; the cameras and the maneuver card read from it. |
+| `RunUpLatch`, `TurnAhead` | `:core-nav`, `nav/camera/RunUp.kt` | The run-up to a freeway exit: when it begins, how long it holds and when it is taken up again, one latch for the card and both cameras; and a turn right after the exit that keeps the close view until it is framed. See [The run-up to a freeway exit](#the-run-up-to-a-freeway-exit). |
+| `LookAhead`, `PeakSpeed` | `:core-nav`, `nav/camera/LookAhead.kt` | How much road the camera shows above the car, by a perspective model, and the closest zoom that still shows 12 s of it at the highest speed of the last 10 s. |
+| `guidancePitch` | `:core-nav`, `nav/camera/CameraMotion.kt` | Smooth follow's tilt: 45° on the road, up to 55° along the lane focus with Large, and down to 0° over a junction, which wins. |
+| `RunUpRule`, `CardLanes` | `:core-nav`, `nav/guidance/` | The card's row on a run-up, with its edge points, the composed lane and the lanes to use in words; and which lane row the card draws. |
+| `LaneChoices` | `:engine-mapbox`, `navigation/LaneChoices.kt` | The points with lanes ahead of the car, read from the route once for each step, and the run-up's one latch and row. The engine owns the one copy; the cameras and the maneuver card read from it. |
 | `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress` (with the lane choices ahead), `onPuckGlide`, `onGuidanceEnded`, `setLaneZoom`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
 | `LaneZoomFrames` | `:engine-mapbox`, `map/camera/LaneZoomFrames.kt` | What the lane zoom changes on the viewport data source for each camera style, and the way a change of it reaches a route the data source already has. |
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
@@ -644,7 +648,8 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `style` | the camera style: `MAPBOX_STANDARD`, `MAPBOX_TUNED` or `SMOOTH_FOLLOW` | |
 | `state` | what the camera is doing: `FOLLOWING`, `OVERVIEW`, `IDLE`, and `TRANSITION_TO_FOLLOWING` or `TRANSITION_TO_OVERVIEW` on the way there | |
 | `zoom`, `pitch`, `bearing` | the map's camera | |
-| `laneDp` | how wide a lane of 3.7 m is on the screen at the camera's centre, in dp | about 4 to 6 on a town road; with Large about 28 at a junction and 14 near a lane choice |
+| `laneDp` | how wide a lane of 3.7 m is on the screen at the camera's centre, in dp | about 4 to 6 on a town road; with Large about 28 at a junction and 14 near a lane choice, less at speed on a run-up |
+| `aheadM` | while the camera follows the car: how much road it shows above the car, in metres, by the model of [The run-up to a freeway exit](#the-run-up-to-a-freeway-exit), from the car's place to the top of the padding, under the card; left out at other times | with Large on a run-up, at least 12 s of driving |
 | `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre | |
 | `puckLagM` | how far the drawn puck trails the latest matched position | below speed × the puck's glide |
 | `sinceFixMs` | how long ago that position came | up to about 1000 |
@@ -682,14 +687,18 @@ Smooth follow adds its controller's own numbers:
 | `zoomPlan` | what sets the zoom with Large: `ROAD`, `JUNCTION`, `AFTER_JUNCTION` or `LANES`; left out in the overview | `ROAD` on most seconds, and always with Default |
 | `laneFocus`, `laneGoal` | the lane choices' schedule: how far the view is in for one, 0 to 1, and where that is going. It runs with Default too, without moving the zoom | 0 on most freeway seconds |
 | `laneAheadM` | metres to the nearest lane choice ahead that counts; left out when there is none on the step | |
-| `laneChoice` | the lane choice that holds the view: `lanes`, `usable`, `atManeuver`; left out on the road | |
+| `laneChoice` | the lane choice that holds the view: `key`, `lanes`, `usable`, `atManeuver`; left out on the road | |
+| `runUp` | the exit of the run-up that holds the view, by its key, also through the hold past the gore and a turn's bridge; left out at other times | the same key from a run-up's start to about 2 s past its gore |
+| `laneCapZoom`, `capSpeed` | the closest zoom the lanes may take and still show 12 s of road, and the speed it is worked out for, the highest of the last 10 s, in m/s; left out without a speed, a padding or a laid-out map | below the 14 dp zoom only above about 25 m/s |
 | `centerLeadS` | how many seconds ahead of the drawn car the centre aims. It is logged also while `onPuck` is 0, in the frame of a maneuver, where it does not move the centre | 0 with Default, and with Large up to about zoom 17; closer in, up to about 0.3 |
 
 The two Mapbox styles do not run the controller. They add `frameUpdates`, the frame animations
 `NavigationCamera` started that second, and `frameUpdatesCut`, those cancelled before they
 finished because the next one came. While the car moves, Mapbox standard starts about two a second
 and Mapbox tuned one. They also add `laneZoom` (the setting, which Mapbox standard does not act
-on), `laneGoal` and `maxZoom` and `minZoom`. `laneGoal` is the goal of the lane choices' schedule,
+on), `laneGoal` and `maxZoom` and `minZoom`, and Mapbox tuned also `runUp`, `laneCapZoom` and
+`capSpeed` as Smooth follow, its floor worked out at the SDK's tilt of 45°, below the 14 dp zoom
+above about 16.5 m/s. `laneGoal` is the goal of the lane choices' schedule,
 as in Smooth follow: 1 from the start of a counted lane choice's window until the view would be
 let go again. Mapbox tuned runs the schedule with Default too, where it moves nothing; Mapbox
 standard does not run it, so it is always 0 there. `maxZoom` and `minZoom` are the limits the data
@@ -722,12 +731,44 @@ Other lines:
   during a drive shows there.
 - A **lane_choice** line once for each point with lanes, when it comes as near as the close view
   would start for it, with every camera style and either lane zoom: `kind` (`straight` where the
-  route goes straight on, `maneuver` at an exit or a fork), `metersAhead`, `window` (the distance
-  at which the close view starts at this speed), `lanes` (not counting `designated` ones),
-  `usable`, `leaving`, `designated`, `freeway`, `speed` in m/s (left out while unknown) and, when
-  the rule passes the point over, `skipped` with the reason: `NOT_A_FREEWAY`, `TOO_FEW_LANES`,
-  `NO_USABLE_LANE`, `NO_LANE_LEAVES` or `TOO_FEW_LEAVING`. The lines without `skipped` are where
-  Large goes close; the others show what a looser rule would add.
+  route goes straight on, `maneuver` at an exit or a fork), `key` (the route, leg, step and
+  intersection, or `end` for the exit), `metersAhead`, `window` (the distance at which the close
+  view starts at this speed), `lanes` (not counting `designated` ones), `usable`, `leaving`,
+  `designated`, `freeway`, `speed` in m/s (left out while unknown) and, when the rule passes the
+  point over, `skipped` with the reason: `NOT_A_FREEWAY`, `TOO_FEW_LANES`, `NO_USABLE_LANE`,
+  `NO_LANE_LEAVES` or `TOO_FEW_LEAVING`. The lines without `skipped` are where Large goes close;
+  the others show what a looser rule would add. `edgeLeaves` says whether the lane at the side the
+  step's exit leaves on leaves the route there (an edge point), and `fromLeft` lists every lane as
+  the route has it, from the leftmost: its arrows (`ind`), `valid`, `active`, the arrow it takes
+  (`validInd`), each null where the route says nothing, and `des`, the vehicles a lane is kept for,
+  only where it has any.
+- A **lane_row** line whenever what the maneuver card's lane row draws changes, with every camera
+  style and either lane zoom: where the row comes from, its lanes, which are lit, or the words beside
+  them; never for a distance alone. `source` (`maneuver`, `choice`, `run_up` or `none`), `key` (the
+  point the row shows), `row` (one token a lane from the left: its arrows `s`, `sl`, `l`, `shl`,
+  `sr`, `r`, `shr`, `u` joined by `+`, `-` for none, `*` when lit, and `>` with the arrow lit on it
+  where that is not the lane's only arrow), `lit` and `des` (indices), `label` (a lane choice's
+  distance), `words` (`R1`, `R2`, `R3`, `R1+1` and `R1+2` for Right lane, 2 right, 3 right, 2nd and
+  3rd from right, and `L...` for the left), `need` (the composed lane, counted from the exit's edge),
+  `metersAhead`, `runUp` and `start` (the run-up's exit, and what began it: a point's key, `edge` or
+  `resume`), `odd` (why a run-up's row has no words: `composed`, `pieces`, `unknown_branch`,
+  `designated_only`, or `no_fit` when the card left words out that did not fit), `pending` and
+  `offRoute`. Words that do not fit are found when the card lays the row out, so such a row has a
+  second line a moment after its first. Keys, indices and tokens only.
+- A **missed_maneuver** or **diverge_taken** line for each place the road divides, to tell later
+  whether a rule could find a car that stayed on the freeway sooner than the navigator does. A
+  watch starts when the step changes past an exit, a fork or an on ramp (`kind` `maneuver`), and
+  when the car passes an edge point (`edge`), a lane choice where the route goes straight on
+  (`choice`) or a road without lane data that leaves on the exit's side (`branch`). It ends with
+  `missed_maneuver` when the navigator finds the car off the route within 30 s or 1,000 m, and with
+  `diverge_taken` after them; a newer diverge ends the one before without a line, and so do a new
+  route, a seek and the end of guidance. Fields: `kind`, `maneuverType` and `modifier` (the
+  maneuver's), `key`, `freeway`, `lanes`, `usable`, `card`, `words` and `runUp` (what the card showed
+  on the way), `advanced` (the step changed), `sinceS` and `sinceM` (to the line), `probAt`,
+  `probMin`, `probMax`, `probLast` (how sure the navigator was of the road it matched), `uncertainS`
+  (seconds it said it was unsure), `sideAt`, `sideMin`, `sideMax` (the phone's position to the side,
+  as `match.raw.sideM`), `speedAt`, `speedEnd`, `teleportAtOff` on a miss, and `match` with `raw`
+  only. Nothing acts on these lines.
 - A **lane_details** line each time the app sets lane details on the map: `reason` (`setting`,
   `style_loaded` or `reapplied`), `wanted`, `read` (what the style says afterwards) and `error` if
   the style refused.
@@ -740,7 +781,8 @@ Other lines:
   intersections that have lanes (`laneIntersections`): `meters` from the start of the step,
   `lanes`, `usable`, `active`, `designated`, the `classes` of the road that leaves it, and
   `freeway`, whether the road that leads to it counts as one. With these the rule can be tried with
-  other numbers after a drive. Every step also has `bearingBefore` and `bearingAfter`, the
+  other numbers after a drive. A step's `lanes` are those of its last banner that has lanes, the
+  one shown near its maneuver. Every step also has `bearingBefore` and `bearingAfter`, the
   compass directions into and out of its maneuver as the route gives them, and `bendM` and
   `bendDeg`, where its road bends after the maneuver point by the rule of the junction frame (none
   for the departure, or where it does not bend within 150 m). Numbers only. These two lines are put
@@ -751,7 +793,12 @@ Other lines:
   `pending` when it was of a new route without its first instruction yet, and the card showed that
   route's next maneuver dimmed and without a distance, never one of the route before. An update
   between a seek of a simulated drive and the car's first position at its new place has
-  `replaySeek` true, and nothing on the screen acts on it.
+  `replaySeek` true, and nothing on the screen acts on it. Its `match`, and that of the `off_route`
+  line, has `raw`: where the phone's own newest position lay against the matched one, `sideM`
+  across the matched direction (to the right positive), `aheadM` along it (the navigator puts the
+  car about a second ahead, so expect about minus the speed), `accM` (its accuracy), `ageMs` (how
+  old it was when the matched one came; none in a simulated drive) and `bearingDiff` (its direction
+  less the matched one, null under 3 m/s). The phone's position itself is not written.
 - A **replay_seek** line for each release of the replay slider of a simulated drive: `fromS`,
   `toS`, `ok`, `durationS`, `fromM`, and `ms` or `why` (DRIVES.md, "What to read"). The first
   position at the new place reaches the camera as a jump: the camera lets go of what it kept of the
@@ -852,9 +899,22 @@ For the Large lane zoom and lane details:
   and the 30 m after the turn carry what comes next. One constant, `junctionLaneDp`.
 - **Fast ground near a lane choice.** At 14 dp and 105 km/h the road moves about 110 dp a second.
   If that tires the eyes, lower `freewayLaneDp`.
-- **The lane-choice rule is a guess** until a drive: 3 lanes, 2 leaving, 25 s. Lane data may also
-  be thin on intersections the route goes straight through; then the rule fires only at exits and
-  forks. The `lane_choice` lines show both.
+- **The lane-choice rule is a guess** until a drive: 3 lanes, 2 leaving, 25 s, and for a run-up
+  60 s or 1,500 m before the window. Lane data may also be thin on intersections the route goes
+  straight through; then the rule fires only at exits and forks. The `lane_choice` lines show both.
+- **The route line's lane means nothing** on a run-up, which holds the close view for up to about
+  85 s: the line lies along one of the freeway's lanes and crosses every lane at the gore, while the
+  card names the lanes to use. Until the app draws the lanes itself, the card's words are the
+  instruction ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit)).
+- **The road ahead is a model.** The 12 s rest on a perspective model of the native camera (a field
+  of view of 36.87°, the camera 1.5 map heights away), which is not published. The camera line's
+  `aheadM` and a screenshot on a drive check it.
+- **The tilt of 55° draws more map** far ahead, about 1.3 km to the screen's top against 0.5 km at
+  45°: more data and frame time, which the next drive measures (the camera line's `render` and the
+  phone's data use).
+- **Rows without words.** Where lanes are added between two edge points, or the lane data
+  contradicts itself, a run-up's row lights the careful lane and has no words. How often, the
+  `lane_row` lines count (`odd`).
 - **The bearing lead of 20°** changes the early turn on curves inside a lane window. Setting
   `laneMaxBearingLead` to 45 brings the SDK's back.
 - **The centre lead** makes the camera follow the drawn car's changes of speed more closely when
@@ -877,16 +937,19 @@ and `large`; a missing or unknown value reads as Default.
 - **Default** is the zoom guidance has had so far, never closer than 16.35. A phone starts with it.
   With Default nothing in this section runs, and every camera style moves exactly as before.
 - **Large** is Default on the open road plus two close views: onto the junction before every turn,
-  and before a lane choice on a freeway. It comes back out after each. Smooth follow and Mapbox
-  tuned carry it. Mapbox standard keeps its own zoom, and Settings says so under the row while that
-  style is chosen.
+  and before a lane choice on a freeway. It comes back out after each, except that on a freeway the
+  run-up to an exit is one approach: the view comes in once and stays to the gore
+  ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit)). Smooth follow and Mapbox tuned
+  carry it. Mapbox standard keeps its own zoom, and Settings says so under the row while that style
+  is chosen.
 
 A change applies at once, also during a drive, and the view glides to it. The reasons are in
 [DECISIONS.md](DECISIONS.md), 38.
 
-None of this has been on a simulated or a real drive. Every threshold below is a first setting from
-reasoning: the drive logs they were to be tuned from have not arrived. Each is one constant in
-`CameraTuning` ([Constants of the lane zoom](#constants-of-the-lane-zoom)).
+Large has since been on a real drive, and what it showed before a freeway exit changed the close
+view there ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit)). Every threshold below is
+still a first setting from reasoning and simulation. Each is one constant in `CameraTuning`
+([Constants of the lane zoom](#constants-of-the-lane-zoom)).
 
 ### How wide a lane is
 
@@ -914,6 +977,10 @@ centre, the car's place near the bottom; lanes farther up the screen are narrowe
   sharp, and labels are placed for the camera's zoom. That is the same online and offline.
 - So Large loads no tiles that Default does not, and it works offline wherever the street map at
   zoom 16 is on the phone. A closer view covers less ground, so fewer tiles are on screen.
+- The run-up's tilt of 55° (Smooth follow with Large) shows more of the map ahead: about 1.3 km to
+  the screen's top, under the card, against about 0.5 km at 45°. That loads more tiles of the same
+  kind, which Mapbox's map pricing by monthly active users already covers: no new bill, but more
+  data and frame time.
 - Not checked: whether [lane details](#lane-details-on-the-map) have map data of their own, and
   whether that is among what gets saved for offline use.
 
@@ -1091,7 +1158,8 @@ pricing may change and is not used.
 
 A wide freeway where every lane goes on, a single exit lane, and every road that is no freeway do
 not count: lane choices in town come with a turn, which has the junction zoom. So on most freeway
-kilometres the long view ahead stays, as the owner asked.
+kilometres the long view ahead stays, as the owner asked, except on the run-up to an exit
+([below](#the-run-up-to-a-freeway-exit)).
 
 Both thresholds are a first setting. Every point with lanes that comes as near as the close view
 would start is written to the debug log once, counted or passed over, with its lane counts and the
@@ -1113,10 +1181,13 @@ fires and how often a looser one would.
   back out to the road's. A new route within a second or two still finds the view close. Back on
   the same route, a point that is still ahead takes the view again.
 
-**The view.** The zoom goes to a lane of 14 dp and the tilt stays at 45°: straight down, that zoom
-would show only a few seconds of road at freeway speed. While a point holds the view, the bearing
-may lead the car's heading toward the road ahead by at most 20° instead of the SDK's 45°, so the
-lanes at the car stay close to upright on a curving freeway. Elsewhere the early turn is unchanged.
+**The view.** The zoom goes to a lane of 14 dp, but no closer than the zoom that still shows 12 s of
+road ahead, and Smooth follow tilts it up to 55° rather than down: straight down, that zoom would
+show only a few seconds of road at freeway speed ([The run-up to a freeway
+exit](#the-run-up-to-a-freeway-exit), the tilt and the road ahead). While a point holds the view,
+the bearing may lead the car's heading toward the road ahead by at most 20° instead of the SDK's
+45°, so the lanes at the car stay close to upright on a curving freeway. Elsewhere the early turn
+is unchanged.
 
 **Where a turn follows closely**, as on a short exit ramp that ends in one, the lane choice can
 still hold the view when the SDK starts to frame the turn. That frame is centred on its own point,
@@ -1134,11 +1205,208 @@ zoom levels take about 7 s, not 6, because of the limit of 1 level a second.
 **The maneuver card shows the same point.** From where the close view would start until the car
 has passed it, the card's lane row shows the lanes of a straight-on lane choice with its distance,
 in every camera style and with either lane zoom (`RouteProgressSnapshot.laneChoiceAhead`, filled
-by the engine from the same `LaneChoices`).
+by the engine from the same `LaneChoices`). On a run-up the card shows the run-up's one row instead
+([The card's row on a run-up](#the-cards-row-on-a-run-up)).
 
 **Limits.** Lane choices are read for the current step only, so one that follows right after a
 maneuver gets a shorter start. What kind the next maneuver is comes from the route's banner; while
-the navigator has none, an exit or a fork is not taken as a lane choice.
+the navigator has none, an exit or a fork is not taken as a lane choice. The run-up has limits of its
+own ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit)).
+
+### The run-up to a freeway exit
+
+On a freeway the last part of a step before its exit or fork is one approach, the **run-up**: the
+close view comes in once and stays to the gore, and the maneuver card shows one lane row for it.
+Before, on an approach with several points on the way, the view went in, out and in again between
+the points, and the card's lane row changed at each point, each row with its own distance counting
+down: every row right for its own point, and together a set of conflicting orders. The reasons are
+in [DECISIONS.md](DECISIONS.md), 46.
+
+**When it begins** (`RunUpLatch` in `:core-nav`). The step's exit, the next maneuver where it is a
+lane choice that counts (an exit or a fork the view stays up for, at least 3 lanes, some usable and
+some leaving), must lie within reach: the close view's window plus 60 s of driving, at least
+1,500 m. That is 1,900 m at 15 m/s, 2,125 m at 25 m/s, 2,465 m at 29 m/s and 2,805 m at 33 m/s; a
+car that stands, or whose speed is not known, gets 1,900 m. Then the run-up begins at the first
+update where one of these holds:
+
+- an **edge point** lies ahead on the step: a point where the route goes straight on and the lane
+  at the exit's side leaves the route while another lane goes on, as at an earlier exit, a split
+  or a lane that ends on that side;
+- a lane choice that counts is inside its own close view window, the exit's own included, so at
+  the latest the run-up begins where the close view began before;
+- a run-up ended less than 3 s ago: a new route that keeps an exit in reach, a short time off the
+  route, a seek of a simulated drive, or the gore of the run-up before, so an exit right after a
+  fork is one approach. 3 s is the camera's own hold of 2 s by time plus one update.
+
+**How long it holds.** Whatever the speed does, until the exit is no longer among the points ahead:
+at the gore, when the step changes; with a new route, whose points have new keys; off the route,
+where there are none. Each of these keeps the time it ended, for the 3 s above. A seek of a
+simulated drive ends a run-up at the seek, so a seek that lands on the same approach takes it up
+again; a new drive and the end of guidance forget it.
+
+**One latch for the card and both cameras.** The engine's lane choices hold the one latch and move
+it at most once for each update of the route progress, whoever asks first; the map's cameras ask
+the engine for the run-up's exit with the same update. So the card and the view never disagree. A
+camera made anew in the middle of a run-up, as after a change of camera style, holds the view at
+once; its lane focus still goes in over its 6 s from where it starts.
+
+**The close view on a run-up** (`LaneFocus`). Between the points on the way the exit holds the view,
+so it does not go out and in again. Past the gore it is held 2 s and 30 m, as after any lane choice,
+then goes out unless a lane choice of the next step is within 10 s of driving of its window, a
+run-up takes over, or a turn follows right away:
+
+- **A turn right after the exit** (`TurnAhead`). When the hold is over and the next maneuver is a
+  turn the camera frames as a junction, whose framing (from 180 m before it) begins within 13.5 s
+  of driving (the tilt's 3.5 s descent plus the 10 s above), the view stays in until that framing
+  begins, and the junction view takes over along its own curve. It ends there, at a new step or
+  route, or off the route, never past the turn. A turn farther on, a fork of the ramp (which the
+  SDK does not frame) or a ramp that splits in two lanes (no lane choice) is not bridged: the view
+  goes out after its 2 s.
+
+**The tilt and the road ahead.** With Large, Smooth follow tilts the close view up to **55°** along
+the lane focus's own 6 s curve (`guidancePitch`), so the zoom and the tilt move together; over a
+junction the view still goes down to 0°, which wins. The owner chose this on 2026-11-11, over the
+tilt of 45° with the same road ahead and lanes a third to a half narrower. Smooth follow and Mapbox
+tuned with Large also never take the lanes closer than the zoom that still shows **12 s** of road
+above the car at the highest speed of the last 10 s (`LookAhead`, `PeakSpeed`): when the car speeds
+up the view goes out at once, and it comes in again only once the speed has stayed lower for 10 s.
+Without a speed, before the padding is set and before the map is laid out, there is no such floor.
+
+The road ahead comes from a perspective model of the map's camera: a vertical field of view of
+36.87°, the camera 1.5 map heights from the screen, the car on the bottom edge of the padding, and
+the road counted up to its top edge, under the card. It is a model: the native camera is not
+published, and on a drive the camera line's `aheadM` and a screenshot check it. On a map 800 dp tall
+(2,400 px at 3 px a dp) with a lane row in the card (padding 838 px at the top, 459 px at the
+bottom), with the lanes counted in levels from the zoom where a lane is 14 dp:
+
+| Speed | Smooth follow at 55°: lane at the car | Road to the padding's top | Road to the card's edge | Mapbox tuned at 45°: lane at the car |
+|---|---|---|---|---|
+| 25 m/s (90 km/h) | 14.0 dp, 0 levels (no floor) | 12.0 s | 17.0 s | 9.2 dp, -0.60 levels |
+| 29 m/s (104 km/h) | 12.1 dp, -0.21 levels | 12.0 s | 16.9 s | 8.0 dp, -0.81 levels |
+| 33 m/s (119 km/h) | 10.6 dp, -0.39 levels | 12.0 s | 16.9 s | 7.0 dp, -1.00 levels |
+
+At 45° and 14 dp the same screen showed about 8 s of road at 25 m/s. Metres, seconds and lane
+widths are the same at every latitude; only the zoom number moves with it, which is why the table
+counts levels from the 14 dp zoom. At 55° the screen's top row lies about 1.3 km ahead, under the
+card, against about 0.5 km at 45°, and more map is drawn: more data and frame time, but no new bill
+([No new tiles](#no-new-tiles)). At 60° it would be several kilometres, which is why 55° and no
+more.
+
+**Mapbox tuned** keeps the SDK's tilt of 45° and gets the same floor, worked out at that tilt with
+the same peak speed, so its lanes get narrower at speed (the last column). **Default** and **Mapbox
+standard** change nothing in the camera: no tilt, no floor and no hold that moves anything. The
+card's run-up row and its words come with every camera style and either lane zoom, as the card's
+lane rows did before.
+
+#### The card's row on a run-up
+
+`CardLanes` decides in one place which lane row the card draws; the card, the `lane_row` line of the
+debug log and every later reader take it from there.
+
+| Stretch of the step | Row | Lit | Beside the lanes |
+|---|---|---|---|
+| Up to the run-up's start | the exit's own lanes, as the navigation SDK reads them | the active lanes; a lane for car pools or buses only where no other lane is active | nothing |
+| Outside a run-up: a lane choice where the route goes straight on, from its window until passed | its lanes | every lane the route can be followed from | its distance |
+| From the run-up's start to the last edge point | the next edge point's lanes, every lane, car pool lanes dim | one lane: the composed lane (below) | its words where the counts leave no doubt |
+| From there to the gore | the exit's own lanes, every lane, car pool lanes dim, a lane without arrows drawn straight on | the lanes the route can be followed from, narrowed to those it prefers where it prefers any | their words where they have some |
+| Past the gore | the next step's rows | | |
+
+**The composed lane** (`RunUpRule`). Counting the lanes open to every car from the exit's edge (0 is
+the lane at that edge), the lane at each edge point that leads through every point after it to the
+exit, worked out backward from the exit:
+
+- Points no more than 100 m apart with the same lanes are one point: one junction often comes as
+  several points. A lane counts as usable there when it is usable at each of them.
+- At each point, the lanes that leave at the exit's edge push the lane to take that many lanes in,
+  and so do lanes for car pools that begin at that edge before the next point.
+- Where the counts cannot say where lanes went, the careful reading: lanes added between two edge
+  points are taken to be on the far side, and lanes gone between them are taken at the exit's edge.
+- The lane stays among the point's open lanes, on a lane that can be used there.
+
+With data that leaves no doubt, the lit lane is the same lane on the road from row to row, its count
+from the edge falling by the lanes that left, and its words change with it. Within a run-up the lit
+lane never moves away from the exit's side, except where the data contradicts itself; such rows have
+no words. What it does not promise: the run-up's first row can light a lane farther from the exit's
+side than the row before it, which is the exit's own lanes, where the exit leaves rather than where
+to drive now. Since an edge point ahead begins the run-up at the reach, that switch comes at least
+a minute of driving plus the window before the exit, never in its last part.
+
+**The words** (`LaneTarget`, and `laneWordsRes` in the app):
+
+| The lanes to use | In the row | What the screen reader says |
+|---|---|---|
+| the lane at the right edge | Right lane | Use the right lane |
+| the two at the right edge | 2 right | Use the 2 right lanes |
+| the three at the right edge | 3 right | Use the 3 right lanes |
+| one lane, the second from the right | 2nd from right | Use the second lane from the right |
+| one lane, the third from the right | 3rd from right | Use the third lane from the right |
+| the same at the left edge | Left lane, 2 left, 3 left, 2nd from left, 3rd from left | the same with left |
+
+Lanes are counted among the lanes open to every car, so a lane for car pools is never "the left
+lane". The row never says "keep right", never "any lane but", and never names the far side. A lane
+for car pools or buses is drawn dim and is not lit while another lane can be used; where the route
+marks only such lanes, they keep their arrow lit, so the row is never empty. **Nothing is spoken:**
+asked on 2026-11-11 whether the lanes should be said aloud, the owner answered no. The words are on
+the card and for the screen reader only, and the app makes no sound.
+
+The row has **no words** where the exit has no lane data or its side cannot be told; where the lanes
+to use are not side by side, or are every open lane; for a single lane three or more lanes in, or
+four lanes or more; where the composed lane needed the careful reading; and while a road without
+lane data leaves on the exit's side before the exit, since such an earlier exit may take the lane
+at that side with it. It may still light lanes then. Outside a run-up, on a pending card and off the
+route there are none either.
+
+The words take up to 45 % of the row (a distance keeps 30 %) and show whole or not at all: measured
+at their smallest size, 10 sp at the phone's font scale, words wider than their share are left out,
+never cut, and the lanes take the row; the screen reader still says them. The row is as high with
+the words as without them, so the card does not change height when they come or go.
+
+**The route line, a residual risk.** The route line's look does not change: its widths, also with
+lane details on ([Lane details on the map](#lane-details-on-the-map)), its colours, the maneuver
+arrow and the order of the layers are as before, and nothing fades, thins or hides it. It still
+follows the road's centre line, which on a freeway runs along one of its lanes, and at the gore it
+still cuts across every lane to the ramp. A run-up now holds the close view, with its line about a
+lane wide, for up to about 85 s, while the card says for example "Right lane" for the last
+kilometre and more. **Until the app draws the lanes itself, the lane the route line lies in means
+nothing; the card's words are the instruction.** The next drive asks at each exit whether the line
+or the card was followed ([DRIVES.md](DRIVES.md), What the next drive tests).
+
+**In synthetic replays** (one update a second, 30 frames a second; points 2,000 m, 1,500 m,
+1,470 m, 1,460 m, 1,440 m and 400 m before the gore of an exit to the right, 25 rising to 29 m/s,
+the same shape as the missed exit with rounded numbers):
+
+- With the code before the run-up: in at 2,125 m, out at 1,349 m, in again at 1,039 m, 72 s close,
+  as little as 6.8 s of road ahead in the last 600 m, and six changes of the card's row.
+- With the run-up: in once at 2,125 m and out 2 s after the gore, about 70 to 100 m past it, 84 s
+  close, at least 12 s of road ahead, lanes of 12.2 to 12.9 dp at the car in the last 600 m. Where
+  the first point's right lane and the next points' two right lanes leave there, the card shows the
+  first point's row with the leftmost general lane lit and no words (a lane is added between the
+  two points, and its side is not known), "3rd from right" from 2,000 m and "Right lane" from about
+  1,425 m; where their left lanes leave instead, one row, "Right lane", from 2,125 m to the gore.
+- At 15 m/s: in at 1,900 m, 130 s close. With Default: the road's zoom throughout.
+- Two exits close together, the second taken, at 27 m/s: in at the reach, about 2,290 m before the
+  second, since the first one's gore ahead is an edge point; "2nd from right", then "Right lane".
+- A left turn 400 m after the gore at 27 m/s: held to about 224 m past the gore, where the turn's
+  framing begins; without the bridge the view would go out about 89 m past it.
+- A split 3,000 m before an exit: two approaches, the split beyond the reach.
+- A new route with the same exit at 1,300 m or 1,100 m, a seek at 1,300 m, a camera made anew at
+  1,300 m and two updates off the route: no gap. Six updates off the route before the new route:
+  out, and in again at the next window.
+- A fork with the exit 600 m, 1,000 m or 1,500 m after its gore: one approach; 2,500 m after it:
+  two.
+
+**Limits.**
+
+- A seek from outside into the middle of a run-up has no run-up to take up again: past the last edge
+  point it begins at the next window, with the exit's own lanes.
+- Off the route for longer than the camera's hold before the new route comes: two approaches.
+- An update without the banner's maneuver type ends the run-up for that update; it takes it up again
+  with the next, and the card shows a lane choice's row for that second where one is in its window.
+- Lane choices are read for the current step only, so a run-up split by a straight step, a road that
+  only changes its name before the exit, begins on the exit's step.
+- Edge points rest on the route's marks of the lanes it can be followed from, which narrow toward an
+  exit within about 1 km and are local farther out; how often lanes are added between two edge
+  points, and so how often a row has no words, the `lane_row` lines count.
 
 ### The centre at close zoom
 
@@ -1167,7 +1435,11 @@ computed (`LaneZoomFrames.beforeTunedEvaluate`):
   the SDK's lower limit also then: the SDK applies the lower limit to that frame as well, and it
   is fitted around the car and the junction, so a lower limit above its fit would push both off
   the map;
-- the frame of a maneuver holds 30 m after the turn, as for Smooth follow.
+- the frame of a maneuver holds 30 m after the turn, as for Smooth follow;
+- on a run-up the same latch as Smooth follow's holds the lane window from the run-up's start to
+  the gore, and a turn right after the exit keeps it by the same bridge; near a lane choice the lower
+  limit is no closer than the zoom that still shows 12 s of road at the SDK's tilt of 45°, at the
+  highest speed of the last 10 s ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit)).
 
 Both styles go by the same rule for when the SDK frames a maneuver, and neither raises the upper
 limit for a frame of the road outside a lane window. Inside one, tuned raises both limits to the
@@ -1317,6 +1589,16 @@ All in `CameraTuning`, the same for the phone and the car.
 | Where the road bends after a maneuver (`bendDegrees`, `bendSideMeters`, `bendSearchMeters`) | 20° off the way in, else 4 m to its side and to the side of the road's own first 15 m, within 150 m |
 | A bend nearer than this is in the frame already, and the road's first stretch that gives the line it leaves on (`bendMinMeters`) | 15 m |
 | The centre trails the car by no more than (`maxPuckLagDp`) | 12 dp |
+| A run-up reaches this far beyond the close view's window (`runUpSeconds`, `runUpMinMeters`) | 60 s of driving, at least 1,500 m |
+| A run-up that ended this recently is taken up again on its reach alone (`runUpResumeSeconds`) | 3 s |
+| The close view's tilt with Large, Smooth follow (`lanePitch`) | 55° (on the road `cruisePitch`, 45°) |
+| Road the lane zoom keeps in view above the car (`laneLookAheadSeconds`), at the highest speed of a time back (`laneCapSpeedSeconds`) | 12 s of driving, at the highest speed of the last 10 s |
+
+Outside `CameraTuning`: points on a run-up no more than 100 m apart with the same lanes are one
+point (`RunUpRule.EDGE_CLUSTER_METERS`), and the lanes to use in words may take 45 % of the card's
+lane row, a distance 30 % (`LANE_WORDS_MAX_WIDTH_SHARE` and `LANE_LABEL_MAX_WIDTH_SHARE` in the
+app). The debug log's watch of a diverge runs 30 s or 1,000 m (`DivergeWatch.WATCH_SECONDS`,
+`WATCH_METERS`).
 
 ## System animations
 
@@ -1354,7 +1636,7 @@ Steps 1 to 4 are done, and so is the Lane zoom setting with lane details on top 
 
 ### JVM tests, no device
 
-`CameraMotionTest` in `:core-nav` (JUnit 6), 27 tests. Among them:
+`CameraMotionTest` in `:core-nav` (JUnit 6), 29 tests. Among them:
 
 - The spring is exact for any frame time and, from rest, never passes its target. After one time
   constant it has gone 1 − 2/e of the way, and a snapped spring is at rest.
@@ -1374,13 +1656,15 @@ Steps 1 to 4 are done, and so is the Lane zoom setting with lane details on top 
 - A reroute that reuses the step numbers is still a new step.
 - Guidance that ends halfway down turns the tilt back from where it is, and leaves nothing behind
   for the next drive.
+- Smooth follow's tilt is 45°, 55° and 0° at the three corners of the lane and the junction focus,
+  and the plain junction tilt with no lane focus.
 
 Beside it: `OncePerUpdateTest` (6 tests: which message of an update computes the frame),
 `JumpFrameTest` (4: after a seek, the frame of the new place comes with its progress),
 `IdleFollowTest` (13: when the camera follows the car before guidance, and which new position is a
 jump) and `GuidancePaddingTest` (7: the top inset that only grows).
 
-For the lane zoom, `LaneZoomTest` in `:core-nav` (46 tests, on example latitudes and made-up
+For the lane zoom, `LaneZoomTest` in `:core-nav` (59 tests, on example latitudes and made-up
 routes). Among them:
 
 - Zoom and lane width are each other's inverse, with 18.89 for 28 dp and 17.89 for 14 dp at 35°.
@@ -1402,18 +1686,38 @@ routes). Among them:
   take up again what it let go, forgets it when told that the tilt is back up, and goes to 14 dp
   near a lane choice. In the frame of a maneuver a lane choice goes no closer than the frame.
 - The centre leads only where it would trail by more than 12 dp, and then holds 12 dp.
+- Without a run-up the class is as before; with one, on the synthetic approach of [The run-up to a
+  freeway exit](#the-run-up-to-a-freeway-exit), the view is in from the first update with the run-up
+  to 2 s and 30 m past the gore with no gap, a camera made anew mid-run-up holds at once, and a turn
+  whose framing starts 5 s or 13 s after the hold is bridged and one at 14 s is not, never past the
+  turn. The look-ahead floor caps the lanes, never the junction, never below the road.
+
+Beside it, in `:core-nav`: `RunUpLatchTest` (13: the run-up begins by its reach with an edge point
+ahead or a choice in its window, holds through a stop and without a speed, ends off the route, on a
+new route and at the gore, and is taken up again within 3 s after a new route, a short time off the
+route, a seek and a fork's gore, never after a new drive), `LookAheadTest` (10, at latitude 0 at the
+zoom of 14 dp lanes: the model's 198 m and 301 m at 45° and 55°, its inverse, at least 12 s at
+25, 29 and 33 m/s, no floor where the model has none, the highest speed of the last 10 s),
+`RunUpRuleTest` (29: the exit's side, edge points and points taken as one, the composed lane with
+lanes added, gone and kept for car pools, the clamps, the exit's row and every case without words,
+and the synthetic replays' rows), `CardLanesTest` (3), `LaneTargetTest` (4: which lanes have
+words), `LaneRowLogTest` (10), `RawOffsetTest` (6) and `DivergeWatchTest` (12: an exit missed on the
+synthetic approach, a car that leaves at an edge point, a ramp taken, the limits, a new route, a
+seek and the end of guidance).
 
 In `:engine-mapbox`, on the JVM with the Directions data classes and made-up coordinates:
-`LaneChoicesTest` (35 tests: the points ahead with their distances and lane counts, designated
+`LaneChoicesTest` (46 tests: the points ahead with their distances and lane counts, designated
 lanes, the maneuver as a lane choice, the card's lanes with every usable lane lit, a step's lanes
-read once and none off the route, and each point reported to the log once),
+read once and none off the route, each point reported to the log once with every lane, the edge
+points by the exit's side, the run-up's latch moved once for each update with its rows, and roads
+off the exit's side without lane data),
 `LaneDetailsTest` (12: nothing is set within the callback of a style load, the setting is made
 after it and made again when something changed it, and nothing after the map is gone),
 `RouteLineWidthsTest` (9: the held widths, and that the copied stops are the SDK's own) and
-`LaneZoomFramesTest` (11: the limits Mapbox tuned gives the data source with Default and with
-Large, on the road, in the frame of a maneuver and near a lane choice; the upper limit Smooth
-follow gives it, raised only with Large in the frame of a maneuver; and the rule for when a
-maneuver is framed, with the SDK's own options).
+`LaneZoomFramesTest` (16: the limits Mapbox tuned gives the data source with Default and with
+Large, on the road, in the frame of a maneuver and near a lane choice, also with the floor of 12 s;
+the upper limit Smooth follow gives it, raised only with Large in the frame of a maneuver; and the
+rule for when a maneuver is framed, with the SDK's own options).
 
 The cameras themselves touch Android and Mapbox types and have no JVM tests. While it was written,
 `SmoothNavigationCamera` was compiled against stand-ins for those types and run frame by frame
@@ -1472,14 +1776,18 @@ exit and, if the data has one, a split:
   roundabout fits; the arrival ends close on the destination.
 - Between maneuvers the view is the one Default has, also on a winding stretch: `to.zoom` in the
   camera line is never above 16.35 on the open road, and it does not drop to 10.5 for a few
-  seconds and come back. On the freeway it stays far ahead, except about 25 s before the exit (and
-  a split), where it goes close with the tilt unchanged and comes back after.
+  seconds and come back. On the freeway it stays far ahead, except on the run-up to the exit: close
+  once, from up to about 1.5 km plus 25 s before it where a lane on the exit's side leaves on the
+  way (else about 25 s before), tilted up to 55°, and held to the gore; about 25 s before a split
+  that is no run-up's, with the same tilt, and back out after it.
 - The camera line: `laneDp` about 28 at junctions and 14 in lane windows, `zoomPlan` `ROAD` on
   most seconds, and no `steps.zoom` above about 0.02 outside a change of mode. `centerLeadS` is 0
   on the road between turns and on the open freeway, and above 0 only while the view is closer
   than about zoom 17: up to about 0.25 around a town turn, from about 140 m before it to about
   60 m after it, and about 0.3 in a lane window at freeway speed. The `lane_choice` lines: one for
-  each point with lanes, with `skipped` on those the rule passed over.
+  each point with lanes, with `skipped` on those the rule passed over. On the run-up the card shows
+  one row, with words such as "Right lane", and `runUp` names the exit in the camera line from the
+  run-up's start to about 2 s past the gore.
 - Lane zoom to Default and back during the drive, near a turn and away from one: a glide each
   time, never a cut.
 - Mapbox tuned with Large: close at turns too, with its zoom coming back at the step change.
@@ -1546,6 +1854,8 @@ With Large, and Lane details on where the area has them, the owner also notes:
 | An exit where it went close and should not, or did not and should | `laneChoiceMinLanes`, `laneChoiceMinLeaving`, with the `lane_choice` lines |
 | Whether the ground moves too fast close in on a freeway | `freewayLaneDp`, 12 to 14 dp |
 | Whether the car rides above its usual place close in | `maxPuckLagDp` |
+| Whether the close view comes too early or too late before an exit | `runUpSeconds`, `runUpMinMeters` |
+| Whether the close view shows enough road ahead, and its tilt | `laneLookAheadSeconds`, `lanePitch` |
 
 Tuning uses the shared debug log.
 
@@ -1573,6 +1883,7 @@ rate. If it collapses, the main thread's frames are being held back: try the fal
 - With Large, the zoom never changes faster than 1 level a second outside a change of mode.
 - On a freeway, seconds with `zoomPlan` `ROAD` outnumber `LANES` by far: the long view stays the
   rule.
+- With Large, one move in for each run-up: `laneGoal` stays 1 from a run-up's start to its gore.
 - With Lane details on, `hdRoads` equals `laneDetails` in every camera line.
 
 ## The owner's answers
@@ -1589,4 +1900,14 @@ Answered on 2026-11-10.
    not lane-accurate and the public SDK has no lane geometry, so the car stays on the road line and
    the lanes to use stay in the maneuver card. Built as [Lane zoom](#lane-zoom); Default is what a
    phone starts with, and Large is one tap away in Settings.
-3. **Freeways.** The long view ahead stays as it is: no minimum zoom of 14.
+3. **Freeways.** The long view ahead stays as it is: no minimum zoom of 14. Since the run-up it
+   stays except on the run-up to an exit
+   ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit)).
+
+Answered on 2026-11-11, after the drive with the missed freeway exit:
+
+4. **A spoken lane hint:** no. The lanes to use are words on the card and for the screen reader; the
+   app says nothing aloud.
+5. **The close view's tilt:** yes to the stronger tilt. With Smooth follow and Large the close view
+   before an exit tilts to 55° and keeps at least 12 s of road ahead, with lanes as large as before
+   at about 90 km/h. Mapbox tuned keeps the SDK's tilt.

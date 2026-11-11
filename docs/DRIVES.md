@@ -599,9 +599,16 @@ Answered on 2026-11-10; all answers are in [STATUS.md](STATUS.md). Those about t
 - **Lane size at turns:** a Lane zoom setting, Default (today's zoom) and Large (the junction fills
   the view and the lanes are clearly visible; also on freeways where lanes split off while the route
   goes straight on).
-- **Freeways:** the long view ahead stays.
+- **Freeways:** the long view ahead stays. Since the run-up to a freeway exit it stays except on the
+  run-up ([DECISIONS.md](DECISIONS.md), 46).
 - **Old routes at Start:** start at once and refresh inside the trip.
 - **Arriving on the right side:** no.
+
+Answered on 2026-11-11, after the drive with the missed freeway exit:
+
+- **A spoken lane hint:** no. The lanes to use are words on the card; nothing is said aloud.
+- **The close view's tilt before an exit:** yes to the stronger tilt, 55° with Smooth follow and
+  Large, with at least 12 s of road ahead.
 
 ### Checking a turn at home
 
@@ -696,10 +703,10 @@ On the drive:
    the view should first go flat and then close, until the junction fills the map, and ease back
    out after it. Note whether the lanes are large enough or the view too close, and whether the
    car and the junction both stay on screen. On the freeway the view should stay far ahead and go
-   close only about 25 s before an exit or a split where lanes leave the route. Note every exit
-   where it went close and should not have, or did not and should have, and whether the road moves
-   too fast when close. Compare one stretch in Default, and one in Mapbox tuned with Large. Changing
-   Lane zoom while moving should glide, never cut.
+   close only before an exit (once for its whole run-up, check 25) or about 25 s before a split
+   where lanes leave the route. Note every exit where it went close and should not have, or did not
+   and should have, and whether the road moves too fast when close. Compare one stretch in Default,
+   and one in Mapbox tuned with Large. Changing Lane zoom while moving should glide, never cut.
 7. **Lane details on the map.** Turn the switch on. Where Mapbox has them (major highways and some
    cities) lane lines and painted arrows should appear close in, without fading out and in when
    the map opens. Do the painted arrows match the card's? Is the route line ever lost on or under a
@@ -707,7 +714,8 @@ On the drive:
    on for everyone.
 8. **Lanes in the card on a freeway.** Before a split or an exit with two exit lanes that the
    route passes going straight on, the card's lane row should show that point's lanes with its
-   distance, and go back to the next maneuver's lanes after it.
+   distance, and go back to the next maneuver's lanes after it. On the run-up to the route's own
+   exit the card shows the run-up's one row instead (check 25).
 9. **The arrow on the route line.** Screenshots of the map at turns come from a passenger or from a
    simulated drive, never from the driver. Before any turn the white arrow should lie on top of the
    amber line, along the last 30 m before the turn and the first 30 m after it, with its head at
@@ -806,6 +814,37 @@ On the drive:
     the view should be at the new place at once, never sliding across the map or framing the turn
     the car left. Then let go of the slider and press End at once: the car should be drawn where the
     phone is, never left on the simulated route.
+25. **An exit with Large in Smooth follow.** On a freeway with exits, Lane zoom on Large. Before
+    the route's exit the view should go close once, from a minute of driving (at least 1.5 km) plus
+    25 s before it where a lane on the exit's side leaves the route on the way, else about 25 s
+    before it, and stay close to the gore and about 2 s past it: never out and in again between the
+    points on the way. Close in, the view tilts up to 55° and shows the road well ahead, about 12 s
+    of it; over a junction it still goes straight down. The card shows one lane row, with no
+    distance on it: the next point where a lane on the exit's side leaves, with one lane lit and
+    words such as "3rd from right" or none, then the exit's own lanes with "Right lane", "2 right" or
+    the like. The words never count down, a lane for car pools or buses is dim and never "the left
+    lane", and the card does not change height when the words come and go. Before the run-up the
+    card is as before. Note at each exit **whether you followed the route line or the card**: the
+    lane the line lies in means nothing until the app draws the lanes itself, and the card's words
+    are the instruction.
+26. **Exits close together.** Where the route takes an exit right after an earlier one, the view
+    should still go close once, a minute plus 25 s before the route's exit, with the earlier exit's
+    lanes first ("2nd from right" and the like), and stay close past the earlier exit.
+27. **A turn right after an exit.** Where the ramp ends in a turn within about 20 s of driving after
+    the gore, the close view should stay until the junction view frames the turn, with no step out
+    and back in before it. A turn farther on: the view goes out about 2 s after the gore, as before.
+28. **Default.** With Lane zoom on Default the camera should be as before on the same exits: no
+    tilt, no close view. The card's run-up row and its words come all the same.
+29. **Mapbox tuned with Large.** One approach for each exit, as in check 25, with the SDK's tilt and
+    lanes a third to a half narrower at freeway speed than in Smooth follow.
+30. **The camera's frame rate and the data with the tilt.** With Smooth follow and Large, compare
+    the camera line's `render` and `renderFps` on a run-up with the open road, and note the app's
+    mobile data use for the drive (check 2): the tilt draws more of the map ahead.
+31. **The new lines.** After the drive: `lane_row` lines at each change of the card's row, with
+    `odd` where a run-up's row had no words (`composed`, `pieces`, `unknown_branch`,
+    `designated_only`, `no_fit`); a `missed_maneuver` line for an exit missed, if one was, and
+    `diverge_taken` lines for exits and points on the way where the route was kept; and on every
+    `progress` and `off_route` line `match.raw`.
 
 Then share the debug log. What to read in it:
 
@@ -836,6 +875,12 @@ Then share the debug log. What to read in it:
 | Progress: `after`, `thenShown`, `stepMetersLeft`, `stepSecondsLeft` | Where the Then chip showed, and for which pairs of maneuvers, to tune its distances |
 | Camera: `laneDp`, `zoomPlan`, `laneFocus`, `centerLeadS` | Whether Large reached about 28 dp at junctions and 14 dp before lane choices, and how much of the freeway stayed in the long view |
 | `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
+| Camera: `runUp`, `laneChoice.key`, `laneCapZoom`, `capSpeed`, `aheadM` | Which run-up held the close view and from where to where; the closest zoom the floor of 12 s allowed and the speed it was worked out for; the road the camera showed above the car, to check the 12 s and the model behind them against a screenshot |
+| `lane_choice`: `key`, `fromLeft`, `edgeLeaves` | Every lane of each point as the route has it, from the left: which lanes the route marked where, which side's lanes left at each point on the way to an exit, and so which row the card should have shown |
+| `lane_row` | What the card's lane row drew and when it changed: `source`, the lanes (`row`, `lit`, `des`), `words`, `need`, the run-up (`runUp`, `start`) and, where a run-up's row had no words, why (`odd`). One to four lines for each run-up; a distance alone writes none |
+| `missed_maneuver`, `diverge_taken` | One line for each place the road divided: the step change past an exit, fork or on ramp, or a point passed on the way (`kind`); missed when the navigator found the car off the route within 30 s or 1,000 m. How sure the navigator was (`probAt`, `probMin`, `probMax`, `probLast`, `uncertainS`), how far the phone's positions lay to the side (`sideAt`, `sideMin`, `sideMax`) and what the card showed on the way (`card`, `words`, `runUp`): whether a rule could find a missed exit sooner than the navigator without false alarms |
+| `progress`, `off_route`: `match.raw` | Where the phone's own position lay against the matched one: `sideM` to the side (right positive), `aheadM` along the way (about minus the speed, since the navigator puts the car a second ahead), `accM`, `ageMs`, `bearingDiff` |
+| `route_response`, `routes_updated`: a step's `lanes` | The lanes of each step's last banner that has them, the one shown near its maneuver |
 | Camera: `laneDetails`, `hdRoads`, `hdRoadsReapplied`; `lane_details` | Whether lane details stayed on once set |
 | `map_layers` | `arrowAboveLine` true at every style load: the maneuver arrow is drawn above the route line. `middle` lists the order of the route's layers |
 | Camera: `bendM`, `bendDeg`, `extraPts`; step fields `bendM`, `bendDeg`, `bearingBefore`, `bearingAfter` | Where the road bends past each maneuver point, and whether the junction frame held it: how often a step begins well before its bend, and at what angle, to check the rule's 20 degrees and 4 m |
