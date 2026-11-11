@@ -39,11 +39,14 @@ release_key="$(key_configured "The release signing key" "${release_secrets[@]}")
 export -n "${debug_secrets[@]}" "${release_secrets[@]}" DEBUG_KEYSTORE_FILE RELEASE_KEYSTORE_FILE
 
 # Decoded keys live in a private folder (mode 700, files 600) in the runner's temporary directory,
-# which is deleted when this script ends, also when it fails or is stopped.
+# which is deleted when this script ends, also when it fails or is stopped. A cancelled run on GitHub
+# sends SIGINT and, 7.5 s later, SIGTERM to the step's own process, which is this script (the
+# workflow starts it with exec); the SIGTERM at the latest ends it and runs the EXIT trap at once,
+# even while Gradle runs. There is deliberately no INT or TERM trap: bash would hold it back until
+# the running command ends. Only a SIGKILL leaves the folder behind, to the runner, which empties its
+# temporary directory at the end of the job.
 key_dir="$(umask 077 && mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/signing-keys.XXXXXXXX")"
 trap 'rm -rf "$key_dir"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 # Tests of the CI scripts themselves; they need no network, no Android SDK and no secret. The upload
 # to Google Play is tested against a local stand-in for Google's endpoints with a throwaway key.

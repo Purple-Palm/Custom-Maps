@@ -243,11 +243,11 @@ The four repository secrets that hold it (**Settings â†’ Secrets and variables â
 Set all four or none. Without them CI still builds the debug APK, but no app bundle; with only
 some, the build fails before anything is built and names the missing secrets. Only the Gradle run
 that builds the app bundle gets the upload key: CI decodes the keystore just before that run into a
-private folder of the runner's temporary directory and deletes it right after, and it passes the
-passwords to that run alone, only as environment variables. The tests of the CI scripts and the
-debug build, its unit tests and lint never see them. A release build on a computer takes the
-same four values in `local.properties`, with `RELEASE_KEYSTORE_FILE` instead of the base64 (see
-[local.properties.example](local.properties.example)).
+private folder of the runner's temporary directory and deletes it right after, also when the run is
+cancelled, and it passes the passwords to that run alone, only as environment variables. The tests
+of the CI scripts and the debug build, its unit tests and lint never see them. A release build on a
+computer takes the same four values in `local.properties`, with `RELEASE_KEYSTORE_FILE` instead of
+the base64 (see [local.properties.example](local.properties.example)).
 
 A wrong release secret, or any other failure in the app bundle part, turns the run red after the
 debug APK is published: that APK passed its tests, lint and 16 KB check and can be installed, but no

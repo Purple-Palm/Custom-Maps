@@ -36,9 +36,11 @@ jobs:
       # All build steps live in scripts/ci.sh. The signing secrets are optional: without the four
       # release secrets no app bundle is built. The Google Play key is a secret of the environment
       # google-play, which this job does not use, so its runner, which runs Gradle, can never get it.
+      # exec makes scripts/ci.sh the step's own process, so that the signals of a cancelled run reach
+      # it and it deletes the decoded signing keys at once.
       - name: Build, test, lint and check 16 KB alignment
         id: build
-        run: scripts/ci.sh
+        run: exec scripts/ci.sh
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
           DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
