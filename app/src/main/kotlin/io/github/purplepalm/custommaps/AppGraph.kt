@@ -12,7 +12,6 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import io.github.purplepalm.custommaps.diagnostics.DeviceLog
 import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
-import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
@@ -25,9 +24,9 @@ import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
 import io.github.purplepalm.custommaps.token.DataStoreTokenStore
 import io.github.purplepalm.custommaps.token.TokenEntry
+import io.github.purplepalm.custommaps.token.TokenHandOver
 import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenStore
-import io.github.purplepalm.custommaps.token.TokenSwitch
 import io.github.purplepalm.custommaps.trip.DataStoreTripLogStore
 import io.github.purplepalm.custommaps.trip.TokenTaggedTripLog
 import java.io.File
@@ -95,17 +94,17 @@ class AppGraph(private val application: Application) {
     val network = NetworkMonitor(application, debugLog, applicationScope)
 
     /**
-     * The id of the saved token last handed to the SDKs, null while none is. Written on the main
-     * thread when a token is handed over, which never happens during a trip ([TokenSwitch]).
+     * Which saved token the SDKs have, and a change that waits for the trip to end. Given every
+     * read of the list on the main thread; a token is never handed over during a trip.
      */
-    @Volatile
-    private var appliedTokenId: String? = null
+    private val tokenHandOver = TokenHandOver()
 
     /**
      * Sets up the navigator; starts no trip session. Each session it logs gets the id of the token
      * it ran on, never the token.
      */
-    val engine: MapboxEngine = MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { appliedTokenId }, debugLog, network.status)
+    val engine: MapboxEngine =
+        MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { tokenHandOver.appliedTokenId }, debugLog, network.status)
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()
@@ -193,43 +192,28 @@ class AppGraph(private val application: Application) {
         }
         // Hand the active token to the SDKs before any map exists, and again whenever the driver
         // picks another one. A change while guidance runs waits for the trip to end, and one while
-        // routes are previewed closes the preview first (TokenSwitch).
+        // routes are previewed closes the preview first (TokenHandOver, TokenSwitch).
         applicationScope.launch {
             var generation = 0
-            var applied: TokenEntry? = null
-            // The token a change waits with until the trip ends, logged once; null for none at all.
-            var holding = false
-            var heldToken: String? = null
             combine(tokenStore.list, engine.navigation.guidanceState, ::Pair).collect { (list, guidance) ->
-                val wanted = list.active?.takeIf { MapboxAccessTokens.check(it.token) == AccessTokenCheck.VALID }
-                val first = _mapsAccess.value == MapsAccess.Checking
-                when (val step = TokenSwitch.step(first, applied?.token, wanted?.token, guidance)) {
-                    // A rename: the same token under its new name.
-                    TokenSwitch.Step.Keep -> {
-                        applied = wanted
-                        appliedTokenId = wanted?.id
-                        holding = false
+                when (val effect = tokenHandOver.next(list, guidance)) {
+                    TokenHandOver.Effect.Keep -> Unit
+                    is TokenHandOver.Effect.Hold -> if (effect.log) {
+                        debugLog.log("token_switch_held", entryFields(list, effect.entry) + ("guidance" to guidance))
                     }
-                    TokenSwitch.Step.Hold -> if (!holding || heldToken != wanted?.token) {
-                        holding = true
-                        heldToken = wanted?.token
-                        debugLog.log("token_switch_held", entryFields(list, wanted) + ("guidance" to guidance))
-                    }
-                    is TokenSwitch.Step.Apply -> {
-                        holding = false
-                        if (step.closePreview) engine.navigation.clearPreview()
-                        if (wanted != null) {
-                            MapboxAccessTokens.apply(wanted.token)
+                    is TokenHandOver.Effect.Apply -> {
+                        if (effect.closePreview) engine.navigation.clearPreview()
+                        val entry = effect.entry
+                        if (entry != null) {
+                            MapboxAccessTokens.apply(entry.token)
                             generation += 1
                             _mapsAccess.value = MapsAccess.Ready(generation)
                         } else {
                             _mapsAccess.value = MapsAccess.NeedsToken
                         }
-                        applied = wanted
-                        appliedTokenId = wanted?.id
                         debugLog.log(
                             "maps_access",
-                            mapOf("access" to _mapsAccess.value.toString()) + entryFields(list, wanted) + ("previewClosed" to step.closePreview),
+                            mapOf("access" to _mapsAccess.value.toString()) + entryFields(list, entry) + ("previewClosed" to effect.closePreview),
                         )
                     }
                 }
