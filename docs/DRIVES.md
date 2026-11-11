@@ -680,6 +680,23 @@ On the drive:
 8. **Lanes in the card on a freeway.** Before a split or an exit with two exit lanes that the
    route passes going straight on, the card's lane row should show that point's lanes with its
    distance, and go back to the next maneuver's lanes after it.
+9. **The arrow on the route line.** Screenshots of the map at turns come from a passenger or from a
+   simulated drive, never from the driver. Before any turn the white arrow should lie on top of the
+   amber line, along the last 30 m before the turn and the first 30 m after it, with its head at
+   the end; before, only the head showed at the sides of the line. Also after the app was closed
+   and opened again during a drive. The log: one `map_layers` line each time the map loads its
+   style, with `arrowAboveLine` true.
+10. **A U-turn on a divided road.** On a route with a U-turn through a median opening (a simulated
+    drive will do), with Large: the arrow should be one white U over the opening, while the amber
+    line still shows its two corners behind it. A U-turn on an undivided road keeps a hairpin
+    arrow. The log: the `progress` lines before it with `next.modifier` `uturn`.
+11. **Other routes behind the car.** Start with other routes shown in the preview. During the drive
+    the grey of another route should begin only where it leaves the amber route: never along the
+    road already driven, never under the amber line. The log: the route ids in `routes_updated`.
+12. **Streets against the ground.** The streets should be clearly lighter than the ground, the
+    buildings only a little, and the amber route still the strongest thing on the map. Close in at
+    a divided road, the median should read as a median, not as a block. On a freeway, note whether
+    another route's grey line is still easy to see on the freeway's band. Screenshots, as above.
 
 Then share the debug log. What to read in it:
 
@@ -711,6 +728,7 @@ Then share the debug log. What to read in it:
 | Camera: `laneDp`, `zoomPlan`, `laneFocus`, `centerLeadS` | Whether Large reached about 28 dp at junctions and 14 dp before lane choices, and how much of the freeway stayed in the long view |
 | `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
 | Camera: `laneDetails`, `hdRoads`, `hdRoadsReapplied`; `lane_details` | Whether lane details stayed on once set |
+| `map_layers` | `arrowAboveLine` true at every style load: the maneuver arrow is drawn above the route line. `middle` lists the order of the route's layers |
 
 Reading the connectivity lines:
 

@@ -456,3 +456,15 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The Play key as a repository secret that only the publish job names: GitHub then hands it to no other job, but only the workflow file keeps the build job from naming it, and a workflow changed on any branch could read it.
   - Workload Identity Federation instead of a service account key: no long-lived key at all, but more setup and not documented by Google for the Play API. A later hardening step that changes only the sign-in part of the script.
 - **Cost:** two apps on the phone (the Play app and the debug APK), each one Mapbox monthly active user with its own token. Production needs a closed test with 12 testers for 14 days first (personal developer account), the store listing, the content rating and the Data safety form ([ROADMAP.md](ROADMAP.md), stage 3).
+
+## 43. Streets lighter than the ground at night
+
+- **Chosen (the owner left it to the build):** the night map has a graphite ground (`colorLand` `#16181B`) and buildings one small step above it (`colorBuildings` `#282B31`), and every road class is one step lighter than before: streets `#4A4F57`, trunk roads `#5A5F67`, freeways `#6A6F77`. As configured, a street stands about 2.2 to 1 against the ground. Mapbox's own ground, which the app left as it was, showed only about 1.3 to 1 darker than the streets on the phone.
+- **Why:** close in, as Large goes, a street is a plain band, since the map's road data ends at zoom 16 and draws no markings outside the areas of lane details (39). A band that stands out from the ground reads as a road, and the median of a divided road as a median, not as a block of houses.
+- **These are the night look's colors, and a first setting.** The night light and the monochrome theme change the configured colors on their way to the screen, in a way only the phone shows (a street configured `#3B4047` showed as `#3A3A3A`). The owner judges them on the phone; a day look sets its own.
+- **Unchanged:** the road surface under lane details (`colorHdRoads`, the street's grey now, darker than a freeway's), water, parks, labels, and the route's amber, which stands about 4 to 1 against a street.
+- **Alternatives:**
+  - Mapbox's own ground and the darker streets, as before: the streets hardly part from the ground close in.
+  - A theme of the app's own (a color table for the whole basemap): one more file to keep, and every color of the map changes with it.
+  - An aerial photo at the close view: planned separately, with its own switch.
+- **Cost:** the other routes' grey (`#6F747C`) is now close to a freeway's, so on a freeway another route shows mostly by its dark casing. One commit to undo.

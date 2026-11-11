@@ -718,6 +718,11 @@ Other lines:
 - A **lane_details** line each time the app sets lane details on the map: `reason` (`setting`,
   `style_loaded` or `reapplied`), `wanted`, `read` (what the style says afterwards) and `error` if
   the style refused.
+- A **map_layers** line once per style load: `arrowAboveLine`, true when every layer of the
+  maneuver arrow is drawn above the route line's top layer (null while either is missing), and
+  `middle`, the ids of the layers in the style's middle slot, where the route line and the arrow
+  are, in the order they are drawn. Ids only. See
+  [The maneuver arrow close in](#the-maneuver-arrow-close-in).
 - The **route_response** and **routes_updated** lines carry, for each step with any, the
   intersections that have lanes (`laneIntersections`): `meters` from the start of the step,
   `lanes`, `usable`, `active`, `designated`, the `classes` of the road that leaves it, and
@@ -1168,6 +1173,42 @@ What the owner gets in its place:
 2. **Lane details on the map** where Mapbox has them, with the arrows painted in each lane.
 3. **The lane arrows in the card**, the lanes to use lit, now also at lane choices where the route
    goes straight on.
+
+### The maneuver arrow close in
+
+The arrow of the next maneuver is the navigation SDK's: platinum with a graphite casing, along the
+last 30 m of the step and the first 30 m of the next one, with its head at the end. Close in, as
+Large goes, it is what shows the turn's path.
+
+- **It lies on top of the route line.** Both are in the style's middle slot, where layers are drawn
+  in the order they were made, and the arrow puts its layers above the route line's top layer only
+  if that layer is there when the arrow makes them. Left to the first renders of the browsing map,
+  the arrow's layers came a moment before the route line's, the amber line covered the arrow, and
+  only the head showed at its sides. So each style load makes the route line's layers first and
+  the arrow's right after, before anything is drawn. Both stay in the style for as
+  long as the map lives, and a style that loads again keeps them in their order (Mapbox keeps
+  persistent layers at their relative position). The `map_layers` line says the order once per
+  style load ([Logging](#logging)).
+- **A U-turn across a median is one curve** (`UTurnArrow`). On a divided road the map has one road
+  for each direction and a short road across the median opening, so a U-turn goes up the near
+  side, across and back down the far side: two corners a few meters apart, and close in a box.
+  Where the route turns back through two corners 4 to 40 m apart, both the same way round, the
+  arrow rounds them into one arc of half the width, at most 8 m. Across an opening of 13 m that is
+  an arc of 6.5 m: each corner of the amber line lies about 2.7 m outside it, about 20 dp with
+  Large, so the line's box still shows behind the white U. The route line keeps the road's shape:
+  the SDK has no way to reshape it, and the line is the route. The arrow is worked out once for
+  the step, from the route's own shape, and kept in memory only. Where the far corner is more than
+  20 m from the maneuver point, the arrow goes on 10 m past it, so its head points back down the
+  road. A U-turn at one point, as on an undivided road, and every other maneuver keep the SDK's
+  arrow.
+- **Other routes are not drawn where they share the route.** During guidance the route line gets
+  the navigator's account of where each other route leaves the route, read on the phone without a
+  request, so the grey of another route no longer runs over the road behind the car, or under the
+  route up to where it turns off. The preview draws every route whole, as it has no such account.
+- **The streets stand out from the ground**, about two to one in the night palette
+  ([DECISIONS.md](DECISIONS.md), 43). Close in a street is a plain band, since the map's road data
+  ends at zoom 16, and a band that stands out from the ground reads as a road: the median of a
+  divided road as a median, not as a block of houses.
 
 ### Constants of the lane zoom
 
