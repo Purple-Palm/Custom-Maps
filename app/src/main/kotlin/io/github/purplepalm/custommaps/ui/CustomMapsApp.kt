@@ -21,7 +21,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.AppGraph
 import io.github.purplepalm.custommaps.MapsAccess
 import io.github.purplepalm.custommaps.R
-import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.ui.map.MapScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
@@ -40,7 +39,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun CustomMapsApp(graph: AppGraph) {
     val access by graph.mapsAccess.collectAsStateWithLifecycle()
-    val tokenViewModel = viewModel { TokenViewModel(graph.tokenStore, graph.debugLog) }
+    val tokenViewModel = viewModel { TokenViewModel(graph.tokenStore, graph.engine.navigation.guidanceState, graph.debugLog) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -53,7 +52,7 @@ fun CustomMapsApp(graph: AppGraph) {
         when (access) {
             MapsAccess.Checking -> Unit
             MapsAccess.NeedsToken -> TokenSetupScreen(
-                onSaveToken = tokenViewModel::save,
+                onSaveToken = { tokenViewModel.add(name = null, input = it) },
                 onOpenSettings = { showSettings = true },
             )
             is MapsAccess.Ready -> MapScreen(
@@ -74,16 +73,17 @@ fun CustomMapsApp(graph: AppGraph) {
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()
             val guidanceSettings by settingsViewModel.guidance.collectAsStateWithLifecycle()
             val debug by settingsViewModel.debug.collectAsStateWithLifecycle()
-            val guidance by graph.engine.navigation.guidanceState.collectAsStateWithLifecycle()
             // Debug builds only: read once from the app's own signing certificate.
             val temporaryDebugKey = remember { context.isDebuggable() && context.signedWithDefaultDebugKey() }
             SettingsScreen(
-                tokenState = tokenState,
-                tokenEditable = guidance != GuidanceState.ACTIVE,
+                tokens = tokenState,
                 guidance = guidanceSettings,
                 debug = debug,
-                onSaveToken = tokenViewModel::save,
-                onClearToken = tokenViewModel::clear,
+                // Each checks again that no trip runs: the active token stays as it is during guidance.
+                onAddToken = tokenViewModel::add,
+                onRenameToken = tokenViewModel::rename,
+                onUseToken = tokenViewModel::use,
+                onDeleteToken = tokenViewModel::delete,
                 onCameraStyleChange = settingsViewModel::setCameraStyle,
                 onLaneZoomChange = settingsViewModel::setLaneZoom,
                 onLaneDetailsChange = settingsViewModel::setLaneDetails,

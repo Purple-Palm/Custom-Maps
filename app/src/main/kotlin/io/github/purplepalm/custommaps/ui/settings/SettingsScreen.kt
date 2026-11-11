@@ -43,7 +43,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
-import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
@@ -51,8 +50,10 @@ import io.github.purplepalm.custommaps.nav.trip.LogBegan
 import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
+import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
-import io.github.purplepalm.custommaps.ui.token.TokenEditor
+import io.github.purplepalm.custommaps.ui.token.TokenListSection
+import io.github.purplepalm.custommaps.ui.token.TokenRow
 import io.github.purplepalm.custommaps.ui.token.TokenState
 import java.time.Instant
 import java.time.LocalDate
@@ -80,12 +81,13 @@ internal fun tripsSinceRes(began: LogBegan?): Int = when (began) {
 
 @Composable
 fun SettingsScreen(
-    tokenState: TokenState,
-    tokenEditable: Boolean,
+    tokens: TokenState,
     guidance: GuidanceSettings,
     debug: DebugState,
-    onSaveToken: (String) -> AccessTokenCheck,
-    onClearToken: () -> Unit,
+    onAddToken: (name: String?, token: String) -> TokenProblem?,
+    onRenameToken: (id: String, name: String) -> TokenProblem?,
+    onUseToken: (id: String) -> Unit,
+    onDeleteToken: (id: String) -> Unit,
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
     onLaneDetailsChange: (Boolean) -> Unit,
@@ -127,7 +129,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(24.dp))
 
-            TokenSection(tokenState, tokenEditable, onSaveToken, onClearToken)
+            SectionTitle(R.string.token_title)
+            TokenListSection(tokens, onAddToken, onRenameToken, onUseToken, onDeleteToken)
             SectionDivider()
             GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
             SectionDivider()
@@ -168,50 +171,6 @@ private fun PrivacyPolicyButton() {
     ) {
         Text(stringResource(R.string.about_privacy_policy))
     }
-}
-
-@Composable
-private fun TokenSection(
-    tokenState: TokenState,
-    editable: Boolean,
-    onSaveToken: (String) -> AccessTokenCheck,
-    onClearToken: () -> Unit,
-) {
-    SectionTitle(R.string.token_title)
-    Text(
-        text = when (tokenState) {
-            is TokenState.Present -> stringResource(R.string.token_saved_as, tokenState.masked)
-            else -> stringResource(R.string.token_not_set)
-        },
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(16.dp))
-    if (editable) {
-        TokenEditor(
-            saveLabel = if (tokenState is TokenState.Present) R.string.token_replace else R.string.token_save,
-            onSave = onSaveToken,
-        )
-        if (tokenState is TokenState.Present) {
-            Spacer(Modifier.height(4.dp))
-            TextButton(onClick = onClearToken) {
-                Text(stringResource(R.string.token_remove))
-            }
-        }
-    } else {
-        // Replacing the token restarts the map and the navigator, which would end the drive.
-        Text(
-            text = stringResource(R.string.token_locked_during_guidance),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-    Spacer(Modifier.height(8.dp))
-    Text(
-        text = stringResource(R.string.token_storage_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 /** How the app guides. Every choice here applies at once, also during a drive. */
@@ -549,8 +508,15 @@ private fun TripKind.labelRes(): Int = when (this) {
 private fun SettingsScreenPreview() {
     CustomMapsTheme {
         SettingsScreen(
-            tokenState = TokenState.Present("pk.abcd…wxyz"),
-            tokenEditable = true,
+            tokens = TokenState.Ready(
+                rows = listOf(
+                    TokenRow("t1", "Main", "pk.dGVz…2ln1", active = true, mayUse = false, mayDelete = true),
+                    TokenRow("t2", "Test", "pk.dGVz…2ln2", active = false, mayUse = true, mayDelete = true),
+                ),
+                locked = false,
+                full = false,
+                defaultName = "Token 2",
+            ),
             guidance = GuidanceSettings(),
             debug = DebugState(
                 trips = MonthCount(3, partialSince = LocalDate.of(2000, 1, 15), began = LogBegan.INSTALLATION),
@@ -561,8 +527,10 @@ private fun SettingsScreenPreview() {
                 simulateDrive = true,
                 logBytes = 2_400_000,
             ),
-            onSaveToken = { AccessTokenCheck.VALID },
-            onClearToken = {},
+            onAddToken = { _, _ -> null },
+            onRenameToken = { _, _ -> null },
+            onUseToken = {},
+            onDeleteToken = {},
             onCameraStyleChange = {},
             onLaneZoomChange = {},
             onLaneDetailsChange = {},

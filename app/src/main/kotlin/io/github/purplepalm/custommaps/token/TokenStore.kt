@@ -5,8 +5,6 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
-import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.delay
@@ -42,16 +40,6 @@ interface TokenStore {
 
     /** Makes the entry [id] the active one. */
     suspend fun activate(id: String): TokenProblem?
-
-    /**
-     * Settings' Replace token, as long as Settings shows one token: the active entry's token
-     * becomes [token], under the same name; with none saved it becomes the first entry. Only a
-     * valid public token is accepted.
-     */
-    suspend fun save(token: String)
-
-    /** Settings' Remove token, as long as Settings shows one token: deletes every saved token. */
-    suspend fun clear()
 }
 
 /**
@@ -112,29 +100,6 @@ class DataStoreTokenStore(
 
     override suspend fun activate(id: String): TokenProblem? = change { list ->
         if (list.slotOf(id) == null) Change.Refused(TokenProblem.NotFound) else Change.To(list.activate(id))
-    }
-
-    override suspend fun save(token: String) {
-        val trimmed = token.trim()
-        require(MapboxAccessTokens.check(trimmed) == AccessTokenCheck.VALID) { "Only a valid public token can be stored" }
-        change { list ->
-            val active = list.active
-            when {
-                active == null -> Change.To(list.add(null, trimmed, freshId(list)))
-                active.token == trimmed -> Change.To(list)
-                else -> {
-                    // A new entry under the old name in place of the active one, so the id stays the token's own.
-                    val others = list.remove(active.id)
-                    val id = freshId(list)
-                    others.problemAdding(active.name, trimmed)?.let(Change::Refused)
-                        ?: Change.To(others.add(active.name, trimmed, id).activate(id))
-                }
-            }
-        }
-    }
-
-    override suspend fun clear() {
-        dataStore.edit { preferences -> KEYS.forEach { preferences.remove(it) } }
     }
 
     /**
@@ -205,10 +170,9 @@ class DataStoreTokenStore(
         private val LEGACY_KEY = stringPreferencesKey("mapbox_access_token")
         private val LIST_KEY = stringPreferencesKey("mapbox_tokens")
         private val ACTIVE_KEY = stringPreferencesKey("mapbox_active_token")
-        private val KEYS = listOf(LEGACY_KEY, LIST_KEY, ACTIVE_KEY)
 
         /** Every key the store writes, all of them in the one file [FILE_NAME]. */
-        val KEY_NAMES: Set<String> = KEYS.map { it.name }.toSet()
+        val KEY_NAMES: Set<String> = listOf(LEGACY_KEY, LIST_KEY, ACTIVE_KEY).map { it.name }.toSet()
 
         private const val READ_RETRY_MS = 1_000L
         private const val MAX_RETRY_STEPS = 30L

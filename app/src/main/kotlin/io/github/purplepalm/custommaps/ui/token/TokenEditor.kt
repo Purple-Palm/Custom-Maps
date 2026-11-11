@@ -17,49 +17,42 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
-import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
+import io.github.purplepalm.custommaps.token.TokenList
+import io.github.purplepalm.custommaps.token.TokenProblem
 
 /**
- * Field for pasting a Mapbox public token. The typed value is kept in plain `remember`, not
- * `rememberSaveable`, so it is never written into the saved instance state.
+ * Field for pasting a Mapbox public token, with its Save button. The typed value is kept in plain
+ * `remember`, not `rememberSaveable`, so it is never written into the saved instance state.
+ * [onSave] returns why the token was not taken, or null when it is being stored.
  */
 @Composable
 fun TokenEditor(
     @StringRes saveLabel: Int,
-    onSave: (String) -> AccessTokenCheck,
+    onSave: (String) -> TokenProblem?,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
-    var rejection by remember { mutableStateOf<AccessTokenCheck?>(null) }
+    var problem by remember { mutableStateOf<TokenProblem?>(null) }
 
     Column(modifier = modifier) {
-        OutlinedTextField(
+        TokenField(
             value = input,
             onValueChange = {
                 input = it
-                rejection = null
+                problem = null
             },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.token_field_label)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password,
-                autoCorrectEnabled = false,
-                imeAction = ImeAction.Done,
-            ),
-            isError = rejection != null,
-            supportingText = rejection?.let { check -> { Text(stringResource(check.messageRes())) } },
+            error = problem?.let { tokenProblemText(it) },
         )
         Spacer(Modifier.height(12.dp))
         Button(
             onClick = {
-                val check = onSave(input)
-                if (check == AccessTokenCheck.VALID) input = "" else rejection = check
+                val refused = onSave(input)
+                if (refused == null) input = "" else problem = refused
             },
             enabled = input.isNotBlank(),
         ) {
@@ -68,11 +61,50 @@ fun TokenEditor(
     }
 }
 
-@StringRes
-private fun AccessTokenCheck.messageRes(): Int = when (this) {
-    AccessTokenCheck.VALID -> R.string.token_saved
-    AccessTokenCheck.EMPTY -> R.string.token_error_empty
-    AccessTokenCheck.SECRET_TOKEN -> R.string.token_error_secret
-    AccessTokenCheck.NOT_PUBLIC_TOKEN -> R.string.token_error_not_public
-    AccessTokenCheck.MALFORMED -> R.string.token_error_malformed
+/**
+ * The token itself: hidden as it is typed, with no suggestions and no autocorrect. Keep its value
+ * in plain `remember`, never `rememberSaveable`.
+ */
+@Composable
+internal fun TokenField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    error: String?,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        label = { Text(stringResource(R.string.token_field_label)) },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Password,
+            autoCorrectEnabled = false,
+            imeAction = ImeAction.Done,
+        ),
+        isError = error != null,
+        supportingText = error?.let { text -> { Text(text) } },
+    )
+}
+
+/** A token's name, at most [TokenList.MAX_NAME_LENGTH] characters: longer input is not taken, so a token pasted here by mistake stays out. */
+@Composable
+internal fun TokenNameField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    error: String?,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { if (it.codePointCount(0, it.length) <= TokenList.MAX_NAME_LENGTH) onValueChange(it) },
+        modifier = modifier.fillMaxWidth(),
+        label = { Text(stringResource(R.string.token_name_label)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+        isError = error != null,
+        supportingText = error?.let { text -> { Text(text) } },
+    )
 }

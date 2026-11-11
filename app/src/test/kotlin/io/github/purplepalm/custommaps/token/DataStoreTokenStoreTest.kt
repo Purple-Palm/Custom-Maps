@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 
 class DataStoreTokenStoreTest {
@@ -265,35 +264,6 @@ class DataStoreTokenStoreTest {
         val seen = withTimeout(5_000) { store(Probe(file, failingReads = 1)).token.take(2).toList() }
 
         assertEquals(listOf(null, fake(1)), seen)
-    }
-
-    @Test
-    fun `replacing keeps only the newest token, under the same name`() = runBlocking {
-        val store = store()
-        store.save(fake(1))
-        store.save(" ${fake(2)} ")
-
-        assertEquals(fake(2), store.token.first())
-        assertEquals(listOf("Main"), store.list.first().names())
-    }
-
-    @Test
-    fun `clear removes every token`() = runBlocking {
-        writeRaw(oldKey.name to fake(9))
-        val store = store()
-        store.save(fake(1))
-        store.add(null, fake(2))
-
-        store.clear()
-
-        assertNull(store.token.first())
-        assertTrue(raw().isEmpty())
-    }
-
-    @Test
-    fun `save refuses a secret token and keeps nothing`() = runBlocking {
-        assertThrows<IllegalArgumentException> { runBlocking { store().save("sk.dGVzdA.c2VjcmV0") } }
-        assertNull(store().token.first())
     }
 
     /**

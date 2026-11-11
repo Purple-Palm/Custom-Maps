@@ -19,13 +19,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
-import io.github.purplepalm.custommaps.engine.mapbox.AccessTokenCheck
+import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 
-/** First launch: no map can be shown until the driver pastes a Mapbox public token. */
+/**
+ * First launch, or every token deleted: no map can be shown until the driver pastes a Mapbox
+ * public token, which becomes the first saved token, Main. [onSaveToken] returns why it was not
+ * taken, or null.
+ */
 @Composable
 fun TokenSetupScreen(
-    onSaveToken: (String) -> AccessTokenCheck,
+    onSaveToken: (String) -> TokenProblem?,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -77,6 +81,6 @@ fun TokenSetupScreen(
 @Composable
 private fun TokenSetupScreenPreview() {
     CustomMapsTheme {
-        TokenSetupScreen(onSaveToken = { AccessTokenCheck.VALID }, onOpenSettings = {})
+        TokenSetupScreen(onSaveToken = { null }, onOpenSettings = {})
     }
 }
