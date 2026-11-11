@@ -7,7 +7,7 @@ data class RouteOption(
     val id: String,
     val duration: Duration,
     val distance: Distance,
-    /** Main roads of the route, for example "I-280 S, CA-85 S". May be empty. */
+    /** Main roads of the route, for example "Highway A South, Oak Street". May be empty. */
     val summary: String,
     /**
      * How far the route's last point is from the place itself, when both are known. A route ends

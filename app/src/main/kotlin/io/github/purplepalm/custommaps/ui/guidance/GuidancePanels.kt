@@ -350,7 +350,7 @@ private fun ManeuverCardPreview() {
     CustomMapsTheme {
         ManeuverCard(
             RouteProgressSnapshot(
-                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: CA-85 S", "Mountain View"),
+                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Highway A South", "Midtown"),
                 distanceToNextManeuver = Distance.miles(0.4),
                 lanes = LaneInfo(
                     listOf(
