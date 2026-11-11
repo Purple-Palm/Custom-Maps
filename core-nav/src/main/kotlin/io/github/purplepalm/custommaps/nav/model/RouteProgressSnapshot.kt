@@ -34,6 +34,13 @@ data class RouteProgressSnapshot(
      * without its distance. Never a maneuver of the route before (`CardContinuity`).
      */
     val pending: Boolean = false,
+    /**
+     * The lane row of a run-up: the last part of a freeway step before its exit or fork, from where
+     * the close view starts for it to the gore. While it is set the card shows its lanes in place of
+     * [laneChoiceAhead] and [lanes], with the lanes to use in words where they have some. Null
+     * outside a run-up, and on a pending card.
+     */
+    val runUpLanes: RunUpLanes? = null,
 ) {
     /** The maneuver the Then chip shows, or null. The phone and the car screen both read this. */
     val thenManeuver: FollowingManeuver? get() = if (showThen) following else null
@@ -57,4 +64,26 @@ data class LanesAhead(
     val distance: Distance,
     /** Every lane that reaches the choice, from the leftmost; the ones to use are the recommended ones. */
     val lanes: LaneInfo,
+)
+
+/**
+ * The card's lane row on a run-up to an exit or a fork: the lanes of the next point on the way
+ * where a lane at the exit's side leaves the route, lit on the one lane that leads through every
+ * such point to the exit, and from the last of them on the exit's own lanes. It holds no distance,
+ * so it stays the same object for as long as the row does.
+ */
+data class RunUpLanes(
+    /** The lanes the card draws, from the leftmost: the ones to use recommended, lanes for car pools and buses dim. */
+    val lanes: LaneInfo,
+    /** The lanes to use in a few words; null when the row has none. */
+    val target: LaneTarget?,
+    /** The point whose lanes the row shows: a point on the way, or the exit's own, as the lane choices key them. */
+    val key: String,
+    /** Why the row has no words although it lights lanes, for the log; null otherwise. */
+    val odd: String?,
+    /**
+     * Where the first lit lane is among the lanes open to every car, counted from the exit's side
+     * from 0, for the log; null when the side is not known or no lane open to every car is lit.
+     */
+    val need: Int? = null,
 )

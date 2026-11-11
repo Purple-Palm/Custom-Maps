@@ -8,6 +8,12 @@ data class Lane(
     val isRecommended: Boolean,
     /** The arrow the route takes from this lane; set only for recommended lanes. */
     val activeIndication: TurnModifier? = null,
+    /**
+     * Kept for buses, car pools, taxis and the like. Such a lane is drawn dim, and is recommended
+     * only where the route marks no lane that every car may use. The maps that read the route
+     * decide that; nothing here checks it, so odd lane data never stops guidance.
+     */
+    val designated: Boolean = false,
 ) {
     init {
         require(activeIndication == null || isRecommended) { "Only a recommended lane has an active indication" }
