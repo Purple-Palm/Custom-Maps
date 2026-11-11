@@ -90,7 +90,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 ## 11. Packaging
 
 - **ABIs:** only `arm64-v8a` (phones) and `x86_64` (emulator); 32-bit ABIs are dropped. The CI APK is arm64 only (`-Pcustommaps.abis=arm64-v8a`), about half the size, because it is meant for the phone.
-- **Debug suffix:** debug builds use the application ID suffix `.debug`, so they install next to the Play build.
+- **Debug suffix:** debug builds use the application ID suffix `.debug`, so they install next to the Play build, and are named **Custom Maps Debug** on the phone (`app/src/debug/res/values/strings.xml`), so the two icons are told apart.
 - **Test fixtures:** fake tokens in tests use values that cannot be mistaken for real Mapbox tokens, so secret scanners stay quiet.
 
 ## 12. Module boundaries and wiring

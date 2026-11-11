@@ -50,7 +50,8 @@ Every push to `main` builds a debug APK.
 2. Under **Artifacts**, download `custommaps-debug-<run>-<commit>.apk`. It is the APK itself, not a zip.
 3. Open the APK on the phone (download it there, or copy it over), and allow installing apps from
    that source when Android asks.
-4. Launch Custom Maps and paste your Mapbox token.
+4. Launch **Custom Maps Debug**, as the debug build is named on the phone, and paste your Mapbox
+   token. The build from Google Play is named **Custom Maps**, so the two icons are told apart.
 
 Install newer builds over the installed one; do not uninstall first. Uninstalling deletes the
 token, and every new installation counts as one more monthly active user at Mapbox. Updating in
@@ -212,9 +213,10 @@ Set all four values or none: a partial setup fails the build with a message list
 
 Android Auto in a real car runs only apps installed from Google Play, and Play keeps the app up to
 date by itself. The Play build reaches the phone through Google Play's **internal testing** track.
-It is built from the same code as the debug APK, with three differences: its package is
-`io.github.purplepalm.custommaps` (no `.debug`), it is not debuggable (no **Crash now**), and it is
-signed with the upload key below and then by Google.
+It is built from the same code as the debug APK, with four differences: its package is
+`io.github.purplepalm.custommaps` (no `.debug`), its name on the phone is **Custom Maps** (the debug
+APK's is **Custom Maps Debug**), it is not debuggable (no **Crash now**), and it is signed with the
+upload key below and then by Google.
 
 The Play app and the debug APK are two apps: both can stay installed, each keeps its own token and
 settings (paste the token once more in the Play app), and each installation counts as one Mapbox

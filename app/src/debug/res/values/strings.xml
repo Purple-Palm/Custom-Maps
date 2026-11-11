@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The debug build's name on the phone, so its icon is told apart from the Play build's
+        "Custom Maps" when both are installed. Everything else uses the strings of src/main.
+    -->
+    <string name="app_name">Custom Maps Debug</string>
+</resources>
