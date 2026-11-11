@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -64,7 +65,7 @@ import kotlin.time.Duration.Companion.seconds
 private val THEN_GLYPH = 40.dp
 
 /** Above and below the chip's content, in the part that shows under the card. */
-private val THEN_CHIP_PADDING = 8.dp
+internal val THEN_CHIP_PADDING = 8.dp
 
 /**
  * How far the chip reaches below the card. During guidance the camera keeps a band of this height
@@ -72,11 +73,17 @@ private val THEN_CHIP_PADDING = 8.dp
  */
 val THEN_CHIP_BAND = THEN_GLYPH + THEN_CHIP_PADDING * 2
 
-/** Share of the card's width the chip may take, so the compass at the top right stays clear. */
+/** Share of the card's width the chip may take. The rest of the band, at its end side, is the end tab's. */
 private const val THEN_CHIP_MAX_WIDTH_SHARE = 0.7f
 
+/** Share of the card's width the tab at the end side of the band may take. */
+private const val END_TAB_MAX_WIDTH_SHARE = 0.3f
+
+/** Stays free between the chip and the end tab when both are as wide as they may be. */
+private val BAND_GAP = 4.dp
+
 /** Square on top, where the chip is under the card; rounded where it hangs over the map. */
-private val THEN_CHIP_SHAPE = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)
+internal val THEN_CHIP_SHAPE = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)
 
 /** The side of the destination gets this small before it is cut, on a narrow screen with a large font. */
 private val THEN_SIDE_MIN_FONT = 12.sp
@@ -113,28 +120,57 @@ private val THEN_FADE: AnimatedContentTransitionScope<Maneuver>.() -> ContentTra
  * the chip lies over the map in [THEN_CHIP_BAND], which the camera keeps free during guidance, so
  * the chip never moves the camera and never covers what it frames.
  *
- * The chip is drawn outside the panel's bounds. Nothing above it in the layout may clip its
- * children, or the chip is cut off.
+ * [endTab] hangs in the same band at the card's end side, for a short notice that is no part of
+ * the instructions. It is not measured either, so it comes and goes without moving anything. The
+ * chip keeps its share of the card's width and the tab gets the rest ([bandWidths]), so the two
+ * never meet. A tab is built like the chip: [THEN_CHIP_SHAPE], with its top [CARD_CORNER] under
+ * the card.
+ *
+ * Both are drawn outside the panel's bounds. Nothing above them in the layout may clip its
+ * children, or they are cut off.
  */
 @Composable
-fun ManeuverPanel(progress: RouteProgressSnapshot, modifier: Modifier = Modifier) {
+fun ManeuverPanel(progress: RouteProgressSnapshot, modifier: Modifier = Modifier, endTab: @Composable () -> Unit = {}) {
     Layout(
         content = {
-            ManeuverCard(progress)
-            ThenChipSlot(progress.thenManeuver?.maneuver)
+            ManeuverCard(progress, Modifier.layoutId(PanelPart.CARD))
+            ThenChipSlot(progress.thenManeuver?.maneuver, Modifier.layoutId(PanelPart.THEN))
+            // Always there, and empty while the tab has nothing to say.
+            Box(Modifier.layoutId(PanelPart.END_TAB)) { endTab() }
         },
         modifier = modifier,
     ) { measurables, constraints ->
-        val card = measurables[0].measure(constraints.copy(minHeight = 0))
+        val card = measurables.first { it.layoutId == PanelPart.CARD }.measure(constraints.copy(minHeight = 0))
+        val widths = bandWidths(card.width, BAND_GAP.roundToPx())
         // Fully hidden, the slot lays out nothing at all.
-        val chip = measurables.getOrNull(1)?.measure(Constraints(maxWidth = (card.width * THEN_CHIP_MAX_WIDTH_SHARE).roundToInt()))
+        val chip = measurables.firstOrNull { it.layoutId == PanelPart.THEN }?.measure(Constraints(maxWidth = widths.then))
+        val tab = measurables.firstOrNull { it.layoutId == PanelPart.END_TAB }?.measure(Constraints(maxWidth = widths.endTab))
         val tuck = CARD_CORNER.roundToPx()
         layout(card.width, card.height) {
-            // Below the card in drawing order: it slides out from under the card, never over it.
+            // Below the card in drawing order: their tops lie under it, and the chip slides out
+            // from under it, never over it.
             chip?.placeRelative(0, card.height - tuck, zIndex = 0f)
+            tab?.placeRelative(card.width - tab.width, card.height - tuck, zIndex = 0f)
             card.placeRelative(0, 0, zIndex = 1f)
         }
     }
+}
+
+/** What the panel lays out: the card, and the two things that hang under it. */
+private enum class PanelPart { CARD, THEN, END_TAB }
+
+/** How wide the Then chip and the tab at the end side of the band may be, in pixels. */
+internal data class BandWidths(val then: Int, val endTab: Int)
+
+/**
+ * Shares the band under a card [cardWidth] pixels wide: the Then chip may take
+ * [THEN_CHIP_MAX_WIDTH_SHARE] of it, as before there was a tab, and the tab at the end side at most
+ * [END_TAB_MAX_WIDTH_SHARE], less what keeps [gap] pixels free between the two.
+ */
+internal fun bandWidths(cardWidth: Int, gap: Int): BandWidths {
+    val then = (cardWidth * THEN_CHIP_MAX_WIDTH_SHARE).roundToInt()
+    val endTab = minOf((cardWidth * END_TAB_MAX_WIDTH_SHARE).toInt(), cardWidth - then - gap).coerceAtLeast(0)
+    return BandWidths(then, endTab)
 }
 
 /**
@@ -145,9 +181,9 @@ fun ManeuverPanel(progress: RouteProgressSnapshot, modifier: Modifier = Modifier
  * so those updates skip this slot.
  */
 @Composable
-private fun ThenChipSlot(then: Maneuver?) {
+private fun ThenChipSlot(then: Maneuver?, modifier: Modifier = Modifier) {
     val transition = updateTransition(targetState = then, label = "then")
-    transition.AnimatedVisibility(visible = { it != null }, enter = THEN_ENTER, exit = THEN_EXIT) {
+    transition.AnimatedVisibility(visible = { it != null }, modifier = modifier, enter = THEN_ENTER, exit = THEN_EXIT) {
         // While it slides away the target is null: it leaves with the arrow it had.
         val shown = transition.targetState ?: transition.currentState
         if (shown != null) ThenChip(shown)
