@@ -292,6 +292,7 @@ class LaneChoicesTest {
         assertEquals(listOf(false, true, true, false, false), shown.map { it.isRecommended })
         assertEquals(listOf(null, TurnModifier.STRAIGHT, TurnModifier.STRAIGHT, null, null), shown.map { it.activeIndication })
         assertEquals(setOf(TurnModifier.STRAIGHT), shown[0].indications, "the car pool lane keeps its arrow, dim")
+        assertEquals(listOf(true, false, false, false, false), shown.map { it.designated }, "and is drawn as one")
         assertEquals(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), shown[2].indications)
         assertEquals(setOf(TurnModifier.SLIGHT_RIGHT), shown[4].indications)
     }

@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import com.mapbox.navigation.tripdata.maneuver.model.LaneIndicator
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -103,6 +104,114 @@ class ManeuverMappingTest {
         assertEquals(setOf(TurnModifier.SLIGHT_RIGHT), lane.indications)
         assertFalse(lane.isRecommended)
         assertNull(lane.activeIndication)
+    }
+
+    @Test
+    fun `a lane for car pools is drawn dim and not lit while a lane every car may use is active`() {
+        val lane = ManeuverMapping.lane(listOf("straight"), isActive = true, activeDirection = "straight", designated = true, openLaneActive = true)
+        assertTrue(lane.designated)
+        assertFalse(lane.isRecommended)
+        assertNull(lane.activeIndication)
+        assertEquals(setOf(TurnModifier.STRAIGHT), lane.indications, "it keeps its arrow, dim")
+        // Without word of the other lanes it is taken that one of them is active.
+        assertFalse(ManeuverMapping.lane(listOf("straight"), isActive = true, activeDirection = null, designated = true).isRecommended)
+    }
+
+    @Test
+    fun `where only lanes for car pools are marked they keep their arrow lit`() {
+        val lane = ManeuverMapping.lane(listOf("straight", "right"), isActive = true, activeDirection = "right", designated = true, openLaneActive = false)
+        assertTrue(lane.designated)
+        assertTrue(lane.isRecommended)
+        assertEquals(TurnModifier.RIGHT, lane.activeIndication)
+    }
+
+    @Test
+    fun `a lane every car may use is lit as before whatever the other lanes are`() {
+        for (openLaneActive in listOf(true, false)) {
+            val lane = ManeuverMapping.lane(listOf("right"), isActive = true, activeDirection = null, openLaneActive = openLaneActive)
+            assertFalse(lane.designated)
+            assertTrue(lane.isRecommended)
+            assertEquals(TurnModifier.RIGHT, lane.activeIndication)
+        }
+    }
+
+    @Test
+    fun `every combination of marks gives a lane the card can draw`() {
+        val arrows = listOf(emptyList(), listOf("straight"), listOf("straight", "slight right"), listOf("none"))
+        val named = listOf(null, "straight", "slight right", "sharp left", "none")
+        for (directions in arrows) {
+            for (activeDirection in named) {
+                for (isActive in listOf(true, false)) {
+                    for (designated in listOf(true, false)) {
+                        for (openLaneActive in listOf(true, false)) {
+                            val what = "$directions $activeDirection $isActive $designated $openLaneActive"
+                            val lane = ManeuverMapping.lane(directions, isActive, activeDirection, designated, openLaneActive)
+                            assertEquals(isActive && !(designated && openLaneActive), lane.isRecommended, what)
+                            assertEquals(designated, lane.designated, what)
+                            assertTrue(lane.activeIndication == null || lane.isRecommended, what)
+                            val ahead = ManeuverMapping.laneAhead(directions, isActive, activeDirection, designated, openLaneActive)
+                            assertEquals(isActive && !(designated && openLaneActive), ahead.isRecommended, what)
+                            assertEquals(designated, ahead.designated, what)
+                            assertEquals(ahead.isRecommended, ahead.activeIndication != null, what)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `at a point the route goes straight through a lane for car pools is dim while another lane can be used`() {
+        val dim = ManeuverMapping.laneAhead(listOf("straight"), usable = true, usedDirection = "straight", designated = true, openLaneUsable = true)
+        assertTrue(dim.designated)
+        assertFalse(dim.isRecommended)
+        assertNull(dim.activeIndication)
+        val only = ManeuverMapping.laneAhead(listOf("straight"), usable = true, usedDirection = null, designated = true, openLaneUsable = false)
+        assertTrue(only.isRecommended)
+        assertEquals(TurnModifier.STRAIGHT, only.activeIndication)
+    }
+
+    private fun indicator(active: Boolean, vararg directions: String, designated: List<String> = emptyList(), used: String? = null) =
+        LaneIndicator.Builder()
+            .isActive(active)
+            .directions(directions.toList())
+            .drivingSide("right")
+            .activeDirection(used)
+            .accessDesignated(designated)
+            .build()
+
+    @Test
+    fun `the maneuver's row keeps the car pool lane dim while a lane every car may use is active`() {
+        val row = requireNotNull(
+            laneInfoOf(
+                listOf(
+                    indicator(true, "straight", designated = listOf("hov")),
+                    indicator(true, "straight"),
+                    indicator(false, "straight"),
+                    indicator(true, "slight right", used = "slight right"),
+                ),
+            ),
+        ).lanes
+        assertEquals(listOf(true, false, false, false), row.map { it.designated })
+        assertEquals(listOf(false, true, false, true), row.map { it.isRecommended })
+        assertEquals(listOf(null, TurnModifier.STRAIGHT, null, TurnModifier.SLIGHT_RIGHT), row.map { it.activeIndication })
+    }
+
+    @Test
+    fun `the maneuver's row lights the car pool lanes where only they are active`() {
+        val row = requireNotNull(
+            laneInfoOf(
+                listOf(
+                    indicator(true, "straight", designated = listOf("hov"), used = "straight"),
+                    indicator(false, "straight"),
+                    indicator(false, "straight", designated = listOf("bus")),
+                ),
+            ),
+        ).lanes
+        assertEquals(listOf(true, false, false), row.map { it.isRecommended })
+        assertEquals(TurnModifier.STRAIGHT, row[0].activeIndication)
+        assertTrue(row[0].designated)
+        assertNull(laneInfoOf(emptyList()), "no lanes, no row")
     }
 
     @Test

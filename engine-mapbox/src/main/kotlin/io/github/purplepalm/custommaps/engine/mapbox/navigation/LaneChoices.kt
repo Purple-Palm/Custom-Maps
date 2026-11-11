@@ -325,11 +325,19 @@ internal fun StepIntersection.laneCounts(): LaneCounts? {
  */
 internal fun StepIntersection.lanesAhead(): LaneInfo? {
     val all = lanes() ?: return null
+    val openLaneUsable = all.any { it != null && !it.isDesignated() && it.isUsable() }
     val lanes = ArrayList<Lane>(all.size)
     for (lane in all) {
         if (lane == null) continue
-        val usable = !lane.isDesignated() && lane.isUsable()
-        lanes.add(ManeuverMapping.laneAhead(lane.indications().orEmpty(), usable, lane.validIndication()))
+        lanes.add(
+            ManeuverMapping.laneAhead(
+                lane.indications().orEmpty(),
+                usable = lane.isUsable(),
+                usedDirection = lane.validIndication(),
+                designated = lane.isDesignated(),
+                openLaneUsable = openLaneUsable,
+            ),
+        )
     }
     return if (lanes.isEmpty()) null else LaneInfo(lanes)
 }

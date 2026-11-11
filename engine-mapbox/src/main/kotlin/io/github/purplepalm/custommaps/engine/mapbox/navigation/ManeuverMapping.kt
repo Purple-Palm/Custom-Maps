@@ -39,11 +39,26 @@ internal object ManeuverMapping {
         else -> null
     }
 
-    /** One lane; for a lane the route uses, the active arrow defaults to its only arrow. */
-    fun lane(directions: List<String>, isActive: Boolean, activeDirection: String?): Lane {
+    /**
+     * One lane of the next maneuver, as the navigation SDK marks it; for a lane the route uses, the
+     * active arrow defaults to its only arrow. A lane kept for car pools, buses and the like
+     * ([designated]) is drawn dim, and is recommended only where the route marks no lane that every
+     * car may use ([openLaneActive] false): then its arrow stays lit, so the row is never left
+     * without a lane to use. Whatever the values, the lane is one the card can draw.
+     *
+     * @param openLaneActive some lane of the same row that every car may use is active
+     */
+    fun lane(
+        directions: List<String>,
+        isActive: Boolean,
+        activeDirection: String?,
+        designated: Boolean = false,
+        openLaneActive: Boolean = true,
+    ): Lane {
         val indications = directions.mapNotNull(::modifier).toSet()
-        val active = if (isActive) modifier(activeDirection) ?: indications.singleOrNull() else null
-        return Lane(indications, isRecommended = isActive, activeIndication = active)
+        val recommended = lit(isActive, designated, openLaneActive)
+        val active = if (recommended) modifier(activeDirection) ?: indications.singleOrNull() else null
+        return Lane(indications, isRecommended = recommended, activeIndication = active, designated = designated)
     }
 
     /**
@@ -51,13 +66,31 @@ internal object ManeuverMapping {
      * can be followed from is lit with the arrow the route takes there: the one the route names,
      * else the lane's arrow that turns least, which is its straight arrow where it has one. A lane
      * without arrows is drawn with a straight one, and that one is lit. A lane that leaves the
-     * route is not recommended and has no lit arrow.
+     * route is not recommended and has no lit arrow. A lane kept for car pools, buses and the like
+     * ([designated]) is drawn dim, and is lit only where no lane that every car may use can be
+     * followed on ([openLaneUsable] false).
+     *
+     * @param openLaneUsable some lane of the same point that every car may use can be followed on
      */
-    fun laneAhead(directions: List<String?>, usable: Boolean, usedDirection: String?): Lane {
+    fun laneAhead(
+        directions: List<String?>,
+        usable: Boolean,
+        usedDirection: String?,
+        designated: Boolean = false,
+        openLaneUsable: Boolean = true,
+    ): Lane {
         val indications = directions.mapNotNull(::modifier).toSet()
-        val active = if (usable) modifier(usedDirection) ?: indications.minByOrNull(::sharpness) ?: TurnModifier.STRAIGHT else null
-        return Lane(indications, isRecommended = usable, activeIndication = active)
+        val recommended = lit(usable, designated, openLaneUsable)
+        val active = if (recommended) modifier(usedDirection) ?: indications.minByOrNull(::sharpness) ?: TurnModifier.STRAIGHT else null
+        return Lane(indications, isRecommended = recommended, activeIndication = active, designated = designated)
     }
+
+    /**
+     * Whether a lane the route marks ([marked]) is lit in the card: a lane kept for car pools,
+     * buses and the like only where the route marks no lane that every car may use.
+     */
+    private fun lit(marked: Boolean, designated: Boolean, openLaneMarked: Boolean): Boolean =
+        marked && (!designated || !openLaneMarked)
 
     /** How far an arrow turns away from straight on, left or right alike. */
     private fun sharpness(turn: TurnModifier): Int = when (turn) {

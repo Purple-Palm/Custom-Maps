@@ -5,6 +5,7 @@ import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.trip.model.RouteProgressState
+import com.mapbox.navigation.tripdata.maneuver.model.LaneIndicator
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
@@ -64,9 +65,28 @@ internal fun RouteProgress.toTripMoment(live: Boolean): TripMoment = TripMoment(
     live = live,
 )
 
-internal fun MapboxLane.toLaneInfo(): LaneInfo? = allLanes
-    .takeIf { it.isNotEmpty() }
-    ?.let { lanes -> LaneInfo(lanes.map { ManeuverMapping.lane(it.directions, it.isActive, it.activeDirection) }) }
+internal fun MapboxLane.toLaneInfo(): LaneInfo? = laneInfoOf(allLanes)
+
+/**
+ * The next maneuver's lanes as the card draws them, from the navigation SDK's. A lane kept for car
+ * pools, buses and the like is drawn dim, and is lit only where no lane that every car may use is
+ * active. Null without lanes.
+ */
+internal fun laneInfoOf(lanes: List<LaneIndicator>): LaneInfo? {
+    if (lanes.isEmpty()) return null
+    val openLaneActive = lanes.any { it.isActive && it.accessDesignated.isEmpty() }
+    return LaneInfo(
+        lanes.map {
+            ManeuverMapping.lane(
+                it.directions,
+                it.isActive,
+                it.activeDirection,
+                designated = it.accessDesignated.isNotEmpty(),
+                openLaneActive = openLaneActive,
+            )
+        },
+    )
+}
 
 /**
  * Snapshot for the UI: the upcoming maneuver from the maneuver API, the maneuver after it from the
