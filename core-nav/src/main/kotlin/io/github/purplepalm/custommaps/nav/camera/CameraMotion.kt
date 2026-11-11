@@ -68,6 +68,20 @@ data class CameraTuning(
     val freewayLaneDp: Double = 14.0,
     /** How much road after a maneuver Large keeps in the frame of that maneuver; the navigation SDK keeps 100 m. */
     val largeMetersAfterManeuver: Double = 30.0,
+    /**
+     * Where the road bends after a maneuver ([TurnBend]): the first point that heads this many
+     * degrees or more off the way in, or else the first place more than [bendSideMeters] to its
+     * side, looked for within [bendSearchMeters] of the maneuver point.
+     */
+    val bendDegrees: Double = 20.0,
+    val bendSideMeters: Double = 4.0,
+    val bendSearchMeters: Double = 150.0,
+    /**
+     * With Large, a bend at least this far past the maneuver point, and the road
+     * [largeMetersAfterManeuver] past it, join the frame of the junction ([JunctionFrame]). A
+     * nearer bend is in that frame already.
+     */
+    val bendMinMeters: Double = 15.0,
     /** A lane choice takes at least this many lanes, not counting lanes kept for buses, car pools and the like. */
     val laneChoiceMinLanes: Int = 3,
     /** Where the route goes straight on, at least this many lanes have to leave it. */
