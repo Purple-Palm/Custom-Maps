@@ -2,7 +2,6 @@ package io.github.purplepalm.custommaps.engine.mapbox.offline
 
 import android.os.SystemClock
 import com.mapbox.bindgen.Expected
-import com.mapbox.common.Cancelable
 import com.mapbox.common.TileRegion
 import com.mapbox.common.TileRegionError
 import com.mapbox.common.TileRegionLoadOptions
@@ -30,7 +29,6 @@ import com.mapbox.navigation.ui.maps.PredictiveCacheControllerErrorHandler
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
 import io.github.purplepalm.custommaps.nav.debug.error
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -70,22 +68,6 @@ internal class OfflineData(
     private val pixelRatio: Float,
     private val debugLog: DebugLog,
 ) : MapboxNavigationObserver {
-
-    /**
-     * One download, from the call that starts it to the store's answer. [progress] and [finished]
-     * are written on the store's thread, [endedBy] on the main thread just before a cancel, and
-     * each is read on the other. [number] and [routes] are those of a load of the tile region.
-     */
-    private class Download<P>(val startedNanos: Long, val number: Int = 0, val routes: Int = 0) {
-        @Volatile var progress: P? = null
-
-        @Volatile var endedBy: EndedBy? = null
-
-        @Volatile var finished = false
-
-        /** Main thread only. */
-        var cancelable: Cancelable? = null
-    }
 
     private val scope = MainScope()
 
@@ -133,8 +115,8 @@ internal class OfflineData(
     /** The load of the tile region that was started last; it may have finished. */
     private var regionLoad: Download<TileRegionLoadProgress>? = null
 
-    /** Whether the style's own files are on the phone, as far as this run of the app knows. */
-    private val stylePack = AtomicInteger(PACK_MISSING)
+    /** Whether the style's own files have been loaded in this run of the app. */
+    private val stylePack = LoadedOnce()
 
     /** The load of the style pack that was started last; it may have finished. */
     private var stylePackLoad: Download<StylePackLoadProgress>? = null
@@ -303,7 +285,7 @@ internal class OfflineData(
      * up to date until the pack is loaded again, so this is also how the map's look stays current.
      */
     private fun loadStylePack() {
-        if (!stylePack.compareAndSet(PACK_MISSING, PACK_LOADING)) return
+        if (!stylePack.begin()) return
         val load = Download<StylePackLoadProgress>(SystemClock.elapsedRealtimeNanos())
         stylePackLoad = load
         try {
@@ -321,7 +303,7 @@ internal class OfflineData(
             )
         } catch (e: RuntimeException) {
             load.finished = true
-            stylePack.set(PACK_MISSING)
+            stylePack.ended(loaded = false)
             debugLog.error("offline_style_pack", e)
         }
     }
@@ -330,7 +312,7 @@ internal class OfflineData(
     private fun onStylePackLoaded(load: Download<StylePackLoadProgress>, result: Expected<StylePackError, StylePack>) {
         load.finished = true
         // A load that failed or was ended is asked for again with the next preview.
-        stylePack.set(if (result.isValue) PACK_LOADED else PACK_MISSING)
+        stylePack.ended(loaded = result.isValue)
         try {
             val pack = result.value
             val error = result.error
@@ -361,15 +343,10 @@ internal class OfflineData(
         }
     }
 
-    /**
-     * Ends [load] if it is still under way, and notes who ended it before the cancel: the store
-     * answers a cancelled load on its own thread, and the line it writes then says why. A load
-     * that was ended before keeps its first reason.
-     */
+    /** Ends [load] if there is one and it is still under way; the line it writes then says who did. */
     private fun end(load: Download<*>?, by: EndedBy) {
-        if (load == null || load.finished || load.endedBy != null) return
-        load.endedBy = by
-        guarded("offline.cancel") { load.cancelable?.cancel() }
+        if (load == null) return
+        guarded("offline.cancel") { load.end(by) }
     }
 
     private fun secondsSince(startedNanos: Long): Double = (SystemClock.elapsedRealtimeNanos() - startedNanos) / NANOS_PER_SECOND
@@ -431,10 +408,5 @@ internal class OfflineData(
 
     private companion object {
         const val NANOS_PER_SECOND = 1e9
-
-        // What this run of the app knows of the style pack.
-        const val PACK_MISSING = 0
-        const val PACK_LOADING = 1
-        const val PACK_LOADED = 2
     }
 }
