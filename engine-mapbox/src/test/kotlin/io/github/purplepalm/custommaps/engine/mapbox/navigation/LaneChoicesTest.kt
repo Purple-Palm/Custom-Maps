@@ -557,7 +557,7 @@ class LaneChoicesTest {
         val atExit = lanes.debugFields(ahead.single { it.atManeuver }, speedMps = 25.0)
         assertEquals("r/0/2/end", atExit["key"])
         assertEquals(false, atExit["edgeLeaves"])
-        assertEquals(6, (atExit["fromLeft"] as List<*>).size)
+        assertEquals(7, (atExit["fromLeft"] as List<*>).size)
         assertEquals(mapOf("ind" to listOf("slight right"), "valid" to true, "active" to true, "validInd" to "slight right"), (atExit["fromLeft"] as List<*>)[5])
         val edge = lanes.debugFields(ahead.single { it.key == "r/0/2/2" }, speedMps = 25.0)
         assertEquals(true, edge["edgeLeaves"])
@@ -608,21 +608,23 @@ class LaneChoicesTest {
         assertNull(laneIntersectionFields(emptyList(), points))
     }
 
-    // The run-up. A made-up freeway with a car pool lane on the left and four general lanes, and an
-    // exit on the right whose own lanes, past a fifth lane that opens for it, are the next step's
-    // first intersection. All distances are synthetic; 25 m/s gives a window of 625 m and a reach
-    // of 2,125 m.
+    // The run-up. A made-up freeway with a car pool lane on the left and five general lanes, and an
+    // exit on the right whose own lanes, past two lanes that open for it, are the next step's first
+    // intersection. All distances are synthetic; 25 m/s gives a window of 625 m and a reach of
+    // 2,125 m.
 
     private val hov = lane(false, designated = listOf("hov"))
 
     /** A point about 400 m into the step where the right lane leaves: an edge point for a right exit. */
-    private val rightLeaves = listOf(hov, lane(true), lane(true), lane(true), lane(false, arrows = listOf("slight right")))
+    private val rightLeaves = listOf(hov, lane(true), lane(true), lane(true), lane(true), lane(false, arrows = listOf("slight right")))
 
     /** A point where the left general lane leaves instead. */
-    private val leftLeaves = listOf(hov, lane(false, arrows = listOf("slight left")), lane(true), lane(true), lane(true))
+    private val leftLeaves = listOf(hov, lane(false, arrows = listOf("slight left")), lane(true), lane(true), lane(true), lane(true))
 
-    /** The exit's own lanes: only the new rightmost lane goes on to the ramp. */
-    private val exitLanes = listOf(hov, lane(false), lane(false), lane(false), lane(false), lane(true, arrows = listOf("slight right"), used = "slight right"))
+    /** The exit's own lanes: the two new right lanes go on to the ramp. */
+    private val exitLanes = listOf(hov, lane(false), lane(false), lane(false), lane(false), rampLane(), rampLane())
+
+    private fun rampLane() = lane(true, arrows = listOf("slight right"), used = "slight right")
 
     private fun runUpStep(
         lanes: LaneChoices,
@@ -651,7 +653,7 @@ class LaneChoicesTest {
         assertEquals(mapOf("r/0/2/1" to true, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves("slight right"))
         assertEquals(mapOf("r/0/2/1" to true, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves("sharp right"))
         assertEquals(mapOf("r/0/2/1" to false, "r/0/2/2" to true, "r/0/2/end" to false), edgeLeaves("slight left"))
-        // Straight on, the exit's lanes to use tell the side: here the rightmost.
+        // Straight on, the exit's lanes to use tell the side: here the two right ones.
         assertEquals(mapOf("r/0/2/1" to true, "r/0/2/2" to false, "r/0/2/end" to false), edgeLeaves("straight"))
         // Lanes to use in the middle say no side: no edge points.
         val middle = listOf(lane(false), lane(true), lane(false), lane(false))
@@ -669,7 +671,7 @@ class LaneChoicesTest {
         assertEquals(RunUpLatch.EDGE, lanes.runUpStartKey)
         // The edge point's row: the second lane from the right lit, the car pool lane dim.
         assertEquals("r/0/2/2", first.key)
-        assertEquals(listOf(false, false, false, true, false), first.lit())
+        assertEquals(listOf(false, false, false, false, true, false), first.lit())
         assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), first.target)
         assertNull(first.odd)
         assertEquals(1, first.need)
@@ -677,12 +679,13 @@ class LaneChoicesTest {
         // The same row, the same object, while the car drives on to it.
         assertSame(first, lanes.at(onStep = 25.0, toExit = 2_075.0, t = 2.0))
         assertSame(first, lanes.at(onStep = 400.0, toExit = 1_700.0, t = 16.0))
-        // Past it: the exit's own lanes, the right lane in words.
+        // Past it: the exit's own lanes, the two right lanes in words.
         val exit = requireNotNull(lanes.at(onStep = 450.0, toExit = 1_650.0, t = 18.0))
         assertEquals("r/0/2/end", exit.key)
-        assertEquals(listOf(false, false, false, false, false, true), exit.lit())
-        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), exit.target)
+        assertEquals(listOf(false, false, false, false, false, true, true), exit.lit())
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 2, 0), exit.target)
         assertEquals(TurnModifier.SLIGHT_RIGHT, exit.lanes.lanes[5].activeIndication)
+        assertEquals(TurnModifier.SLIGHT_RIGHT, exit.lanes.lanes[6].activeIndication)
         assertTrue(exit.lanes.lanes[0].designated)
         assertFalse(exit.lanes.lanes[0].isRecommended)
         assertSame(exit, lanes.at(onStep = 900.0, toExit = 100.0, t = 50.0))
@@ -769,7 +772,7 @@ class LaneChoicesTest {
     @Test
     fun `on a run-up the card shows its row and no lane choice ahead`() {
         // A split 600 m in where two lanes leave on the right: a lane choice, and an edge point.
-        val split = listOf(hov, lane(true), lane(true), lane(false), lane(false))
+        val split = listOf(hov, lane(true), lane(true), lane(true), lane(false), lane(false))
         val lanes = LaneChoices()
         val step = listOf(intersection(0), intersection(6, split))
         fun at(onStep: Double, toExit: Double, t: Double): Pair<RunUpLanes?, Distance?> {
@@ -832,11 +835,11 @@ class LaneChoicesTest {
         assertEquals(emptyList<DivergeWatch.Branch>(), lanes.branchesAhead(metersOnStep = 2 * spacing + 1.0))
         assertNull(withheld.target)
         assertEquals(RunUpRule.ODD_UNKNOWN_BRANCH, withheld.odd)
-        assertEquals(listOf(false, false, false, false, false, true), withheld.lit(), "lit as the data says")
+        assertEquals(listOf(false, false, false, false, false, true, true), withheld.lit(), "lit as the data says")
         assertSame(withheld, at(onStep = 2 * spacing, toExit = 500.0, t = 1.0), "at the road itself")
         val passed = requireNotNull(at(onStep = 2 * spacing + 1.0, toExit = 499.0, t = 2.0))
         assertNull(passed.odd)
-        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), passed.target)
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 2, 0), passed.target)
     }
 
     @Test

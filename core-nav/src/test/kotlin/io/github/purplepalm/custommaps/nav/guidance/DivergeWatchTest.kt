@@ -11,8 +11,8 @@ import org.junit.jupiter.api.Test
 /**
  * Diverges taken and missed on a made-up freeway step of a route "r": five lanes, points before an
  * exit on the right at the rounded, synthetic distances of the lane design (2,000 m, 1,500 m,
- * 1,470 m, 1,460 m, 1,440 m and 400 m before the gore), at 25 rising to 29 m/s. The route starts
- * 5,000 m before the gore.
+ * 1,470 m, 1,460 m, 1,440 m and 400 m before the gore), at 25 rising to 29 m/s; the exit takes the
+ * two right lanes of six. The route starts 5,000 m before the gore.
  */
 class DivergeWatchTest {
 
@@ -20,15 +20,15 @@ class DivergeWatchTest {
     private class Spot(val key: String, val beforeGore: Double, val usable: Int, val edge: Boolean)
 
     private val spots = listOf(
-        // One lane at the exit's side leaves: an edge point, no lane choice.
+        // The lane at the exit's side leaves: an edge point, no lane choice.
         Spot("r/0/2/1", 2_000.0, usable = 4, edge = true),
-        // Two lanes at the exit's side leave: a lane choice and an edge point, four points as one.
+        // The lanes at both sides leave: a lane choice and an edge point, four points as one.
         Spot("r/0/2/2", 1_500.0, usable = 3, edge = true),
         Spot("r/0/2/3", 1_470.0, usable = 3, edge = true),
         Spot("r/0/2/4", 1_460.0, usable = 3, edge = true),
         Spot("r/0/2/5", 1_440.0, usable = 3, edge = true),
-        // Three lanes leave on the far side: a lane choice only.
-        Spot("r/0/2/6", 400.0, usable = 2, edge = false),
+        // Two lanes leave on the far side: a lane choice only.
+        Spot("r/0/2/6", 400.0, usable = 3, edge = false),
     )
 
     private fun choice(key: String, metersAhead: Double, usable: Int, edge: Boolean = false, atManeuver: Boolean = false, lanes: Int = 5) =
@@ -37,7 +37,7 @@ class DivergeWatchTest {
     /** The points ahead of a car [toGore] meters before the gore, nearest first, and the exit. */
     private fun ahead(toGore: Double): List<LaneChoice> =
         spots.filter { toGore - it.beforeGore >= 0.0 }.map { choice(it.key, toGore - it.beforeGore, it.usable, it.edge) } +
-            choice("r/0/2/end", toGore, usable = 1, atManeuver = true, lanes = 6)
+            choice("r/0/2/end", toGore, usable = 2, atManeuver = true, lanes = 6)
 
     /** An update on the step before the exit. */
     private fun before(
@@ -47,7 +47,7 @@ class DivergeWatchTest {
         probability: Double? = 0.9,
         side: Double? = -0.5,
         card: String? = "run_up",
-        words: String? = "R1",
+        words: String? = "R2",
         runUp: String? = "r/0/2/end",
         branches: List<DivergeWatch.Branch> = emptyList(),
         uncertain: Boolean = false,
@@ -126,7 +126,7 @@ class DivergeWatchTest {
     }
 
     @Test
-    fun `the exit missed on the shape of the lane design's drive, one line for the step change and none for the last point`() {
+    fun `the exit missed on the lane design's approach, one line for the step change and none for the last point`() {
         val watch = DivergeWatch()
         val end = DoubleArray(1)
         val lines = watch.feed(approach(from = 2_100.0, end = end)).toMutableList()
@@ -157,9 +157,9 @@ class DivergeWatchTest {
                 "key" to "r/0/2/end",
                 "freeway" to true,
                 "lanes" to 6,
-                "usable" to 1,
+                "usable" to 2,
                 "card" to "run_up",
-                "words" to "R1",
+                "words" to "R2",
                 "runUp" to "r/0/2/end",
                 "advanced" to true,
                 "sinceS" to 9.0,
@@ -369,7 +369,7 @@ class DivergeWatchTest {
         val watch = DivergeWatch()
         watch.onProgress(before(0.0, toGore = 410.0, card = "choice", words = null, runUp = null))
         // The point is passed; this update's card already shows the next row.
-        watch.onProgress(before(1.0, toGore = 385.0, card = "run_up", words = "R1", runUp = "r/0/2/end", speed = 27.5, probability = null, side = null))
+        watch.onProgress(before(1.0, toGore = 385.0, card = "run_up", words = "R2", runUp = "r/0/2/end", speed = 27.5, probability = null, side = null))
         val missed = requireNotNull(watch.onOffRoute(3.0, null, null, null, null))
         assertEquals("choice", missed.fields["kind"])
         assertEquals("r/0/2/6", missed.fields["key"])

@@ -1371,18 +1371,19 @@ kilometre and more. **Until the app draws the lanes itself, the lane the route l
 nothing; the card's words are the instruction.** The next drive asks at each exit whether the line
 or the card was followed ([DRIVES.md](DRIVES.md), What the next drive tests).
 
-**In synthetic replays** (one update a second, 30 frames a second; points 2,000 m, 1,500 m,
-1,470 m, 1,460 m, 1,440 m and 400 m before the gore of an exit to the right, 25 rising to 29 m/s,
-the same shape as the missed exit with rounded numbers):
+**In synthetic replays** (one update a second, 30 frames a second; a made-up approach with points
+2,000 m, 1,500 m, 1,470 m, 1,460 m, 1,440 m and 400 m before the gore of an exit to the right, five
+lanes at each point, an exit that takes the two right lanes of six, and 25 rising to 29 m/s):
 
 - With the code before the run-up: in at 2,125 m, out at 1,349 m, in again at 1,039 m, 72 s close,
   as little as 6.8 s of road ahead in the last 600 m, and six changes of the card's row.
 - With the run-up: in once at 2,125 m and out 2 s after the gore, about 70 to 100 m past it, 84 s
   close, at least 12 s of road ahead, lanes of 12.2 to 12.9 dp at the car in the last 600 m. Where
-  the first point's right lane and the next points' two right lanes leave there, the card shows the
-  first point's row with the leftmost general lane lit and no words (a lane is added between the
-  two points, and its side is not known), "3rd from right" from 2,000 m and "Right lane" from about
-  1,425 m; where their left lanes leave instead, one row, "Right lane", from 2,125 m to the gore.
+  the right lane leaves at the first point, and the right and the left lane at the next points,
+  the card shows the first point's row with the middle lane lit and no words (a lane is added
+  between the two points, and its side is not known), "2nd from right" from 2,000 m and "2 right"
+  from about 1,425 m; where the lanes leave on the left instead, one row, "2 right", from 2,125 m
+  to the gore.
 - At 15 m/s: in at 1,900 m, 130 s close. With Default: the road's zoom throughout.
 - Two exits close together, the second taken, at 27 m/s: in at the reach, about 2,290 m before the
   second, since the first one's gore ahead is an edge point; "2nd from right", then "Right lane".

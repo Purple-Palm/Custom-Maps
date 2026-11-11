@@ -9,16 +9,16 @@ import org.junit.jupiter.api.Test
 class RunUpLatchTest {
     private val tuning = CameraTuning.PHONE
 
-    /** An exit that counts: five lanes, one of them usable, and a car pool lane. */
-    private fun exit(ahead: Double, route: String = "r1", lanes: Int = 5, usable: Int = 1, freeway: Boolean = true) =
-        LaneChoice("$route/0/3/end", ahead, lanes, usable, designatedLanes = 1, onFreeway = freeway, atManeuver = true)
+    /** An exit that counts: six lanes, two of them usable. */
+    private fun exit(ahead: Double, route: String = "r1", lanes: Int = 6, usable: Int = 2, freeway: Boolean = true) =
+        LaneChoice("$route/0/3/end", ahead, lanes, usable, designatedLanes = 0, onFreeway = freeway, atManeuver = true)
 
-    /** A point on the way: by default four lanes, two of them usable, which counts. */
-    private fun point(ahead: Double, key: String, lanes: Int = 4, usable: Int = 2, edgeLeaves: Boolean = false) =
-        LaneChoice("r1/0/3/$key", ahead, lanes, usable, designatedLanes = 1, onFreeway = true, atManeuver = false, edgeLeaves = edgeLeaves)
+    /** A point on the way: by default five lanes, three of them usable, which counts. */
+    private fun point(ahead: Double, key: String, lanes: Int = 5, usable: Int = 3, edgeLeaves: Boolean = false) =
+        LaneChoice("r1/0/3/$key", ahead, lanes, usable, designatedLanes = 0, onFreeway = true, atManeuver = false, edgeLeaves = edgeLeaves)
 
     /** A point on the way where one lane, the one at the exit's side, leaves: no lane choice of its own. */
-    private fun edge(ahead: Double, key: String) = point(ahead, key, lanes = 4, usable = 3, edgeLeaves = true)
+    private fun edge(ahead: Double, key: String) = point(ahead, key, lanes = 5, usable = 4, edgeLeaves = true)
 
     @Test
     fun `the reach is the window and a minute of driving, at least 1,500 m`() {
@@ -80,7 +80,7 @@ class RunUpLatchTest {
         val cases = mapOf(
             "two lanes" to exit(2_000.0, lanes = 2),
             "no usable lane" to exit(2_000.0, usable = 0),
-            "every lane usable" to exit(2_000.0, usable = 5),
+            "every lane usable" to exit(2_000.0, usable = 6),
             "a town road" to exit(2_000.0, freeway = false),
             "beyond reach" to exit(2_200.0),
         )

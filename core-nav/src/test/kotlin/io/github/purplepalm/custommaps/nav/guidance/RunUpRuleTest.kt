@@ -384,9 +384,9 @@ class RunUpRuleTest {
     @Test
     fun `a road without lane data on the exit's side keeps the words back until it is passed (S17)`() {
         // Exits close together: the route takes exit B, and exit A, 300 m before it, has no lanes.
-        val s17 = Approach(right, emptyList(), listOf(hov(), s(false), s(false), s(false), sr()), branches = listOf(300.0))
-        assertEquals("E [H s s s sr*] '' odd=unknown_branch", describe(s17.rowAt(900.0)))
-        assertEquals("E [H s s s sr*] 'Right lane'", describe(s17.rowAt(299.0)))
+        val s17 = Approach(right, emptyList(), listOf(s(false), s(false), s(false), s(false), sr()), branches = listOf(300.0))
+        assertEquals("E [s s s s sr*] '' odd=unknown_branch", describe(s17.rowAt(900.0)))
+        assertEquals("E [s s s s sr*] 'Right lane'", describe(s17.rowAt(299.0)))
         // A row that has no words for its own reason keeps that reason.
         val inexact = Approach(
             right,
@@ -401,15 +401,18 @@ class RunUpRuleTest {
     // ------------------------------------------------------------------ the design's approaches
 
     /**
-     * The brief-shaped approach of the design (synthetic, rounded): a car pool lane on the left and
-     * four lanes; points at 2,000 m (P0), 1,500, 1,470, 1,460 and 1,440 m (P1a to P1d, one
-     * junction) and 400 m (P2); the exit on the right takes the rightmost of five lanes.
+     * The lane design's approach at its rounded, synthetic distances, on made-up lanes: points at
+     * 2,000 m (P0), 1,500, 1,470, 1,460 and 1,440 m (P1a to P1d, one junction) and 400 m (P2)
+     * before the gore, five lanes at each; the exit on the right takes the two right lanes of six.
+     * On the exit's side ([onExitSide]) the right lane leaves at P0, the right and the left lane
+     * at P1; on the far side the left lane leaves at P0 and the two left lanes at P1. The two left
+     * lanes leave at P2 either way.
      */
-    private fun briefShaped(rightLanesLeave: Boolean): Approach {
-        fun four(vararg valid: Boolean) = arrayOf(hov(), *valid.map { s(it) }.toTypedArray())
-        val p0 = if (rightLanesLeave) four(true, true, true, false) else four(false, true, true, true)
-        val p1 = if (rightLanesLeave) four(true, true, false, false) else four(false, false, true, true)
-        val p2 = four(false, false, false, true)
+    private fun designApproach(onExitSide: Boolean): Approach {
+        fun five(vararg valid: Boolean) = valid.map { s(it) }.toTypedArray()
+        val p0 = if (onExitSide) five(true, true, true, true, false) else five(false, true, true, true, true)
+        val p1 = if (onExitSide) five(false, true, true, true, false) else five(false, false, true, true, true)
+        val p2 = five(false, false, true, true, true)
         return Approach(
             right,
             listOf(
@@ -420,32 +423,33 @@ class RunUpRuleTest {
                 at(1_440.0, "P1d", *p1),
                 at(400.0, "P2", *p2),
             ),
-            listOf(hov(), s(false), s(false), s(false), s(false), sr()),
+            listOf(s(false), s(false), s(false), s(false), sr(), sr()),
         )
     }
 
     @Test
-    fun `the brief-shaped approach where the right lanes leave on the way (S1)`() {
-        val s1 = briefShaped(rightLanesLeave = true)
-        // From where the run-up begins: P0's row on the leftmost open lane, no words, as a lane
-        // was added between P0 and P1 and its side is not known.
-        assertEquals("P0 [H s* s s s] '' odd=composed", describe(s1.rowAt(2_125.0)))
-        // Past P0: P1's row, the second open lane of four.
-        assertEquals("P1d [H s s* s s] '3rd from right'", describe(s1.rowAt(1_999.0)))
+    fun `the design's approach where lanes leave on the exit's side on the way (S1)`() {
+        val s1 = designApproach(onExitSide = true)
+        // From where the run-up begins: P0's row on the middle lane, no words, as a lane was added
+        // between P0 and P1 and its side is not known.
+        assertEquals("P0 [s s s* s s] '' odd=composed", describe(s1.rowAt(2_125.0)))
+        assertEquals(2, s1.rowAt(2_125.0)?.need)
+        // Past P0: P1's row, the second lane from the right.
+        assertEquals("P1d [s s s s* s] '2nd from right'", describe(s1.rowAt(1_999.0)))
         // The same row while P1's points are passed one by one: the same lanes, words and key.
         assertEquals(s1.rowAt(1_999.0), s1.rowAt(1_469.0))
         assertEquals(s1.rowAt(1_999.0), s1.rowAt(1_441.0))
-        // Past P1: the exit's own lane, the rightmost; P2 on the way agrees with it.
-        assertEquals("E [H s s s s sr*] 'Right lane'", describe(s1.rowAt(1_439.0)))
-        assertEquals("E [H s s s s sr*] 'Right lane'", describe(s1.rowAt(399.0)))
+        // Past P1: the exit's own lanes, the two right ones; P2 on the way agrees with them.
+        assertEquals("E [s s s s sr* sr*] '2 right'", describe(s1.rowAt(1_439.0)))
+        assertEquals("E [s s s s sr* sr*] '2 right'", describe(s1.rowAt(399.0)))
         assertEquals(s1.rowAt(1_439.0), s1.rowAt(1.0))
     }
 
     @Test
-    fun `the brief-shaped approach where the left lanes leave on the way (S2)`() {
-        val s2 = briefShaped(rightLanesLeave = false)
+    fun `the design's approach where lanes leave on the far side on the way (S2)`() {
+        val s2 = designApproach(onExitSide = false)
         for (toGore in listOf(2_125.0, 1_999.0, 1_469.0, 1_439.0, 399.0, 0.0)) {
-            assertEquals("E [H s s s s sr*] 'Right lane'", describe(s2.rowAt(toGore)), "$toGore m before the gore")
+            assertEquals("E [s s s s sr* sr*] '2 right'", describe(s2.rowAt(toGore)), "$toGore m before the gore")
         }
     }
 
@@ -480,15 +484,15 @@ class RunUpRuleTest {
     @Test
     fun `exits close together, the second one taken (S9)`() {
         // Exit A's gore 300 m before exit B takes the right lane.
-        val s9 = Approach(right, listOf(at(300.0, "A", hov(), s(), s(), s(), sr(false))), listOf(hov(), s(false), s(false), s(false), sr()))
-        assertEquals("A [H s s s* sr] '2nd from right'", describe(s9.rowAt(2_200.0)))
-        assertEquals("E [H s s s sr*] 'Right lane'", describe(s9.rowAt(299.0)))
+        val s9 = Approach(right, listOf(at(300.0, "A", s(), s(), s(), s(), sr(false))), listOf(s(false), s(false), s(false), s(false), sr()))
+        assertEquals("A [s s s s* sr] '2nd from right'", describe(s9.rowAt(2_200.0)))
+        assertEquals("E [s s s s sr*] 'Right lane'", describe(s9.rowAt(299.0)))
     }
 
     @Test
     fun `within a run-up the words never name the far side`() {
         val approaches = listOf(
-            briefShaped(true), briefShaped(false),
+            designApproach(true), designApproach(false),
             Approach(left, listOf(at(1_200.0, "T1", sl(false), s(), s(), s(), s())), listOf(hov(), sl(), s(false), s(false))),
             Approach(right, listOf(at(500.0, "D", s(), s(), s(), s(false))), listOf(s(false), s(false), s(false), sr())),
         )
