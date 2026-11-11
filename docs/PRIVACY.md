@@ -121,8 +121,10 @@ The app is meant for adult drivers and is not directed to children.
 - **In your Google account:** uninstalling does not delete Android's backup of the settings and the
   trip session log, and it is restored when the app is installed again. It can be deleted with the
   phone's backup in the backup settings of that account.
-- **At Mapbox:** use Mapbox's [data request form](https://www.mapbox.com/legal/ccpa-deletion-request);
-  the [Mapbox Privacy Policy](https://www.mapbox.com/legal/privacy) describes your other rights.
+- **At Mapbox:** to have it deleted, use Mapbox's
+  [data request form](https://www.mapbox.com/legal/ccpa-deletion-request); for your other rights,
+  which the [Mapbox Privacy Policy](https://www.mapbox.com/legal/privacy) describes, write to
+  Mapbox's privacy office at privacy@mapbox.com.
 - **With the developer:** the app sends the developer nothing to delete, and Google keeps the Play
   Console reports under its own privacy policy. To be taken off the testers list, or to have a debug
   log you sent to the developer deleted, ask the developer (see [Contact](#contact)). Any other debug
