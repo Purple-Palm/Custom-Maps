@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.mapbox.api.directions.v5.models.LegStep
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.api.directions.v5.models.StepIntersection
+import com.mapbox.api.directions.v5.models.StepManeuver
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.route.NavigationRoute
@@ -11,6 +12,9 @@ import com.mapbox.navigation.base.route.RouterFailure
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.utils.DecodeUtils.stepsGeometryToPoints
 import com.mapbox.navigation.core.trip.session.LocationMatcherResult
+import io.github.purplepalm.custommaps.engine.mapbox.map.StepShapes
+import io.github.purplepalm.custommaps.nav.camera.Bend
+import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.geo.Geo
 
@@ -92,6 +96,7 @@ private const val SEVERE_CONGESTION = 80
 
 private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
     val maneuver = maneuver()
+    val bend = stepBend(maneuver.type(), maneuver.bearingBefore(), shape)
     return mapOf(
         "road" to name(),
         "ref" to ref(),
@@ -111,7 +116,24 @@ private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
             ?.filter { it.type() == "lane" }
             ?.map { mapOf("directions" to it.directions(), "active" to it.active(), "activeDirection" to it.activeDirection()) },
         "laneIntersections" to laneIntersectionFields(intersections().orEmpty(), shape),
+        // Which way the road runs into and out of the maneuver, and where it bends after it: numbers only.
+        "bearingBefore" to maneuver.bearingBefore(),
+        "bearingAfter" to maneuver.bearingAfter(),
+        "bendM" to bend?.meters?.let { Motion.round(it, 1) },
+        "bendDeg" to bend?.degrees?.let { Motion.round(it, 1) },
     )
+}
+
+/**
+ * Where the road of a step bends after its maneuver point, as the junction's frame with Large finds
+ * it ([StepShapes.bendOf]): how often a step begins well before its bend, and at what angle, can be
+ * counted from the log. Null for the departure, which has no way in, and without the bearing in.
+ *
+ * @param shape the points of the step, from its maneuver point
+ */
+internal fun stepBend(type: String?, bearingBefore: Double?, shape: List<Point>): Bend? {
+    if (type == StepManeuver.DEPART || bearingBefore == null) return null
+    return StepShapes.bendOf(shape, bearingBefore, CameraTuning.PHONE)
 }
 
 /**
