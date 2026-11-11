@@ -180,9 +180,10 @@ internal class OfflineData(
     }
 
     /**
-     * A trip began on the previewed routes. What [downloadPreview] started goes on into the trip
-     * until it is done: the map along the routes for a phone that loses its network soon after
-     * Start. It starts no trip session and asks for no route.
+     * A trip's session began on the previewed routes. What [downloadPreview] started goes on into
+     * the trip until it is done: the map along the routes for a phone that loses its network soon
+     * after Start. It starts no trip session and asks for no route. A start whose routes were
+     * refused never gets here, and its preview's download goes on as a preview's.
      */
     fun onTripStarted() {
         tripRunning = true

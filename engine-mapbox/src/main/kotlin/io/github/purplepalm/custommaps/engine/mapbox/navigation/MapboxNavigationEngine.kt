@@ -594,8 +594,6 @@ internal class MapboxNavigationEngine(
         val navigation = navigation
         when (command) {
             is GuidanceCommand.CommitRoutes -> {
-                // The preview's download goes on into the drive until it is done.
-                offlineData.onTripStarted()
                 // Keeps the navigator alive for the drive, even without a screen.
                 MapboxNavigationApp.attach(guidanceLifecycle)
                 // A new drive: the Then chip and the lane choices know nothing of the last one.
@@ -637,6 +635,8 @@ internal class MapboxNavigationEngine(
                 staleStart.begin()
                 lastMatch = null
                 beginTripTally(command.simulated)
+                // The preview's download goes on into the drive until it is done.
+                offlineData.onTripStarted()
                 if (command.simulated) {
                     replaying = true
                     navigation?.let(replay::onAttached)
