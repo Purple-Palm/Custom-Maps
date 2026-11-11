@@ -299,11 +299,8 @@ fun MapScreen(
         }
 
         // The offline chip under the search bar. It is no part of the column above, so nothing
-        // that is measured there changes when it comes or goes. Not over an open list of
-        // suggestions, which can reach down to the strip of the Mapbox logo, and not in the route
-        // preview, where it would lie over the far end of the routes on the map.
-        val searchBarShown = state.guidance == GuidanceState.IDLE || state.guidance == GuidanceState.ARRIVED
-        if (searchBarShown && state.suggestions.isEmpty()) {
+        // that is measured there changes when it comes or goes.
+        if (showsOfflineSentence(state.guidance, suggestionsShown = state.suggestions.isNotEmpty())) {
             OfflineChipSlot(
                 reason = offline,
                 onOpenSettings = { context.openDataSettings(debugLog) },
@@ -428,6 +425,16 @@ private fun OfflineChipSlot(
         DisposableEffect(Unit) { onDispose { onBottomChanged(0) } }
     }
 }
+
+/**
+ * Whether the offline chip may show as the whole sentence under the search bar: only while the
+ * search bar is there, before a drive and at the arrival. Not over an open list of suggestions,
+ * which can reach down to the strip of the Mapbox logo, and not in the route preview, where it
+ * would lie over the far end of the routes on the map. During guidance the chip is the tab under
+ * the maneuver card instead, which only the guidance panel shows.
+ */
+internal fun showsOfflineSentence(guidance: GuidanceState, suggestionsShown: Boolean): Boolean =
+    (guidance == GuidanceState.IDLE || guidance == GuidanceState.ARRIVED) && !suggestionsShown
 
 /**
  * How far down from the top of the map the top of the screen reaches, for the compass to sit
