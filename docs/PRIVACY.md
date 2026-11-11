@@ -14,9 +14,9 @@ Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#ch
   and it sends the developer nothing. Google Play shows the developer some reports that Google itself
   collects; see [No other third party](#no-other-third-party).
 - Maps, routes, traffic and search come from Mapbox. To provide them, the Mapbox software inside the
-  app sends Mapbox the phone's location, what you search for, where you plan routes to, your Mapbox
-  access token, and usage and device details. You can turn off Mapbox's telemetry with the (i) button
-  on the map.
+  app sends Mapbox the phone's location, what you search for, where you plan routes to, the Mapbox
+  access token in use, and usage and device details. You can turn off Mapbox's telemetry with the
+  (i) button on the map.
 - Everything else stays on the phone, with two exceptions: Android's backup copies the settings and
   the trip session log to your Google account, and a debug log leaves the phone when you share it.
   Uninstalling the app deletes everything it keeps on the phone, but not that backup, which comes
@@ -24,17 +24,20 @@ Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#ch
 
 ## What stays on the phone
 
-- **Your Mapbox access token**, which you create in your own Mapbox account and enter yourself. It is
-  stored only in the app's private storage, never in backups or device transfers, and never in the
-  debug log.
+- **Your Mapbox access tokens**, up to five, which you create in a Mapbox account and enter
+  yourself, each under a name you give it. Only one is used at a time, the one you choose in
+  Settings. Each token names the Mapbox account that is billed for what the app does with it. They
+  are stored only in the app's private storage, never in backups or device transfers, and never in
+  the debug log, which names the token in use only by its place in the list and its name.
 - **Settings:** camera style, lane zoom, lane details and the simulated drive switch.
-- **The trip session log:** when each guidance session started, its kind and whether it was
-  simulated; the last 500 at most. It holds no places.
+- **The trip session log:** when each guidance session started, its kind, whether it was
+  simulated, and a random id the app gave the token it ran on, never the token itself; the last 500
+  at most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads, the position, speed and road
   every second of guidance, a summary of each drive (how it ended, its length and time, and the data
   and battery it used), what was searched and found, settings changes, the phone's state (model,
-  Android version, battery, heat, memory, network) and crashes. It never holds the token. Days that
+  Android version, battery, heat, memory, network) and crashes. It never holds a token. Days that
   are over are kept compressed on the phone, and when the log grows past 50 MB the oldest days are
   deleted. It leaves the phone only when you tap **Share debug log** in Settings and pick an app,
   which gets it as plain text; from then on that app's own terms apply.
@@ -63,10 +66,10 @@ over encrypted connections (HTTPS):
   performance with device details (model, Android version, mobile carrier and network type, battery,
   screen and audio state), counts of the features used, and navigation events such as the start of a
   route, arrival, cancelling and new routes.
-- **With every request:** your access token, which also names the Mapbox account it belongs to; the
-  phone's IP address; the app's identifier and the versions of the Mapbox software; and random
-  identifiers that Mapbox uses for billing. Mapbox counts the usage against the Mapbox account the
-  token belongs to.
+- **With every request:** the access token in use, which also names the Mapbox account it belongs
+  to; the phone's IP address; the app's identifier and the versions of the Mapbox software; and
+  random identifiers that Mapbox uses for billing. Mapbox counts the usage against the Mapbox
+  account the token belongs to. The other saved tokens are not sent.
 
 Mapbox uses this data to provide, secure and improve its services, to prevent fraud and to bill, and
 to compute de-identified, aggregated data such as traffic. Mapbox says that it does not sell personal
@@ -85,7 +88,7 @@ the map, routes, guidance and search. Those requests, and the count of monthly u
 by, continue. The app never turns telemetry off on its own; Mapbox's terms leave that choice to you.
 
 The same dialog offers **Improve This Map**, which opens Mapbox's map feedback page in your browser;
-its address holds the area on screen and your access token.
+its address holds the area on screen and the access token in use.
 
 ## Permissions
 
@@ -118,8 +121,9 @@ The app is meant for adult drivers and is not directed to children.
 ## Deleting your data
 
 - **On the phone:** **Clear** under Settings, Debug log deletes the debug log and the copies made
-  for sharing. **Remove token** deletes the token. Uninstalling the app deletes everything it keeps
-  on the phone, including the map data Mapbox saved for it.
+  for sharing. **Delete** in a token's menu under Settings, Mapbox access token, deletes that
+  token. Uninstalling the app deletes everything it keeps on the phone, including the map data
+  Mapbox saved for it.
 - **In your Google account:** uninstalling does not delete Android's backup of the settings and the
   trip session log, and it is restored when the app is installed again. It can be deleted with the
   phone's backup in the backup settings of that account.

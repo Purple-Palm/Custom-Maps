@@ -31,12 +31,25 @@ alternatives are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 - The app needs a Mapbox **public** token (`pk.…`). Create one on the
   [Mapbox access tokens page](https://console.mapbox.com/account/access-tokens/); the default public scopes are enough.
-- No build contains the token: not debug builds, not CI builds, not Play builds. Enter it in the
-  app, either on first launch or later in **Settings → Mapbox access token**, where it can also be
-  replaced or removed.
-- The token is stored only on the phone, in the app's private storage. It is excluded from cloud
-  backups and from device-to-device transfers, so after a reinstall or on a new phone it has to be
-  entered again.
+- No build contains a token: not debug builds, not CI builds, not Play builds. Enter it in the
+  app, either on first launch or later in **Settings → Mapbox access token**.
+- The app keeps up to five tokens, for example a main one and a test one, each under a name you
+  give it; the first is called **Main**, and after the update the token entered before is Main.
+  Only one is used at a time, the **Active** one, for the map, routes and search. To use another
+  one, tap it in Settings: the app asks first, then the map reloads with it. **Add token** adds one
+  (it is gone at five), and each token's menu renames or deletes it. Deleting the active token
+  makes the first one left active; deleting the last one brings back the first-launch screen.
+- The app never switches tokens by itself, and nobody can switch during a trip: while guidance
+  runs the active token cannot be changed or deleted and no token can be added, and Settings says
+  so. End the trip first. A trip session therefore always runs on one token, from Start to its end.
+- Each token belongs to a Mapbox account, and that account is billed for what the app does with
+  it. Mapbox's terms do not allow using several accounts to stay within a free monthly tier or to
+  pay less; the spare tokens are for choosing by hand which token is used, for example to start a
+  trip on the main token rather than the test one. **Settings → Debug** counts the month's trip
+  sessions for each token.
+- Tokens are stored only on the phone, in the app's private storage. They are excluded from cloud
+  backups and from device-to-device transfers, so after a reinstall or on a new phone they have to
+  be entered again. A build from before the list, installed over a newer one, finds no token.
 - Secret tokens (`sk.…`) are refused. Building the project needs no Mapbox token at all: the Mapbox
   Maven repository is public.
 
@@ -56,7 +69,7 @@ Every push to `main` builds a debug APK.
    token. The build from Google Play is named **Custom Maps**, so the two icons are told apart.
 
 Install newer builds over the installed one; do not uninstall first. Uninstalling deletes the
-token, and every new installation counts as one more monthly active user at Mapbox. Updating in
+tokens, and every new installation counts as one more monthly active user at Mapbox. Updating in
 place only works when all builds are signed with the same key, see the next section.
 **Settings → About** shows the version (`0.1.<run>` for a CI build) and the commit of the installed
 build.
@@ -83,7 +96,8 @@ The same builds also reach the phone through Google Play, where they update by t
    does **End Navigation** in the trip notification.
 
 The phone screen stays in portrait. If Mapbox refuses the token (mistyped or revoked), the map
-stays empty and the app says so, with a button to Settings where the token can be replaced.
+stays empty and the app says so, with a button to Settings, where another token can be added and
+chosen.
 
 ### Simulated drive
 
@@ -149,15 +163,16 @@ what could be read and then says so in an `export_error` line; the other days ar
 The log never leaves the phone otherwise: it is kept out of backups and device transfers, days that
 are over are kept compressed, the oldest days are deleted once it passes 50 MB on the phone, and
 **Clear** deletes it together with the copies made for sharing. The shared text
-files are several times larger than the size Settings shows. It never contains the Mapbox token;
-token-shaped text is masked in every line as a last safeguard.
+files are several times larger than the size Settings shows. It never contains a Mapbox token: it
+names the token in use only by its place in the list and its name. Token-shaped text is masked in
+every line as a last safeguard.
 
 Debug builds also offer **Settings → Debug → Crash now**, which closes the app as a crash would, to
 check on the phone that the crash and how the app ended are recorded.
 
 ### Backups
 
-Android backs up only the app's settings and its trip session log. The token, the debug log and
+Android backs up only the app's settings and its trip session log. The tokens, the debug log and
 the data the Mapbox SDKs keep on the phone (map and routing caches) stay out of cloud backups and
 device transfers. The app keeps no search history.
 
@@ -239,8 +254,8 @@ It is built from the same code as the debug APK, with four differences: its pack
 APK's is **Custom Maps Debug**), it is not debuggable (no **Crash now**), and it is signed with the
 upload key below and then by Google.
 
-The Play app and the debug APK are two apps: both can stay installed, each keeps its own token and
-settings (paste the token once more in the Play app), and each installation counts as one Mapbox
+The Play app and the debug APK are two apps: both can stay installed, each keeps its own tokens and
+settings (paste the tokens once more in the Play app), and each installation counts as one Mapbox
 monthly active user.
 
 ### The upload key and the release secrets
@@ -451,8 +466,9 @@ all signing secrets are optional.
 - The app starts a trip session only when you press Start, once the navigator has the route, so a
   drive is one active guidance session and never a free drive first. It stops the session on
   arrival and on End. From stage 2, when the car disconnects mid-drive, guidance continues on the
-  phone, so the session keeps running until arrival or End. Every start is logged, and **Settings → Debug** shows
-  the count for the month, the latest starts and a link to the
+  phone, so the session keeps running until arrival or End. Every start is logged with the token it
+  ran on, and **Settings → Debug** shows the count for the month, for each token too, the latest
+  starts and a link to the
   [Mapbox statistics page](https://console.mapbox.com/account/statistics/), which has the billed numbers.
   The log starts empty with each installation, so after one during the month the count says since
   which day it runs.

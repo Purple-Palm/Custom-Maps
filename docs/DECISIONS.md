@@ -51,7 +51,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Chosen:**
   - No build contains a token: debug, CI or Play.
-  - The driver pastes a public token on first launch or in Settings; Settings shows it only masked. The typed value never enters saved instance state.
+  - The driver pastes a public token on first launch or in Settings; Settings shows it only masked. The typed value never enters saved instance state. Up to five can be kept, one of them in use (47).
   - It is stored in a dedicated DataStore file. The backup rules include only the settings and the trip log (see 21), so that file is never backed up or transferred; a unit test keeps the rules in sync with the file paths.
   - The token reaches the SDKs at runtime through `MapboxOptions.accessToken`. Secret tokens are refused.
 - **Alternatives:** `resValue` from `local.properties`, or a GitHub secret built into CI APKs.
@@ -130,8 +130,8 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The map stays composed for the whole life of the activity. Settings opens on top of it.
   - The activity handles configuration changes such as resizing itself, so the map is not rebuilt for them.
   - A map created during a drive, after the app was reopened, draws the navigator's current route at once.
-  - Replacing or removing the token recreates the activity, so a new map and navigator use the new token. Replacing it is blocked during guidance.
-- **Why:** the Maps SDK releases a map only when its activity is destroyed, and rebuilding the navigator mid-drive would end the drive.
+  - Switching to another token or removing the last one recreates the activity, so a new map uses the new token. The navigator lives through the recreation, as through any configuration change, and reads the new token with its next request. Switching is blocked during guidance (47).
+- **Why:** the Maps SDK releases a map only when its activity is destroyed, and a new token in the middle of a drive would put the rest of its trip session on another token.
 
 ## 17. Search
 
@@ -146,7 +146,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 - **Simulated drive:** a switch in **Settings → Debug** replays the selected route instead of following GPS, for testing at home and in the Desktop Head Unit. It still starts a trip session, and that session is logged as simulated.
 - **Trip session log:**
-  - Every new trip session (its session id changes) is stored with its time and kind, up to 500 entries.
+  - Every new trip session (its session id changes) is stored with its time and kind, and the app's own id of the token it ran on (47), up to 500 entries.
   - Settings shows the count for the current month and the latest entries, plus a link to the Mapbox statistics page.
   - The count is an estimate; the Mapbox statistics page has the billed numbers.
 
@@ -531,3 +531,18 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The tilt draws more map far ahead: more data and frame time, no new bill.
   - The lane that serves a split right after the exit is not shown; that is for the app's own drawing of the lanes.
   - None of it has run on a phone yet.
+
+## 47. Spare tokens, switched by hand
+
+- **Chosen (owner, 2026-11-11):** up to five Mapbox public tokens on the phone, each with a name the driver gives it, one of them active, chosen by hand in **Settings → Mapbox access token**: spare tokens just in case, for example to start a trip on the main token rather than the test one. The first is Main; after the update the one token entered before becomes Main.
+  - **Never switched by the app.** Nothing switches on an error, a refused token, a count or anything else, and nothing compares or adds up free tiers. Mapbox's terms do not allow using several accounts to stay within a free monthly tier or to pay less; the list is only for choosing by hand which token is used.
+  - **Never during a trip.** While guidance runs the active token can be neither switched nor deleted, and no token added; Settings says why. A change that arrives all the same waits for the trip to end, so a trip session runs on one token from its start to its end. A switch while routes are previewed closes the preview, whose routes were asked for with the other token.
+  - **A switch recreates the map,** as replacing the token did (16). It asks for nothing and starts no trip session by itself: the next search, route request and map tile go out with the new token.
+  - **Stored as before** (6), in the one DataStore file that backups and transfers leave out: the list and the active token's id. The first read after the update moves the old token into the list in two writes, the list first and the old key last, so a process that dies in between loses nothing and adds nothing twice.
+  - **Trip sessions by token.** Each session in the trip log keeps a random id the app gave the token, never the token, and **Settings → Debug** counts the month's sessions under each token's name. Sessions of deleted tokens count together as "Deleted token", those logged before the update as "Before tokens were named". The debug log names the token in use only by its place in the list and its name.
+- **Alternatives:**
+  - Moving on to the next token when one is refused or a count is reached: that spreads usage over accounts, which Mapbox's terms forbid, and the owner does not want it.
+  - Keeping a deleted token's name for its past sessions: the names would have to outlive the tokens somewhere else, and the trip log comes back from a backup without the tokens anyway, with ids that then name nothing.
+  - Showing the Mapbox account each token belongs to, read from the token itself: left out. Its tests would need token-shaped fixtures that secret scanners flag, the account name is personal, and the driver names each token.
+  - Handing a switched token over in the middle of a trip: every SDK reads the token with each request, so the rest of the session (reroutes, traffic updates, tiles) would go to the other token.
+- **Cost:** tokens are entered on each phone and in each app (the Play app and the debug app keep their own lists). A build from before the list, installed over a newer one, finds no token. Five at most.
