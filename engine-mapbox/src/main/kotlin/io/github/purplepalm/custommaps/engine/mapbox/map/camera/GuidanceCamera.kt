@@ -59,6 +59,14 @@ internal interface GuidanceCamera {
     fun onLocation(location: Location, isTeleport: Boolean)
 
     /**
+     * The car was put somewhere else along the route, as a seek of a simulated drive puts it; the
+     * next position, a jump, is where it is now. What the camera keeps of the road it was on (the
+     * view down onto a maneuver, the close view for lanes, the last junction's zoom) is let go
+     * from where it is, so the camera starts from the new place as if it had come there by road.
+     */
+    fun onJump()
+
+    /**
      * The route progress of the same update of the navigator; it comes right after the location.
      * [laneChoices] are the points with lanes ahead of the car at this update, as the engine reads
      * them from the route; the Large lane zoom goes close for the ones that count.

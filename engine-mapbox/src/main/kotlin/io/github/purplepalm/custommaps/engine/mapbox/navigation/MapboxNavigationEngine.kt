@@ -1021,6 +1021,12 @@ internal class MapboxNavigationEngine(
     }
 
     /**
+     * How many seeks have moved a simulated drive in this run of the app. The first position after
+     * the count changed that [carriesOldPosition] lets through is where the seek put the car.
+     */
+    internal val replaySeeks: Int get() = seekHold.seeks
+
+    /**
      * Writes a "lane_choice" line for each point with lanes that has come as near as the close
      * view's start: once for each point, with its lane counts, and with the reason when the view
      * stays as it is for it. With every camera style and either lane zoom, so a drive shows how

@@ -389,6 +389,14 @@ internal class SmoothNavigationCamera(
         requestFrame()
     }
 
+    override fun onJump() {
+        val now = now()
+        maneuverFocus.reset(now)
+        laneFocus.reset(now)
+        zoomPlanner.reset()
+        requestFrame()
+    }
+
     override fun setLaneZoom(mode: LaneZoom) {
         if (mode == laneZoom) return
         laneZoom = mode

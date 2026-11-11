@@ -51,9 +51,13 @@ internal class GuidancePuck : LocationProvider {
         }
     }
 
-    fun onFix(result: LocationMatcherResult) {
+    /**
+     * A new matched position. With [jump] the car was put somewhere else, as a seek of a simulated
+     * drive puts it: the puck goes there at once in every camera style, never across the map.
+     */
+    fun onFix(result: LocationMatcherResult, jump: Boolean = false) {
         val location = result.enhancedLocation
-        if (!jumpOnTeleport || !result.isTeleport) {
+        if (!jump && (!jumpOnTeleport || !result.isTeleport)) {
             provider.changePosition(location, result.keyPoints, null, null)
             return
         }

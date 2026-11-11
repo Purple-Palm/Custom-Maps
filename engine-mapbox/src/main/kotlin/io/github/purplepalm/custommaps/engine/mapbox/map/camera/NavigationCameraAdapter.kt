@@ -236,6 +236,11 @@ internal class NavigationCameraAdapter(
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
     }
 
+    override fun onJump() {
+        // Mapbox standard keeps nothing of the road; Mapbox tuned only the lane choices' schedule.
+        if (tuned) laneFocus.reset(nowSeconds())
+    }
+
     override fun setLaneZoom(mode: LaneZoom) {
         // The limits follow with the next progress update.
         laneZoom = mode

@@ -221,6 +221,12 @@ class PhoneMap internal constructor(
      */
     private var oldPosition = false
 
+    /**
+     * The seeks of a simulated drive this map has seen. The first position after another one is
+     * where the seek put the car: the drawn car and the camera go there at once.
+     */
+    private var seenSeeks = engine.replaySeeks
+
     /** Whether the map is on screen, as the hosting screen says with [setVisible]. */
     private var visible = false
 
@@ -311,11 +317,16 @@ class PhoneMap internal constructor(
             // line with the update that comes with it.
             oldPosition = engine.carriesOldPosition(locationMatcherResult)
             if (oldPosition) return
+            val seek = engine.replaySeeks != seenSeeks
+            seenSeeks = engine.replaySeeks
             fixes += 1
             lastFixAt = SystemClock.elapsedRealtimeNanos()
             lastKeyPoints = locationMatcherResult.keyPoints.size
-            guidancePuck.onFix(locationMatcherResult)
-            camera.onLocation(locationMatcherResult.enhancedLocation, locationMatcherResult.isTeleport)
+            // A seek put the car here: the camera lets go of the road it was on, and both go there
+            // at once and glide on from the new place, like after a jump of the navigator's.
+            if (seek) camera.onJump()
+            guidancePuck.onFix(locationMatcherResult, jump = seek)
+            camera.onLocation(locationMatcherResult.enhancedLocation, locationMatcherResult.isTeleport || seek)
         }
     }
 
