@@ -3,10 +3,12 @@
 # require editing the workflow file.
 #
 # The two signing keys come from the repository secrets, four values each, all four or none (README,
-# "Shared debug signing key" and "Release through Google Play"). Each key reaches only the Gradle run
-# that signs with it: the debug key only the debug build, the upload key only the app bundle build.
-# The script tests and the debug build never see a release value. Never trace this script: a trace
-# would print the values.
+# "Shared debug signing key" and "Release through Google Play"). Each key is given only to the Gradle
+# run that signs with it: the debug key only to the debug build, the upload key only to the app
+# bundle build. The script tests and the debug build get no release value in their environment. That
+# keeps the values out of their output, not away from hostile code: this script's own start
+# environment keeps all eight (/proc/<pid>/environ), which any process of the job can read
+# (DECISIONS 42). Never trace this script: a trace would print the values.
 set +x
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,8 +34,9 @@ key_configured() {
     fi
 }
 
-# Both sets are checked by name before anything runs. The values then leave the environment: they
-# stay in this shell, and each Gradle run below gets only its own key's values.
+# Both sets are checked by name before anything runs. The values then leave the environment of every
+# child: they stay in this shell and in its start environment, and each Gradle run below gets only
+# its own key's values.
 debug_key="$(key_configured "The shared debug signing key" "${debug_secrets[@]}")"
 release_key="$(key_configured "The release signing key" "${release_secrets[@]}")"
 export -n "${debug_secrets[@]}" "${release_secrets[@]}" DEBUG_KEYSTORE_FILE RELEASE_KEYSTORE_FILE
@@ -96,7 +99,7 @@ mkdir -p build/ci
 cp app/build/outputs/apk/debug/app-debug.apk "build/ci/custommaps-debug-${GITHUB_RUN_NUMBER:-local}-${revision:0:7}.apk"
 
 if [[ "$release_key" == true ]]; then
-    # The upload key exists on disk only for this Gradle run, which alone gets its three values.
+    # The upload key exists on disk only for this Gradle run, which alone is given its three values.
     (umask 077 && printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode --ignore-garbage >"$key_dir/upload.p12")
     unset RELEASE_KEYSTORE_BASE64
 
