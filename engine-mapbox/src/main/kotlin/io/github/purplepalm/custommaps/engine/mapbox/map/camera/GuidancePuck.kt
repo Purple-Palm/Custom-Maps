@@ -1,6 +1,5 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
-import android.animation.TypeEvaluator
 import android.animation.ValueAnimator
 import android.view.animation.LinearInterpolator
 import com.mapbox.common.location.Location
@@ -61,36 +60,22 @@ internal class GuidancePuck : LocationProvider {
             provider.changePosition(location, result.keyPoints, null, null)
             return
         }
-        // Put on the new position at once, and from there on along the road for one glide, so the
-        // car does not stand still until the next position.
+        // Put on the new position at once. A move that takes no time is drawn at once, so the puck
+        // is there before the glide below starts.
+        provider.changePosition(location, result.keyPoints, JUMP, JUMP)
+        // From there on along the road for one glide, so the car does not stand still until the
+        // next position. The glide goes to the drawing alone: the provider's last location stays
+        // the fix, and the animation keeps the SDK's own evaluator, which the jump has just set.
         val ahead = PuckGlide.ahead(location.latitude, location.longitude, location.bearing, location.speed, glideMillis / MILLIS_PER_SECOND)
-        if (ahead == null) {
-            provider.changePosition(location, result.keyPoints, JUMP, JUMP)
-            return
-        }
-        val glide = JumpThenGlide(
-            from = Point.fromLngLat(location.longitude, location.latitude),
-            to = Point.fromLngLat(ahead.longitude, ahead.latitude),
-        )
-        provider.changePosition(location, emptyList(), latLngTransitionOptions = glide.options, bearingTransitionOptions = JUMP)
+            ?: return
+        val target = Point.fromLngLat(ahead.longitude, ahead.latitude)
+        for (consumer in consumers) consumer.onLocationUpdated(target, options = glide)
     }
 
-    /**
-     * The puck's animation after a jump: it starts on [from], the new position, whatever point the
-     * animation was given to start from, and goes on to [to] at a steady speed. The animation has
-     * two values, where the puck is drawn and the new position; this replaces both.
-     */
-    private class JumpThenGlide(private val from: Point, private val to: Point) : TypeEvaluator<Point> {
-
-        override fun evaluate(fraction: Float, startValue: Point, endValue: Point): Point = Point.fromLngLat(
-            from.longitude() + fraction * (to.longitude() - from.longitude()),
-            from.latitude() + fraction * (to.latitude() - from.latitude()),
-        )
-
-        val options: ValueAnimator.() -> Unit = {
-            interpolator = LINEAR
-            setEvaluator(this@JumpThenGlide)
-        }
+    /** The glide on from a jump: as long as any other, at a steady speed. */
+    private val glide: ValueAnimator.() -> Unit = {
+        duration = glideMillis
+        interpolator = LINEAR
     }
 
     override fun registerLocationConsumer(locationConsumer: LocationConsumer) {
