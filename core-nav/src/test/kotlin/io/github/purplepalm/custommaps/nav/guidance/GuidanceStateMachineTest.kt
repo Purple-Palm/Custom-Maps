@@ -11,6 +11,7 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState.ARRIVED
 import io.github.purplepalm.custommaps.nav.model.GuidanceState.IDLE
 import io.github.purplepalm.custommaps.nav.model.GuidanceState.PREVIEW
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -32,6 +33,28 @@ class GuidanceStateMachineTest {
     )
 
     private fun reduce(state: GuidanceState, event: GuidanceEvent) = GuidanceStateMachine.reduce(state, event)
+
+    /** Whether [event] in [state] ends a drive, as the engine asks it of the transition. */
+    private fun endsDrive(state: GuidanceState, event: GuidanceEvent) = GuidanceStateMachine.endsDrive(state, reduce(state, event).state)
+
+    @Test
+    fun `End from anywhere and the arrival end a drive`() {
+        for (reason in StopReason.entries) assertTrue(endsDrive(ACTIVE, GuidanceEvent.Stopped(reason)), reason.name)
+        assertTrue(endsDrive(ACTIVE, GuidanceEvent.Arrived))
+    }
+
+    @Test
+    fun `a start whose routes were refused, and every other change, end no drive`() {
+        // Back to the preview: no trip had begun, and the preview's download goes on.
+        assertFalse(endsDrive(ACTIVE, GuidanceEvent.CommitFailed))
+        assertFalse(endsDrive(ACTIVE, GuidanceEvent.RoutesCommitted(simulated = false)))
+        assertFalse(endsDrive(ARRIVED, GuidanceEvent.ArrivalDismissed))
+        assertFalse(endsDrive(PREVIEW, GuidanceEvent.PreviewCleared))
+        assertFalse(endsDrive(PREVIEW, GuidanceEvent.StartRequested(simulated = false)))
+        for (state in GuidanceState.entries.filter { it != ACTIVE }) {
+            for (event in allEvents) assertFalse(endsDrive(state, event), "$state $event")
+        }
+    }
 
     @Test
     fun `routes ready opens the preview without any trip session`() {

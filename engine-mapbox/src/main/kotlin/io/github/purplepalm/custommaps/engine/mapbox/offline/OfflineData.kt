@@ -49,7 +49,7 @@ import kotlinx.coroutines.withContext
  * tiles, as the map loads them itself when it shows a place; road data is not asked for outside a
  * trip. A preview is often open for a few seconds only, so its download goes on after Start until
  * it is done, and ends early only when a newer preview takes the region over or the trip ends
- * ([onTripEnded], [PreviewDownloadRules]). During a drive it loads on the store's own threads next
+ * ([onTripEnded], [EndedBy]). During a drive it loads on the store's own threads next
  * to predictive caching; the main thread only hands the store its work and, at the trip's end,
  * cancels what is left.
  *
@@ -187,7 +187,6 @@ internal class OfflineData(
      */
     fun onTripStarted() {
         tripRunning = true
-        endPreviewDownload(PreviewEvent.START)
     }
 
     /**
@@ -196,12 +195,11 @@ internal class OfflineData(
      */
     fun onTripEnded() {
         tripRunning = false
-        endPreviewDownload(PreviewEvent.TRIP_ENDED)
+        endPreviewDownload(EndedBy.TRIP_END)
     }
 
-    /** Ends what [downloadPreview] started and has not finished, if [event] ends it ([PreviewDownloadRules]). */
-    private fun endPreviewDownload(event: PreviewEvent) {
-        val by = PreviewDownloadRules.endedBy(event) ?: return
+    /** Ends what [downloadPreview] started and has not finished, as ended [by] the app. */
+    private fun endPreviewDownload(by: EndedBy) {
         previewGeometry?.cancel()
         previewGeometry = null
         guarded("offline.cancel") { regionLoad.stop(by) }

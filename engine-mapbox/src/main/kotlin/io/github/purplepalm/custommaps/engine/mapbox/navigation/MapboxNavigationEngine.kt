@@ -819,9 +819,7 @@ internal class MapboxNavigationEngine(
         if (transition.state == GuidanceState.IDLE) _destination.value = null
         // A drive that ends, by End or at the destination; a start whose routes were refused goes
         // back to the preview, whose download goes on.
-        if (from == GuidanceState.ACTIVE && (transition.state == GuidanceState.IDLE || transition.state == GuidanceState.ARRIVED)) {
-            offlineData.onTripEnded()
-        }
+        if (GuidanceStateMachine.endsDrive(from, transition.state)) offlineData.onTripEnded()
         transition.commands.forEach(::execute)
     }
 
@@ -829,7 +827,8 @@ internal class MapboxNavigationEngine(
         val navigation = navigation
         when (command) {
             is GuidanceCommand.CommitRoutes -> {
-                // Keeps the navigator alive for the drive, even without a screen.
+                // Keeps the navigator alive for the drive, even without a screen. The preview's
+                // download is not ended here: it goes on into the drive ([OfflineData.onTripStarted]).
                 MapboxNavigationApp.attach(guidanceLifecycle)
                 // A new drive: the Then chip and the lane choices know nothing of the last one.
                 thenTracker.reset()

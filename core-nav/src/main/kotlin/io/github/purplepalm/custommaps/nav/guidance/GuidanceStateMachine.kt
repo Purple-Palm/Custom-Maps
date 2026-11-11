@@ -89,6 +89,14 @@ object GuidanceStateMachine {
         }
     }
 
+    /**
+     * Whether going from [from] to [to] ends a drive: End, in the app, in the trip notification or
+     * from the car, or the arrival. A start whose routes the navigator refused goes back to the
+     * preview and ends nothing, since no trip had begun.
+     */
+    fun endsDrive(from: GuidanceState, to: GuidanceState): Boolean =
+        from == GuidanceState.ACTIVE && (to == GuidanceState.IDLE || to == GuidanceState.ARRIVED)
+
     private val stopSequence = listOf(
         GuidanceCommand.StopTripSession,
         GuidanceCommand.ClearRoutes,

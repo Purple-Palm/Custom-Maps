@@ -2,7 +2,14 @@ package io.github.purplepalm.custommaps.engine.mapbox.offline
 
 import io.github.purplepalm.custommaps.nav.debug.Motion
 
-/** Why the app itself ended a download before the store had finished it. */
+/**
+ * Why the app itself ended a download before the store had finished it. A preview is often open for
+ * a few seconds only before Start, so its download goes on into the trip: it is the map along the
+ * routes for a phone that loses its network soon after Start. Only these two end it early. Neither
+ * Start nor closing the preview does, and no change of network: the download may use the networks
+ * [PreviewDownload.NETWORK] allows, which is any network, mobile data included, and without a
+ * network the store waits.
+ */
 internal enum class EndedBy {
 
     /** A newer preview loads the region again, with its own routes. */
@@ -13,40 +20,6 @@ internal enum class EndedBy {
      * notification, or the arrival. The next preview loads the routes it shows.
      */
     TRIP_END,
-}
-
-/** What happens to a preview, as far as it decides whether the preview's download goes on. */
-internal enum class PreviewEvent {
-
-    /** Start: a trip begins on the previewed routes. */
-    START,
-
-    /** The preview was closed without a trip. */
-    CLOSED,
-
-    /** A newer preview loads the region with its own routes. */
-    NEWER_PREVIEW,
-
-    /** The trip that began on the previewed routes ended. */
-    TRIP_ENDED,
-}
-
-/**
- * When the download of a preview's routes ends before it is done. A preview is often open for a few
- * seconds only before Start, so its download goes on into the trip: it is the map along the routes
- * for a phone that loses its network soon after Start. It ends early only when a newer preview takes
- * the region over or when the trip ends. The network rule is the tile store's own: the download may
- * use the networks [PreviewDownload.NETWORK] allows, which is any network, mobile data included, and
- * without a network the store waits; no change of network ends it.
- */
-internal object PreviewDownloadRules {
-
-    /** Who ends a download still under way at [event]; null when it goes on. */
-    fun endedBy(event: PreviewEvent): EndedBy? = when (event) {
-        PreviewEvent.START, PreviewEvent.CLOSED -> null
-        PreviewEvent.NEWER_PREVIEW -> EndedBy.NEWER_PREVIEW
-        PreviewEvent.TRIP_ENDED -> EndedBy.TRIP_END
-    }
 }
 
 /**

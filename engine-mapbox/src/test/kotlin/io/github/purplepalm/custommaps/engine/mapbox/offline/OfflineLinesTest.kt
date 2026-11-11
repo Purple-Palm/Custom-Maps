@@ -166,6 +166,16 @@ class OfflineLinesTest {
     }
 
     @Test
+    fun `a download that ended during a trip says so, and only then`() {
+        val during = OfflineLines.region(1, 2, errorType = null, message = null, endedBy = null, counts = null, seconds = 30.0, inTrip = true)
+        val before = OfflineLines.region(1, 2, errorType = null, message = null, endedBy = null, counts = null, seconds = 30.0)
+
+        assertEquals(true, during["inTrip"])
+        assertFalse("inTrip" in before)
+        assertEquals(true, OfflineLines.stylePack(null, null, null, null, 1.0, inTrip = true)["inTrip"])
+    }
+
+    @Test
     fun `a failed region gives the reason and the store's message, and no numbers it never had`() {
         val line = OfflineLines.region(1, 1, "TILESET_DESCRIPTOR", "the style could not be resolved", endedBy = null, counts = null, seconds = 0.44)
 
