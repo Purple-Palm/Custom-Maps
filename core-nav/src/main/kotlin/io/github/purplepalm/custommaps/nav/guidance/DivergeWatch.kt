@@ -140,7 +140,7 @@ class DivergeWatch(private val tuning: CameraTuning = CameraTuning.PHONE) {
         return open.close(offRoute = true, teleport = teleport)
     }
 
-    /** A new route was set by hand, guidance ended or a seek moved the car: nothing goes on. */
+    /** A new drive begins, guidance ends or a seek of a simulated drive moves the car: nothing goes on. */
     fun reset() {
         last = null
         watch = null
