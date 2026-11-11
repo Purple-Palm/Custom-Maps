@@ -82,6 +82,22 @@ becomes **Start simulation**: the position moves along the chosen route by itsel
 maneuver card, lanes and arrival. Each simulated drive is a trip session and is billed like a real
 one; the debug section counts them with the rest.
 
+### Offline
+
+The app saves what a drive needs for stretches without a connection:
+
+- when routes are shown, the street map along them, starting where they start;
+- during guidance, the map and the road data around the car, along the route and around the
+  destination.
+
+Both use mobile data when the phone is not on Wi-Fi, by estimate tens of MB for a new area, and
+what is saved is used again on later drives. Mapbox does not charge extra for it. The debug log
+records how much each download really loaded.
+
+Three seconds after the app loses its internet a chip on the map says so: a sentence with the
+reason under the search bar, or a short **Offline** tab under the maneuver card during guidance.
+The map then shows only what is saved on the phone, and guidance continues.
+
 ### Debug log
 
 The app records a detailed log on the phone, so a drive can be examined afterwards:
@@ -96,6 +112,8 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 - the phone's state: on screen or not, the screen, charging, Power saving, heat and memory, with a
   sample once a minute during guidance, and whether Android's animations run;
 - the app's network on every change, and the phone settings that can keep only this app offline;
+- what is saved for stretches without a connection: each download with its size and the bytes it
+  loaded, and when the offline chip showed;
 - one camera line a second during guidance while the map is on screen: where the camera is and
   where it is heading, how smoothly the camera and the car move, and the map's frame rate;
 - map errors, the first of each kind in full and the repeats as one count a minute.

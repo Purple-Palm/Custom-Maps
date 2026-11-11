@@ -380,3 +380,46 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The wait for a live position trusts the age the navigator gives its positions, which no drive log has shown yet. If that age were wrong the plan would never begin; the log would show it, with the age on each `progress` line and the plan closed as skipped at the end of the drive.
   - How often the navigator changes its alternatives in the first seconds of a trip cannot be read from its source. If it does so more than once while the refresh runs, the single repeat is used up and the refresh is lost as before.
   - None of it has been on a drive yet; 5 minutes, 100 m, 30 minutes, the 30 s of a live position and the single repeat are first settings.
+
+## 41. Offline data along the drive
+
+- **Chosen:** the phone saves the map and the road data of a drive before the connection is gone, in two ways, both into one tile store. A chip on the map says when the app is offline.
+- **One tile store for the map and the navigator.** The engine makes Mapbox's tile store first, gives it to the Maps SDK before any map or offline manager exists, and puts it into the options every navigator is made from. Both SDKs read their options when an object is made, so the order is fixed in one place (`MapboxEngine.create`).
+  - It is the store at the default location, the one each SDK used before by itself, so nothing saved so far is lost.
+  - The map uses it as before (`READ_ONLY`, the SDK's default): it reads tile packs from the store and loads any other tile singly into its own cache.
+  - Without a store set by the app, the SDK's predictive caching refuses map data.
+- **During guidance, data is kept ahead of the car.** The navigation SDK's predictive caching (`PredictiveCacheController`) loads road data and the map around the car, along the route in use and around the destination, over whatever network the app has. It is set up with each navigator and has something to load only during guidance: the navigator learns where the car is, and which route it drives, only in a trip session. The distances are the app's own:
+
+  | Data | Around the car | Along the route | Around the destination |
+  |---|---|---|---|
+  | Road data: map matching, speed limits, reroutes without a connection | 10 km | 3 km | 10 km |
+  | Standard map, zoom 15 to 16 | 2 km | 1 km | 2 km |
+  | Standard map, zoom 11 to 14 | 10 km | 5 km | 10 km |
+
+  - The SDK's defaults are 20 km around the car, 5 km along the route and 50 km around the destination, for the road data and for the map at zoom 15 to 16.
+  - Why smaller: all of it is loaded over mobile data while driving. The street map is kept only close to the car and the route, where the camera shows it. The town map and the road data reach further, for the view of the whole route and for a reroute. The drive ends at the destination, so 50 km around it would mostly be data for roads never driven.
+  - Only the route in use counts, not its alternatives. Nothing is kept for search.
+- **Before guidance, the street map along the previewed routes is downloaded.** When routes appear in the preview, one tile region is loaded: the Standard map from zoom 11 to 16 along every previewed route, outward from where the routes start. The first preview after the app starts also loads the style's own files, which the Maps SDK keeps outside the tile store, so the map can open without a connection.
+  - It is always the same region, and each new preview takes it over. A load still under way is ended then, and the log calls that `replaced`, not an error.
+  - Start ends a load still under way (`stopped`). During a drive only predictive caching loads, within its distances, and the routes not taken are not paid for in mobile data. What was loaded stays. A preview closed without Start lets its load finish.
+  - Tiles the phone has are taken as they are, also past their date. The style's files are loaded anew when past theirs: Mapbox's guide says a style saved this way is not brought up to date otherwise.
+  - The store gets the routes as lines with a point about every 100 m, put together off the main thread. A route has a point every few meters, and the smallest tile asked for is 300 to 600 m wide.
+  - Map tiles only, as the map loads them itself when it shows a place. No route or search request is sent and no trip session starts.
+- **On disk.** Tiles of the region stay as long as a preview's routes need them. Once a new preview's region no longer covers them, they belong to no region. By the SDK's description, what the store holds outside regions is trimmed once it passes 1 GB, the default; no overall limit is set. Whether tiles that fell out of the region are dropped at once or with that trimming, and whether what predictive caching loaded counts the same way, cannot be read from the SDK's published sources.
+- **Cost: mobile data, no extra Mapbox charges.** Map tiles are covered by the Maps SDK's monthly user, and the navigator's requests during guidance are part of the trip. So every download writes into the debug log how many bytes came over the network for it (`loadedBytes`), next to what the phone holds for it.
+- **Open, the owner's question: may the preview download use mobile data?** For now it runs on any network, so routes planned on the road are covered too. It is one constant (`PreviewDownload.NETWORK`); the other value waits for a network that costs nothing, and a setting can take the constant's place. Two things belong to the same question:
+  - There is no cap on the length of the routes. A long trip's preview asks for the street map of every route's whole length, bounded only by Start and by the next preview. Mapbox does not load a region that would take the phone past 750 tile packs.
+  - Tiles in the region are never refreshed by this path, since tiles past their date are accepted.
+- **The chip.** Three seconds after the app loses its internet a chip says so, and it goes at once when the internet is back; the wait hides a handover from Wi-Fi to mobile data. Before a drive it is a sentence under the search bar that names the reason, with a Settings button when Android keeps the app off the network. During guidance it is a short tab, an icon and "Offline", at the end side of the band the Then chip hangs in (37), at most 30% of the card's width and without a button. Both forms are outside the measured panels, so nothing moves when the chip comes or goes. The compass sits below the band for the whole of guidance.
+- **Alternatives:**
+  - Offline regions the owner picks on a map and keeps until removed. They need a picker, a list with sizes and a way to update them, and they do not help on a route outside them. Still on the Future list in [ROADMAP.md](ROADMAP.md).
+  - The SDK's default distances. More mobile data for the same drive.
+  - A tile store in a directory of the app's own. It would start empty and leave what is cached behind.
+  - `READ_AND_UPDATE`, where the map loads only whole tile packs through the store. Mapbox's guide suggests it for a map that cannot be panned freely; this one can.
+  - Letting a preview's download run on into the drive. It would load the routes not taken over mobile data. It is one call to remove if drives show that previews are too short to load anything.
+  - The full sentence during guidance. It would need a second row under the card and more of the map.
+- **Why:** the first drive lost its connection 37 s after Start and stayed offline until End. Nothing had been saved ahead, although the routes had been on screen on home Wi-Fi for 8 minutes, and nothing on the screen said why the map stopped loading ([DRIVES.md](DRIVES.md)).
+- **Cost:**
+  - Mobile data, by estimate tens of MB for a new area; the log has the real numbers.
+  - The Maps and Common native libraries now load when the app starts, with the tile store, not with the first map.
+  - None of it has run on a phone. Whether Mapbox resolves the Standard style for a tile region, its 3D buildings included, shows only in the first `offline_region` line on the phone. The distances, the zooms and the 100 m are first settings.

@@ -26,7 +26,7 @@ Both drives: the owner's Samsung phone with Android 15, a stage 1 build.
 | Lanes too small before a turn | The following camera stops at zoom 16.35 | A Lane zoom setting: with Large the view goes close onto the junction | Built in stage 1.1 |
 | The camera turned into a gentle curve well before the car (liked) | The SDK aims the camera at the far end of the road ahead | Kept | Built in stage 1.1, in every style |
 | The first drive's routes all ended behind the store | The route went to the middle of the building, and the router took the nearest road | Routes end at Mapbox's stop point for the place, and the map shows the place as a pin | Built in stage 1.1 |
-| No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Next build; the network lines and the folded map errors are built |
+| No internet from 37 s into the first drive; 2337 map tile errors | The app had no network once home Wi-Fi faded; nothing was saved ahead | Map and road data saved ahead, an offline chip, network lines in the log | Built in stage 1.1 |
 | The app restarted once before the first drive | Unknown: the log records no crash and no exit reason | Crash and exit-reason lines | Built in stage 1.1 |
 | A reroute right after Start, on both drives | First drive: the car was not yet matched to a road. Second drive: the navigator began with an out-of-date position | None needed: a reroute inside a trip is free. Start refreshes or replans old routes inside the trip | Built in stage 1.1 |
 
@@ -287,9 +287,10 @@ view at three points, while the camera stays in following mode:
 ### What changes
 
 The next build is stage 1.1 in [ROADMAP.md](ROADMAP.md). It is being built in steps: the
-diagnostics, the camera, the destination and the start below are built, and so are the Then chip
-the owner asked for ([DECISIONS.md](DECISIONS.md), 37) and the Lane zoom setting with lane details
-on the map (38, 39); the rest is designed and not built yet. Stage 2 is the Android Auto stage.
+diagnostics, the camera, the destination, the start and the offline data below are built, and so
+are the Then chip the owner asked for ([DECISIONS.md](DECISIONS.md), 37) and the Lane zoom setting
+with lane details on the map (38, 39). The trip history and the prediction of ROADMAP.md are
+designed and not built yet. Stage 2 is the Android Auto stage.
 
 #### Camera
 
@@ -416,14 +417,19 @@ where they were requested, and picks a plan that is carried out inside the trip:
 
 #### Offline
 
-- **One tile store (next build).** The map and the navigator share one `TileStore`, set in
-  `MapboxMapsOptions.tileStore` before the first map. Predictive caching needs it. It stays at the
-  default location, so nothing cached so far is lost.
-- **Predictive caching during guidance (next build).** `PredictiveCacheController` (ui-maps 3.34.1)
-  keeps data along the drive while any network is up
-  ([offline guide](https://docs.mapbox.com/android/navigation/guides/advanced/offline/)). Mapbox's
-  defaults are 20 km around the car, 5 km along the route and 50 km around the destination; these
-  are smaller:
+Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 41). None of it has run on a phone yet.
+
+- **One tile store.** The map and the navigator share one `TileStore`. It is set in
+  `MapboxMapsOptions.tileStore` before the first map exists, and in the options the navigator is
+  made from. Predictive caching needs it. It is the store at the default location, so nothing
+  cached so far is lost, and the map uses it as before (`READ_ONLY`).
+- **Predictive caching during guidance.** `PredictiveCacheController` (ui-maps 3.34.1) keeps data
+  ahead of the car while any network is up
+  ([offline guide](https://docs.mapbox.com/android/navigation/guides/advanced/offline/)). It has
+  something to load only during guidance: the navigator knows where the car is, and which route
+  it drives, only in a trip. Only the route in use counts, not its alternatives. Mapbox's defaults
+  are 20 km around the car, 5 km along the route and 50 km around the destination; these are
+  smaller:
 
   | Data | Around the car | Along the route | Around the destination |
   |---|---|---|---|
@@ -431,24 +437,48 @@ where they were requested, and picks a plan that is carried out inside the trip:
   | Standard map, zoom 15 to 16 | 2 km | 1 km | 2 km |
   | Standard map, zoom 11 to 14 | 10 km | 5 km | 10 km |
 
-- **Street map along the routes (next build).** When routes appear in the preview, the Standard
-  map at zoom 11 to 16 along every previewed route is downloaded, 3D sources included, plus the
-  Standard style pack, so the map can also open offline. It is one tile region that the next
-  preview replaces, not the owner-chosen offline regions on the future list in ROADMAP.md. On the
-  first drive this would have used the 8 minutes on home Wi-Fi. Each download is logged with its
-  size and time.
+- **Street map along the routes.** When routes appear in the preview, the Standard map at zoom 11
+  to 16 along every previewed route is downloaded, outward from where the routes start. The first
+  preview after the app starts also loads the Standard style pack, so the map can open offline.
+  - It is one tile region that each new preview replaces, not the owner-chosen offline regions on
+    the future list in ROADMAP.md.
+  - Start ends a download that is still under way: during a drive only predictive caching loads,
+    so the routes not taken are not paid for in mobile data. After a preview that was open for
+    seconds only, the map ahead comes from predictive caching. A preview closed without Start
+    lets its download finish.
+  - Map tiles only; road data is loaded during guidance, as part of the trip. Tiles the phone
+    already has are taken as they are.
+  - On the first drive this would have used the 8 minutes on home Wi-Fi.
+  - Whether Mapbox resolves the Standard style for a tile region, its 3D buildings included,
+    cannot be read from the SDK's sources. The first download on the phone shows it; see the next
+    drive's checks.
 - **Cost.** No extra Mapbox charges: Navigation SDK requests during guidance are part of the trip,
-  and map tiles are covered by the Maps SDK's monthly user. The cost is mobile data: tens of MB for
-  a new area, reused on later drives. Data outside tile regions is capped at 1 GB by default.
-  The preview download also runs on mobile data when routes are planned on the road; it could be
-  limited to Wi-Fi.
-- **Offline chip (next build).** 3 s after the app loses internet, a chip under the search bar or
-  the maneuver card says so. The delay hides a normal handover from Wi-Fi to mobile data. The chip
-  sits outside the measured panels, so the camera does not move when it appears.
-  - No network: "No internet. The map shows only areas saved on the phone; guidance continues."
-  - A network without internet: "Connected, but no internet. The map shows only saved areas."
-  - Android blocks the app: "Android is not letting Custom Maps use this network." A **Settings**
-    button next to it opens the app's data usage page.
+  and map tiles are covered by the Maps SDK's monthly user. The cost is mobile data: by estimate
+  tens of MB for a new area, reused on later drives. Every download writes into the log how many
+  bytes it really loaded. Data outside tile regions is capped at 1 GB by default.
+  The preview download also runs on mobile data when routes are planned on the road. Whether it
+  should wait for Wi-Fi is an open question to the owner; in the code it is one constant.
+- **Offline chip.** 3 s after the app loses internet a chip says so, and it goes at once when the
+  internet is back. The delay hides a normal handover from Wi-Fi to mobile data. A reason that
+  changes while the chip is up changes what it says at once.
+  - **Before a drive** it is the whole sentence, under the search bar:
+    - No network: "No internet. The map shows only areas saved on the phone; guidance continues."
+    - A network without internet: "Connected, but no internet. The map shows only saved areas."
+    - Android blocks the app: "Android is not letting Custom Maps use this network." A
+      **Settings** button next to it opens the app's data usage page, or the app's details page
+      on a phone that has no such page.
+  - **During guidance** it is a short tab with an icon and the word "Offline", at the end side of
+    the band under the maneuver card, where the Then chip hangs at the other side. It takes at
+    most 30% of the card's width, the Then chip keeps its 70%, and it has no button: nothing asks
+    for a tap while the car moves.
+  - In both forms the chip is outside the measured panels, so neither the panels nor the camera
+    move when it comes or goes. It is not shown over an open list of suggestions and not in the
+    route preview, where it would lie over the far end of the routes.
+  - The compass keeps clear of it. During guidance it now sits under the band, for the whole
+    drive; before a drive it moves below the sentence while that is up.
+  - Which sentence shows follows what Android reports for the app's network. "Blocked" is only
+    what Android itself marks as blocked for the app. How Samsung's Wi-Fi only setting for one
+    app is reported is not known yet; see the next drive's checks.
 - **Car map (stage 2).** The car map uses the same saved map data as the phone.
 - **Trip-log upload (stage 2).** The first drive ended offline, so an upload at End would have
   failed. The upload waits for any network, in a background job that survives the app being
@@ -469,6 +499,7 @@ Built in stage 1.1. New lines in the debug log:
 | Camera | Once a second during guidance while the map is on screen (the `activity` and `screen` lines show when it was not): zoom, tilt and bearing against the navigation camera's target, how far the camera trails the drawn car and the car trails the latest fix, how often the camera and the car moved and their longest pauses, the padding, the map's frame rate, render times and missed frames, and whether Android's animations run. Also how wide a lane is on the screen, what sets the zoom with the Large lane zoom, and whether lane details are on. A line on every camera mode change with how long the transition took, and when a touch takes over the camera or Recenter or Overview is tapped | Steps, switches, lanes, a heavy style |
 | Lane choices | Once for each point of the route with lanes, when it comes as near as the close view would start: its lanes, how many can be used and how many leave the route, whether the road is a freeway, and the reason when the rule passes it over. Each route also lists, step by step, its intersections with lanes | How often Large goes close on a freeway, and how often a looser rule would |
 | Map errors | The first error of each kind in full, then one line a minute with the counts and the map sources | The flood |
+| Offline data | For each navigator, whether it and the map share the tile store, and how far data is kept ahead. For each download of a preview's routes and of the map's style: how it ended (done, partial, replaced by a newer preview, stopped at Start, or failed and why), how many resources it needed and has, their bytes on the phone, the bytes that came over the network for it, and the seconds it took. Errors of predictive caching, the first of each kind and then counts. Each time the offline chip comes, goes or changes its sentence, with the reason and whether a drive was running, and which system page its Settings button opened | Nothing saved ahead; what saving costs in data |
 | Search results | How exact the point is (rooftop, parcel, interpolated, street), the stop points with their distance from it and the one the app took, the result's types, categories and Mapbox id | Behind the store |
 | Route requests | Every route request the app sends: where it starts, and how old, how fast and in which direction that position was; the stop point, the arrival target and the direction sent with it; whether it was sent inside a trip. And every reroute request of the navigator: how many points and arrival targets it has, whether the destination's target is set, and how far its end is from where the trip goes | Behind the store; what a drive costs |
 | Start | The plan at Start, with the age of the routes and how far the car moved. Then the result of the refresh and of the replan, whether a cancelled refresh is asked for once more, and the reason whenever fresh routes were not set | Old routes at Start |
@@ -571,8 +602,29 @@ On the drive:
    road: a gently curving road (the early turn must stay), ordinary turns, and a freeway entry and
    exit. Note smoothness, how the tilt changes before and after turns, and whether the freeway
    view zooms out too far. Change the style only while stopped.
-3. **Offline.** If the network drops, the offline chip should appear within about 3 s, and the map
-   along the route should stay complete.
+3. **Offline.** None of it could be run on a phone, so some checks come before the drive.
+   - **The first download.** At home on Wi-Fi, open the routes to a place and leave the preview
+     open for a minute or two before Start; Start ends a download still under way. The log then
+     has an `offline_region` line. `required` above zero, with some MB in `completedBytes`, means
+     Mapbox resolved the Standard style for a tile region. That line is the only place where
+     this shows. `failed` with `tileset_descriptor` means it did not resolve.
+   - **The chip, before a drive.** With the map open and no drive, turn on airplane mode. Within
+     about 3 s the sentence "No internet. The map shows only areas saved on the phone; guidance
+     continues." should appear under the search bar. It should go as soon as the phone is online
+     again.
+   - **The tab, during guidance.** On a drive, or on a simulated one (which counts as a trip),
+     turn on airplane mode after Start. A tab with "Offline" should appear under the maneuver
+     card's right end within about 3 s, and neither the card nor the map should move for it. The
+     map along the route should stay complete, streets included, and guidance should go on. The
+     compass now sits lower, under the band: it should be clear of the tab and of the Then chip.
+   - **The blocked case.** Parked, with Wi-Fi off, set **Allowed networks for apps** to Wi-Fi
+     only for Custom Maps (check 2 above). The chip should say "Android is not letting Custom Maps
+     use this network." with a **Settings** button that opens the app's data usage page. If it
+     says "No internet." without a button, Android reported no network at all instead of a
+     blocked one. The log's `network` line then shows `transport` `none` with a mobile network
+     under `available`, and the rule that picks the sentence has to learn that case.
+   - **On the road.** If the network drops, the tab should appear within about 3 s, and the map
+     along the route should stay complete.
 4. **Old routes.** Start must go at once every time, with no pause and no spinner.
    - Leave the routes open for more than 5 minutes, parked, then press Start: the drive begins on
      the routes as shown, and the arrival time may correct itself within a few seconds.
@@ -618,7 +670,12 @@ Then share the debug log. What to read in it:
 | `search_result`: `stopPoint` | Which routable point the app took for each search, its name and its distance from the place; null when it took none |
 | `route_request`: `stopPoint`, `targets`, `bearings`, `originFix`, `inTrip` | Whether routes went to the stop point with the place as target; whether a direction was sent and from what speed; one request for each Directions press, and at most one with `inTrip` in a drive |
 | `reroute_options` | Whether reroutes keep the arrival target: `targets` null with `targetWanted` true means a reroute lost it. `endMeters` near 0 means it still ends at the same point |
-| Offline downloads | Size and time of the route download |
+| `tile_store` | `shared` true: the map and the navigator have the one tile store. `map` false would mean that predictive caching keeps no map data |
+| `offline_region_start`, `offline_region` | One pair for each preview. `required` above zero: Mapbox Standard resolved for a tile region. `loadedBytes` is what the download cost in data, `completedBytes` what the phone holds for it, `seconds` how long it took. `replaced` (a newer preview) and `stopped` (Start) are no faults; `partial` and `failed` name their reason. A start line with no line after it is a download that never got an answer, as without a connection |
+| `offline_style_pack` | The size of the map's style, loaded once after the app starts, and again with the next preview if that failed |
+| `offline_cache`, `offline_cache_error` | That predictive caching was set up, once for each navigator, with its distances, and what it could not do |
+| `offline_chip` | When the chip came and went, with its reason and the guidance state. `shown` true should follow a `network` line that reports the app offline by about 3 s, and `shown` false should come with the line that reports it online again |
+| `offline_settings` | The system page the chip's Settings button opened; null when the phone has neither the data usage page nor the app's details page |
 | Map errors | A few lines a minute instead of thousands |
 | Fix age | Whether GPS fixes arrive late, or old as at the second drive's Start |
 | `start_plan` | The plan, the age of the routes in seconds and the meters moved; `movedMeters` and `position` are null when the map had shown no position |
