@@ -53,7 +53,7 @@ class MapboxEngine private constructor(
     }
 
     /** A map for the phone screen. Call [PhoneMap.release] when its view leaves the screen. */
-    fun createPhoneMap(context: Context): PhoneMap = PhoneMap(context, navigationEngine, debugLog)
+    fun createPhoneMap(context: Context): PhoneMap = PhoneMap(context, navigationEngine, debugLog, offlineData)
 
     companion object {
 

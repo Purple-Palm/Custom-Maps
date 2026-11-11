@@ -27,4 +27,16 @@ class OfflineLinesTest {
         assertEquals(listOf(false, true), listOf(navigatorOnly["map"], navigatorOnly["navigator"]))
         assertEquals("DISABLED", neither["usage"])
     }
+
+    @Test
+    fun `the predictive cache line gives every area as car, route and destination`() {
+        assertEquals(
+            mapOf(
+                "roadData" to mapOf("meters" to listOf(10_000, 3_000, 10_000)),
+                "streetMap" to mapOf("zooms" to listOf(15, 16), "meters" to listOf(2_000, 1_000, 2_000)),
+                "townMap" to mapOf("zooms" to listOf(11, 14), "meters" to listOf(10_000, 5_000, 10_000)),
+            ),
+            OfflineLines.predictiveCache(),
+        )
+    }
 }

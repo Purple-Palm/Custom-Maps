@@ -54,6 +54,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
+import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
@@ -100,11 +101,15 @@ import kotlinx.coroutines.launch
  * them on ([LaneDetails]). The puck stays where the navigator puts the car, on the line of the
  * road: nothing here moves it sideways into a lane, since no position the phone has says which
  * lane the car is in.
+ *
+ * While the map exists, the style it shows is among what is kept ahead of the car during guidance
+ * for stretches without a connection ([OfflineData]).
  */
 class PhoneMap internal constructor(
     context: Context,
     private val engine: MapboxNavigationEngine,
     private val debugLog: DebugLog,
+    private val offlineData: OfflineData,
 ) : MapRenderer {
 
     private val mapView = MapView(context, MapInitOptions(context, styleUri = null))
@@ -386,6 +391,9 @@ class PhoneMap internal constructor(
         mapView.gestures.addOnMapClickListener(mapClickListener)
 
         MapboxNavigationApp.registerObserver(navigationObserver)
+        // The style this map shows is kept ahead of the car during guidance from now on. The style
+        // may still be loading: it is taken when it has loaded, and again each time it loads.
+        offlineData.attachMap(mapboxMap)
         scope.launch {
             combine(engine.guidanceState, engine.previewRoutes) { state, _ -> state }.collect { state -> render(state) }
         }
@@ -521,6 +529,8 @@ class PhoneMap internal constructor(
         mapErrorFolder.flush()
         scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
+        // Nothing is kept ahead for this map any more, and nothing there holds on to it.
+        offlineData.detachMap(mapboxMap)
         platformPuck.onGlide = null
         mapView.camera.removeCameraAnimationsLifecycleListener(driverMoves)
         camera.destroy()
