@@ -270,7 +270,7 @@ Play Console. Once:
 3. If Play Console asks for the foreground service declaration (**App content**), declare the
    location type: the Mapbox navigation service keeps turn-by-turn guidance going after the driver
    taps **Start**, and ends with the drive. Google asks for a link to a short video that shows a
-   drive being started.
+   drive being started. If it asks about the advertising ID, the answer is No: the app has none.
 4. On the **Testers** tab create an email list with the Google account the phone's Play Store uses,
    select it, **Save changes**, and copy the shareable link. Open the link on the phone, accept the
    invitation and install Custom Maps from the Play Store page it leads to. The link works once the
