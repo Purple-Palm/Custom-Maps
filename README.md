@@ -55,7 +55,8 @@ Every push to `main` builds a debug APK.
 Install newer builds over the installed one; do not uninstall first. Uninstalling deletes the
 token, and every new installation counts as one more monthly active user at Mapbox. Updating in
 place only works when all builds are signed with the same key, see the next section.
-**Settings → About** shows the version and the commit of the installed build.
+**Settings → About** shows the version (`0.1.<run>` for a CI build) and the commit of the installed
+build.
 
 The same builds also reach the phone through Google Play, where they update by themselves; see
 [Release through Google Play](#release-through-google-play).
@@ -236,8 +237,8 @@ Four repository secrets hold it (**Settings → Secrets and variables → Action
 | `RELEASE_KEY_ALIAS` | the alias of the key in the keystore |
 | `RELEASE_KEY_PASSWORD` | the key's password: in a PKCS12 keystore the same as the keystore password |
 
-Set all four or none. Without them CI builds the debug APK exactly as before and no app bundle; with
-only some, the build fails and names the missing secrets. CI decodes the keystore into a folder of
+Set all four or none. Without them CI still builds the debug APK, but no app bundle; with only
+some, the build fails and names the missing secrets. CI decodes the keystore into a folder of
 the runner's temporary directory that only the build can read and deletes it when the build ends;
 the passwords reach Gradle only as environment variables. A release build on a computer takes the
 same four values in `local.properties`, with `RELEASE_KEYSTORE_FILE` instead of the base64 (see
