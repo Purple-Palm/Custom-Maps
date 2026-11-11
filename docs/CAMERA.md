@@ -747,7 +747,15 @@ Other lines:
 - The **progress** line, once a second during guidance, has `card`: `fresh` when the update
   brought the next maneuver, `kept` when it brought none and the card stayed as it was, and
   `pending` when it was of a new route without its first instruction yet, and the card showed that
-  route's next maneuver dimmed and without a distance, never one of the route before.
+  route's next maneuver dimmed and without a distance, never one of the route before. An update
+  between a seek of a simulated drive and the car's first position at its new place has
+  `replaySeek` true, and nothing on the screen acts on it.
+- A **replay_seek** line for each release of the replay slider of a simulated drive: `fromS`,
+  `toS`, `ok`, `durationS`, `fromM`, and `ms` or `why` (DRIVES.md, "What to read"). The first
+  position at the new place reaches the camera as a jump: the camera lets go of what it kept of the
+  road it left (`onJump`: the tilt onto a maneuver, the close view for lanes, the last junction's
+  zoom) and flies to the car as after a teleport, and the drawn car is put there at once in every
+  camera style.
 - An **animations** line: `reason`, `enabled` (`areAnimatorsEnabled()`), `durationScale` (the
   setting `Settings.Global.ANIMATOR_DURATION_SCALE`) and `powerSave`. It is written when the first
   activity starts and at every Start, not at app start: a process learns the real scale only when
@@ -1431,7 +1439,8 @@ not in the build yet; its draft was compiled against maps-androidauto 11.34.1 an
 
 In **Settings → Debug → Simulate drive**, pick a route with a long gentle curve, ordinary turns, two
 turns less than 150 m apart, a fork or off-ramp, a roundabout and the arrival. Drive it once in
-each camera style; the points below are for Smooth follow.
+each camera style; the points below are for Smooth follow. The replay slider over the guidance bar
+takes the car back to before a turn to watch it again (DRIVES.md, "Checking a turn at home").
 
 Watch for:
 

@@ -485,3 +485,17 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Ending the preview's download at Start, as before: less mobile data for routes not taken, but it rarely saved anything.
   - Keeping the log as plain text and raising the limit: the same days take far more room on the phone.
 - **Cost:** a download that goes on into the drive also loads the routes not taken, up to the region's limit, over mobile data; sharing the log takes a moment longer while compressed days are written out; one more navigator call at the end of each drive. None of it has run on a phone yet.
+
+## 45. The replay slider of the simulated drive
+
+- **Chosen:** during a simulated drive, a small slider over the guidance bar shows how far the drive has got and moves it forward or back along the route, as the owner asked.
+  - **The whole route in the replay.** The SDK's replay decodes the route 100 km at a time and drops what it has played when it takes the next part, so only the part in hand could be sought in. It now decodes the whole route at once, as its own documentation offers, and the replayer holds the drive from start to end: about 3 MB of positions for a few hundred km, decoded once at the start, on the main thread as each part was before.
+  - **Each seek as Mapbox asks for a large change of position:** the replay stops, the navigator forgets where the car was (`resetTripSession`, which the SDK's replay itself calls at the start of every simulated drive), and the replay goes to the new place and plays on. The routes and the trip session stay as they are, and nothing is billed. Back is as good as forward.
+  - **No reroute after a seek.** How the navigator treats a jump is in its native code, not in the SDK's sources, and a reroute would be a route request. So from a drive's first seek its reroutes are off until the drive ends. A simulated drive follows its route and needs none; a drive without a seek reroutes as before.
+  - **The new place first.** The updates from before a seek, and from the moment the navigator knows no place, are left alone by the screen (`SeekHold`, logged with `replaySeek`); the drawn car and the camera go to the new place at once and let go of the road they were on, and the Then chip and the lane choices start over there.
+  - The slider counts the replay's time, so the played part grows at a steady pace, as a video's does. It ends 5 s before the destination, so the drive still arrives by itself. The dot glides between the drive's positions in the draw phase only and stops when they stop.
+- **Alternatives:**
+  - Keeping the 100 km parts and pushing positions up to the target before a seek: the session's decoding is private, and what it has played is already dropped, so it could never go back.
+  - Forward seeks only, without the reset: the navigator's handling of a jump either way is not documented, and Mapbox's own advice for a large change of position is the reset.
+  - Seeks with reroutes left on: probably harmless, but a seek must never cause a route request, and nothing in the sources rules one out.
+- **Cost:** a pause at the start of a very long simulated drive while the whole route is decoded, and some MB of memory for it; after a seek the simulated drive cannot be rerouted. None of it has run on a phone yet.

@@ -603,6 +603,26 @@ Answered on 2026-11-10; all answers are in [STATUS.md](STATUS.md). Those about t
 - **Old routes at Start:** start at once and refresh inside the trip.
 - **Arriving on the right side:** no.
 
+### Checking a turn at home
+
+The simulated drive and its replay slider show a turn again and again without driving it:
+
+1. Turn on **Settings → Debug → Simulate drive**, plan a route through the turn and press **Start
+   simulation**. A short route is easier: the slider spans the whole drive, so on a long one a
+   finger's width covers a lot of road.
+2. Drag the white dot of the slider over the guidance bar to a little before the turn and let go.
+   The car is put there at once, the map flies to it within about 2 s, and the card shows the turn
+   with its distance. Not there yet: drag again. A release within 2 s of the car's place in the
+   drive moves nothing.
+3. Watch the turn: the card, the Then chip, the lanes, the arrow on the route line, and with Large
+   the view going down and close. Then drag back to before the turn and watch it again, in another
+   camera style or lane zoom if wanted; Settings can be changed during the drive.
+4. Take screenshots of what looks wrong and share the debug log afterwards. Each release is one
+   `replay_seek` line, and the `progress` lines after it show where the car landed.
+
+The simulated car drives up to about 67 mph on straight stretches and slows down for turns; the
+slider counts the time of that drive.
+
 ### What the next drive tests
 
 Before the drive:
@@ -759,6 +779,17 @@ On the drive:
     `...-tempkey.apk`, its run shows a warning, and **Settings → Debug** in that build says that
     the next CI build needs an uninstall, which deletes the token, the settings and the log. Share
     the log before installing the next build.
+24. **The replay slider.** In a simulated drive, and never in a real one, a thin slider sits over
+    the guidance bar, clear of the card and of the Mapbox logo; the amber part grows and the dot
+    glides without steps. Drag forward past a turn, then back to before it: each time the car and
+    the map are at the new place at once (the map flies there within about 2 s), the card shows a
+    maneuver ahead of the new place and never one jumped over, the Then chip comes only for turns
+    ahead, no new route appears, and the drive goes on by itself. Drag to the very end: the drive
+    arrives within a few seconds. With TalkBack the slider reads "Simulated drive position" and a
+    percent. The log: one `replay_seek` line per release, `ok` true with a small `ms`; `progress`
+    lines with `replaySeek` only in the moment after a seek; no `off_route` and no `routes_updated`
+    with `reroute` after a seek; the drive's `trip_summary` with `simulated` true and `meters` close
+    to the road actually replayed.
 
 Then share the debug log. What to read in it:
 
@@ -801,6 +832,8 @@ Then share the debug log. What to read in it:
 | `offline_region`, `offline_style_pack`: `inTrip`, `why` | `inTrip` true: the download ended during a drive. `stopped` with `trip_end`: the drive ended first |
 | Step fields `trafficSignals`, `stopSigns`, `yieldSigns`, `railwayCrossings`, `roadClass`; route `congestionRuns`; progress `speedLimit` | What the roads were like: signs and signals per step (null: the service sent nothing), the class of each step's road, the runs of heavy and of severe traffic with their meters, and the speed limit (value, unit, sign) whenever it changed |
 | `routes_committed`: `routeId`; `session_state`: `simulated` | The route a drive started on. In the Idle state, `simulated` is that of the drive that just ended; it is left out before the first drive of a run |
+| `replay_seek` | One for each release of the replay slider in a simulated drive: where the car was, `fromS` of `durationS` seconds of the replay and `fromM` metres along the route; `toS`, where it was sent (for a release that moved nothing, where the finger let go); `ok`, and with it `ms`, the time from the release until the replay played from there; else `why`: `near` (within 2 s of the car), `end` (already in the last stretch), `reroute` (a new route was on its way), `no_replay`, `replaced` (a newer release went instead), `ended` (the drive ended or its route changed first) or `refused` (the navigator or the replayer would not) |
+| Progress: `replaySeek` | An update between a seek of a simulated drive and the car's first position at its new place: logged, and left alone by everything on the screen. One or two per seek; more would mean the navigator was slow to find the new place |
 
 Reading the connectivity lines:
 

@@ -92,6 +92,14 @@ becomes **Start simulation**: the position moves along the chosen route by itsel
 maneuver card, lanes and arrival. Each simulated drive is a trip session and is billed like a real
 one; the debug section counts them with the rest.
 
+During a simulated drive a small slider sits over the guidance bar, like a video's progress bar:
+amber for the part driven, a white dot where the car is. Drag the dot, or tap the slider, to send
+the car forward or back along the route; the map, the car and the card go there at once, and the
+drive goes on by itself from there. The slider's end stops a few seconds before the destination, so
+the drive still arrives by itself. A seek is no new trip: it keeps the trip session and the route
+and asks for no route; from the first seek of a drive to its end the navigator does not reroute.
+DRIVES.md shows how to use it to check a turn at home. A real drive has no slider.
+
 ### Offline
 
 The app saves what a drive needs for stretches without a connection:
