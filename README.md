@@ -238,9 +238,11 @@ Four repository secrets hold it (**Settings → Secrets and variables → Action
 | `RELEASE_KEY_PASSWORD` | the key's password: in a PKCS12 keystore the same as the keystore password |
 
 Set all four or none. Without them CI still builds the debug APK, but no app bundle; with only
-some, the build fails and names the missing secrets. CI decodes the keystore into a folder of
-the runner's temporary directory that only the build can read and deletes it when the build ends;
-the passwords reach Gradle only as environment variables. A release build on a computer takes the
+some, the build fails before anything is built and names the missing secrets. Only the Gradle run
+that builds the app bundle gets the upload key: CI decodes the keystore just before that run into a
+private folder of the runner's temporary directory and deletes it right after, and it passes the
+passwords to that run alone, only as environment variables. The tests of the CI scripts and the
+debug build, its unit tests and lint never see them. A release build on a computer takes the
 same four values in `local.properties`, with `RELEASE_KEYSTORE_FILE` instead of the base64 (see
 [local.properties.example](local.properties.example)).
 
