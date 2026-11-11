@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -55,5 +56,28 @@ class LaneRowTest {
     @Test
     fun `a row with no room for lanes gives them none`() {
         assertEquals(0, planLaneRow(width = 40, lanes = 3, fullSlot = 44, reserved = 60).slot)
+    }
+
+    @Test
+    fun `a label shows only where it fits whole at its smallest size`() {
+        // The run-up's words may take 45 % of the row: 135 of 300.
+        assertTrue(wordsFit(textWidthAtMinSize = 135, rowWidth = 300, share = LANE_WORDS_MAX_WIDTH_SHARE))
+        assertFalse(wordsFit(textWidthAtMinSize = 136, rowWidth = 300, share = LANE_WORDS_MAX_WIDTH_SHARE))
+        // A distance keeps its 30 %: 90 of 300.
+        assertTrue(wordsFit(textWidthAtMinSize = 90, rowWidth = 300, share = LANE_LABEL_MAX_WIDTH_SHARE))
+        assertFalse(wordsFit(textWidthAtMinSize = 91, rowWidth = 300, share = LANE_LABEL_MAX_WIDTH_SHARE))
+        // Words that fit beside a distance's share fit beside their own.
+        assertTrue(wordsFit(textWidthAtMinSize = 100, rowWidth = 300, share = LANE_WORDS_MAX_WIDTH_SHARE))
+    }
+
+    @Test
+    fun `beside the run-up's words the lanes get narrower and never reach under them`() {
+        // Six lanes and words as wide as their whole share, 45 % of a row of 304 plus the gap.
+        val reserved = (304 * LANE_WORDS_MAX_WIDTH_SHARE).toInt() + 8
+        val plan = planLaneRow(width = 304, lanes = 6, fullSlot = 44, reserved = reserved)
+        assertEquals(LaneRowPlan(slot = 26, start = reserved), plan)
+        assertTrue(plan.start + plan.slot * 6 <= 304)
+        // Short words leave the lanes at full size where there is room.
+        assertEquals(44, planLaneRow(width = 304, lanes = 4, fullSlot = 44, reserved = 60).slot)
     }
 }

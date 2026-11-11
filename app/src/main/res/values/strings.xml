@@ -67,6 +67,26 @@
     <string name="then_destination">destination</string>
     <string name="then_destination_left">destination on the left</string>
     <string name="then_destination_right">destination on the right</string>
+    <string name="lane_words_short_right_1">Right lane</string>
+    <string name="lane_words_short_right_2">2 right</string>
+    <string name="lane_words_short_right_3">3 right</string>
+    <string name="lane_words_short_right_2nd">2nd from right</string>
+    <string name="lane_words_short_right_3rd">3rd from right</string>
+    <string name="lane_words_short_left_1">Left lane</string>
+    <string name="lane_words_short_left_2">2 left</string>
+    <string name="lane_words_short_left_3">3 left</string>
+    <string name="lane_words_short_left_2nd">2nd from left</string>
+    <string name="lane_words_short_left_3rd">3rd from left</string>
+    <string name="lane_words_long_right_1">Use the right lane</string>
+    <string name="lane_words_long_right_2">Use the 2 right lanes</string>
+    <string name="lane_words_long_right_3">Use the 3 right lanes</string>
+    <string name="lane_words_long_right_2nd">Use the second lane from the right</string>
+    <string name="lane_words_long_right_3rd">Use the third lane from the right</string>
+    <string name="lane_words_long_left_1">Use the left lane</string>
+    <string name="lane_words_long_left_2">Use the 2 left lanes</string>
+    <string name="lane_words_long_left_3">Use the 3 left lanes</string>
+    <string name="lane_words_long_left_2nd">Use the second lane from the left</string>
+    <string name="lane_words_long_left_3rd">Use the third lane from the left</string>
 
     <string name="message_no_location">Waiting for your location. Try again in a moment.</string>
     <string name="message_no_route">No route found to this place.</string>

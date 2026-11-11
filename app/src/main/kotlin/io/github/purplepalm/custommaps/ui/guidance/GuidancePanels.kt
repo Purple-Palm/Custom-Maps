@@ -24,7 +24,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Constraints
@@ -32,14 +35,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.format.ImperialFormat
+import io.github.purplepalm.custommaps.nav.guidance.CardLanes
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
+import io.github.purplepalm.custommaps.nav.model.LaneTarget
 import io.github.purplepalm.custommaps.nav.model.LanesAhead
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import java.time.ZonedDateTime
@@ -54,7 +61,9 @@ internal val CARD_CORNER = 24.dp
 /**
  * Next maneuver: the arrow, a large distance and the road, with lane guidance below. Right after a
  * new route, until the navigator's first instruction for it ([RouteProgressSnapshot.pending]), the
- * card shows the new route's maneuver dimmed, with no distance and no lanes.
+ * card shows the new route's maneuver dimmed, with no distance and no lanes. Which lane row it
+ * shows is [CardLanes]' decision: the run-up's to an exit with its words, a lane choice's ahead
+ * with its distance, or the maneuver's own.
  */
 @Composable
 fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier) {
@@ -115,12 +124,26 @@ fun ManeuverCard(progress: RouteProgressSnapshot, modifier: Modifier = Modifier)
                     }
                 }
             }
-            // A lane choice the car reaches before the maneuver takes the row, with its distance:
-            // those lanes come first on the road. After it the row is the maneuver's again.
-            val ahead = progress.laneChoiceAhead
-            (ahead?.lanes ?: progress.lanes)?.let { lanes ->
+            // On the run-up to an exit its one row, with the lanes to use in words where the counts
+            // allow them. Elsewhere a lane choice the car reaches before the maneuver takes the row,
+            // with its distance: those lanes come first on the road. After it the row is the
+            // maneuver's again.
+            val row = CardLanes.of(progress)
+            row.lanes?.let { lanes ->
                 Spacer(Modifier.height(12.dp))
-                LanesRow(lanes, distanceLabel = ahead?.let { ImperialFormat.distance(it.distance).toString() })
+                when (row.source) {
+                    CardLanes.Source.RUN_UP -> {
+                        val words = row.target?.let(::laneWordsRes)
+                        LanesRow(
+                            lanes,
+                            label = words?.let { stringResource(it.short) },
+                            description = words?.let { stringResource(it.long) },
+                            labelShare = LANE_WORDS_MAX_WIDTH_SHARE,
+                        )
+                    }
+                    CardLanes.Source.CHOICE -> LanesRow(lanes, label = row.distance?.let { ImperialFormat.distance(it).toString() })
+                    else -> LanesRow(lanes)
+                }
             }
         }
     }
@@ -133,40 +156,58 @@ internal fun cardContentAlpha(pending: Boolean): Float = if (pending) PENDING_CA
 private const val PENDING_CARD_ALPHA = 0.45f
 
 /**
- * Lanes from left to right; the ones to use are amber, the others dim. Every lane is shown: when
- * there are more than fit, all of them get narrower, since the lane to take is often the last one.
+ * Lanes from left to right; the ones to use are amber, the others dim, and so is a lane kept for
+ * car pools or buses. Every lane is shown: when there are more than fit, all of them get narrower,
+ * since the lane to take is often the last one.
  *
- * With a [distanceLabel], for lanes that are not the next maneuver's, the label stands at the start
- * of the row in small type. The lanes stay in the middle of the row while there is room for that
- * beside the label, and move over, and get narrower, when there is not. The row is as high as one
- * lane, with or without the label, so the label never makes the card taller.
+ * With a [label], for lanes that are not the next maneuver's, the label stands at the start of the
+ * row in small type: a lane choice's distance, or on the run-up to an exit the lanes to use in
+ * words. It takes at most [labelShare] of the row and shrinks to fit, and shows whole or not at
+ * all: a label wider than its share at the smallest size is left out, never cut. The lanes stay in
+ * the middle of the row while there is room for that beside the label, and move over, and get
+ * narrower, when there is not. The row is as high as one lane, with or without the label, so the
+ * label never makes the card taller. A [description] is what the screen reader says for the row.
  */
 @Composable
-fun LanesRow(lanes: LaneInfo, modifier: Modifier = Modifier, distanceLabel: String? = null) {
+fun LanesRow(
+    lanes: LaneInfo,
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    description: String? = null,
+    labelShare: Float = LANE_LABEL_MAX_WIDTH_SHARE,
+) {
     val highlight = MaterialTheme.colorScheme.primary
     val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    val labelStyle = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_DIGITS)
+    val measurer = rememberTextMeasurer()
     val count = lanes.lanes.size
+    val described = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier
     Layout(
         content = {
             lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim) }
-            if (distanceLabel != null) LaneDistanceLabel(distanceLabel)
+            if (label != null) LaneLabel(label, labelStyle)
         },
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().then(described),
     ) { measurables, constraints ->
         val fullSlot = LANE_SLOT.roundToPx()
         // The card gives the row a width. Without one, every lane is as wide as it likes to be.
         val width = if (constraints.hasBoundedWidth) constraints.maxWidth else fullSlot * (count + 2)
-        // The label keeps to a share of the row and to the height of a lane; its text shrinks to fit.
-        val label = measurables.getOrNull(count)?.measure(
-            Constraints(maxWidth = (width * LANE_LABEL_MAX_WIDTH_SHARE).roundToInt(), maxHeight = fullSlot),
-        )
-        val reserved = if (label != null) label.width + LANE_LABEL_GAP.roundToPx() else 0
+        // The label keeps to a share of the row and to the height of a lane; its text shrinks to
+        // fit, and a text that does not fit at its smallest size is left out.
+        val fits = label != null &&
+            wordsFit(measurer.measure(label, labelStyle.copy(fontSize = LANE_LABEL_MIN_SIZE), maxLines = 1, softWrap = false).size.width, width, labelShare)
+        val shown = if (fits) {
+            measurables.getOrNull(count)?.measure(Constraints(maxWidth = (width * labelShare).roundToInt(), maxHeight = fullSlot))
+        } else {
+            null
+        }
+        val reserved = if (shown != null) shown.width + LANE_LABEL_GAP.roundToPx() else 0
         val row = planLaneRow(width, count, fullSlot, reserved)
         val gap = (row.slot * LANE_GAP_SHARE).roundToInt()
         val arrows = (row.slot - 2 * gap).coerceAtLeast(0)
         val glyphs = List(count) { measurables[it].measure(Constraints.fixed(arrows, arrows)) }
         layout(width, row.slot) {
-            label?.placeRelative(0, (row.slot - label.height) / 2)
+            shown?.placeRelative(0, (row.slot - shown.height) / 2)
             glyphs.forEachIndexed { index, glyph -> glyph.placeRelative(row.start + index * row.slot + gap, gap) }
         }
     }
@@ -186,16 +227,24 @@ internal fun planLaneRow(width: Int, lanes: Int, fullSlot: Int, reserved: Int): 
     return LaneRowPlan(slot, start = maxOf(reserved, (width - slot * lanes) / 2))
 }
 
-/** How far ahead the lanes of the row are, for example "0.4 mi". */
+/**
+ * Whether a label [textWidthAtMinSize] wide at its smallest size, in pixels, fits whole into its
+ * [share] of a row [rowWidth] pixels wide. A label that does not is left out of the row, never cut:
+ * on the run-up to an exit the lanes then stand without their words, which the screen reader still
+ * says.
+ */
+internal fun wordsFit(textWidthAtMinSize: Int, rowWidth: Int, share: Float): Boolean =
+    textWidthAtMinSize <= (rowWidth * share).roundToInt()
+
+/** The label at the start of a lane row: how far ahead the lanes are, for example "0.4 mi", or the lanes to use in words. */
 @Composable
-private fun LaneDistanceLabel(text: String) {
-    val style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_DIGITS)
+private fun LaneLabel(text: String, style: TextStyle) {
     Text(
         text = text,
         style = style,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
-        autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = style.fontSize),
+        autoSize = TextAutoSize.StepBased(minFontSize = LANE_LABEL_MIN_SIZE, maxFontSize = style.fontSize),
     )
 }
 
@@ -212,7 +261,16 @@ private const val LANE_GAP_SHARE = 4f / 44f
 private val LANE_LABEL_GAP = 8.dp
 
 /** The most of the row the distance label may take, whatever the font size: the lanes are what the row is for. */
-private const val LANE_LABEL_MAX_WIDTH_SHARE = 0.3f
+internal const val LANE_LABEL_MAX_WIDTH_SHARE = 0.3f
+
+/**
+ * The most of the row the lanes to use in words may take on the run-up to an exit: more than a
+ * distance, since "2nd from right" is longer and is the instruction itself.
+ */
+internal const val LANE_WORDS_MAX_WIDTH_SHARE = 0.45f
+
+/** The smallest the label's text shrinks to; at the phone's font scale. */
+private val LANE_LABEL_MIN_SIZE = 10.sp
 
 /**
  * Arrival time, time and distance left, and the controls to change view or end guidance. The texts
@@ -350,7 +408,7 @@ private fun ManeuverCardPreview() {
     CustomMapsTheme {
         ManeuverCard(
             RouteProgressSnapshot(
-                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Highway A South", "Midtown"),
+                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street", "Office"),
                 distanceToNextManeuver = Distance.miles(0.4),
                 lanes = LaneInfo(
                     listOf(
@@ -366,3 +424,103 @@ private fun ManeuverCardPreview() {
         )
     }
 }
+
+/**
+ * The run-up to an exit, on a narrow phone at three font sizes: the one row with the lanes to use
+ * in words, which shrink with the font and show whole or not at all, while the row keeps its
+ * height. A lane for car pools stands at the left edge, dim.
+ */
+@Preview(name = "run-up, right lane", widthDp = 360)
+@Preview(name = "run-up, right lane, larger font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "run-up, right lane, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun RunUpRightLanePreview() {
+    RunUpPreview(
+        Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
+        RunUpLanes(
+            LaneInfo(listOf(previewCarPool, previewOn(false), previewOn(false), previewOn(false), previewOn(false), previewExit)),
+            target = LaneTarget(LaneEdge.RIGHT, 1, 0),
+            key = "route/0/3/end",
+            odd = null,
+        ),
+    )
+}
+
+@Preview(name = "run-up, 2 right", widthDp = 360)
+@Preview(name = "run-up, 2 right, larger font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "run-up, 2 right, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun RunUpTwoRightPreview() {
+    RunUpPreview(
+        Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
+        RunUpLanes(
+            LaneInfo(listOf(previewCarPool, previewOn(false), previewOn(false), previewOn(false), previewExit, previewExit)),
+            target = LaneTarget(LaneEdge.RIGHT, 2, 0),
+            key = "route/0/3/end",
+            odd = null,
+        ),
+    )
+}
+
+/** Before the exit, where the right lane leaves for an earlier one: the second lane from the right goes on to it. */
+@Preview(name = "run-up, 2nd from right", widthDp = 360)
+@Preview(name = "run-up, 2nd from right, larger font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "run-up, 2nd from right, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun RunUpSecondFromRightPreview() {
+    RunUpPreview(
+        Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
+        RunUpLanes(
+            LaneInfo(listOf(previewCarPool, previewOn(false), previewOn(false), previewOn(true), previewLeaving)),
+            target = LaneTarget(LaneEdge.RIGHT, 1, 1),
+            key = "route/0/3/2",
+            odd = null,
+        ),
+    )
+}
+
+/** A left exit: the lane for car pools at the left edge is never the left lane, and stays dim. */
+@Preview(name = "run-up, left lane past a car pool lane", widthDp = 360)
+@Preview(name = "run-up, left lane past a car pool lane, larger font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "run-up, left lane past a car pool lane, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun RunUpLeftLanePreview() {
+    val left = Lane(setOf(TurnModifier.SLIGHT_LEFT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_LEFT)
+    RunUpPreview(
+        Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_LEFT, "Exit 31: Elm Street"),
+        RunUpLanes(
+            LaneInfo(listOf(previewCarPool, left, previewOn(false), previewOn(false), previewOn(false))),
+            target = LaneTarget(LaneEdge.LEFT, 1, 0),
+            key = "route/0/5/end",
+            odd = null,
+        ),
+    )
+}
+
+@Composable
+private fun RunUpPreview(maneuver: Maneuver, row: RunUpLanes) {
+    CustomMapsTheme {
+        ManeuverCard(
+            RouteProgressSnapshot(
+                nextManeuver = maneuver,
+                distanceToNextManeuver = Distance.miles(1.2),
+                lanes = null,
+                distanceRemaining = Distance.miles(12.3),
+                durationRemaining = 18.minutes,
+                runUpLanes = row,
+            ),
+        )
+    }
+}
+
+/** A lane for car pools: drawn dim, never lit while another lane can be used. */
+private val previewCarPool = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false, designated = true)
+
+/** A general lane that goes on, lit or not. */
+private fun previewOn(lit: Boolean) = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = lit, activeIndication = if (lit) TurnModifier.STRAIGHT else null)
+
+/** A lane that leaves for an earlier exit. */
+private val previewLeaving = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
+
+/** A lane that goes on to the exit, lit. */
+private val previewExit = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
