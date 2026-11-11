@@ -77,6 +77,21 @@ class JunctionFrameTest {
     }
 
     @Test
+    fun `a bend is looked for 150 m past the maneuver point and no farther`() {
+        val road = veer(145.0, 26.0)
+        val plan = plan(road)
+        assertEquals(145.0, plan.bend!!.meters, 1e-9)
+        // The road to 30 m past it, back to the maneuver point.
+        val past = LocalLine.pointAt(road, 175.0)
+        assertEquals(past.x, plan.points.first().x, 1e-9)
+        assertEquals(past.y, plan.points.first().y, 1e-9)
+        assertEquals(p(0.0, 0.0), plan.points.last())
+        // A bend 155 m on is not found.
+        assertNull(plan(veer(155.0, 26.0)).bend)
+        assertTrue(plan(veer(155.0, 26.0)).points.isEmpty())
+    }
+
+    @Test
     fun `a road with no bend within the search adds nothing`() {
         val plan = plan(listOf(p(0.0, 0.0), p(0.0, 3000.0)))
         assertNull(plan.bend)

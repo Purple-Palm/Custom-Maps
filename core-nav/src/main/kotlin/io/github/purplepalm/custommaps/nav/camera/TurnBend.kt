@@ -37,7 +37,8 @@ object TurnBend {
     /**
      * The first bend of [points], the road from the maneuver point on (its first point), or null
      * when it goes on within [minDegrees] and [sideMeters] of the way in for [searchMeters] or to
-     * its end, or only drifts away from the way in along the line it leaves the point on.
+     * its end, or only drifts away from the way in along the line it leaves the point on. The
+     * numbers are the camera's ([CameraTuning]), so they have one home.
      *
      * @param approachBearing the compass bearing the car comes in on, in degrees
      * @param nearMeters how much of the road from the maneuver point gives the line it leaves on
@@ -45,10 +46,10 @@ object TurnBend {
     fun bend(
         points: List<LocalPoint>,
         approachBearing: Double,
-        minDegrees: Double = 20.0,
-        sideMeters: Double = 4.0,
-        searchMeters: Double = 150.0,
-        nearMeters: Double = 15.0,
+        minDegrees: Double,
+        sideMeters: Double,
+        searchMeters: Double,
+        nearMeters: Double,
     ): Bend? {
         val road = spaced(points)
         if (road.size < 2) return null
