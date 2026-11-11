@@ -10,6 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -53,9 +54,10 @@ class FileDebugLogTest {
         log.log("arrival")
         runCurrent()
 
+        // The first day is over, and compressed.
         assertEquals(
             listOf("""{"t":"2000-01-01T11:59:00Z","type":"route_request","to":"Elm Street"}"""),
-            firstDay.readLines(),
+            gunzip(File(logDirectory, "2000-01-01.jsonl.gz")).lines().filter { it.isNotEmpty() },
         )
         assertEquals(
             listOf("""{"t":"2000-01-01T12:01:00Z","type":"arrival"}"""),
@@ -171,8 +173,9 @@ class FileDebugLogTest {
 
     @Test
     fun `the oldest days go first once the log is too large`() = runTest {
-        val log = newLog(maxBytes = 200)
-        val filler = mapOf("text" to "x".repeat(80))
+        val log = newLog(maxBytes = 400)
+        // Text that gzip cannot make much smaller, so each day takes about as much room compressed.
+        val filler = mapOf("text" to noise(120))
         for (day in listOf("2000-01-01", "2000-01-02", "2000-01-03")) {
             clock.now = Instant.parse("${day}T12:00:00Z")
             log.log("event", filler)
@@ -180,8 +183,115 @@ class FileDebugLogTest {
         }
 
         val remaining = logDirectory.listFiles().orEmpty().map { it.name }.sorted()
-        assertEquals(listOf("2000-01-02.jsonl", "2000-01-03.jsonl"), remaining)
+        assertEquals(listOf("2000-01-02.jsonl.gz", "2000-01-03.jsonl"), remaining)
         assertTrue(log.sizeBytes() <= 400)
+    }
+
+    @Test
+    fun `a day is compressed once the log goes on to the next one`() = runTest {
+        val log = newLog()
+        log.log("first", mapOf("text" to "Oak Street"))
+        log.log("second")
+        runCurrent()
+        val written = firstDay.readText()
+        clock.now = Instant.parse("2000-01-02T08:00:00Z")
+        log.log("third")
+        runCurrent()
+
+        assertFalse(firstDay.exists())
+        assertEquals(written, gunzip(File(logDirectory, "2000-01-01.jsonl.gz")))
+        // The day being written stays plain.
+        assertEquals(1, File(logDirectory, "2000-01-02.jsonl").readLines().size)
+        assertEquals(emptyList<String>(), logDirectory.list().orEmpty().filter { it.endsWith(".tmp") })
+    }
+
+    @Test
+    fun `the limit is on the compressed size`() = runTest {
+        // Ten days of 50 lines each: about 8 KB of text a day, a few hundred bytes compressed. As
+        // text they would take 78 KB, and only the newest day would be kept.
+        val log = newLog(maxBytes = 12_000)
+        for (day in 1..10) {
+            clock.now = Instant.parse("2000-01-${day.toString().padStart(2, '0')}T12:00:00Z")
+            repeat(50) { log.log("progress", mapOf("road" to "Pine Avenue", "metersLeft" to 1_200 - it, "text" to "x".repeat(60))) }
+            runCurrent()
+        }
+
+        val days = logDirectory.list().orEmpty().map { it.substringBefore('.') }.distinct()
+        assertEquals(10, days.size)
+        assertTrue(log.sizeBytes() <= 12_000, "stored ${log.sizeBytes()} bytes")
+        val exported = log.export(emptyMap())
+        assertEquals(10, exported.size)
+        assertTrue(exported.sumOf { it.length() } > 50_000L)
+    }
+
+    @Test
+    fun `export writes a compressed day as the plain text it was`() = runTest {
+        val log = newLog()
+        log.log("route_request", mapOf("to" to "Elm Street"))
+        log.log("arrival")
+        runCurrent()
+        val written = firstDay.readLines()
+        clock.now = Instant.parse("2000-01-02T09:00:00Z")
+        log.log("next day")
+        runCurrent()
+        assertFalse(firstDay.exists())
+
+        val files = log.export(mapOf("app" to "0.1.0"))
+
+        assertEquals(listOf("custom-maps-debug-2000-01-01.txt", "custom-maps-debug-2000-01-02.txt"), files.map { it.name })
+        val lines = files.first().readLines()
+        assertTrue(lines.first().contains("\"type\":\"export\""))
+        assertEquals(written, lines.drop(1))
+    }
+
+    @Test
+    fun `lines that come back to a compressed day are kept, after the ones before`() = runTest {
+        val log = newLog()
+        log.log("before")
+        runCurrent()
+        clock.now = Instant.parse("2000-01-02T09:00:00Z")
+        log.log("next day")
+        runCurrent()
+        // The phone's clock is set back a day.
+        clock.now = Instant.parse("2000-01-01T23:00:00Z")
+        log.log("late")
+        clock.now = Instant.parse("2000-01-02T09:30:00Z")
+        log.log("next day again")
+        runCurrent()
+
+        // Both parts of the day are one compressed file now, read as one text.
+        assertEquals(listOf("before", "late"), gunzip(File(logDirectory, "2000-01-01.jsonl.gz")).lines().filter { it.isNotEmpty() }.map(::typeOf))
+        val exported = log.export(emptyMap()).first().readLines().drop(1).map(::typeOf)
+        assertEquals(listOf("before", "late"), exported)
+    }
+
+    @Test
+    fun `days left plain by an earlier run are compressed at the first line`() = runTest {
+        logDirectory.mkdirs()
+        val old = File(logDirectory, "1999-12-30.jsonl").apply { writeText("{\"t\":\"1999-12-30T10:00:00Z\",\"type\":\"old\"}\n") }
+        val log = newLog()
+
+        log.log("today")
+        runCurrent()
+
+        assertFalse(old.exists())
+        assertEquals("{\"t\":\"1999-12-30T10:00:00Z\",\"type\":\"old\"}\n", gunzip(File(logDirectory, "1999-12-30.jsonl.gz")))
+    }
+
+    @Test
+    fun `clear also deletes the compressed days`() = runTest {
+        val log = newLog()
+        log.log("first")
+        runCurrent()
+        clock.now = Instant.parse("2000-01-02T09:00:00Z")
+        log.log("second")
+        runCurrent()
+        assertTrue(File(logDirectory, "2000-01-01.jsonl.gz").exists())
+
+        log.clear()
+
+        assertEquals(emptyList<String>(), logDirectory.list().orEmpty().toList())
+        assertEquals(0L, log.sizeBytes())
     }
 
     @Test
@@ -351,6 +461,21 @@ class FileDebugLogTest {
     private companion object {
         const val RACE_RUNS = 200
         const val QUEUED_BEHIND = 5
+
+        fun gunzip(file: File): String = GZIPInputStream(file.inputStream()).bufferedReader().use { it.readText() }
+
+        fun typeOf(line: String): String = line.substringAfter("\"type\":\"").substringBefore('"')
+
+        /** [length] letters that follow no pattern gzip can use, the same each time. */
+        fun noise(length: Int): String {
+            var seed = 12_345L
+            return buildString {
+                repeat(length) {
+                    seed = (seed * 1_103_515_245L + 12_345L) and 0x7fffffffL
+                    append('a' + (seed % 26).toInt())
+                }
+            }
+        }
     }
 
     private class MutableClock(var now: Instant, private val zone: ZoneId) : Clock() {

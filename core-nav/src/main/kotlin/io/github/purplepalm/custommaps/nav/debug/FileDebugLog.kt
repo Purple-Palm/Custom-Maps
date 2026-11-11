@@ -2,15 +2,20 @@ package io.github.purplepalm.custommaps.nav.debug
 
 import java.io.BufferedWriter
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.io.Writer
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.withLock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -23,14 +28,19 @@ import kotlinx.coroutines.withContext
  * The debug log in [directory]: one JSON-lines file per local day, written by a single background
  * coroutine so [log] never blocks the caller: it only queues the event, and the coroutine encodes,
  * masks and writes it. [logNow] writes on the calling thread instead, for a process that is about
- * to die. Once all files together pass [maxBytes], the oldest days are deleted; the file being
- * written is always kept. Copies for sharing go to [exportDirectory], and [clear] deletes them
- * along with the log.
+ * to die.
+ *
+ * A day that is over is kept compressed (gzip), which holds many more days in the same room: a
+ * guided minute writes a lot. Days are compressed in the background, outside the lock that guards
+ * writing, so neither [log] nor [logNow] waits for it. Once all files together, as stored, pass
+ * [maxBytes], the oldest days are deleted; the file being written is always kept. Copies for sharing
+ * go to [exportDirectory] as plain text, one file per day, and [clear] deletes them along with the
+ * log.
  */
 class FileDebugLog(
     private val directory: File,
     private val exportDirectory: File,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val maxBytes: Long = DEFAULT_MAX_BYTES,
@@ -62,6 +72,9 @@ class FileDebugLog(
     private var writer: Writer? = null
     private var writerDay: LocalDate? = null
     private var linesSinceTrim = 0
+
+    /** True while a pass of [compressClosedDays] runs; there is never more than one. */
+    private val compressing = AtomicBoolean(false)
 
     init {
         scope.launch(io) {
@@ -126,28 +139,88 @@ class FileDebugLog(
         files.withLock { logFiles().sumOf { it.length() } }
     }
 
+    /**
+     * Each day of the log as a plain text file, `custom-maps-debug-<day>.txt`, the [header] line
+     * first, then the day's lines in the order they were written; a compressed day is written out
+     * as text. The files are opened under the lock and copied after it, so writing goes on
+     * meanwhile: the copy has what the log held when the export began.
+     */
     override suspend fun export(header: Map<String, Any?>): List<File> = withContext(io) {
-        files.withLock {
+        val sources = files.withLock {
             writer?.flush()
             exportDirectory.mkdirs()
             deleteExports()
+            openParts()
+        }
+        try {
             val headerLine = JsonLines.event(clock.instant(), "export", header)
-            logFiles().map { source ->
-                File(exportDirectory, "$EXPORT_PREFIX${source.nameWithoutExtension}.txt").also { exported ->
-                    exported.bufferedWriter().use { out ->
-                        out.write(headerLine)
-                        out.write("\n")
-                        source.bufferedReader().use { it.copyTo(out) }
+            sources.groupBy { it.day }.map { (day, parts) ->
+                File(exportDirectory, "$EXPORT_PREFIX$day.txt").also { exported ->
+                    exported.outputStream().buffered().use { out ->
+                        out.write(headerLine.toByteArray(Charsets.UTF_8))
+                        out.write('\n'.code)
+                        for (part in parts) part.open().use { it.copyTo(out) }
                     }
                 }
             }
+        } finally {
+            sources.forEach { it.close() }
         }
+    }
+
+    /**
+     * One file of the log opened for reading: a compressed day, or [length] bytes of a plain one,
+     * as long as it was when it was opened. An open file can still be read when it is renamed or
+     * deleted.
+     */
+    private class Part(val day: String, private val input: FileInputStream, private val compressed: Boolean, private val length: Long) {
+        fun open(): InputStream = if (compressed) GZIPInputStream(input.buffered()) else LimitedInput(input.buffered(), length)
+
+        fun close() {
+            try {
+                input.close()
+            } catch (e: IOException) {
+                // Nothing to keep.
+            }
+        }
+    }
+
+    /** At most [left] bytes of [input]. */
+    private class LimitedInput(private val input: InputStream, private var left: Long) : InputStream() {
+        override fun read(): Int {
+            if (left <= 0L) return -1
+            return input.read().also { if (it >= 0) left -= 1 }
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (left <= 0L) return -1
+            val read = input.read(buffer, offset, minOf(length.toLong(), left).toInt())
+            if (read > 0) left -= read
+            return read
+        }
+
+        override fun close() = input.close()
+    }
+
+    /** Every file of the log, oldest first, opened for [export]. Call it holding [files]. */
+    private fun openParts(): List<Part> {
+        val parts = ArrayList<Part>()
+        try {
+            for (file in logFiles()) {
+                parts += Part(dayOf(file), FileInputStream(file), file.name.endsWith(COMPRESSED_EXTENSION), file.length())
+            }
+        } catch (e: IOException) {
+            parts.forEach { it.close() }
+            throw e
+        }
+        return parts
     }
 
     override suspend fun clear() = withContext(io) {
         files.withLock {
             closeWriter()
             logFiles().forEach { it.delete() }
+            temporaryFiles().forEach { it.delete() }
             deleteExports()
         }
     }
@@ -184,6 +257,9 @@ class FileDebugLog(
         writer = opened
         writerDay = day
         trim()
+        // A new day: the days before it are over. Also at the first line of a run, for days a
+        // run before left plain.
+        compressClosedDaysLater()
         return opened
     }
 
@@ -198,6 +274,68 @@ class FileDebugLog(
         }
     }
 
+    /** Starts a pass of [compressClosedDays] in the background, unless one runs. */
+    private fun compressClosedDaysLater() {
+        if (!compressing.compareAndSet(false, true)) return
+        scope.launch(io) {
+            try {
+                compressClosedDays()
+            } finally {
+                compressing.set(false)
+            }
+        }
+    }
+
+    /**
+     * Compresses each day that is over and still plain, one at a time, without holding the lock
+     * while it compresses: the lines of the file as long as it was are written to a temporary file,
+     * and only then, under the lock, does that take the plain file's place, if the file is still
+     * as long as it was. A day that got lines meanwhile, as when the phone's clock was set back,
+     * stays plain until the next pass. Lines that come for a day that is already compressed are
+     * added to it as one more gzip member, which reads as one text.
+     */
+    private fun compressClosedDays() {
+        files.withLock { temporaryFiles().forEach { it.delete() } }
+        val closed = files.withLock {
+            val current = writerDay?.let(::fileFor)
+            logFiles().filter { it.name.endsWith(LOG_EXTENSION) && it != current }
+        }
+        for (plain in closed) {
+            val length = files.withLock { plain.length().takeIf { plain.exists() && plain != writerDay?.let(::fileFor) } } ?: continue
+            val compressed = File(directory, plain.name + GZIP_SUFFIX)
+            val temporary = File(directory, compressed.name + TEMPORARY_SUFFIX)
+            try {
+                GZIPOutputStream(FileOutputStream(temporary).buffered()).use { out ->
+                    LimitedInput(FileInputStream(plain).buffered(), length).use { it.copyTo(out) }
+                }
+            } catch (e: IOException) {
+                // Storage full or the file went away: the day stays as it is.
+                temporary.delete()
+                continue
+            }
+            files.withLock {
+                val unchanged = plain.exists() && plain.length() == length && plain != writerDay?.let(::fileFor)
+                try {
+                    if (!unchanged) {
+                        temporary.delete()
+                    } else if (compressed.exists()) {
+                        FileOutputStream(compressed, true).use { out -> temporary.inputStream().use { it.copyTo(out) } }
+                        temporary.delete()
+                        plain.delete()
+                    } else if (temporary.renameTo(compressed)) {
+                        plain.delete()
+                    } else {
+                        temporary.delete()
+                    }
+                } catch (e: IOException) {
+                    temporary.delete()
+                }
+            }
+        }
+        // The days take less room now; the oldest may have to go all the same.
+        files.withLock { trim() }
+    }
+
     private fun closeWriter() {
         try {
             writer?.close()
@@ -210,16 +348,28 @@ class FileDebugLog(
 
     private fun fileFor(day: LocalDate) = File(directory, "$day$LOG_EXTENSION")
 
-    /** Oldest first: the names are ISO dates. */
+    /**
+     * Every file of the log, oldest first: by day, the names being ISO dates, and within a day the
+     * compressed part, which holds the older lines, before a plain one.
+     */
     private fun logFiles(): List<File> =
-        directory.listFiles { file -> file.isFile && file.name.endsWith(LOG_EXTENSION) }
-            ?.sortedBy { it.name }
+        directory.listFiles { file -> file.isFile && (file.name.endsWith(LOG_EXTENSION) || file.name.endsWith(COMPRESSED_EXTENSION)) }
+            ?.sortedWith(compareBy({ dayOf(it) }, { !it.name.endsWith(COMPRESSED_EXTENSION) }))
             .orEmpty()
+
+    /** What a pass of compression left behind when the process ended during it. */
+    private fun temporaryFiles(): List<File> =
+        directory.listFiles { file -> file.isFile && file.name.endsWith(COMPRESSED_EXTENSION + TEMPORARY_SUFFIX) }.orEmpty().toList()
+
+    private fun dayOf(file: File): String = file.name.substringBefore('.')
 
     companion object {
         const val DEFAULT_MAX_BYTES = 50L * 1024 * 1024
         const val EXPORT_PREFIX = "custom-maps-debug-"
         private const val LOG_EXTENSION = ".jsonl"
+        private const val GZIP_SUFFIX = ".gz"
+        private const val COMPRESSED_EXTENSION = LOG_EXTENSION + GZIP_SUFFIX
+        private const val TEMPORARY_SUFFIX = ".tmp"
         private const val BUFFERED_EVENTS = 10_000
         private const val TRIM_EVERY_LINES = 1_000
     }
