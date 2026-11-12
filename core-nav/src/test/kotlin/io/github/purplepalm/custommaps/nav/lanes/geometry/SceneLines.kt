@@ -34,13 +34,13 @@ internal object SceneLines {
         LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), LaneScenes.sideBranches(route))
 
     /** The line of [route]: north from 0, 0, turning at every maneuver by [bendOf]'s angle; its length is the route's. */
-    fun of(route: LaneRoute, rampDegrees: Double = RAMP_DEGREES): List<GeoPoint> {
-        val bends = route.nodes.mapNotNull { node ->
-            val maneuver = node.maneuver ?: return@mapNotNull null
-            val degrees = bendOf(maneuver.type, maneuver.modifier, rampDegrees)
-            if (degrees == 0.0) null else node.station to degrees
-        }
-        return line(route.lengthMeters, bends)
+    fun of(route: LaneRoute, rampDegrees: Double = RAMP_DEGREES): List<GeoPoint> = line(route.lengthMeters, bendsOf(route, rampDegrees))
+
+    /** Where [route]'s line turns, at its maneuvers: station to degrees, left positive. */
+    fun bendsOf(route: LaneRoute, rampDegrees: Double = RAMP_DEGREES): List<Pair<Double, Double>> = route.nodes.mapNotNull { node ->
+        val maneuver = node.maneuver ?: return@mapNotNull null
+        val degrees = bendOf(maneuver.type, maneuver.modifier, rampDegrees)
+        if (degrees == 0.0) null else node.station to degrees
     }
 
     /** A line [length] metres long from 0, 0 due north, turning by each of [bends] (station to degrees, left positive). */
