@@ -16,7 +16,7 @@ import kotlin.math.min
  *   them, or leaves it at the first point with lanes it can be followed from, which go on onto the
  *   new road (an exit's lanes onto its ramp). A node where the route turns without lane data ends a
  *   run. A run's lanes begin at the node where the route turned onto its road before its first point
- *   and end at the next such node after its last.
+ *   and end at its last point: past it the route's data says nothing of its lanes.
  * - **Clusters.** Points of one road no more than [RunUpRule.EDGE_CLUSTER_METERS] apart with the same
  *   lanes, and the same ones kept for car pools, are one junction: the same lanes at each.
  * - **What goes on past a point** the route goes straight through: at the exit's edge the lanes open
@@ -412,15 +412,12 @@ class LaneTopology private constructor(
             addPoint(p, current.map { it.id })
         }
 
+        /** The run ends at its last point: past it the route's lane data says nothing more. */
         private fun endRun(first: Int, last: Int) {
             val run = runs.size - 1
-            val lastNode = points.last().node
-            val end = roadEnd(lastNode)
-            val lastPoint = points.last()
-            val keep = if (lastPoint.turns) lastPoint.allowed else null
+            val end = min(points.last().station + LEAVE_PAST_POINT_METERS, roadEnd(points.last().node))
             for (lane in lanes) {
-                if (lane.run != run || lane.closes != Double.POSITIVE_INFINITY) continue
-                lane.closes = if (keep != null && lane.id !in keep) lastPoint.station + LEAVE_PAST_POINT_METERS else end
+                if (lane.run == run && lane.closes == Double.POSITIVE_INFINITY) lane.closes = end
             }
             runs[run] = runs[run].copy(to = end, points = (points.size - (last - first + 1)) until points.size)
         }

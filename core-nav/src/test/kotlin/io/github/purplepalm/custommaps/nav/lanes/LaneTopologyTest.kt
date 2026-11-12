@@ -119,7 +119,7 @@ class LaneTopologyTest {
         assertEquals(setOf(3), t.points.last().allowed)
         assertEquals(GORE + 5.0, t.lanes[2].closes, "the lanes that go on along the freeway end at the gore")
         assertEquals(GORE + 265.0, a5.closes)
-        assertEquals(GORE + 700.0, t.lanes[3].closes, "the run ends at the turn at the ramp's end")
+        assertEquals(GORE + 265.0, t.lanes[3].closes, "the run ends at its last point: the split")
         assertEquals(1, t.runs.size)
         // The option lane is second from the right wherever the exit-only lane may already be, unless the plan names it.
         assertEquals(0, t.right(3, p1 - 10.0, emptySet()))
@@ -288,10 +288,10 @@ class LaneTopologyTest {
         val t = topology(route)
         assertEquals(2, t.runs.size)
         assertEquals(0.0, t.runs[0].from)
-        assertEquals(2_000.0, t.runs[0].to)
+        assertEquals(1_005.0, t.runs[0].to, "a run ends at its last point: past it nothing is known of its lanes")
         assertEquals(2_000.0, t.runs[1].from, "the second run's lanes begin at the turn")
         assertEquals(listOf(3, 4), t.idsAt(2_200.0))
-        assertTrue(t.lanes.filter { it.run == 0 }.all { it.closes == 2_000.0 })
+        assertTrue(t.lanes.filter { it.run == 0 }.all { it.closes == 1_005.0 })
         // An exit with lanes keeps one run: see IW31's ramp; one whose lanes none can use ends it.
         val none = topology(
             approach(
