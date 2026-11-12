@@ -287,6 +287,14 @@ class LanePlannerTest {
         "split-right" to Golden(GORE - 965.0 to 3, listOf(g(0.0, 3, 0), g(-150.0, 3, 0))),
         // Into the inner of two lanes added on the right, where they open.
         "two-added" to Golden(GORE - 995.0 to 3, listOf(g(2_000.0, null, null), g(900.0, 4, 1), g(0.0, 4, 1)), listOf(Triple(GORE - 950.0, 3, 4))),
+        // P7: the lane that is the right lane where the road without lane data leaves is held from the run-up's start,
+        // then named once past the road; a hold dropped where the band holds the edge lane alone stays dropped.
+        "edge-then-road" to Golden(GORE - 2_295.0 to 2, listOf(g(1_650.0, 2, 2), g(0.0, 3, 0)), listOf(Triple(GORE - 950.0, 2, 3))),
+        "dropped-then-wider" to Golden(
+            GORE - 2_435.0 to 1,
+            listOf(g(1_700.0, 2, 0), g(1_200.0, 2, 0), g(0.0, 2, 0)),
+            listOf(Triple(GORE - 2_020.0, 1, 2)),
+        ),
     )
 
     @Test
@@ -466,6 +474,32 @@ class LanePlannerTest {
                 assertEquals(4, plan.at(GORE - edgeFrom).named, label)
             }
         }
+    }
+
+    @Test
+    fun `the lane at the edge where the road leaves is held from the run-up's start, not only once it is at the edge`() {
+        // The right lane leaves 1,650 m before the gore, the road 950 m before: the lane that is the right lane from 1,650
+        // m on is held from the start, so the light moves once, to it past the road, and never away from the edge.
+        val plan = plan(LaneScenes.edgeThenRoad())
+        assertEquals(GORE - 2_295.0 to 2, plan.firstNamed())
+        assertTrue(3 in plan.at(GORE - 2_000.0).band, "the lane works; it is only not named")
+        assertEquals(listOf(Triple(GORE - 950.0, 2, 3)), plan.moves.map { Triple(it.station, it.from, it.to) })
+        assertTrue(plan.moves.none { it.back })
+        assertTrue(plan.unknownExits.single().held)
+    }
+
+    @Test
+    fun `a hold dropped where the band holds the edge lane alone stays dropped, though the band widens again`() {
+        // Only the right lane can be used 1,700 m before the gore, so the hold for the road 800 m before is dropped where
+        // the band holds that lane alone; a lane added on the far side 1,200 m before widens the band again, and the
+        // light stays on the right lane rather than moving away from it until the road.
+        val plan = plan(LaneScenes.droppedThenWider())
+        assertEquals(GORE - 2_020.0, requireNotNull(plan.unknownExits.single().droppedAt), 1e-9)
+        assertEquals(listOf(Triple(GORE - 2_020.0, 1, 2)), plan.moves.map { Triple(it.station, it.from, it.to) })
+        val wider = plan.at(GORE - 1_000.0)
+        assertEquals(listOf(3, 2), wider.band)
+        assertEquals(2, wider.named)
+        assertTrue(wider.unknownExitAhead)
     }
 
     @Test

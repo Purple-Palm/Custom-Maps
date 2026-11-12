@@ -50,10 +50,11 @@ import kotlin.math.min
  *   that needs more changes. Outside card windows no lane is named (P3): the band is kept and the
  *   path follows it.
  * - **Unknown exits** (P7): before a road without lane data that leaves on the side of the next exit,
- *   the lane at that edge may be the road's own lane, so it is not named unless it is the only lane of
- *   the band; past the road the named lane moves to the edge once where that needs fewer changes. The
- *   hold lasts to the road where it lies at least one comfortable change and the reaction time of
- *   driving before the exit; nearer, the edge lane is named from where the band holds nothing else
+ *   the lane at that edge where the road leaves may be the road's own lane, so it is not named before
+ *   the road (also while another lane still lies beyond it) unless it is the only lane of the band;
+ *   past the road the named lane moves to the edge once where that needs fewer changes. The hold
+ *   lasts to the road where it lies at least one comfortable change and the reaction time of driving
+ *   before the exit; nearer, the edge lane is named from where the band holds nothing else, and stays
  *   ([LanePlan.UnknownExitHold.droppedAt]). Until the road is passed the card shows no words
  *   ([PlanSegment.unknownExitAhead]).
  * - **No lane** (C1): on the approach to a maneuver no lane open to every car can meet (only a lane
@@ -657,10 +658,10 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         return null
     }
 
-    /** The lane at the exit's edge at station [i] (a local index), or -1 where the side is not known or no lane is open there. */
-    private fun edgeLane(i: Int): Int {
+    /** The lane at [edge] at station [i] (a local index), or -1 where the side is not known or no lane is open there. */
+    private fun edgeLane(i: Int, edge: LaneEdge?): Int {
         val here = order[i]
-        return when (edges[i]) {
+        return when (edge) {
             LaneEdge.RIGHT -> here.lastOrNull { !lanes[it].designated } ?: -1
             LaneEdge.LEFT -> here.firstOrNull { !lanes[it].designated } ?: -1
             null -> -1
@@ -678,8 +679,9 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
 
     /**
      * The lane named at each station (local index, -1 for none): P6 inside card windows, nothing outside
-     * (P3), and the lane at the exit's edge held back before an unknown exit (P7); where only that lane
-     * is left in the band, the hold of every unknown exit ahead on the step is dropped there ([drops]).
+     * (P3), and the lane at the exit's edge where an unknown exit leaves held back before it (P7); where
+     * only such lanes are left in the band, the hold of every unknown exit ahead on the step is dropped
+     * there for good ([drops]).
      * A lane once named moves only toward the maneuver's edge, unless it leaves the band or the hold.
      */
     private fun name(inWindow: BooleanArray, noLaneAt: Array<LanePlan.NoLane.Cause?>, drops: HashMap<Int, Double>): IntArray {
@@ -697,16 +699,25 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
                 continue
             }
             var candidates = band
-            if (nextExit < unknownExits.size && unknownExits[nextExit] <= nextTurn[i]) {
-                val edgeLane = edgeLane(i)
-                if (edgeLane >= 0 && edgeLane in band) {
-                    val others = band.filter { it != edgeLane }.toIntArray()
-                    if (others.isNotEmpty()) {
-                        candidates = others
-                    } else {
-                        var e = nextExit
-                        while (e < unknownExits.size && unknownExits[e] <= nextTurn[i]) drops.putIfAbsent(e++, s)
-                    }
+            // For every road ahead on the step whose hold was not dropped: the lane at the edge where it leaves,
+            // which may be its own. A lane that becomes the edge lane only on the way is held from the start, and a
+            // dropped hold stays dropped, so the light never has to move away from the edge for a hold.
+            var held: IntArray? = null
+            var e = nextExit
+            while (e < unknownExits.size && unknownExits[e] <= nextTurn[i]) {
+                if (!drops.containsKey(e)) {
+                    val lane = edgeLane(atOrAfter(unknownExits[e]), edges[i])
+                    if (lane >= 0 && lane in band && (held == null || lane !in held)) held = (held ?: IntArray(0)) + lane
+                }
+                e++
+            }
+            if (held != null) {
+                val others = band.filter { it !in held }.toIntArray()
+                if (others.isNotEmpty()) {
+                    candidates = others
+                } else {
+                    var k = nextExit
+                    while (k < unknownExits.size && unknownExits[k] <= nextTurn[i]) drops.putIfAbsent(k++, s)
                 }
             }
             val cost = requireNotNull(costOf[i])
