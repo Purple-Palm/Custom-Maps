@@ -140,6 +140,22 @@ class LanePlannerTest {
         assertEquals(4_000.0 - 810.0, five.lastInBand(3), "one change: the floor")
     }
 
+    @Test
+    fun `between two maneuvers the band only narrows, and a lane that left it does not come back`() {
+        // IW31: g1 leaves the band for P1, 1,850 m before the gore, where it cannot be used. Past P1 it could reach the
+        // exit's lanes again, and the costs alone would put it back; it stays out, at P1 and after it.
+        val plan = plan(LaneScenes.iw31())
+        assertEquals(listOf(1, 2, 3), plan.at(GORE - 1_850.0).band, "at P1")
+        var before = 1_900.0
+        while (before >= 1_400.0) {
+            assertFalse(0 in plan.at(GORE - before).band, "$before m before the gore")
+            before -= LanePlanner.GRID_METERS
+        }
+        // Only a lane that was not there before may join it: the exit-only lane where it opens.
+        assertFalse(4 in plan.at(GORE - 700.0).band)
+        assertTrue(4 in plan.at(GORE - 620.0).band)
+    }
+
     // ------------------------------------------------------------------ P3, P6 and no move back
 
     @Test

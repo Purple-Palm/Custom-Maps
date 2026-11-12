@@ -881,6 +881,37 @@ class LaneEvidenceTest {
     }
 
     @Test
+    fun `a gap between points of unequal width is a zone at the wider one's width`() {
+        // Three lanes at 1,000 m, roads that may be entered on both sides at 1,200 m, four lanes at 3,000 m: the gap from
+        // the first point to where the second's reach begins is drawn as four lanes, never narrowed to a waist of three.
+        val route = route(
+            start(),
+            node(1_000.0, s(), s(), s()),
+            node(1_200.0, roads = bothSides),
+            node(3_000.0, s(), s(), s(), s()),
+            node(5_000.0, maneuver = arrive),
+        )
+        val first = evidence(route)
+        assertEquals(LaneEvidence.Gap(1_000.0, 2_000.0, 0.0, false, 1, 3), first.gaps.single())
+        val wider = second(route, windows = listOf(CardWindow(500.0, 4_000.0, CardWindow.Kind.RUN_UP, 4)))
+        val gap = wider.zones.single { it.cause == LaneEvidence.Zone.Cause.GAP }
+        assertEquals(1_000.0 to 2_000.0, gap.from to gap.to)
+        assertEquals(4, gap.lanes, "the wider neighbour's width")
+        val stretch = wider.stretches.single { it.from <= 1_500.0 && 1_500.0 < it.to }
+        assertEquals(Kind.ZONE, stretch.kind)
+        assertEquals(4, stretch.lanes)
+        // The same with the wider point first: still four.
+        val narrowing = route(
+            start(),
+            node(1_000.0, s(), s(), s(), s()),
+            node(1_200.0, roads = bothSides),
+            node(3_000.0, s(), s(), s()),
+            node(5_000.0, maneuver = arrive),
+        )
+        assertEquals(4, second(narrowing, windows = listOf(CardWindow(500.0, 4_000.0, CardWindow.Kind.RUN_UP, 4))).zones.single { it.cause == LaneEvidence.Zone.Cause.GAP }.lanes)
+    }
+
+    @Test
     fun `outside every window a gap is a zone up to 600 m`() {
         val short = second(gapRoute(1_000.0, 2_600.0))
         assertEquals(listOf("1000..1600 GAP"), short.zoneList())
