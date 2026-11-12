@@ -684,11 +684,14 @@ class LaneEvidenceTest {
         }
     }
 
-    /** S13: a split 3,000 m before an exit, nothing between: the two right lanes leave at the split. */
+    /**
+     * S13: a split 3,000 m before an exit, nothing between: the two right lanes leave at the split.
+     * The exit is IA's: it takes the two right lanes of six, the fifth an option lane.
+     */
     private fun sceneS13() = route(
         start(),
         node(1_000.0, s(), s(), s(), sr(false), sr(false), roads = exitRight),
-        node(4_000.0, s(false), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRampRight),
+        node(4_000.0, s(false), s(false), s(false), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRampRight),
         node(4_300.0, road = RoadKind.RAMP, maneuver = arrive),
     )
 
@@ -696,16 +699,16 @@ class LaneEvidenceTest {
     fun `S13 leaves a 2,000 m gap between the split and the exit's reach`() {
         val window = CardWindow(1_720.0, 4_000.0, CardWindow.Kind.RUN_UP, 2)
         val evidence = evidence(sceneS13(), listOf(window))
-        assertEquals(listOf("0..1000 KNOWN 5", "1000..3000 NONE", "3000..4000 KNOWN 5", "4000..4300 NONE"), evidence.drawn())
+        assertEquals(listOf("0..1000 KNOWN 5", "1000..3000 NONE", "3000..4000 KNOWN 6", "4000..4300 NONE"), evidence.drawn())
         val gap = evidence.gaps.single()
         assertEquals(2_000.0, gap.meters, 1e-9)
         assertEquals(1_280.0, gap.inWindowMeters, 1e-9)
-        // Three lanes go on past the split, the exit lists five: the arrows place neither added lane.
+        // Three lanes go on past the split, the exit lists six: the arrows place none of the three added lanes.
         val change = evidence.changes.single()
         assertEquals(3, change.lanesBefore)
-        assertEquals(5, change.lanesAfter)
+        assertEquals(6, change.lanesAfter)
         assertFalse(change.explained)
-        assertEquals(2, evidence.added.single().lanes)
+        assertEquals(3, evidence.added.single().lanes)
         assertNull(evidence.added.single().side)
     }
 
@@ -728,13 +731,16 @@ class LaneEvidenceTest {
         assertEquals(LaneEdge.RIGHT, evidence.added.single().side)
     }
 
-    /** S17: no lane points on the way, a road without lane data leaving on the right 300 m before the exit. */
+    /**
+     * S17: no lane points on the way, a road without lane data leaving on the right 300 m before the
+     * exit; five general lanes, as the run-up rule's S17 has them.
+     */
     private fun sceneS17(pointAt: Double? = null) = route(
         *listOfNotNull(
             start(),
-            pointAt?.let { node(4_000.0 - it, hov(), s(), s(), s(), s()) },
+            pointAt?.let { node(4_000.0 - it, s(), s(), s(), s(), s()) },
             node(3_700.0, roads = exitRight),
-            node(4_000.0, hov(), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRampRight),
+            node(4_000.0, s(false), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRampRight),
             node(4_300.0, road = RoadKind.RAMP, maneuver = arrive),
         ).toTypedArray(),
     )

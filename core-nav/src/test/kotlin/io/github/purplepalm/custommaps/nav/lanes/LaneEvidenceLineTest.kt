@@ -89,32 +89,37 @@ class LaneEvidenceLineTest {
 
     @Test
     fun `gaps, unexplained changes, unknown exits and designated lanes are counted`() {
-        // A split 3,000 m before the exit takes two lanes; a road leaves on the exit's side between two points that agree.
+        // A split 3,000 m before the exit takes two lanes. From the next point on a car-pool lane runs beside three general
+        // lanes; it and the exit agree, and a road leaves on the exit's side between them.
         val nodes = listOf(
             node(0.0, maneuver = NodeManeuver(ManeuverType.DEPART)),
             node(1_000.0, s(), s(), s(), sr(false), sr(false), exitRight = true),
-            node(3_400.0, hov(), s(), s(), s(), s(), kinds = listOf(setOf(DesignatedKind.HOV), emptySet(), emptySet(), emptySet(), emptySet())),
-            node(3_700.0, exitRight = true),
-            node(4_000.0, hov(), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(3_200.0, hov(), s(), s(), s(), kinds = listOf(setOf(DesignatedKind.HOV), emptySet(), emptySet(), emptySet())),
+            node(3_500.0, exitRight = true),
+            node(4_000.0, hov(), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRamp),
             node(4_300.0, road = RoadKind.RAMP, maneuver = NodeManeuver(ManeuverType.ARRIVE)),
         )
         val evidence = LaneEvidence.of(LaneRoute("route-2#0", 3, 4_300.0, nodes))
         val fields = LaneEvidenceLine.fields(evidence)
-        // Past the split three lanes go on; the next point lists five: 1,400 m without lane data, about 1,060 m of it in the run-up.
+        // Past the split three lanes go on and the next point lists four: 1,200 m without lane data, up to 2,200 m. The run-up,
+        // planned at the freeway's setting, starts 2,659.888 m before the gore: 860 m of the gap lie in it.
         val gaps = fields["gaps"] as Map<*, *>
         assertEquals(1, gaps["count"])
-        assertEquals(1_400L, gaps["m"])
+        assertEquals(1_200L, gaps["m"])
         assertEquals(1, gaps["inWindow"])
-        assertEquals(Math.round(evidence.gaps.single().inWindowMeters), gaps["inWindowM"])
+        assertEquals(860L, gaps["inWindowM"])
         assertEquals(0, gaps["shortOutside"])
         assertEquals(1, fields["unexplained"])
-        assertEquals(mapOf("count" to 2, "sideUnknown" to 2), fields["exitSideAdded"])
+        assertEquals(mapOf("count" to 1, "sideUnknown" to 1), fields["exitSideAdded"])
         assertEquals(1, fields["unknownExits"])
         assertEquals(1, (fields["designated"] as Map<*, *>)["hov"], "the car-pool lane whose kinds were read")
         assertEquals(1, (fields["designated"] as Map<*, *>)["other"], "the gore's car-pool lane, its kinds not read")
-        val freeway = fields["freewayM"] as Map<*, *>
-        assertEquals(4_000L, (freeway["known"] as Long) + (freeway["bridged"] as Long) + (freeway["none"] as Long))
-        assertEquals(300L, freeway["bridged"], "from 3,400 m to the exit's reach at 3,700 m")
+        assertEquals(
+            mapOf("known" to 2_500L, "bridged" to 300L, "none" to 1_200L),
+            fields["freewayM"],
+            "bridged from 3,200 m to the exit's reach at 3,500 m",
+        )
+        assertEquals(mapOf("runUps" to 1, "street" to 0), fields["windows"])
     }
 
     @Test

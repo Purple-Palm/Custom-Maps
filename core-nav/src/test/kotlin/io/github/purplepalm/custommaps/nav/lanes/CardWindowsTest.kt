@@ -19,6 +19,7 @@ class CardWindowsTest {
 
     private fun s(valid: Boolean = true) = RouteLane(setOf(TurnModifier.STRAIGHT), valid = valid)
     private fun sr(valid: Boolean = true) = RouteLane(setOf(TurnModifier.SLIGHT_RIGHT), valid = valid)
+    private fun option() = RouteLane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), valid = true)
     private fun hov() = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, designated = true)
 
     private val exitLanes = arrayOf(s(false), s(false), s(false), sr())
@@ -135,10 +136,11 @@ class CardWindowsTest {
 
     @Test
     fun `the S13 scene's run-up covers the last 2,280 m before its gore`() {
+        // The exit is IA's: the two right lanes of six, the fifth an option lane.
         val route = route(
             node(0.0, maneuver = depart, postedMph = 55.0),
             node(1_000.0, s(), s(), s(), sr(false), sr(false), postedMph = 55.0),
-            node(4_000.0, s(false), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(4_000.0, s(false), s(false), s(false), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRamp),
             node(4_300.0, road = RoadKind.RAMP, maneuver = arrive),
         )
         val window = CardWindows.of(route).single()
