@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test
 class LaneLayersTest {
 
     private val under = listOf(
-        LaneLayers.ASPHALT, LaneLayers.TINT, LaneLayers.LIT, LaneLayers.LIT_EDGES,
+        LaneLayers.ASPHALT, LaneLayers.TINT, LaneLayers.LIT, LaneLayers.LIT_EDGES, LaneLayers.ERASER,
         LaneLayers.PAINT, LaneLayers.PAINT_WIDE, LaneLayers.SHAPES,
     )
     private val over = listOf(LaneLayers.ARROWS, LaneLayers.ARROW_EDGES)
@@ -55,7 +55,7 @@ class LaneLayersTest {
         assertEquals(1.0, byId.getValue(LaneLayers.ARROW_EDGES).fixedDp)
         for (spec in LaneLayers.LAYERS) {
             assertEquals(1.0, spec.emissiveStrength, spec.id)
-            if (!spec.fill) assertTrue(spec.width != null || spec.fixedDp != null, spec.id)
+            if (!spec.fill) assertTrue(spec.width != null || spec.fixedDp != null || spec.meters != null, spec.id)
         }
     }
 
@@ -64,7 +64,22 @@ class LaneLayersTest {
         val byId = LaneLayers.LAYERS.associateBy { it.id }
         for (id in listOf(LaneLayers.ASPHALT, LaneLayers.PAINT, LaneLayers.PAINT_WIDE)) assertEquals(LaneDrawing.ASPHALT_MIN_ZOOM, byId.getValue(id).minZoom, id)
         for (id in listOf(LaneLayers.SHAPES, LaneLayers.ARROWS, LaneLayers.ARROW_EDGES)) assertEquals(LaneDrawing.SYMBOL_MIN_ZOOM, byId.getValue(id).minZoom, id)
-        for (id in listOf(LaneLayers.TINT, LaneLayers.LIT, LaneLayers.LIT_EDGES)) assertEquals(LaneDrawing.LIT_MIN_ZOOM, byId.getValue(id).minZoom, id)
+        for (id in listOf(LaneLayers.TINT, LaneLayers.LIT, LaneLayers.LIT_EDGES, LaneLayers.ERASER)) assertEquals(LaneDrawing.LIT_MIN_ZOOM, byId.getValue(id).minZoom, id)
+    }
+
+    @Test
+    fun `the eraser is the own line's path one lane and 0_3 m wide, over the lit lane and its edges and under the paint`() {
+        val eraser = LaneLayers.LAYERS.single { it.id == LaneLayers.ERASER }
+        assertEquals(OwnRouteLine.SOURCE, eraser.source)
+        assertEquals(3.96, eraser.meters!!, 1e-9)
+        assertEquals(LaneDrawing.LIT_MIN_ZOOM, eraser.minZoom)
+        assertTrue(eraser.kinds.isEmpty() && !eraser.fill)
+        val ids = LaneLayers.LAYERS.map { it.id }
+        assertEquals(ids.indexOf(LaneLayers.LIT_EDGES) + 1, ids.indexOf(LaneLayers.ERASER))
+        assertEquals(ids.indexOf(LaneLayers.PAINT) - 1, ids.indexOf(LaneLayers.ERASER))
+        // Every other layer draws the drawing's own source; the eraser goes with what is lit.
+        assertTrue(LaneLayers.LAYERS.filter { it.id != LaneLayers.ERASER }.all { it.source == LaneLayers.SOURCE })
+        assertTrue(LaneLayers.ERASER in LaneLayers.LIT_LAYERS)
     }
 
     /** A style as the map keeps its layers: in one list, each with its slot, drawn from the first to the last. */

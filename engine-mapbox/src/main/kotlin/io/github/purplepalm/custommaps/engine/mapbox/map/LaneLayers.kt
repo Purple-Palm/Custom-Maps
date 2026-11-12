@@ -18,6 +18,7 @@ import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
 import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 
 /**
@@ -27,8 +28,8 @@ import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
  *
  * Their order inside the style's middle slot, from the bottom (design 7): Standard's roads, which lie below the slot;
  * the [Group.UNDER_ROUTE] layers, below the navigation SDK's route line ([LayerOrder.ROUTE_LINE_BOTTOM]): the asphalt
- * with lanes kept for buses and the like darker on it, the tints, the lit lane and its edges, the paint lines of two
- * widths and the paint's shapes (the car-pool diamonds); the SDK's other routes (its primary line hidden while the app
+ * with lanes kept for buses and the like darker on it, the tints, the lit lane and its edges, the eraser that covers
+ * the lit lane behind the car ([ERASER]), the paint lines of two widths and the paint's shapes (the car-pool diamonds); the SDK's other routes (its primary line hidden while the app
  * draws its own); the app's own route line; the [Group.OVER_ROUTE] layers above it, the lane arrows and their edge;
  * the SDK's maneuver arrow; and in the top slot the 3D buildings and the labels.
  *
@@ -54,6 +55,7 @@ internal object LaneLayers {
     const val TINT = "custommaps-lanes-tint"
     const val LIT = "custommaps-lanes-lit"
     const val LIT_EDGES = "custommaps-lanes-lit-edges"
+    const val ERASER = "custommaps-lanes-eraser"
     const val PAINT = "custommaps-lanes-paint"
     const val PAINT_WIDE = "custommaps-lanes-paint-wide"
     const val SHAPES = "custommaps-lanes-shapes"
@@ -69,6 +71,12 @@ internal object LaneLayers {
 
     /** The lane arrows' edge, on the screen. */
     const val ARROW_EDGE_DP = 1.0
+
+    /**
+     * The eraser's width on the ground: one freeway lane and 0.3 m, so it covers the lit lane and its edges, which lie
+     * centred on the lane's lines, wherever it lies about the route's path.
+     */
+    const val ERASER_METERS = LaneTopology.FREEWAY_LANE_METERS + 0.3
 
     /** The property names of a drawn feature, as the layers read them. */
     object Key {
@@ -110,8 +118,9 @@ internal object LaneLayers {
 
     /**
      * One layer: [id]; a [fill] or a line; the [kinds] of feature it draws, a line's of [width] only where one is
-     * given; its [group]; shown from [minZoom] at latitude 0; a line [fixedDp] wide on the screen where given, else at
-     * the ground width of [width]; [emissiveStrength] 1, so the style's light leaves its colours as they are.
+     * given; its [group]; shown from [minZoom] at latitude 0; a line [fixedDp] wide on the screen where given, else
+     * [meters] or the ground width of [width]; [emissiveStrength] 1, so the style's light leaves its colours as they are;
+     * from [source], the drawing's, or for the eraser the own route line's path.
      */
     class Spec(
         val id: String,
@@ -122,6 +131,8 @@ internal object LaneLayers {
         val minZoom: Double,
         val fixedDp: Double? = null,
         val emissiveStrength: Double = 1.0,
+        val meters: Double? = null,
+        val source: String = SOURCE,
     )
 
     /** The lines of paint, of both widths. */
@@ -133,6 +144,9 @@ internal object LaneLayers {
         Spec(TINT, true, listOf(LaneDrawing.Kind.TINT), null, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM),
         Spec(LIT, true, listOf(LaneDrawing.Kind.LIT), null, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM),
         Spec(LIT_EDGES, false, listOf(LaneDrawing.Kind.LIT_EDGE), LaneDrawing.Width.EDGE, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM),
+        // The path, in the road's colour where a lane is lit and transparent elsewhere, trimmed to the car: it covers the
+        // lit lane behind the car, so the amber ends where the car is (the design's E3).
+        Spec(ERASER, false, emptyList(), null, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM, meters = ERASER_METERS, source = OwnRouteLine.SOURCE),
         Spec(PAINT, false, PAINT_KINDS, LaneDrawing.Width.NORMAL, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
         Spec(PAINT_WIDE, false, PAINT_KINDS, LaneDrawing.Width.WIDE, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
         Spec(SHAPES, false, listOf(LaneDrawing.Kind.DIAMOND), LaneDrawing.Width.NORMAL, Group.UNDER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM),
@@ -230,15 +244,21 @@ internal object LaneLayers {
          */
         fun setStates(behind: List<String>, levels: List<Pair<String, String?>>)
 
-        /** Shows or hides the layers of what is lit for the route the map holds: the tints, the lit lane and its edges. */
+        /** Shows or hides the layers of what is lit for the route the map holds: the tints, the lit lane and its edges, the eraser. */
         fun setLitVisible(visible: Boolean)
+
+        /** The eraser's colours along the path, a step from each of [stops] on: the road's where a lane is lit, else none. */
+        fun setEraser(stops: List<OwnRouteLine.ColourStop>)
+
+        /** Trims the eraser from [fraction] of the path's projected length to its end: it stays over the part behind the car. */
+        fun setEraserTrim(fraction: Double)
 
         /** Takes the layers, the own slots and the source out of the style, whichever of them is there. */
         fun remove()
     }
 
     /** The layers that show only what is lit for a route, hidden while a new route's drawing loads. */
-    val LIT_LAYERS: List<String> = listOf(TINT, LIT, LIT_EDGES)
+    val LIT_LAYERS: List<String> = listOf(TINT, LIT, LIT_EDGES, ERASER)
 
     /** The drawing's layers and source on [mapboxMap]; [onLoaded] hears each data id of the source that loaded. */
     fun on(mapboxMap: MapboxMap, onLoaded: (dataId: String) -> Unit): Port = object : Port {
@@ -318,6 +338,14 @@ internal object LaneLayers {
             for (id in LIT_LAYERS) set(id, "visibility", visibility)
         }
 
+        override fun setEraser(stops: List<OwnRouteLine.ColourStop>) {
+            set(ERASER, "line-gradient", OwnRouteLine.stepGradient(stops))
+        }
+
+        override fun setEraserTrim(fraction: Double) {
+            set(ERASER, "line-trim-offset", Value.valueOf(listOf(Value.valueOf(fraction), Value.valueOf(1.0))))
+        }
+
         override fun remove() {
             loads?.cancel()
             loads = null
@@ -349,16 +377,20 @@ internal object LaneLayers {
                 if (spec.id == TINT) fillOpacity(notBehind())
             }
         } else {
-            lineLayer(spec.id, SOURCE) {
+            lineLayer(spec.id, spec.source) {
                 slot(slot)
-                filter(filterOf(spec))
+                if (spec.kinds.isNotEmpty()) filter(filterOf(spec))
                 minZoom(LaneDrawing.zoomAt(spec.minZoom, latitude))
                 // Dashes end where they are cut; paint meets at its corners.
                 lineCap(LineCap.BUTT)
-                lineJoin(if (spec.id == LIT_EDGES) LineJoin.ROUND else LineJoin.MITER)
+                lineJoin(if (spec.id == LIT_EDGES || spec.id == ERASER) LineJoin.ROUND else LineJoin.MITER)
                 lineWidth(widthOf(spec, latitude))
                 lineColor(colourOf(spec, colours))
                 lineEmissiveStrength(spec.emissiveStrength)
+                // Never faded behind 3D objects: drawn whole or not at all, as the fills under them are.
+                lineDepthOcclusionFactor(0.0)
+                // The eraser covers nothing until the route's lit stretches are known.
+                if (spec.id == ERASER) lineGradient(OwnRouteLine.stepGradient(listOf(OwnRouteLine.ColourStop(0.0, OwnRouteLine.TRANSPARENT))))
             }
         }
 
@@ -379,7 +411,7 @@ internal object LaneLayers {
     /** The line width of [spec]: its fixed width on the screen, or its ground width for [latitude]. */
     private fun widthOf(spec: Spec, latitude: Double): Expression {
         spec.fixedDp?.let { return Expression.literal(it) }
-        val meters = requireNotNull(spec.width) { "A line needs a width" }.meters
+        val meters = spec.meters ?: requireNotNull(spec.width) { "A line needs a width" }.meters
         return Expression.interpolate {
             exponential { literal(2.0) }
             zoom()
@@ -431,6 +463,8 @@ internal object LaneLayers {
             Expression.color(colours.white),
         )
         SHAPES, ARROWS -> Expression.color(colours.white)
+        // Its gradient draws it; the colour is the road's all the same.
+        ERASER -> Expression.color(colours.asphalt)
         ARROW_EDGES -> Expression.color(colours.arrowEdge)
         else -> throw IllegalArgumentException("No colour for ${spec.id}")
     }

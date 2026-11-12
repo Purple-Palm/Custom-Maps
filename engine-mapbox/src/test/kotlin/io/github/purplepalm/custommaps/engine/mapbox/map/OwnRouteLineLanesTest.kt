@@ -206,9 +206,47 @@ class OwnRouteLineLanesTest {
         drawn()
         style.calls.clear()
         line.setLook(Look.DAY)
-        assertEquals(listOf("lanes.setColours", "setGradients"), style.calls)
+        assertEquals(listOf("lanes.setColours", "setGradients", "lanes.setEraser"), style.calls)
         assertEquals(MapPalette.lanes(Look.DAY), lanes.shownColours)
+        // The eraser in the day's road colour.
+        assertEquals(OwnRouteLine.eraserGradient(requireNotNull(built.last().lanes).lit, MapPalette.lanes(Look.DAY).asphalt), lanes.eraserStops)
         assertTrue(style.gradients.getValue(OwnRouteLine.LIT_CASING).any { it.colour == OwnRouteLine.casingColour(Look.DAY) })
+    }
+
+    /** The colour [stops] give at [fraction] of the path, as a step gradient. */
+    private fun colourAt(stops: List<OwnRouteLine.ColourStop>, fraction: Double): Int = stops.last { it.from <= fraction }.colour
+
+    @Test
+    fun `the eraser covers the lit lane behind the car with the route line's own trim, so the amber ends at the car`() {
+        val stretch = own.litStations.first()
+        drawn(car = stretch.start + 40.0)
+        val drawing = built.last()
+        val lit = requireNotNull(drawing.lanes).lit
+        val road = MapPalette.lanes(Look.NIGHT).asphalt
+        val eraser = requireNotNull(lanes.eraserStops)
+        // The road's colour exactly over the lit stretches, nothing elsewhere.
+        assertEquals(OwnRouteLine.eraserGradient(lit, road), eraser)
+        var x = 0.0
+        while (x < 1.0) {
+            val inLit = lit.any { x >= it.start && x < it.endInclusive }
+            assertEquals(if (inLit) road else OwnRouteLine.TRANSPARENT, colourAt(eraser, x), "at $x")
+            x += 0.0007
+        }
+        var car = stretch.start + 40.0
+        while (car < stretch.endInclusive) {
+            puck(car)
+            val trim = requireNotNull(lanes.eraserTrim)
+            // The eraser takes the route line's trim, the car's place on the path.
+            assertEquals(style.trim!!, trim, 0.0)
+            assertEquals(drawing.table.pathFraction(car), trim, 1e-9)
+            // The eraser is drawn up to the trim: the first lit fraction it leaves is the trim's, where the car is.
+            val litHere = lit.first { trim in it }
+            val step = (litHere.endInclusive - litHere.start) / 20_000.0
+            var first = litHere.start
+            while (first < litHere.endInclusive && first < trim && colourAt(eraser, first) == road) first += step
+            assertEquals(trim, first, 2 * step, "the amber begins at the car at $car")
+            car += 37.0
+        }
     }
 
     @Test

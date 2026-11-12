@@ -105,6 +105,19 @@ class OwnLanesTest {
         assertTrue(empty.latitude.isNaN())
     }
 
+    @Test
+    fun `the eraser is the road's colour over each lit stretch and nothing elsewhere`() {
+        val road = MapPalette.lanes(Look.NIGHT).asphalt
+        val t = OwnRouteLine.TRANSPARENT
+        assertEquals(listOf(OwnRouteLine.ColourStop(0.0, t)), OwnRouteLine.eraserGradient(emptyList(), road))
+        assertEquals(
+            listOf(OwnRouteLine.ColourStop(0.0, t), OwnRouteLine.ColourStop(0.2, road), OwnRouteLine.ColourStop(0.3, t), OwnRouteLine.ColourStop(0.7, road)),
+            OwnRouteLine.eraserGradient(listOf(0.7..1.0, 0.2..0.3), road),
+        )
+        // A stretch from the path's start covers it from there.
+        assertEquals(listOf(OwnRouteLine.ColourStop(0.0, road), OwnRouteLine.ColourStop(0.15, t)), OwnRouteLine.eraserGradient(listOf(0.0..0.15), road))
+    }
+
     /** The colour [stops] give at [fraction] of the path, as a step gradient. */
     private fun colourAt(stops: List<OwnRouteLine.ColourStop>, fraction: Double): Int = stops.last { it.from <= fraction }.colour
 

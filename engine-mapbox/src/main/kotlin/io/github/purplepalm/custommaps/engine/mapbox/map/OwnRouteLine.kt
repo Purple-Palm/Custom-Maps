@@ -820,10 +820,15 @@ internal class OwnRouteLine(
         if (waited && !released) quietly { lanePort?.watchLoads(false) }
     }
 
-    /** The colours of [drawing]'s line: with the lanes in its two pairs of layers, else in the one pair. */
+    /**
+     * The colours of [drawing]'s line: with the lanes in its two pairs of layers, and the eraser in the road's colour
+     * over the lit stretches; else in the one pair.
+     */
     private fun setColours(drawing: OwnLineDrawing) {
         if (lanes) {
-            layers.setGradients(laneGradients(drawing.runs, drawing.lanes?.lit.orEmpty(), look))
+            val lit = drawing.lanes?.lit.orEmpty()
+            layers.setGradients(laneGradients(drawing.runs, lit, look))
+            lanePort?.setEraser(eraserGradient(lit, MapPalette.lanes(look).asphalt))
         } else {
             layers.setColours(colourStops(drawing.runs, look), casingColour(look))
         }
@@ -844,6 +849,8 @@ internal class OwnRouteLine(
             trim = drawing.table.pathFraction(station)
             trimStation = station
             layers.setTrim(trim)
+            // The eraser over the part behind the car, with the same fraction: the lit lane ends where the line does.
+            if (lanes) lanePort?.setEraserTrim(trim)
             layers.setVisible(true)
             if (lanes) {
                 lanePort?.setLitVisible(true)
@@ -882,7 +889,10 @@ internal class OwnRouteLine(
         if (fraction == trim) return
         trim = fraction
         trims++
-        attempt { layers.setTrim(fraction) }
+        attempt {
+            layers.setTrim(fraction)
+            if (lanes) lanePort?.setEraserTrim(fraction)
+        }
     }
 
     /** The SDK's line is shown and the own layers hidden. */
@@ -1141,8 +1151,22 @@ internal class OwnRouteLine(
             )
         }
 
+        /**
+         * The eraser's colours along the path ([LaneLayers.ERASER]): [asphalt] over each of the [lit] stretches (fractions
+         * of the path), [TRANSPARENT] elsewhere, so it covers nothing but the lit lane.
+         */
+        fun eraserGradient(lit: List<ClosedFloatingPointRange<Double>>, asphalt: Int): List<ColourStop> {
+            val out = arrayListOf(ColourStop(0.0, TRANSPARENT))
+            for (stretch in lit.sortedBy { it.start }) {
+                if (stretch.endInclusive <= stretch.start) continue
+                if (stretch.start <= 0.0) out[0] = ColourStop(0.0, asphalt) else out.add(ColourStop(stretch.start, asphalt))
+                if (stretch.endInclusive < 1.0) out.add(ColourStop(stretch.endInclusive, TRANSPARENT))
+            }
+            return out
+        }
+
         /** [stops] as a step gradient over the line's progress, as the navigation SDK builds its own. */
-        private fun stepGradient(stops: List<ColourStop>): Expression = Expression.ExpressionBuilder("step").apply {
+        internal fun stepGradient(stops: List<ColourStop>): Expression = Expression.ExpressionBuilder("step").apply {
             lineProgress()
             color(stops.first().colour)
             for (stop in stops) stop {
