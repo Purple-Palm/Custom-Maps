@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Replaces the theme of values/ whole from Android 10 on, so it takes everything from the same
+        base. The window theme says it is dark in both looks: Android then never darkens or inverts the
+        app's own day colours.
+    -->
+    <style name="Theme.CustomMaps" parent="Base.Theme.CustomMaps">
+        <item name="android:isLightTheme">false</item>
+    </style>
+</resources>

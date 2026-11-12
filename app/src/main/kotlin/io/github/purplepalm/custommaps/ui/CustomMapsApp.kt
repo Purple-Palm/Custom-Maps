@@ -39,10 +39,14 @@ import kotlinx.coroutines.launch
 @Composable
 fun CustomMapsApp(graph: AppGraph) {
     val access by graph.mapsAccess.collectAsStateWithLifecycle()
+    // The map is made once the first look is decided, so it draws its first tiles in that look.
+    val lookDecided by graph.lookController.decided.collectAsStateWithLifecycle()
     val tokenViewModel = viewModel { TokenViewModel(graph.tokenStore, graph.engine.navigation.guidanceState, graph.debugLog) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Settings over the map hides it: a look that waits for a quiet moment of the drive goes now.
+    LaunchedEffect(showSettings) { graph.lookController.onCovered(showSettings) }
 
     // The page colour shows until the map has drawn, and behind its fade-in.
     Box(
@@ -56,13 +60,16 @@ fun CustomMapsApp(graph: AppGraph) {
                 onSaveToken = { tokenViewModel.add(name = null, input = it) },
                 onOpenSettings = { showSettings = true },
             )
-            is MapsAccess.Ready -> MapScreen(
-                engine = graph.engine,
-                settings = graph.settings,
-                debugLog = graph.debugLog,
-                network = graph.network.status,
-                onOpenSettings = { showSettings = true },
-            )
+            is MapsAccess.Ready -> if (lookDecided) {
+                MapScreen(
+                    engine = graph.engine,
+                    settings = graph.settings,
+                    looks = graph.lookController,
+                    debugLog = graph.debugLog,
+                    network = graph.network.status,
+                    onOpenSettings = { showSettings = true },
+                )
+            }
         }
 
         if (showSettings) {

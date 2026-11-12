@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -14,10 +15,14 @@ import io.github.purplepalm.custommaps.diagnostics.DeviceLog
 import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
+import io.github.purplepalm.custommaps.look.LastKnownPosition
+import io.github.purplepalm.custommaps.look.LookController
+import io.github.purplepalm.custommaps.look.SunPlaces
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.nav.debug.JsonLines
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.network.NetworkMonitor
 import io.github.purplepalm.custommaps.settings.AppSettings
@@ -31,6 +36,7 @@ import io.github.purplepalm.custommaps.trip.DataStoreTripLogStore
 import io.github.purplepalm.custommaps.trip.TokenTaggedTripLog
 import java.io.File
 import java.time.Instant
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +48,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -105,6 +112,30 @@ class AppGraph(private val application: Application) {
      */
     val engine: MapboxEngine =
         MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { tokenHandOver.appliedTokenId }, debugLog, network.status)
+
+    /**
+     * The day look or the night look, for the whole process: an activity created again shows the
+     * look this one decided. The sun is computed for the newest position the app has, which never
+     * leaves memory.
+     */
+    val lookController = LookController(
+        guidance = engine.navigation.guidanceState,
+        progress = engine.navigation.routeProgress,
+        places = SunPlaces(
+            fix = { engine.navigation.lastPosition },
+            lastKnown = LastKnownPosition(application),
+            zone = { ZoneId.systemDefault().rules },
+            now = Instant::now,
+        )::current,
+        // Auto until Settings offers the choice.
+        choices = flowOf(LookChoice.AUTO),
+        debugLog = debugLog,
+        scope = applicationScope,
+        now = Instant::now,
+        elapsedMillis = SystemClock::elapsedRealtime,
+        // Behind the progress update, once the map's camera has taken it too.
+        driveContext = Dispatchers.Main,
+    )
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()

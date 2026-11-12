@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window theme only; the UI itself is drawn by Compose. Dark from the first frame, no white flash. -->
-    <style name="Theme.CustomMaps" parent="android:Theme.Material.NoActionBar">
+    <!--
+        Window theme only; the UI is drawn by Compose in the look the app decides, which also sets the
+        window's own background. The theme stays graphite in both looks: the splash, and what Recents
+        and a start from it show for the app, which leaves no picture of its screen there from Android
+        13 on. A dark frame by day costs nothing; a light one at night would light up a dark car.
+    -->
+    <style name="Base.Theme.CustomMaps" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/graphite</item>
+        <item name="android:colorBackground">@color/graphite</item>
     </style>
+
+    <style name="Theme.CustomMaps" parent="Base.Theme.CustomMaps" />
 </resources>

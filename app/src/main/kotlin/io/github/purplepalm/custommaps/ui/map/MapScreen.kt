@@ -71,11 +71,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
+import io.github.purplepalm.custommaps.look.LookController
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.GuidancePadding
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
-import io.github.purplepalm.custommaps.nav.look.Look
-import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
@@ -89,7 +88,9 @@ import io.github.purplepalm.custommaps.ui.guidance.ManeuverPanel
 import io.github.purplepalm.custommaps.ui.guidance.ReplaySlider
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
 import io.github.purplepalm.custommaps.ui.theme.LookTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 
 /**
  * The main screen: the map with search, route choice and guidance drawn over it. [network] is the
@@ -99,6 +100,7 @@ import kotlinx.coroutines.flow.StateFlow
 fun MapScreen(
     engine: MapboxEngine,
     settings: AppSettings,
+    looks: LookController,
     debugLog: DebugLog,
     network: StateFlow<NetworkStatus>,
     onOpenSettings: () -> Unit,
@@ -127,9 +129,22 @@ fun MapScreen(
         onDispose { engine.detachHost(lifecycleOwner) }
     }
 
-    // The night look until the app chooses one by the sun.
-    val phoneMap = remember { engine.createPhoneMap(context, LookOnMap(Look.NIGHT)) }
+    // The map is made with the look it is to show, so its first tiles are drawn in that look.
+    val phoneMap = remember { engine.createPhoneMap(context, looks.lookOnMap.value) }
     DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
+    // Every later look, at once, and what the map did with it for the look's line in the debug log.
+    LaunchedEffect(phoneMap) { looks.showOn(phoneMap::setLook) }
+    // Whether the camera shows a close view, which holds a look switch. Taken as the map works it
+    // out at each progress update, within that update, so the switch reads the update's own.
+    LaunchedEffect(phoneMap) {
+        withContext(Dispatchers.Main.immediate) {
+            try {
+                phoneMap.closeView.collect { looks.onCloseView(it) }
+            } finally {
+                looks.onCloseView(false)
+            }
+        }
+    }
     // While the activity is stopped nothing is on screen, and the camera draws no frames.
     LifecycleStartEffect(phoneMap) {
         phoneMap.setVisible(true)
