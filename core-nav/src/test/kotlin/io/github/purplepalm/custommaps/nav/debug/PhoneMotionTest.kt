@@ -230,13 +230,13 @@ class PhoneMotionTest {
     fun `a right turn pulls to the right side and braking backwards`() {
         val motion = PhoneMotion()
         motion.gravity(leaningBack30.phone(0.0, 0.0, GRAVITY))
-        // 25 m/s turning right at 2 degrees a second: 0.87 m/s² toward the turn's inside; braking at 0.8.
-        val sideways = 25.0 * rad(2.0)
+        // 30 m/s turning right at 2 degrees a second: 1.05 m/s² toward the turn's inside; braking at 0.8.
+        val sideways = 30.0 * rad(2.0)
         motion.gyroscope(leaningBack30.phone(0.0, 0.0, -rad(2.0)))
         motion.linear(leaningBack30.phone(sideways, -0.8, 0.0))
         val fields = motion.take()
         assertEquals(2.0, fields["yaw"])
-        assertEquals(0.87, fields["side"])
+        assertEquals(1.05, fields["side"])
         assertEquals(-0.8, fields["fwd"])
     }
 

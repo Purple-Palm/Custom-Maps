@@ -697,12 +697,15 @@ class LaneEvidenceTest {
 
     @Test
     fun `S13 leaves a 2,000 m gap between the split and the exit's reach`() {
-        val window = CardWindow(1_720.0, 4_000.0, CardWindow.Kind.RUN_UP, 2)
-        val evidence = evidence(sceneS13(), listOf(window))
+        // Against the route's own run-up, planned at the freeway's setting: from 2,659.888 m before the gore.
+        val evidence = LaneEvidence.of(sceneS13())
+        val window = evidence.windows.single()
+        assertEquals(CardWindow.Kind.RUN_UP, window.kind)
+        assertEquals(1_340.112, window.from, 1e-6)
         assertEquals(listOf("0..1000 KNOWN 5", "1000..3000 NONE", "3000..4000 KNOWN 6", "4000..4300 NONE"), evidence.drawn())
         val gap = evidence.gaps.single()
         assertEquals(2_000.0, gap.meters, 1e-9)
-        assertEquals(1_280.0, gap.inWindowMeters, 1e-9)
+        assertEquals(1_659.888, gap.inWindowMeters, 1e-6)
         // Three lanes go on past the split, the exit lists six: the arrows place none of the three added lanes.
         val change = evidence.changes.single()
         assertEquals(3, change.lanesBefore)

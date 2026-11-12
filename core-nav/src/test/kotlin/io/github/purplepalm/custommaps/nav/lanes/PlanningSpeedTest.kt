@@ -10,7 +10,7 @@ class PlanningSpeedTest {
 
     @Test
     fun `a posted speed is planned 5 mph faster`() {
-        assertEquals(60.0 * mph, PlanningSpeed.mps(55.0 * mph, RoadKind.FREEWAY), 1e-9)
+        assertEquals(75.0 * mph, PlanningSpeed.mps(70.0 * mph, RoadKind.FREEWAY), 1e-9)
         assertEquals(30.0 * mph, PlanningSpeed.mps(25.0 * mph, RoadKind.STREET), 1e-9)
         assertEquals(5.0, PlanningSpeed.MARGIN_MPH)
     }

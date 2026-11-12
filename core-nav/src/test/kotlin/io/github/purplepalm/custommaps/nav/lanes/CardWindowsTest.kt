@@ -47,8 +47,8 @@ class CardWindowsTest {
     @Test
     fun `a freeway exit that counts has a run-up from the reach at the planning speed`() {
         val route = route(
-            node(0.0, maneuver = depart, postedMph = 55.0),
-            node(3_000.0, postedMph = 55.0),
+            node(0.0, maneuver = depart, postedMph = 70.0),
+            node(3_000.0, postedMph = 70.0),
             node(5_000.0, *exitLanes, road = RoadKind.RAMP, maneuver = offRamp),
             node(5_400.0, road = RoadKind.RAMP, maneuver = arrive),
         )
@@ -56,9 +56,9 @@ class CardWindowsTest {
         assertEquals(CardWindow.Kind.RUN_UP, window.kind)
         assertEquals(2, window.node)
         assertEquals(5_000.0, window.to)
-        // 55 mph posted: planned at 60 mph, 26.8 m/s; 670.6 m of window and 1,609.3 m of driving.
-        assertEquals(5_000.0 - reach(60.0 * mph), window.from, 1e-9)
-        assertEquals(2_279.904, window.meters, 1e-6)
+        // 70 mph posted: planned at 75 mph, 33.528 m/s; 838.2 m of window and 2,011.68 m of driving.
+        assertEquals(5_000.0 - reach(75.0 * mph), window.from, 1e-9)
+        assertEquals(2_849.88, window.meters, 1e-6)
     }
 
     @Test
@@ -135,16 +135,16 @@ class CardWindowsTest {
     }
 
     @Test
-    fun `the S13 scene's run-up covers the last 2,280 m before its gore`() {
-        // The exit is IA's: the two right lanes of six, the fifth an option lane.
+    fun `the S13 scene's run-up covers the last 2,850 m before its gore`() {
+        // The exit is IA's: the two right lanes of six, the fifth an option lane. 70 mph posted, planned at 75 mph.
         val route = route(
-            node(0.0, maneuver = depart, postedMph = 55.0),
-            node(1_000.0, s(), s(), s(), sr(false), sr(false), postedMph = 55.0),
+            node(0.0, maneuver = depart, postedMph = 70.0),
+            node(1_000.0, s(), s(), s(), sr(false), sr(false), postedMph = 70.0),
             node(4_000.0, s(false), s(false), s(false), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRamp),
             node(4_300.0, road = RoadKind.RAMP, maneuver = arrive),
         )
         val window = CardWindows.of(route).single()
-        assertEquals(1_720.096, window.from, 1e-6)
+        assertEquals(1_150.12, window.from, 1e-6)
     }
 
     @Test
