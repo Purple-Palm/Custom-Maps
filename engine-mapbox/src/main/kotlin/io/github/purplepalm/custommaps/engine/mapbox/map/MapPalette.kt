@@ -1,17 +1,18 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
-import com.mapbox.bindgen.Value
-import com.mapbox.maps.MapboxMap
 import com.mapbox.navigation.ui.maps.route.line.model.RouteLineColorResources
+import io.github.purplepalm.custommaps.nav.look.Look
 
 /**
- * The app's look on top of Mapbox Standard: night lighting with 3D buildings, a muted monochrome
- * base in graphite tones, platinum labels and one amber accent for the route.
+ * The app's two looks on top of Mapbox Standard, and the colours of its own marks on the map.
+ *
+ * At night: night lighting with 3D buildings, a muted monochrome base in graphite tones, platinum
+ * labels and one amber accent for the route. By day: Standard's own day light and colourful theme,
+ * with every colour the night sets given back to the style. The basemap's config is one table with
+ * a value for each look ([keys]), so no key can be set at night and left over by day; [MapLook]
+ * writes a look's column one key at a time.
  */
 internal object MapPalette {
-
-    /** Import id of the Standard basemap when it is loaded as the style itself. */
-    private const val BASEMAP = "basemap"
 
     /**
      * The ground, the buildings and the roads at night, from the darkest to the lightest: a
@@ -31,57 +32,163 @@ internal object MapPalette {
     const val WATER = "#080B0E"
     const val GREENSPACE = "#090C0A"
 
-    private val nightConfig: Map<String, Value> = mapOf(
-        "lightPreset" to Value.valueOf("night"),
-        "theme" to Value.valueOf("monochrome"),
-        "show3dObjects" to Value.valueOf(true),
-        "colorLand" to Value.valueOf(LAND),
-        "colorBuildings" to Value.valueOf(BUILDINGS),
-        "colorMotorways" to Value.valueOf(MOTORWAYS),
-        "colorTrunks" to Value.valueOf(TRUNKS),
-        "colorRoads" to Value.valueOf(ROADS),
-        // The road surface where lane details are drawn. Only the color is set here: whether they
-        // are drawn at all is LaneDetails' to set, and never while the style loads.
-        "colorHdRoads" to Value.valueOf("#4A4F57"),
-        "colorWater" to Value.valueOf(WATER),
-        "colorGreenspace" to Value.valueOf(GREENSPACE),
-        "colorPlaceLabels" to Value.valueOf("#D6D7D9"),
-        "colorRoadLabels" to Value.valueOf("#A9ADB3"),
-        "colorModePointOfInterestLabels" to Value.valueOf("single"),
-        "colorPointOfInterestLabels" to Value.valueOf("#8C9198"),
-        "densityPointOfInterestLabels" to Value.valueOf(2L),
-    )
+    /**
+     * The road surface where lane details are drawn, in each look: at night the street's grey, by
+     * day a dark asphalt under Standard's white markings, which are faint on its own light surface.
+     * Only the colour is set by the look: whether lane details are drawn at all is LaneDetails' to
+     * set, and never while the style loads.
+     */
+    const val HD_ROADS_NIGHT = "#4A4F57"
+    const val HD_ROADS_DAY = "#575C64"
 
-    /** Call when the style JSON is parsed, before tiles render, so no daylight frame appears. */
-    fun applyNight(map: MapboxMap) {
-        nightConfig.forEach { (name, value) -> map.setStyleImportConfigProperty(BASEMAP, name, value) }
+    /** One key of the basemap's config, with its value in each look. */
+    class Key(val name: String, val night: LookValue, val day: LookValue) {
+        fun value(look: Look): LookValue = if (look == Look.NIGHT) night else day
     }
 
+    /**
+     * Every key a look writes, in the order they are written; by day every colour the night sets
+     * goes back to Standard's own, except the road under lane details. Lane details' own switch
+     * (showHdRoads) is in neither column: it is the driver's, kept by LaneDetails.
+     */
+    val keys: List<Key> = listOf(
+        Key("lightPreset", LookValue.Text("night"), LookValue.Text("day")),
+        // The only bright and colourful theme by day; monochrome would be pale grey.
+        Key(MapLook.THEME, LookValue.Text("monochrome"), LookValue.Text("default")),
+        Key("show3dObjects", LookValue.Flag(true), LookValue.Flag(true)),
+        Key("colorLand", LookValue.Colour(LAND), LookValue.Restore),
+        Key("colorBuildings", LookValue.Colour(BUILDINGS), LookValue.Restore),
+        Key("colorMotorways", LookValue.Colour(MOTORWAYS), LookValue.Restore),
+        Key("colorTrunks", LookValue.Colour(TRUNKS), LookValue.Restore),
+        Key("colorRoads", LookValue.Colour(ROADS), LookValue.Restore),
+        Key("colorHdRoads", LookValue.Colour(HD_ROADS_NIGHT), LookValue.Colour(HD_ROADS_DAY)),
+        Key("colorWater", LookValue.Colour(WATER), LookValue.Restore),
+        Key("colorGreenspace", LookValue.Colour(GREENSPACE), LookValue.Restore),
+        Key("colorPlaceLabels", LookValue.Colour("#D6D7D9"), LookValue.Restore),
+        Key("colorRoadLabels", LookValue.Colour("#A9ADB3"), LookValue.Restore),
+        // By day the places' icons keep Standard's own colours; with one grey it would be "single"
+        // and #5E646C.
+        Key("colorModePointOfInterestLabels", LookValue.Text("single"), LookValue.Text("default")),
+        Key("colorPointOfInterestLabels", LookValue.Colour("#8C9198"), LookValue.Restore),
+        Key("densityPointOfInterestLabels", LookValue.Number(2L), LookValue.Number(2L)),
+    )
+
+    /** [look]'s column: every key with its value, in the order of [keys]. */
+    fun column(look: Look): List<Pair<String, LookValue>> = keys.map { it.name to it.value(look) }
+
     const val AMBER = 0xFFF5A524.toInt()
-    private const val AMBER_CASING = 0xFF3A2800.toInt()
-    private const val TRAFFIC_MODERATE = 0xFFFF7A1A.toInt()
-    private const val TRAFFIC_HEAVY = 0xFFE5484D.toInt()
-    private const val TRAFFIC_SEVERE = 0xFF9E1B32.toInt()
-    private const val ALTERNATIVE = 0xFF6F747C.toInt()
-    private const val ALTERNATIVE_CASING = 0xFF2A2E34.toInt()
+
+    /** The route's casing: at night it melts into the dark map, by day it outlines the route. */
+    const val CASING_NIGHT = 0xFF3A2800.toInt()
+    const val CASING_DAY = 0xFF5C3B00.toInt()
+
+    /**
+     * Traffic on the route. Moderate is the same orange in both looks. At night heavy and severe
+     * are bright, coral and pink, since a dark red would vanish on the lighter night roads; by day
+     * the casing carries every level and the reds stay.
+     */
+    const val TRAFFIC_MODERATE = 0xFFFF7A1A.toInt()
+    const val TRAFFIC_HEAVY_NIGHT = 0xFFFF6B5E.toInt()
+    const val TRAFFIC_SEVERE_NIGHT = 0xFFFF5C9E.toInt()
+    const val TRAFFIC_HEAVY_DAY = 0xFFE5484D.toInt()
+    const val TRAFFIC_SEVERE_DAY = 0xFF9E1B32.toInt()
+
+    /** A closed section of the route: platinum at night, a dark grey by day. */
+    const val CLOSED_NIGHT = 0xFFE5E4E2.toInt()
+    const val CLOSED_DAY = 0xFF3A3F46.toInt()
+
+    /** Other routes, at every level of traffic, in both looks: a light grey with a graphite casing. */
+    const val ALTERNATIVE = 0xFF9AA1AB.toInt()
+    const val ALTERNATIVE_CASING = 0xFF2A2E34.toInt()
+
+    /** The maneuver arrow and its casing, the same in both looks. */
     const val PLATINUM = 0xFFE5E4E2.toInt()
     const val GRAPHITE = 0xFF0E1013.toInt()
 
-    /** Amber where traffic is light or unknown, warmer to red as it gets heavier; alternatives in grey. */
-    val routeLineColors: RouteLineColorResources = RouteLineColorResources.Builder()
-        .routeDefaultColor(AMBER)
-        .routeUnknownCongestionColor(AMBER)
-        .routeLowCongestionColor(AMBER)
-        .routeModerateCongestionColor(TRAFFIC_MODERATE)
-        .routeHeavyCongestionColor(TRAFFIC_HEAVY)
-        .routeSevereCongestionColor(TRAFFIC_SEVERE)
-        .routeCasingColor(AMBER_CASING)
-        .alternativeRouteDefaultColor(ALTERNATIVE)
-        .alternativeRouteUnknownCongestionColor(ALTERNATIVE)
-        .alternativeRouteLowCongestionColor(ALTERNATIVE)
-        .alternativeRouteModerateCongestionColor(ALTERNATIVE)
-        .alternativeRouteHeavyCongestionColor(ALTERNATIVE)
-        .alternativeRouteSevereCongestionColor(ALTERNATIVE)
-        .alternativeRouteCasingColor(ALTERNATIVE_CASING)
-        .build()
+    /**
+     * The colours the app gives the route line in [look], as plain ARGB values. Every colour it does
+     * not name, such as restricted roads, stays the navigation SDK's own.
+     */
+    fun routeLine(look: Look): Map<RouteLineColor, Int> {
+        val night = look == Look.NIGHT
+        return mapOf(
+            RouteLineColor.ROUTE_DEFAULT to AMBER,
+            RouteLineColor.ROUTE_UNKNOWN to AMBER,
+            RouteLineColor.ROUTE_LOW to AMBER,
+            RouteLineColor.ROUTE_MODERATE to TRAFFIC_MODERATE,
+            RouteLineColor.ROUTE_HEAVY to if (night) TRAFFIC_HEAVY_NIGHT else TRAFFIC_HEAVY_DAY,
+            RouteLineColor.ROUTE_SEVERE to if (night) TRAFFIC_SEVERE_NIGHT else TRAFFIC_SEVERE_DAY,
+            RouteLineColor.ROUTE_CLOSED to if (night) CLOSED_NIGHT else CLOSED_DAY,
+            RouteLineColor.ROUTE_CASING to if (night) CASING_NIGHT else CASING_DAY,
+            RouteLineColor.OTHER_DEFAULT to ALTERNATIVE,
+            RouteLineColor.OTHER_UNKNOWN to ALTERNATIVE,
+            RouteLineColor.OTHER_LOW to ALTERNATIVE,
+            RouteLineColor.OTHER_MODERATE to ALTERNATIVE,
+            RouteLineColor.OTHER_HEAVY to ALTERNATIVE,
+            RouteLineColor.OTHER_SEVERE to ALTERNATIVE,
+            RouteLineColor.OTHER_CASING to ALTERNATIVE_CASING,
+        )
+    }
+
+    /** [routeLine] of [look] as the navigation SDK's route line takes it. */
+    fun routeLineColorResources(look: Look): RouteLineColorResources {
+        val builder = RouteLineColorResources.Builder()
+        for ((color, argb) in routeLine(look)) {
+            when (color) {
+                RouteLineColor.ROUTE_DEFAULT -> builder.routeDefaultColor(argb)
+                RouteLineColor.ROUTE_UNKNOWN -> builder.routeUnknownCongestionColor(argb)
+                RouteLineColor.ROUTE_LOW -> builder.routeLowCongestionColor(argb)
+                RouteLineColor.ROUTE_MODERATE -> builder.routeModerateCongestionColor(argb)
+                RouteLineColor.ROUTE_HEAVY -> builder.routeHeavyCongestionColor(argb)
+                RouteLineColor.ROUTE_SEVERE -> builder.routeSevereCongestionColor(argb)
+                RouteLineColor.ROUTE_CLOSED -> builder.routeClosureColor(argb)
+                RouteLineColor.ROUTE_CASING -> builder.routeCasingColor(argb)
+                RouteLineColor.OTHER_DEFAULT -> builder.alternativeRouteDefaultColor(argb)
+                RouteLineColor.OTHER_UNKNOWN -> builder.alternativeRouteUnknownCongestionColor(argb)
+                RouteLineColor.OTHER_LOW -> builder.alternativeRouteLowCongestionColor(argb)
+                RouteLineColor.OTHER_MODERATE -> builder.alternativeRouteModerateCongestionColor(argb)
+                RouteLineColor.OTHER_HEAVY -> builder.alternativeRouteHeavyCongestionColor(argb)
+                RouteLineColor.OTHER_SEVERE -> builder.alternativeRouteSevereCongestionColor(argb)
+                RouteLineColor.OTHER_CASING -> builder.alternativeRouteCasingColor(argb)
+            }
+        }
+        return builder.build()
+    }
+}
+
+/** A value of the basemap's config in one look's column of [MapPalette.keys]. */
+internal sealed interface LookValue {
+    /** A word the style knows, such as a light preset or a theme. */
+    data class Text(val text: String) : LookValue
+
+    /** On or off. */
+    data class Flag(val on: Boolean) : LookValue
+
+    /** A whole number, such as a density. */
+    data class Number(val value: Long) : LookValue
+
+    /** A colour as #RRGGBB. */
+    data class Colour(val hex: String) : LookValue
+
+    /** The style's own value: the key is written with no value, which gives it back to the style. */
+    data object Restore : LookValue
+}
+
+/** The colours of the route line the app sets, for the route and for the other routes. */
+internal enum class RouteLineColor {
+    ROUTE_DEFAULT,
+    ROUTE_UNKNOWN,
+    ROUTE_LOW,
+    ROUTE_MODERATE,
+    ROUTE_HEAVY,
+    ROUTE_SEVERE,
+    ROUTE_CLOSED,
+    ROUTE_CASING,
+    OTHER_DEFAULT,
+    OTHER_UNKNOWN,
+    OTHER_LOW,
+    OTHER_MODERATE,
+    OTHER_HEAVY,
+    OTHER_SEVERE,
+    OTHER_CASING,
 }

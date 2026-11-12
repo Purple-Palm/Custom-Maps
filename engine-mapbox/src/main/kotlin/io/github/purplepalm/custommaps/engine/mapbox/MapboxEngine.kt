@@ -17,6 +17,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.search.MapboxSearchProvider
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import java.util.Locale
@@ -55,8 +56,12 @@ class MapboxEngine private constructor(
         MapboxNavigationApp.detach(owner)
     }
 
-    /** A map for the phone screen. Call [PhoneMap.release] when its view leaves the screen. */
-    fun createPhoneMap(context: Context): PhoneMap = PhoneMap(context, navigationEngine, debugLog, offlineData)
+    /**
+     * A map for the phone screen, showing [lookOnMap] from its first tile on. Call
+     * [PhoneMap.release] when its view leaves the screen.
+     */
+    fun createPhoneMap(context: Context, lookOnMap: LookOnMap): PhoneMap =
+        PhoneMap(context, navigationEngine, debugLog, offlineData, lookOnMap)
 
     /**
      * What the maneuver card did with the words of a run-up's lane row: [shown] false when they did

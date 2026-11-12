@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav
 
+import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
@@ -46,7 +47,45 @@ interface MapRenderer {
      * route to it ends; null takes the pin away. One place is marked at a time.
      */
     fun showPlace(place: Place?)
+
+    /**
+     * Shows [request]: [LookOnMap.look] for the basemap's light and colours and for the map's own
+     * marks, and the basemap's theme of [LookOnMap.theme]. Config writes on the style the map
+     * shows, all within this call; never a style reload. A map whose style is still loading takes
+     * the request there, with the look's own theme. The same request again writes nothing.
+     *
+     * Returns what was written, for the caller's own log line: the map writes no line about it.
+     * After a write that includes the theme, [onSettled] hears once how many milliseconds later the
+     * map had drawn all its tiles again, or null when that had not happened within 10 s.
+     */
+    fun setLook(request: LookOnMap, onSettled: (idleMs: Long?) -> Unit = {}): LookApplied
 }
+
+/**
+ * What a map did with a look it was asked to show ([MapRenderer.setLook]), in plain values for a
+ * log line.
+ */
+data class LookApplied(
+    /** Keys of the basemap's config written now. */
+    val keys: Int = 0,
+    /** How many of the writes the map refused, and for which keys. */
+    val errors: Int = 0,
+    val failedKeys: List<String> = emptyList(),
+    /** How long the call took on the main thread, in milliseconds. */
+    val writeMs: Double = 0.0,
+    /**
+     * For keys given back to the style, as the day look gives back every colour the night sets:
+     * "null" when each read back as the style had it, "snapshot" when one had to be written back
+     * from what the style said as it loaded. Null when no key was given back.
+     */
+    val reset: String? = null,
+    /** The style's transition the light change follows, in milliseconds; null when nothing was written. */
+    val transitionMs: Long? = null,
+    /** Whether the route line took the look's colours now. */
+    val routeLine: Boolean = false,
+    /** Whether the basemap's theme was written now; the settle time then follows. */
+    val theme: Boolean = false,
+)
 
 /** Insets in pixels from each edge of the map surface. */
 data class ViewportPadding(val left: Int, val top: Int, val right: Int, val bottom: Int) {

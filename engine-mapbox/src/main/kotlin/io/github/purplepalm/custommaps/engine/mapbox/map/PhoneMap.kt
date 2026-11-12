@@ -60,6 +60,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
+import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
@@ -75,6 +76,8 @@ import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.guidance.UTurnArrow
+import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -91,9 +94,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * The phone's map: Mapbox Standard at night with 3D buildings, the device location, the routes of
- * the preview and, during guidance, the active route with traffic and the next maneuver arrow. The
- * place being looked at or driven to has a pin of its own ([showPlace]), wherever its route ends.
+ * The phone's map: Mapbox Standard with 3D buildings in the day or the night look ([setLook]), the
+ * device location, the routes of the preview and, during guidance, the active route with traffic
+ * and the next maneuver arrow. The place being looked at or driven to has a pin of its own
+ * ([showPlace]), wherever its route ends.
  *
  * Before guidance the puck comes from the platform location provider, so no trip session (and no
  * free drive billing) is needed just to see where you are. The camera follows the car there too,
@@ -119,6 +123,8 @@ class PhoneMap internal constructor(
     private val engine: MapboxNavigationEngine,
     private val debugLog: DebugLog,
     private val offlineData: OfflineData,
+    /** The look the map shows from its first tile on; [setLook] brings any later one. */
+    lookOnMap: LookOnMap,
 ) : MapRenderer {
 
     private val mapView = MapView(context, MapInitOptions(context, styleUri = null))
@@ -156,9 +162,13 @@ class PhoneMap internal constructor(
 
     private val routeLineOptions = MapboxRouteLineApiOptions.Builder().vanishingRouteLineEnabled(true).build()
     private val routeLineApi = MapboxRouteLineApi(routeLineOptions)
+    /**
+     * Made once, with the first look's colours; a later look changes its options. A second view
+     * would add its layers again above the maneuver arrow.
+     */
     private val routeLineView = MapboxRouteLineView(
         MapboxRouteLineViewOptions.Builder(context)
-            .routeLineColorResources(MapPalette.routeLineColors)
+            .routeLineColorResources(MapPalette.routeLineColorResources(lookOnMap.look))
             .slotName(ROUTE_SLOT)
             .build(),
     )
@@ -188,6 +198,23 @@ class PhoneMap internal constructor(
 
     /** The pin of the place being looked at or driven to; none until [showPlace] brings a place. */
     private val placePin = PlacePin.on(mapboxMap, debugLog)
+
+    /** The basemap's config, written one key a call. */
+    private val basemap = MapLook.basemapOf(mapboxMap)
+
+    /** When a requested look reaches the basemap, its theme and the route line. */
+    private val lookApplier = LookApplier(lookOnMap)
+
+    /** The basemap's own values, read in this style load before its first write. */
+    private var styleSnapshot: Map<String, MapLook.Read> = emptyMap()
+
+    /** What the style's data wrote, for the "map_style_loaded" line. */
+    private var styleWritten = MapLook.Written.NONE
+
+    // The one wait for the map to settle after a write of the theme ([watchLookSettled]).
+    private var lookIdle: Cancelable? = null
+    private var lookIdleTimeout: Job? = null
+    private var onLookSettled: ((Long?) -> Unit)? = null
 
     private val viewportDataSource = MapboxNavigationViewportDataSource(mapboxMap)
 
@@ -412,17 +439,23 @@ class PhoneMap internal constructor(
 
         mapView.alpha = 0f
         mapView.scalebar.enabled = false
+        // The look is written when the style's data is parsed, before any tile draws, so no frame
+        // of the other look appears.
         mapboxMap.subscribeStyleDataLoaded { event ->
-            if (event.type == StyleDataLoadedType.STYLE) MapPalette.applyNight(mapboxMap)
+            if (event.type == StyleDataLoadedType.STYLE) onStyleData()
         }
+        lookApplier.onStyleLoading()
         mapboxMap.loadStyle(Style.STANDARD) { loaded ->
-            debugLog.log("map_style_loaded", mapOf("refreshHz" to mapView.display?.refreshRate))
+            debugLog.log("map_style_loaded", styleLoadedFields())
             style = loaded
             // The route line's layers first, then the arrow's, before anything is drawn: the arrow
             // goes above the route line only if the line's top layer is there when the arrow makes
             // its layers. Left to the first renders, the arrow came first and the line covered it.
             // Both kinds of layer stay in the style, in this order, for as long as the map lives.
             routeLineView.initializeLayers(loaded)
+            // A look asked for while the style loaded: the basemap if it changed since the style's
+            // data, then the route line's colours.
+            applyLook(lookApplier.onStyleLoaded())
             clearArrows()
             logLayerOrder(loaded)
             // Lane details are set a moment after this callback, never within it (see LaneDetails).
@@ -545,6 +578,26 @@ class PhoneMap internal constructor(
         placePin.show(place?.point)
     }
 
+    override fun setLook(request: LookOnMap, onSettled: (idleMs: Long?) -> Unit): LookApplied {
+        // A map that has gone writes nothing.
+        if (!mapboxMap.isValid()) return LookApplied()
+        val startedNanos = SystemClock.elapsedRealtimeNanos()
+        val writes = lookApplier.setLook(request)
+        val written = applyLook(writes)
+        val writeMs = Motion.round((SystemClock.elapsedRealtimeNanos() - startedNanos) / NANOS_PER_MILLI.toDouble(), 1)
+        if (writes.theme != null) watchLookSettled(SystemClock.elapsedRealtime(), onSettled)
+        return LookApplied(
+            keys = written.keys,
+            errors = written.errors,
+            failedKeys = written.failedKeys,
+            writeMs = writeMs,
+            reset = written.reset,
+            transitionMs = if (written.keys > 0) mapboxMap.getStyleTransition().duration else null,
+            routeLine = writes.routeLine != null,
+            theme = writes.theme != null,
+        )
+    }
+
     /**
      * Puts the Mapbox logo and the attribution button in a fixed strip at the bottom left of the map,
      * just above [bottomInset] pixels of navigation bar or keyboard. The screen keeps that strip free
@@ -594,6 +647,9 @@ class PhoneMap internal constructor(
 
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {
+        // A wait for the map to settle after a look ends without an answer.
+        onLookSettled = null
+        endLookSettled(null)
         stopCameraSampling()
         laneDetails.release()
         placePin.release()
@@ -615,6 +671,74 @@ class PhoneMap internal constructor(
         mapView.gestures.removeOnMapClickListener(mapClickListener)
         routeLineApi.cancel()
         routeLineView.cancel()
+    }
+
+    /**
+     * The style's data is parsed (STYLE): the basemap's own values are read once, then the whole
+     * requested look is written with its own theme, before any tile draws.
+     */
+    private fun onStyleData() {
+        styleSnapshot = MapLook.snapshot(basemap)
+        styleWritten = applyLook(lookApplier.onStyleData())
+    }
+
+    /**
+     * The "map_style_loaded" line: the screen's refresh rate, the look the basemap shows, and how
+     * many keys of the basemap's config the style's data wrote and how many of them the map refused.
+     */
+    private fun styleLoadedFields(): Map<String, Any?> {
+        val written = styleWritten
+        return mapOf(
+            "refreshHz" to mapView.display?.refreshRate,
+            "look" to lookApplier.basemapLook,
+            "keys" to written.keys,
+            "errors" to written.errors,
+            "failedKeys" to written.failedKeys.takeIf { it.isNotEmpty() },
+        ).filterValues { it != null }
+    }
+
+    /** Writes what [writes] says is due now: the basemap's config with its theme, and the route line's colours. */
+    private fun applyLook(writes: LookApplier.Writes): MapLook.Written {
+        val written =
+            if (writes.basemap == null && writes.theme == null) MapLook.Written.NONE else MapLook.write(basemap, writes.basemap, writes.theme, styleSnapshot)
+        writes.routeLine?.let { look -> style?.let { applyRouteLineLook(it, look) } }
+        return written
+    }
+
+    /**
+     * Gives the route line [look]'s colours. The view keeps the rest of its options, the widths held
+     * for lane details among them; routes on the map are drawn again with them.
+     */
+    private fun applyRouteLineLook(style: Style, look: Look) {
+        routeLineView.updateDynamicOptions(style) { routeLineColorResources(MapPalette.routeLineColorResources(look)) }
+        if (framedRoute != null) routeLineApi.getRouteDrawData { value -> routeLineView.renderRouteDrawData(style, value) }
+    }
+
+    /**
+     * Waits once, from [writtenAt] (milliseconds since boot), for the map to be idle after a write of
+     * the theme: no transition running and every tile drawn. [listener] then hears how long that
+     * took, or null after [LOOK_SETTLE_MS], or when a newer write of the theme takes the wait over.
+     * One subscription for the one event, cancelled at its first call; nothing runs per frame.
+     */
+    private fun watchLookSettled(writtenAt: Long, listener: (Long?) -> Unit) {
+        endLookSettled(null)
+        onLookSettled = listener
+        lookIdle = mapboxMap.subscribeMapIdle { endLookSettled(SystemClock.elapsedRealtime() - writtenAt) }
+        lookIdleTimeout = scope.launch {
+            delay(LOOK_SETTLE_MS)
+            endLookSettled(null)
+        }
+    }
+
+    /** Ends the wait of [watchLookSettled], if one runs, and tells its listener [idleMs]. */
+    private fun endLookSettled(idleMs: Long?) {
+        lookIdle?.cancel()
+        lookIdle = null
+        lookIdleTimeout?.cancel()
+        lookIdleTimeout = null
+        val listener = onLookSettled ?: return
+        onLookSettled = null
+        listener(idleMs)
     }
 
     private fun render(state: GuidanceState) {
@@ -1162,5 +1286,8 @@ class PhoneMap internal constructor(
         /** How long, and how often, a camera that ended a move is asked whether its springs are at rest. */
         private const val SETTLE_WATCH_MS = 5_000L
         private const val SETTLE_POLL_MS = 100L
+
+        /** How long a write of the theme waits for the map to settle before it says it did not. */
+        private const val LOOK_SETTLE_MS = 10_000L
     }
 }

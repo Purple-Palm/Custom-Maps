@@ -75,6 +75,8 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.GuidancePadding
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
@@ -125,7 +127,8 @@ fun MapScreen(
         onDispose { engine.detachHost(lifecycleOwner) }
     }
 
-    val phoneMap = remember { engine.createPhoneMap(context) }
+    // The night look until the app chooses one by the sun.
+    val phoneMap = remember { engine.createPhoneMap(context, LookOnMap(Look.NIGHT)) }
     DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
     // While the activity is stopped nothing is on screen, and the camera draws no frames.
     LifecycleStartEffect(phoneMap) {

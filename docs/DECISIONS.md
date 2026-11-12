@@ -469,7 +469,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Mapbox's own ground and the darker streets, as before: the streets hardly part from the ground close in.
   - A theme of the app's own (a color table for the whole basemap): one more file to keep, and every color of the map changes with it.
   - An aerial photo at the close view: planned separately, with its own switch.
-- **Cost:** the other routes' grey (`#6F747C`) is now close to a freeway's, so on a freeway another route shows mostly by its dark casing. One commit to undo.
+- **Cost:** the other routes' grey (`#6F747C`) came close to a freeway's, so on a freeway another route showed mostly by its dark casing. Their grey is now `#9AA1AB`, about 2 to 1 against a freeway and 3 to 1 against a street. One commit to undo.
 
 ## 44. Fixes from the drive logs
 

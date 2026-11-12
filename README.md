@@ -84,9 +84,9 @@ The same builds also reach the phone through Google Play, where they update by t
    the bottom offers to switch. If Android has stopped asking, the prompt opens the app's system
    settings instead, where precise location can be turned on.
 2. Type an address or a place name in the search field and pick a suggestion.
-3. Tap **Directions**. Up to three routes appear: the chosen one in amber, turning orange and red
-   where traffic is heavy, the alternatives in grey. Tap a route, on the map or in the list, to
-   choose it.
+3. Tap **Directions**. Up to three routes appear: the chosen one in amber, turning orange, coral
+   and pink where traffic is heavy, the alternatives in grey. Tap a route, on the map or in the
+   list, to choose it.
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
    notification. The maneuver card shows the next turn, its distance and the lanes; the bottom bar
    shows the arrival time, what is left, **Overview**/**Recenter** and **End**. Right after a new
