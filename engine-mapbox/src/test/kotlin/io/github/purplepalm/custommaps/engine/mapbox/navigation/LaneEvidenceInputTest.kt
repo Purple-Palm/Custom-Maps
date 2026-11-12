@@ -183,9 +183,22 @@ class LaneEvidenceInputTest {
     }
 
     @Test
+    fun `a link class makes a ramp in a step of any kind`() {
+        val turnOntoLink = listOf(
+            step("depart", null, 0, listOf(intersection(0, first = true))),
+            step("turn", "right", 2, listOf(intersection(2, streetsClass = "motorway_link"))),
+            step("arrive", "right", 4, listOf(intersection(4))),
+        )
+        val shapes = listOf(listOf(points.subList(0, 3), points.subList(2, 5), listOf(points[4], points[4])))
+        val nodes = laneRoute("route-4#0", listOf(RouteLeg.builder().steps(turnOntoLink).build()), shapes).nodes
+        assertEquals(listOf(RoadKind.STREET, RoadKind.RAMP, RoadKind.STREET), nodes.map { it.road })
+    }
+
+    @Test
     fun `the posted speed is the maxspeed of the road that leaves the intersection`() {
         val posted = route().nodes.map { it.postedMps }
         assertEquals(25.0 * PlanningSpeed.MPS_PER_MPH, posted[0]!!, 1e-9)
+        assertEquals(25.0 * PlanningSpeed.MPS_PER_MPH, posted[1]!!, 1e-9, "the segment that leaves it, the last one at 25 mph")
         assertNull(posted[2], "unknown")
         assertEquals(105.0 / 3.6, posted[3]!!, 1e-9)
         assertEquals(105.0 / 3.6, posted[5]!!, 1e-9)
@@ -202,6 +215,7 @@ class LaneEvidenceInputTest {
         assertNull(speed(null, "mph").metersPerSecond())
         assertNull(speed(60, "mph", unknown = true).metersPerSecond())
         assertNull(speed(null, none = true).metersPerSecond())
+        assertNull(speed(130, "km/h", none = true).metersPerSecond(), "no limit, whatever speed comes with it")
     }
 
     @Test
