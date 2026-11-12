@@ -345,14 +345,15 @@ class CrossSection private constructor(
          * line and meets it without a kink ([turnOffEnd] says where). Where the straight-on line does not close in on the
          * new road's line (it lies outside the turn, or the turn is too sharp to read the old road's way across it), the
          * path keeps to the new road's line at an offset that shrinks from [shift] to 0 over [RAMP_BLEND_METERS] from the
-         * arc's start along a half-cosine, with no slope at either end; on the line already ([shift] 0), it stays on it.
+         * arc's start along a half-cosine of a half-cosine, with neither slope nor curvature at either end; on the line already
+         * ([shift] 0), it stays on it.
          */
         fun turnOff(axis: RoadAxis, station: Double, shift: Double, at: Double): Double {
             val begin = beginOf(axis, station)
             if (at < begin) return shift
             if (abs(shift) <= SETTLED_METERS) return 0.0
             val settle = settling(axis, begin, station, shift)
-                ?: return shift * (1.0 - ramp(at, begin, begin + RAMP_BLEND_METERS))
+                ?: return shift * (1.0 - ramp(ramp(at, begin, begin + RAMP_BLEND_METERS), 0.0, 1.0))
             if (at < settle.from) return lineOffset(axis, begin, shift, at) ?: 0.0
             if (at >= settle.to) return 0.0
             val u = 1.0 - (at - settle.from) / (settle.to - settle.from)

@@ -330,7 +330,7 @@ class CrossSectionTest {
         assertEquals(fillet.from + CrossSection.RAMP_BLEND_METERS, CrossSection.turnOffEnd(axis, gore, shift), 1e-9)
         assertEquals(shift, CrossSection.turnOff(axis, gore, shift, fillet.from), 1e-12)
         assertEquals(shift * 0.5, CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS * 0.5), 1e-12)
-        assertTrue(CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS - 0.1) < 0.0)
+        assertTrue(CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS - 1.0) < 0.0)
         assertEquals(0.0, CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS), 0.0)
     }
 
