@@ -1297,7 +1297,7 @@ class PhoneMap internal constructor(
          * reaches about 10 dp below it, so this keeps it off the logo and the (i); the same in both
          * looks, so a change of look never moves a panel.
          */
-        private const val SHADOW_CLEARANCE_DP = 12f
+        internal const val SHADOW_CLEARANCE_DP = 12f
 
         /** Height of the strip above the bottom inset that the logo and attribution need; panels stay above it. */
         const val ORNAMENT_STRIP_DP = ORNAMENT_MARGIN_DP + LOGO_HEIGHT_DP + SHADOW_CLEARANCE_DP
