@@ -446,6 +446,19 @@ internal object LaneScenes {
     )
 
     /**
+     * A right exit where a lane leaves by a road at the edge with possible lanes beyond it: three lanes 2,600 m before the
+     * gore; at a point 1,200 m before, the right one leaves by a road on the right. The exit adds two exit-only lanes on the
+     * right, which may be there from that point on; the plan names neither, so both are drawn as possible from there.
+     * Planned at 26.5 m/s. For the geometry's tests, not among [all].
+     */
+    fun leavesBesidePossible() = approach(
+        listOf(at(2_600.0, s(), s(), s()), at(1_200.0, s(), s(), s(false), roads = EXIT_RIGHT)),
+        exit = listOf(s(false), sr(), sr(false), sr(false)),
+        planMps = 26.5,
+        id = "leaves-beside-possible",
+    )
+
+    /**
      * A street into a roundabout: two lanes 150 m before it, both of which the route can be followed from; the
      * route leaves the roundabout 60 m on. 35 mph planned. With [turnInstead] a plain right turn takes its place.
      */

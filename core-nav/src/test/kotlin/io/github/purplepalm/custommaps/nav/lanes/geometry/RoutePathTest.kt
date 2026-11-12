@@ -315,6 +315,27 @@ class RoutePathTest {
     }
 
     @Test
+    fun `where a lane leaves by a road at the edge with possible lanes beyond it the path keeps to its lane with no step`() {
+        val built = build(LaneScenes.leavesBesidePossible())
+        val plan = built.plan
+        val path = built.path
+        // The scene: the plan names the middle lane of three through the run-up; the right lane leaves by a road at the edge
+        // 5 m past the point 1,200 m before the gore, with the exit's added lanes only possible beyond it there.
+        val point = gore - 1_200.0
+        val leaves = point + LaneTopology.LEAVE_PAST_POINT_METERS
+        val window = plan.windows.single { it.kind == CardWindow.Kind.RUN_UP }
+        assertTrue(window.from < point)
+        assertEquals(1, plan.segmentAt(leaves)!!.named)
+        assertEquals(CrossSection.State.POSSIBLE, built.section.place(3, leaves - 1.0)!!.state)
+        // The named lane keeps its place where the right lane leaves, and so does the path in it.
+        for (station in listOf(leaves - 1.0, leaves - 0.25, leaves, leaves + 0.25, leaves + 1.0, gore - 300.0)) {
+            assertEquals(0.0, path.offsetAt(station), 1e-9, "at $station")
+        }
+        assertEquals(listOf(RoutePath.Move.Kind.TURN), path.moves.map { it.kind })
+        checkRules("leaves beside possible lanes", built)
+    }
+
+    @Test
     fun `the path is the route's own line away from the drawings and meets it at every drawing end`() {
         for ((name, route) in LaneScenes.all()) {
             val built = build(route)
@@ -526,12 +547,23 @@ class RoutePathTest {
      * path is in the named lane except inside a move and never moves away from the exit's edge; inside the drawings it
      * moves only toward the plan's lane, then never back; it is back on the road's line only where a drawing ends outside
      * card windows; it is on the road's line on an approach where no lane is named (C1); it meets the route's line at every
-     * drawing end.
+     * drawing end; it never steps sideways inside a drawing.
      */
     private fun checkRules(name: String, built: Built): Int {
         val path = built.path
         val plan = built.plan
         assertContinuous(name, path)
+        // No step inside the drawings: its moves, tapers and blends move the path far less than a step over a quarter metre.
+        for (drawing in path.drawings) {
+            var station = drawing.from
+            var prev = path.offsetAt(station)
+            while (station + STEP_SAMPLE_METERS < drawing.to) {
+                station += STEP_SAMPLE_METERS
+                val now = path.offsetAt(station)
+                assertTrue(abs(now - prev) < STEP_METERS, "$name at $station: a step from $prev to $now")
+                prev = now
+            }
+        }
         val excluded = path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(built) + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
         fun free(station: Double) = excluded.none { station >= it.first && station <= it.second }
         var windows = 0
@@ -884,5 +916,15 @@ class RoutePathTest {
 
         /** Where a drawing begins, the path's heading is taken from the slope of its offset over this distance. */
         const val END_SLOPE_METERS = 0.1
+
+        /**
+         * Inside a drawing the path moves less than this over every [STEP_SAMPLE_METERS]: its S between lanes, the tapers it
+         * follows and the blends at a ramp's start move it less than half a metre a metre, while a step of a lane between
+         * two of its samples, a metre apart, shows as almost a metre a quarter metre.
+         */
+        const val STEP_METERS = 0.2
+
+        /** ...measured this often along the drawing. */
+        const val STEP_SAMPLE_METERS = 0.25
     }
 }

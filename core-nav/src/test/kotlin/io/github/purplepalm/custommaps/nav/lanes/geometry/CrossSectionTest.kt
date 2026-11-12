@@ -76,6 +76,31 @@ class CrossSectionTest {
     }
 
     @Test
+    fun `a lane that leaves by a road at the edge with possible lanes beyond it ends at that edge and the others stay`() {
+        val route = LaneScenes.leavesBesidePossible()
+        val section = section(route)
+        val lanes = section.topology.lanes
+        // The right lane of three leaves by the road on the right 5 m past the point; the exit's two added lanes may be
+        // there from the point on, beyond it, and the plan names neither: both are only possible where it leaves.
+        val point = gore - 1_200.0
+        val leaves = point + LaneTopology.LEAVE_PAST_POINT_METERS
+        assertEquals(leaves, lanes[2].closes, 1e-9)
+        for (added in listOf(3, 4)) {
+            assertEquals(point, lanes[added].possibleFrom!!, 1e-9)
+            assertTrue(lanes[added].opens > leaves)
+            assertEquals(CrossSection.State.POSSIBLE, section.place(added, leaves - 1.0)!!.state)
+        }
+        assertEquals(-w, section.place(2, leaves - 1e-6)!!.centre, 1e-9)
+        assertNull(section.place(2, leaves))
+        // The lanes that go on keep their place and the left edge stays: no lane steps sideways where it leaves.
+        for (station in listOf(leaves - 1.0, leaves - 1e-6, leaves, leaves + 1.0, gore - 300.0)) {
+            assertEquals(w, section.place(0, station)!!.centre, 1e-9, "lane 0 at $station")
+            assertEquals(0.0, section.place(1, station)!!.centre, 1e-9, "lane 1 at $station")
+            assertEquals(1.5 * w, section.edges(station)!!.left, 1e-9, "the left edge at $station")
+        }
+    }
+
+    @Test
     fun `a lane on the exit's side the plan does not name is drawn from where it may begin, 15 to 1 from 50 mph`() {
         // IW31: the exit-only lane a5 is listed first at P2; it may be there from P1 on, the plan names g4 beside it.
         val iw31 = section(LaneScenes.iw31())

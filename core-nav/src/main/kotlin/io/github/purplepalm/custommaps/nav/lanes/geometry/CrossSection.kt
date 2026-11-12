@@ -44,7 +44,7 @@ import kotlin.math.min
  *   that leaves by a road between other lanes of its road. A lane that leaves by a road at an edge ends where it
  *   leaves; one followed in its place by another (its kinds changed: a lane kept for car pools or buses from there, or
  *   open to every car again) ends where the other begins, and no lane moves there. Where a lane opens or ends between
- *   others, the fewer lanes on one side of it move and the rest stay.
+ *   others, the fewer lanes on one side of it move and the rest stay; a lane only possible there is not counted.
  * - **A ramp's start** ([RampStart]): where the route turns off its road and lanes go on, they keep their place,
  *   straight on along the old road, until the new road's line lies farther out, and then blend onto the new
  *   road's carriageway over [RAMP_BLEND_METERS]: the route geometry's diagonal across the lanes at a gore is
@@ -419,13 +419,16 @@ class CrossSection private constructor(
          * Whether [d] opens or ends on the left side at [station]: it has no more lanes of [lanes] to its left there than to
          * its right, so the lanes on its left move and the others stay; at the left edge it is, at the right edge it is not.
          * A lane of its own slot is not counted: where a lane's kinds change, the lane that ends and the one that takes its
-         * place lie in one place, so both are put on the same side, and the road neither widens nor narrows there.
+         * place lie in one place, so both are put on the same side, and the road neither widens nor narrows there. Nor is a
+         * lane that is only possible there ([State.POSSIBLE]): it is not there yet, so a lane at the edge with possible lanes
+         * beyond it still ends at that edge, and the lanes on its other side stay where they are.
          */
         private fun leftSide(d: DrawnLane, lanes: List<DrawnLane>, station: Double): Boolean {
             var left = 0
             var right = 0
             for (other in lanes) {
                 if (other === d || other.lane.slot == d.lane.slot || station < other.from || station >= other.to) continue
+                if (station < other.possibleTo) continue
                 if (other.lane.slot < d.lane.slot) left++ else right++
             }
             return left <= right
