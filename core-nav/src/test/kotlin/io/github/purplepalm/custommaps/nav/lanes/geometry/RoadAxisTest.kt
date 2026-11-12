@@ -199,6 +199,27 @@ class RoadAxisTest {
     }
 
     @Test
+    fun `a road that goes straight on between its bends has no arc there`() {
+        // Vertices every 100 m, turning 17 degrees right at 1 km and 8 degrees left at 1.5 km: two arcs, none at the
+        // vertices between, where the way out is the way in to the last bit (acos of their dot product is not).
+        val pts = ArrayList<GeoPoint>()
+        var heading = PI / 2.0
+        var x = 0.0
+        var y = 0.0
+        pts.add(geo(x, y))
+        for (k in 1..20) {
+            x += 100.0 * cos(heading)
+            y += 100.0 * sin(heading)
+            pts.add(geo(x, y))
+            if (k == 10) heading -= Math.toRadians(17.0)
+            if (k == 15) heading += Math.toRadians(8.0)
+        }
+        val road = RoadAxis.of(pts, null, origin)
+        assertEquals(listOf(10, 15), road.fillets.map { it.vertex })
+        assertEquals(listOf(17.0, 8.0), road.fillets.map { Math.round(it.turnDegrees * 1e9) / 1e9 })
+    }
+
+    @Test
     fun `a point taken to the window's frame and back is the same point`() {
         val road = RoadAxis.of(listOf(GeoPoint(0.0004, -0.0003), GeoPoint(0.0021, 0.0009)))
         val p = GeoPoint(0.0011, 0.0007)

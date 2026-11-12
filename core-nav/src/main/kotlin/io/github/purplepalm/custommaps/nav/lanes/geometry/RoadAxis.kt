@@ -4,7 +4,7 @@ import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
-import kotlin.math.acos
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -251,7 +251,8 @@ class RoadAxis private constructor(
                 val u1y = (b.y - a.y) / lenPrev
                 val u2x = (c.x - b.x) / lenNext
                 val u2y = (c.y - b.y) / lenNext
-                val theta = acos((u1x * u2x + u1y * u2y).coerceIn(-1.0, 1.0))
+                // From the cross and dot products: acos of a dot product near 1 is noise of about 1e-8 for a road that goes straight on.
+                val theta = atan2(abs(u1x * u2y - u1y * u2x), u1x * u2x + u1y * u2y)
                 if (theta < NO_TURN_RADIANS) continue
                 val availPrev = if (i - 1 > 0) lenPrev / 2.0 else lenPrev
                 val availNext = if (i + 1 < n - 1) lenNext / 2.0 else lenNext
