@@ -370,9 +370,9 @@ class LanePlansTest {
 
     /**
      * A made-up 30 km route: a street of 1 km, an on ramp, 28 km of freeway with an intersection every
-     * 100 m, every fourteenth of them a lane point of five lanes (19 in all) (the right one leaving at every other one,
-     * by a road on the right), roads without lane data leaving on the right before the exit, an exit with
-     * two lanes of six, a turn and the arrival.
+     * 100 m, every fifteenth of them a lane point of five lanes (18 in all, the right one leaving at every
+     * other one by a road on the right), roads without lane data leaving on the right before the exit, an
+     * exit with two lanes of six, a turn and the arrival.
      */
     private fun longRoute(): Pair<List<RouteLeg>, List<List<List<Point>>>> {
         val freewayFrom = 12
@@ -380,8 +380,8 @@ class LanePlansTest {
         val freeway = ArrayList<StepIntersection>()
         freeway.add(intersection(freewayFrom, motorway = true, others = listOf(200 to false)))
         for (i in freewayFrom + 1 until exitAt) {
-            val lanePoint = (i - freewayFrom) % 14 == 0
-            val rightLeaves = lanePoint && (i - freewayFrom) % 28 == 0
+            val lanePoint = (i - freewayFrom) % 15 == 0
+            val rightLeaves = lanePoint && (i - freewayFrom) % 30 == 0
             val lanes = when {
                 !lanePoint -> null
                 rightLeaves -> listOf(lane(true), lane(true), lane(true), lane(true), lane(false))
@@ -422,7 +422,7 @@ class LanePlansTest {
         }.sorted()
         val median = times[times.size / 2]
         val held = requireNotNull(planRoute("route-long#0", { legs }, { shapes }, debugLog = DebugLog.NONE))
-        assertEquals(20, held.input.route.nodes.count { it.isLanePoint }, "19 points on the way and the exit")
+        assertEquals(19, held.input.route.nodes.count { it.isLanePoint }, "18 points on the way and the exit")
         assertTrue(held.plan.windows.any { it.kind == CardWindow.Kind.RUN_UP })
         assertTrue(held.input.unknownExits.isNotEmpty())
         println("lane plan of a 30 km route: median ${"%.1f".format(median)} ms over $TIMED_RUNS runs, fastest ${"%.1f".format(times.first())} ms")
