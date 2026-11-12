@@ -12,7 +12,9 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -40,7 +42,7 @@ class LanePlansTest {
 
     private val step = 0.0009
 
-    private fun point(i: Int): Point = Point.fromLngLat(0.0, i * step)
+    private fun point(i: Int, east: Double = 0.0): Point = Point.fromLngLat(east, i * step)
 
     /** How far point [i] lies along the route from its start. */
     private fun along(i: Int) = Geo.meters(0.0, 0.0, i * step, 0.0)
@@ -55,8 +57,9 @@ class LanePlansTest {
         motorway: Boolean = false,
         others: List<Pair<Int, Boolean>> = emptyList(),
         first: Boolean = false,
+        east: Double = 0.0,
     ): StepIntersection = StepIntersection.builder()
-        .rawLocation(doubleArrayOf(0.0, at * step))
+        .rawLocation(doubleArrayOf(east, at * step))
         .bearings((if (first) listOf(0) else listOf(180, 0)) + others.map { it.first })
         .entry((if (first) listOf(true) else listOf(false, true)) + others.map { it.second })
         .`in`(if (first) null else 0)
@@ -66,8 +69,8 @@ class LanePlansTest {
         .geometryIndex(at)
         .build()
 
-    private fun legStep(type: String, modifier: String?, from: Int, intersections: List<StepIntersection>): LegStep = LegStep.builder()
-        .maneuver(StepManeuver.builder().rawLocation(doubleArrayOf(0.0, from * step)).type(type).modifier(modifier).build())
+    private fun legStep(type: String, modifier: String?, from: Int, intersections: List<StepIntersection>, east: Double = 0.0): LegStep = LegStep.builder()
+        .maneuver(StepManeuver.builder().rawLocation(doubleArrayOf(east, from * step)).type(type).modifier(modifier).build())
         .distance(0.0)
         .duration(0.0)
         .weight(0.0)
@@ -76,10 +79,10 @@ class LanePlansTest {
         .build()
 
     /** The points of each step: from its first point to the next step's first, the last step a point. */
-    private fun shapes(starts: List<Int>, end: Int): List<List<List<Point>>> = listOf(
+    private fun shapes(starts: List<Int>, end: Int, east: Double = 0.0): List<List<List<Point>>> = listOf(
         starts.mapIndexed { i, from ->
             val to = if (i + 1 < starts.size) starts[i + 1] else end
-            if (to > from) (from..to).map(::point) else listOf(point(from), point(from))
+            if (to > from) (from..to).map { point(it, east) } else listOf(point(from, east), point(from, east))
         },
     )
 
@@ -93,9 +96,9 @@ class LanePlansTest {
     /**
      * Depart at 0 onto a freeway; lanes at 8 (five, the right one leaving: an edge point) and at 10; a road
      * without lane data leaves on the right at 12; off the freeway to the right at 15 with [gore]'s lanes; a
-     * turn at 17; the arrival at 19.
+     * turn at 17; the arrival at 19. [east] moves it all that many degrees of longitude east.
      */
-    private fun shortRoute(): Pair<List<RouteLeg>, List<List<List<Point>>>> {
+    private fun shortRoute(east: Double = 0.0): Pair<List<RouteLeg>, List<List<List<Point>>>> {
         val five = listOf(lane(true), lane(true), lane(true), lane(true), lane(false))
         val steps = listOf(
             legStep(
@@ -103,37 +106,84 @@ class LanePlansTest {
                 null,
                 0,
                 listOf(
-                    intersection(0, motorway = true, first = true),
-                    intersection(8, five, motorway = true, others = listOf(30 to true)),
-                    intersection(10, listOf(lane(true), lane(true), lane(true), lane(true)), motorway = true),
-                    intersection(12, motorway = true, others = listOf(30 to true)),
+                    intersection(0, motorway = true, first = true, east = east),
+                    intersection(8, five, motorway = true, others = listOf(30 to true), east = east),
+                    intersection(10, listOf(lane(true), lane(true), lane(true), lane(true)), motorway = true, east = east),
+                    intersection(12, motorway = true, others = listOf(30 to true), east = east),
                 ),
+                east,
             ),
-            legStep("off ramp", "slight right", 15, listOf(intersection(15, gore, motorway = true))),
-            legStep("turn", "right", 17, listOf(intersection(17))),
-            legStep("arrive", "right", 19, listOf(intersection(19))),
+            legStep("off ramp", "slight right", 15, listOf(intersection(15, gore, motorway = true, east = east)), east),
+            legStep("turn", "right", 17, listOf(intersection(17, east = east)), east),
+            legStep("arrive", "right", 19, listOf(intersection(19, east = east)), east),
         )
-        return listOf(leg(steps, 19, 60)) to shapes(listOf(0, 15, 17, 19), 19)
+        return listOf(leg(steps, 19, 60)) to shapes(listOf(0, 15, 17, 19), 19, east)
     }
 
-    private fun plan(lines: Lines = Lines(), id: String = "route-a#0"): RouteLanePlan? {
-        val (legs, shapes) = shortRoute()
-        return planRoute(read = { laneRouteInput(id, legs, shapes) }, debugLog = lines)
+    private fun plan(lines: Lines = Lines(), id: String = "route-a#0", east: Double = 0.0, change: RouteChange? = null): RouteLanePlan? {
+        val (legs, shapes) = shortRoute(east)
+        return planRoute(id, { legs }, { shapes }, debugLog = lines, change = change)
     }
 
     // ------------------------------------------------------------------ the worker's job
 
     @Test
-    fun `a new route gets its lane_evidence line and its plan`() {
+    fun `a new route gets its lane_evidence line, then its lane_plan line, and its plan`() {
         val lines = Lines()
         val held = requireNotNull(plan(lines))
-        assertEquals(listOf(LaneEvidenceLine.TYPE), lines.types(), "one line, no error")
+        assertEquals(listOf(LaneEvidenceLine.TYPE, LanePlanLine.TYPE), lines.types(), "no error")
         assertEquals("route-a#0", held.routeId)
-        assertEquals(LaneEvidenceLine.fields(held.plan.topology.evidence), lines.lines.single().second)
+        assertEquals(LaneEvidenceLine.fields(held.plan.topology.evidence, held.plan, held.evidence), lines.lines[0].second)
+        assertTrue("zones" in lines.lines[0].second && "noneM" in lines.lines[0].second, "with the second pass's fields")
         // The plan names lanes on the exit's run-up and nothing outside it.
         assertTrue(held.plan.segments.any { it.named != null })
         assertTrue(held.plan.windows.any { it.kind == CardWindow.Kind.RUN_UP })
         assertTrue(held.buildMillis >= 0.0)
+    }
+
+    @Test
+    fun `the lane_plan line names the exit by the card's own key, in metres before its gore`() {
+        val lines = Lines()
+        val held = requireNotNull(plan(lines))
+        val fields = lines.lines[1].second
+        assertEquals("route-a#0", fields["routeId"])
+        assertTrue(fields["replanMoves"] == null, "no change of route at the start of a drive")
+        @Suppress("UNCHECKED_CAST")
+        val windows = fields["windows"] as List<Map<String, Any?>>
+        val runUp = windows.single { it["kind"] == "run_up" }
+        assertEquals("route-a#0/0/0/end", runUp["key"])
+        @Suppress("UNCHECKED_CAST")
+        val points = runUp["points"] as List<Map<String, Any?>>
+        assertEquals(listOf(-Math.round(along(15) - along(8)), -Math.round(along(15) - along(10)), 0L), points.map { it["atM"] })
+        assertEquals(1, runUp["unknownExits"], "the road without lane data at 12")
+        assertEquals(held.buildMillis, (fields["ms"] as Double), 0.05)
+    }
+
+    @Test
+    fun `after a change of route on the same carriageway the new plan's lane_plan line says the count was kept`() {
+        val old = requireNotNull(plan(id = "route-a#0"))
+        val car = GeoPoint(13 * step, 0.0)
+        val lines = Lines()
+        val new = requireNotNull(plan(lines, id = "route-b#0", change = RouteChange(old, car, along(13))))
+        val fields = lines.lines.single { it.first == LanePlanLine.TYPE }.second
+        assertEquals(true, fields["replanKept"])
+        assertEquals(0, fields["replanMoves"], "the same lane before and after")
+        assertEquals("route-b#0", new.routeId)
+    }
+
+    @Test
+    fun `after a change onto a road beside the route the count is not kept`() {
+        val old = requireNotNull(plan(id = "route-a#0"))
+        val car = GeoPoint(13 * step, 0.0)
+        val lines = Lines()
+        // The same lanes on a road 0.0002 degrees (about 22 m) east of the route before.
+        requireNotNull(plan(lines, id = "route-c#0", east = 0.0002, change = RouteChange(old, car, along(13))))
+        val fields = lines.lines.single { it.first == LanePlanLine.TYPE }.second
+        assertEquals(false, fields["replanKept"])
+        // Farther than 50 m from the car: no hand-over at all.
+        val far = Lines()
+        requireNotNull(plan(far, id = "route-d#0", east = 0.001, change = RouteChange(old, car, along(13))))
+        assertTrue("replanKept" !in far.lines.single { it.first == LanePlanLine.TYPE }.second)
     }
 
     @Test
@@ -190,7 +240,7 @@ class LanePlansTest {
         val lines = Lines()
         val off = listOf(listOf(listOf(Point.fromLngLat(0.0, 0.0), Point.fromLngLat(0.0, 95.0))))
         val legs = listOf(RouteLeg.builder().steps(listOf(legStep("depart", null, 0, listOf(intersection(0, first = true))))).build())
-        assertNull(planRoute(read = { laneRouteInput("route-c#0", legs, off) }, debugLog = lines))
+        assertNull(planRoute("route-c#0", { legs }, { off }, debugLog = lines))
         assertEquals(listOf("error"), lines.types())
         assertEquals(LaneEvidenceLine.TYPE, lines.lines.single().second["where"])
     }
@@ -199,13 +249,12 @@ class LanePlansTest {
     fun `a plan that cannot be made costs one error line, after the route's own line`() {
         val lines = Lines()
         val (legs, shapes) = shortRoute()
-        val failing = planRoute(
-            read = { laneRouteInput("route-d#0", legs, shapes) },
-            debugLog = lines,
+        val failing = planRoute("route-d#0", { legs }, { shapes }, debugLog = lines,
             planner = { _, _, _ -> throw IllegalStateException("a made-up failure") },
         )
         assertNull(failing)
         assertEquals(listOf(LaneEvidenceLine.TYPE, "error"), lines.types())
+        assertTrue("zones" !in lines.lines.first().second, "the first pass's line alone")
         assertEquals(LANE_PLAN_ERROR, lines.lines.last().second["where"])
     }
 
@@ -213,21 +262,20 @@ class LanePlansTest {
     fun `work no longer wanted makes no line and no plan`() {
         val lines = Lines()
         val (legs, shapes) = shortRoute()
-        assertNull(planRoute(read = { laneRouteInput("route-e#0", legs, shapes) }, debugLog = lines, active = { false }))
+        assertNull(planRoute("route-e#0", { legs }, { shapes }, debugLog = lines, active = { false }))
         assertTrue(lines.lines.isEmpty())
         var calls = 0
-        // Wanted for the line, no longer for the plan.
-        assertNull(planRoute(read = { laneRouteInput("route-e#0", legs, shapes) }, debugLog = lines, active = { ++calls <= 1 }))
-        assertEquals(listOf(LaneEvidenceLine.TYPE), lines.types())
+        // Wanted while the route is read, no longer once its plan is made.
+        assertNull(planRoute("route-e#0", { legs }, { shapes }, debugLog = lines, active = { ++calls <= 1 }))
+        assertTrue(lines.lines.isEmpty())
+        assertEquals(2, calls)
     }
 
     @Test
     fun `the planner gets the route's own card windows and stations, nothing of the car`() {
         val (legs, shapes) = shortRoute()
         var given: List<Double>? = null
-        val held = planRoute(
-            read = { laneRouteInput("route-f#0", legs, shapes) },
-            debugLog = DebugLog.NONE,
+        val held = planRoute("route-f#0", { legs }, { shapes }, debugLog = DebugLog.NONE,
             planner = { topology, windows, unknownExits ->
                 given = unknownExits
                 LanePlanner.plan(topology, windows, unknownExits)
@@ -364,16 +412,16 @@ class LanePlansTest {
         val route = laneRouteInput("route-long#0", legs, shapes).route
         assertEquals(30_000.0, route.lengthMeters, 400.0)
         // Warm up the classes and the JIT, then time the job as the worker runs it.
-        repeat(WARM_RUNS) { requireNotNull(planRoute(read = { laneRouteInput("route-long#0", legs, shapes) }, debugLog = DebugLog.NONE)) }
+        repeat(WARM_RUNS) { requireNotNull(planRoute("route-long#0", { legs }, { shapes }, debugLog = DebugLog.NONE)) }
         val times = (0 until TIMED_RUNS).map {
             val start = System.nanoTime()
-            val held = requireNotNull(planRoute(read = { laneRouteInput("route-long#0", legs, shapes) }, debugLog = DebugLog.NONE))
+            val held = requireNotNull(planRoute("route-long#0", { legs }, { shapes }, debugLog = DebugLog.NONE))
             val wall = (System.nanoTime() - start) / 1e6
             assertTrue(held.buildMillis <= wall + 1e-6, "the plan's own time is the job's")
             wall
         }.sorted()
         val median = times[times.size / 2]
-        val held = requireNotNull(planRoute(read = { laneRouteInput("route-long#0", legs, shapes) }, debugLog = DebugLog.NONE))
+        val held = requireNotNull(planRoute("route-long#0", { legs }, { shapes }, debugLog = DebugLog.NONE))
         assertEquals(20, held.input.route.nodes.count { it.isLanePoint }, "19 points on the way and the exit")
         assertTrue(held.plan.windows.any { it.kind == CardWindow.Kind.RUN_UP })
         assertTrue(held.input.unknownExits.isNotEmpty())

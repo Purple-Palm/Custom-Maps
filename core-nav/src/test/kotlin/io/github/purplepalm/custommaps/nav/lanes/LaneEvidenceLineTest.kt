@@ -175,4 +175,44 @@ class LaneEvidenceLineTest {
         assertTrue(routes.onCommitted("a#0"), "the same route on a new drive has a line of its own")
         assertFalse(routes.onCommitted(null))
     }
+
+    // ------------------------------------------------------------------ with the lane plan (the second pass)
+
+    /** The fields of [route]'s line with its plan, as the engine writes it once the plan is made. */
+    private fun withPlan(route: LaneRoute): Map<String, Any?> {
+        val first = LaneEvidence.of(route)
+        val plan = LanePlanner.plan(LaneTopology.of(first), CardWindows.latched(route), LaneScenes.sideBranches(route))
+        return LaneEvidenceLine.fields(first, plan, plan.evidence())
+    }
+
+    @Test
+    fun `with the plan the line counts its zones, its possible lanes, its aligned changes and what is left`() {
+        val ia = withPlan(LaneScenes.ia())
+        assertEquals(2, ia["zones"], "the careful gains before IA1 and IA2a")
+        assertEquals(0, ia["zonesBridged"])
+        assertEquals(1, ia["possibleLanes"], "the exit-only lane from IA2b")
+        assertEquals(1, ia["aligned"], "the exit's lane by its arrow")
+        val iw31 = withPlan(LaneScenes.iw31())
+        assertEquals(0, iw31["zones"])
+        assertEquals(1, iw31["zonesBridged"], "the stretch between P1 and the entrance")
+        assertEquals(1, iw31["possibleLanes"], "the exit-only lane from P1")
+        // The metres left without anything of the app's own: before the first lane point's reach and after the last.
+        val route = LaneScenes.iw31()
+        val second = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), LaneScenes.sideBranches(route)).evidence()
+        assertEquals(Math.round(second.stretches.filter { it.kind == LaneEvidence.Kind.NONE }.sumOf { it.meters }), iw31["noneM"])
+        assertTrue((iw31["noneM"] as Long) < route.lengthMeters.toLong())
+    }
+
+    @Test
+    fun `without the plan the line is the first pass's alone, the new fields after the old ones`() {
+        val first = LaneEvidence.of(LaneScenes.ia())
+        val alone = LaneEvidenceLine.fields(first)
+        assertTrue(listOf("zones", "zonesBridged", "possibleLanes", "aligned", "noneM").none { it in alone })
+        val keys = withPlan(LaneScenes.ia()).keys.toList()
+        assertEquals(alone.keys.toList(), keys.take(alone.size))
+        assertEquals(listOf("zones", "zonesBridged", "possibleLanes", "aligned", "noneM"), keys.drop(alone.size))
+        val line = JsonLines.event(Instant.parse("2000-01-01T00:00:00Z"), LaneEvidenceLine.TYPE, withPlan(LaneScenes.iw31()))
+        println("lane_evidence with the plan's fields: ${line.length} bytes")
+        assertTrue(line.length < 900, "${line.length}")
+    }
 }

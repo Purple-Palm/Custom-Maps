@@ -27,9 +27,15 @@ object LaneEvidenceLine {
      * - "windows": the card windows, freeway run-ups ("runUps") and street maneuvers ("street");
      * - "streetTurns": the turns at junctions off freeways, with lanes at the junction and without;
      * - "designated": the lanes the lane points list for each kind of designated lane;
-     * - "noLanes": true when the route has no lane point at all.
+     * - "noLanes": true when the route has no lane point at all;
+     * - with the route's lane [plan] and its evidence's second pass [second] ([LanePlan.evidence]): "zones",
+     *   changes of the lane count nothing explains, drawn as zones (rule 5); "zonesBridged", stretches
+     *   without lane data drawn as zones between two drawn ones (rule 7a); "possibleLanes", the lanes on an
+     *   exit's side that may already be there before the point that lists them (rule 2a); "aligned", the
+     *   changes of the lane count whose side something told (a road, the arrows, the lanes kept for car
+     *   pools); "noneM", the whole metres left without anything of the app's own lanes.
      */
-    fun fields(evidence: LaneEvidence): Map<String, Any?> {
+    fun fields(evidence: LaneEvidence, plan: LanePlan? = null, second: LaneEvidence? = null): Map<String, Any?> {
         val route = evidence.route
         val lanePoints = RoadKind.entries.associateWithTo(LinkedHashMap()) { 0 }
         for (p in evidence.lanePoints) {
@@ -37,7 +43,7 @@ object LaneEvidenceLine {
             lanePoints[road] = lanePoints.getValue(road) + 1
         }
         val streetTurnsWithLanes = evidence.streetTurns.count { route.nodes[it].isLanePoint }
-        return linkedMapOf(
+        val fields = linkedMapOf(
             "routeId" to route.routeId,
             "lengthM" to Math.round(route.lengthMeters),
             "steps" to route.steps,
@@ -69,6 +75,14 @@ object LaneEvidenceLine {
             "designated" to evidence.designated.mapKeys { it.key.logName },
             "noLanes" to evidence.lanePoints.isEmpty(),
         )
+        if (plan != null && second != null) {
+            fields["zones"] = second.zones.count { it.cause == LaneEvidence.Zone.Cause.CHANGE }
+            fields["zonesBridged"] = second.zones.count { it.cause == LaneEvidence.Zone.Cause.GAP }
+            fields["possibleLanes"] = second.possibleLanes.sumOf { it.lanes }
+            fields["aligned"] = plan.topology.alignments.count { it.explained }
+            fields["noneM"] = Math.round(second.stretches.filter { it.kind == LaneEvidence.Kind.NONE }.sumOf { it.meters })
+        }
+        return fields
     }
 
     /** The whole metres of [road] by what is known of their lanes. */

@@ -1,15 +1,20 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import com.mapbox.api.directions.v5.models.RouteLeg
+import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindows
+import io.github.purplepalm.custommaps.nav.lanes.LaneCarry
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 
 /*
  * The lane plan of each primary route a drive uses (the app's own lanes, design 5): built once for the
@@ -28,6 +33,11 @@ internal class RouteLanePlan(
     val evidence: LaneEvidence,
     /** How long reading the route and making the plan took on the route lines' worker, in milliseconds. */
     val buildMillis: Double,
+    /**
+     * The route's line with its stations, for finding the car on it when the drive changes to another route
+     * (the design's D8). Read on the route lines' worker only, where it is made the first time it is needed.
+     */
+    val line: Lazy<LaneCarry.Line>,
 ) {
     /** The navigator's id of the route. */
     val routeId: String get() = input.route.routeId
@@ -117,19 +127,31 @@ internal class LanePlans {
 }
 
 /**
- * What the route lines' worker does for a new primary route: reads it ([read], with [laneRouteInput]),
- * writes its "lane_evidence" line, and makes its lane plan with the stations of the roads without lane
- * data that leave on an exit's side, as plain numbers. A route that cannot be read costs its line and its
- * plan; a plan that cannot be made costs one error line. Neither costs the drive. [active] tells whether
- * the work is still wanted, between its stages.
+ * Where the car was when the drive changed from the route of [old] to a new one, for the hand-over of the lit
+ * lane (the design's D8): [car], its latest matched place, kept in memory only, and [oldNear], its station on
+ * the route before at the last update there, where known.
+ */
+internal class RouteChange(val old: RouteLanePlan, val car: GeoPoint, val oldNear: Double?)
+
+/**
+ * What the route lines' worker does for a new primary route [routeId], whose [legs] and steps' points
+ * [shapes] the navigator already holds: reads it ([laneRouteInput]), makes its lane plan with the stations of
+ * the roads without lane data that leave on an exit's side, as plain numbers, and writes its "lane_evidence"
+ * line, then its "lane_plan" line, with the hand-over of the lit lane after [change], a change of route. A
+ * route that cannot be read costs its line and its plan; a plan that cannot be made costs one error line and
+ * the "lane_plan" line, and the "lane_evidence" line is the first pass's alone. Neither costs the drive.
+ * [active] tells whether the work is still wanted, between its stages.
  *
  * @param planner the planner, [LanePlanner.plan]; tests give one that fails
  * @param nanos the clock the work is timed on
  * @return the plan to hold, or null
  */
 internal fun planRoute(
-    read: () -> LaneRouteInput,
+    routeId: String,
+    legs: () -> List<RouteLeg>,
+    shapes: () -> List<List<List<Point>>>,
     debugLog: DebugLog,
+    change: RouteChange? = null,
     active: () -> Boolean = { true },
     planner: (LaneTopology, List<CardWindow>, List<Double>) -> LanePlan = LanePlanner::plan,
     nanos: () -> Long = System::nanoTime,
@@ -138,27 +160,62 @@ internal fun planRoute(
     val input: LaneRouteInput
     val first: LaneEvidence
     try {
-        input = read()
+        input = laneRouteInput(routeId, legs(), shapes())
         first = LaneEvidence.of(input.route)
-        val fields = LaneEvidenceLine.fields(first)
-        if (!active()) return null
-        debugLog.log(LaneEvidenceLine.TYPE, fields)
     } catch (e: RuntimeException) {
         // A route that cannot be read costs its line, never the drive.
         debugLog.error(LaneEvidenceLine.TYPE, e)
         return null
     }
-    return try {
+    if (!active()) return null
+    var failure: RuntimeException? = null
+    val held = try {
         val topology = LaneTopology.of(first)
-        if (!active()) return null
         val plan = planner(topology, CardWindows.latched(input.route), input.unknownExits)
-        if (!active()) return null
-        RouteLanePlan(input, plan, plan.evidence(), (nanos() - start) / NANOS_PER_MILLI)
+        val line = lazy { carryLine(shapes(), input) }
+        RouteLanePlan(input, plan, plan.evidence(), (nanos() - start) / NANOS_PER_MILLI, line)
     } catch (e: RuntimeException) {
-        // A plan that cannot be made costs this line and the plan, never the drive.
-        debugLog.error(LANE_PLAN_ERROR, e)
+        failure = e
         null
     }
+    if (!active()) return null
+    try {
+        debugLog.log(LaneEvidenceLine.TYPE, LaneEvidenceLine.fields(first, held?.plan, held?.evidence))
+    } catch (e: RuntimeException) {
+        debugLog.error(LaneEvidenceLine.TYPE, e)
+    }
+    // A plan that cannot be made costs this line and the plan, never the drive.
+    if (failure != null) debugLog.error(LANE_PLAN_ERROR, failure)
+    if (held == null) return null
+    try {
+        val carry = change?.let { carryAt(it, held) }
+        debugLog.log(LanePlanLine.TYPE, LanePlanLine.fields(held.plan, held.evidence, held.input::keyOf, held.buildMillis, carry))
+    } catch (e: RuntimeException) {
+        debugLog.error(LanePlanLine.TYPE, e)
+    }
+    return held
+}
+
+/**
+ * The hand-over of the lit lane from the plan before [change] to [new] with the car where [change] found it
+ * ([LaneCarry.atChange]); null where the car is not on the new route or no lane is lit there. On the route
+ * lines' worker, which makes both routes' lines.
+ */
+private fun carryAt(change: RouteChange, new: RouteLanePlan): LaneCarry.Carry? =
+    LaneCarry.atChange(change.old.plan, change.old.line.value, change.oldNear, new.plan, new.line.value, change.car)
+
+/** The line of the route [input] reads, from its steps' points [shapes] ([LaneCarry.Line]); a coordinate off the globe leaves its point out. */
+internal fun carryLine(shapes: List<List<List<Point>>>, input: LaneRouteInput): LaneCarry.Line {
+    val steps = ArrayList<List<GeoPoint>>()
+    val starts = ArrayList<Double>()
+    for ((l, leg) in shapes.withIndex()) {
+        for ((k, step) in leg.withIndex()) {
+            val start = input.station(l, k, 0.0) ?: continue
+            steps.add(step.mapNotNull { it.toGeoPoint() })
+            starts.add(start)
+        }
+    }
+    return LaneCarry.Line.of(steps, starts)
 }
 
 /** Where an error line says a lane plan could not be made. */

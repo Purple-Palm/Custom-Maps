@@ -50,19 +50,25 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.PhoneMotion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.CardContinuity
+import io.github.purplepalm.custommaps.nav.guidance.CardLanes
 import io.github.purplepalm.custommaps.nav.guidance.CardUpdate
 import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.FixTime
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceCommand
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceEvent
 import io.github.purplepalm.custommaps.nav.guidance.GuidanceStateMachine
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.guidance.StaleStart
 import io.github.purplepalm.custommaps.nav.guidance.StartFreshness
 import io.github.purplepalm.custommaps.nav.guidance.StartPlan
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
+import io.github.purplepalm.custommaps.nav.lanes.CardPlanAgreement
+import io.github.purplepalm.custommaps.nav.lanes.LaneAgreeLine
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
+import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
+import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -238,6 +244,22 @@ internal class MapboxNavigationEngine(
 
     /** The routes' "lane_evidence" lines and plans on their way through [routeLines]; the end of a drive drops them. Main thread. */
     private val lanePlanJobs = ArrayList<Job>()
+
+    /**
+     * The plan held for the route of the latest progress update, at the car's station: the one lookup in the
+     * plan each update makes ([LanePlans.planFor], [RouteLanePlan.at]), for the "lane_agree" line only;
+     * nothing on the screen reads it. Null without a plan of that route. Main thread.
+     */
+    private var lanePlanAtCar: PlanSegment? = null
+
+    /** Where the car was on the route of the plan held at the latest update that had one: for a change of route (D8). Main thread. */
+    private var lanePlanCar: CarOnPlan? = null
+
+    /** Which of the card's rows get a "lane_agree" line ([LaneAgreeLine.Rows]); every drive starts it over. Main thread. */
+    private val laneAgreeRows = LaneAgreeLine.Rows()
+
+    /** Whether the card's comparison with the plan failed in this drive: one error line, then no more "lane_agree" lines. */
+    private var laneAgreeFailed = false
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
@@ -826,14 +848,16 @@ internal class MapboxNavigationEngine(
      * line.
      */
     private fun planLanes(route: NavigationRoute, ticket: LanePlans.Ticket) {
+        val change = routeChange()
         lanePlanJobs.removeAll { it.isCompleted }
         lanePlanJobs += scope.launch(routeLines) {
+            val directions = route.directionsRoute
             val plan = planRoute(
-                read = {
-                    val directions = route.directionsRoute
-                    laneRouteInput(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints())
-                },
+                routeId = route.id,
+                legs = { directions.legs().orEmpty() },
+                shapes = { directions.stepsGeometryToPoints() },
                 debugLog = debugLog,
+                change = change,
                 active = { isActive },
             )
             // Back on the main thread, unless the drive ended meanwhile: then the plan is dropped here.
@@ -841,11 +865,33 @@ internal class MapboxNavigationEngine(
         }
     }
 
+    /**
+     * Where the car is as the drive changes to a new route, for the hand-over of the lit lane from the plan
+     * held (the design's D8, logged as the new plan's "replanMoves"): its latest matched place, in memory
+     * only, and its station on the route of that plan at the last update there. Null at the start of a drive
+     * and before the first matched place.
+     */
+    private fun routeChange(): RouteChange? {
+        val old = lanePlans.held ?: return null
+        val location = lastMatch?.enhancedLocation ?: return null
+        val car = positionOrNull(location.latitude, location.longitude) ?: return null
+        return RouteChange(old, car, lanePlanCar?.takeIf { it.routeId == old.routeId }?.station)
+    }
+
     /** The drive ended: no "lane_evidence" line or plan of it is made any more, none still on its way is, and no plan is held. */
     private fun endLanePlans() {
         lanePlans.end()
         lanePlanJobs.forEach { it.cancel() }
         lanePlanJobs.clear()
+        forgetLaneAgree()
+    }
+
+    /** What the card's comparison with the plan remembers of a drive goes: the next drive starts it over. */
+    private fun forgetLaneAgree() {
+        lanePlanAtCar = null
+        lanePlanCar = null
+        laneAgreeRows.reset()
+        laneAgreeFailed = false
     }
 
     /** The "route_request" line of every route request the app sends, before a trip or inside one. */
@@ -943,6 +989,7 @@ internal class MapboxNavigationEngine(
                 val primary = _previewRoutes.value.firstOrNull()
                 val routeId = primary?.id
                 lanePlans.begin()
+                forgetLaneAgree()
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
                 navigation?.setNavigationRoutes(_previewRoutes.value) { result ->
@@ -1206,6 +1253,8 @@ internal class MapboxNavigationEngine(
             logLaneRow(progress, snapshot)
             _routeProgress.value = snapshot
         }
+        // The card's row against the lane plan of the update's route, for the debug log only.
+        if (active) logLaneAgree(progress, snapshot)
         // Every update the guards let through, the card's row of it known: was a diverge passed?
         if (active) watchDiverges(progress)
         // The first progress of a trip, the next one after a cancelled refresh, and the first one
@@ -1301,6 +1350,56 @@ internal class MapboxNavigationEngine(
     internal fun onRunUpWordsShown(key: String, shown: Boolean) {
         val fields = laneRowLog.onWordsShown(key, shown) ?: return
         debugLog.log("lane_row", fields)
+    }
+
+    /**
+     * For [progress], an update the guards let through, and [snapshot], the card it publishes: the one
+     * lookup in the plan of the update's route at the car's station, and a "lane_agree" line when the card
+     * begins to show a row at a lane point ([LaneAgreeLine.Rows]): the run-up's row, a lane choice's, and on
+     * a freeway the exit's or the fork's own, against the plan there ([CardPlanAgreement]). A progress update
+     * of another route than the plan's, and a pending card, read none. Reads only what the navigator already
+     * handed over. A failure costs one error line and the lines of the rest of the drive, never the drive.
+     */
+    private fun logLaneAgree(progress: RouteProgress, snapshot: RouteProgressSnapshot?) {
+        if (laneAgreeFailed) return
+        try {
+            val held = lanePlans.planFor(progress.navigationRoute.id)
+            val leg = progress.currentLegProgress
+            val stepProgress = leg?.currentStepProgress
+            val car = if (held != null && leg != null && stepProgress != null) {
+                held.station(leg.legIndex, stepProgress.stepIndex, stepProgress.distanceTraveled.toDouble())
+            } else {
+                null
+            }
+            lanePlanAtCar = if (held != null && car != null) held.at(car) else null
+            if (held != null && car != null) lanePlanCar = CarOnPlan(held.routeId, car)
+            val card = if (snapshot != null) CardLanes.of(snapshot) else NO_ROW
+            val key = when (card.source) {
+                CardLanes.Source.RUN_UP -> snapshot?.runUpLanes?.key
+                CardLanes.Source.CHOICE -> laneChoices.choiceKey
+                CardLanes.Source.MANEUVER -> snapshot?.let { "${it.stepKey}/end" }
+                CardLanes.Source.NONE -> null
+            }
+            if (held == null || car == null || !laneAgreeRows.take(card.source, key, card.lanes, card.target != null, held.plan)) return
+            val lanes = card.lanes ?: return
+            val row = CardPlanAgreement.Row(card.source, lanes.lanes, words = card.target != null, exact = snapshot?.runUpLanes?.odd != RunUpRule.ODD_COMPOSED)
+            val point = held.pointOf(key)
+            val result = when {
+                point != null -> {
+                    // The maneuver's own row counts on a freeway only, at an exit or a fork; street rows are later's.
+                    val nodes = held.input.route.nodes
+                    val freeway = nodes[point.node].maneuver?.viewStaysUp == true && held.input.route.approachRoad(point.node) != RoadKind.STREET
+                    if (card.source == CardLanes.Source.MANEUVER && !freeway) return
+                    CardPlanAgreement.of(row, held.plan, point, car, lanePlanAtCar)
+                }
+                card.source == CardLanes.Source.MANEUVER -> return
+                else -> CardPlanAgreement.noPoint(row)
+            }
+            debugLog.log(LaneAgreeLine.TYPE, LaneAgreeLine.fields(card.source, key, result, point?.let { it.station - car }))
+        } catch (e: RuntimeException) {
+            laneAgreeFailed = true
+            debugLog.error(LaneAgreeLine.TYPE, e)
+        }
     }
 
     /**
@@ -1559,6 +1658,9 @@ internal class MapboxNavigationEngine(
 
         /** How often the marker of a running trip is written again. */
         const val MARKER_EVERY_MILLIS = 60_000L
+
+        /** The card without a lane row. */
+        val NO_ROW = CardLanes(CardLanes.Source.NONE)
     }
 }
 
@@ -1574,6 +1676,9 @@ private class SeekAsk(
     val routeId: String?,
     val askedAt: Long,
 )
+
+/** The car at [station] metres along the route [routeId], as the plan of that route measures it. */
+private class CarOnPlan(val routeId: String, val station: Double)
 
 /**
  * The "replay_seek" line of one release of the replay slider: where the drive was ([from]: `fromS`
