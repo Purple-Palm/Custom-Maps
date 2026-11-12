@@ -345,6 +345,30 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `the own lanes are off until switched on, and the switch is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        runCurrent()
+        assertFalse(viewModel.debug.value.drawOwnLanes)
+        viewModel.setDrawOwnLanes(true)
+        runCurrent()
+        assertTrue(settings.drawOwnLanes.value)
+        assertTrue(viewModel.debug.value.drawOwnLanes)
+        assertFalse(viewModel.debug.value.ownRouteLine, "the own route line's switch is its own")
+        assertFalse(viewModel.debug.value.simulateDrive)
+    }
+
+    @Test
+    fun `an own lanes switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setDrawOwnLanes(true)
+        runCurrent()
+        assertFalse(viewModel.debug.value.drawOwnLanes)
+        assertFalse(settings.drawOwnLanes.value)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
     fun `an own route line switch that cannot be stored stays as it was`() = runTest(dispatcher) {
         settings.storageFull = true
         val viewModel = viewModel()

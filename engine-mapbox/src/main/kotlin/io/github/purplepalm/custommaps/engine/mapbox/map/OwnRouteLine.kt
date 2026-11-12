@@ -19,6 +19,8 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.StationTable
 import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficLevel
@@ -66,9 +68,16 @@ import kotlin.math.max
  * The debug log gets a "route_line" line at each change of who draws the line, with the swap's times where the own
  * line took over, and the camera line a "routeLine" object once a second ([diagnostics]): numbers and words only.
  *
- * Behind a second Debug switch, Draw the app's lanes ([setLanes]), the layers of the app's own lanes ([LaneLayers]) are
- * in the style with the own line's: added after them, empty, at every style load and when either switch is turned on,
- * in the look's colours. Main thread only.
+ * Behind a second Debug switch, Draw the app's lanes ([setLanes]), the own line draws the app's own lanes with the route
+ * ([OwnLanes]): their layers ([LaneLayers]) are in the style with the own line's, added after them, empty, at every
+ * style load and when either switch is turned on, in the look's colours. Each path is built with its drawing, and the
+ * drawing's source holds one window of it at a time ([DrawingWindows]): the first goes with the path, and the swap from
+ * the SDK's line waits for both to load; the next ones are built off the main thread and sent while the car drives,
+ * never inside a card window ([onProgress]), each with a "lane_drawing" line of its size and of how long it took. With
+ * the lanes the route line lies in two pairs of layers, one over the stretches where a lane is lit ([LIT_LAYERS]) and
+ * one over the rest, each with a gradient that is transparent where the other draws, so together they are the one line
+ * it was. A tint's piece the car has passed is hidden, and a lit piece takes its stretch's traffic colour, by feature
+ * state, set again after each window's load. At guidance end the drawing's source is cleared. Main thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
@@ -104,10 +113,16 @@ internal class OwnRouteLine(
         /** The line's colours along the path from each of [stops] on, and the casing's [casing]. */
         fun setColours(stops: List<ColourStop>, casing: Int)
 
-        /** Trims both layers from the path's start to [fraction] of its projected length. */
+        /**
+         * With the app's lanes: each of [gradients]' layers its colours along the path, a step from each of its stops on;
+         * where a stop's colour is [TRANSPARENT] the layer draws nothing, its casing too.
+         */
+        fun setGradients(gradients: List<Gradient>)
+
+        /** Trims every layer added from the path's start to [fraction] of its projected length. */
         fun setTrim(fraction: Double)
 
-        /** Shows or hides both layers. */
+        /** Shows or hides every layer added. */
         fun setVisible(visible: Boolean)
 
         /** Takes the layers and the source out of the style, whichever of them is there. */
@@ -132,9 +147,12 @@ internal class OwnRouteLine(
         fun cancel()
     }
 
-    /** Builds the drawing of one path of a route, off the main thread: [version] tells it from the route's earlier ones. */
+    /**
+     * Builds the drawing of one path of a route, off the main thread: [version] tells it from the route's earlier ones;
+     * with [lanes], the app's own lanes along it too ([OwnLineDrawing.lanes]).
+     */
     fun interface Build {
-        fun drawing(version: Int): OwnLineDrawing
+        fun drawing(version: Int, lanes: Boolean): OwnLineDrawing
     }
 
     /** Gives the traffic of a route along a drawing's path, off the main thread, for a refresh. */
@@ -142,7 +160,10 @@ internal class OwnRouteLine(
         fun runs(drawing: OwnLineDrawing): List<TrafficRun>
     }
 
-    /** One of the own line's layers as it goes into the style: in [slot], right above the layer [above], with [widths]. */
+    /**
+     * One of the own line's layers as it goes into the style: in [slot], right above the layer [above], with [widths];
+     * [lit] for the pair over the stretches where a lane is lit, which draws nothing until its gradient is set.
+     */
     data class Layer(
         val id: String,
         val casing: Boolean,
@@ -150,10 +171,14 @@ internal class OwnRouteLine(
         val slot: String,
         val widths: List<RouteLineWidths.Stop>,
         val emissiveStrength: Double,
+        val lit: Boolean = false,
     )
 
     /** From [from], a fraction of the path's projected length, the line is [colour] up to the next stop. */
     data class ColourStop(val from: Double, val colour: Int)
+
+    /** The colours of the layer [layerId] along the path. */
+    data class Gradient(val layerId: String, val stops: List<ColourStop>)
 
     /** Why the own line gave the route line back to the SDK, as the "route_line" line names it. */
     enum class Fallback(val logName: String) {
@@ -208,6 +233,31 @@ internal class OwnRouteLine(
     /** Whether the own line is drawn and the SDK's primary line hidden. */
     var drawn = false
         private set
+
+    /** The lanes' window the drawing's source holds now; null for none. */
+    private var window: LaneWindow? = null
+
+    /** The window sent to the source that has not loaded yet, its data id and when it was sent; null while none waits. */
+    private var pendingWindow: LaneWindow? = null
+    private var windowSentId: String? = null
+    private var windowSentAt = 0L
+
+    /** Why that window was sent, and how long building it took, for its "lane_drawing" line. */
+    private var windowReason = REASON_ROUTE
+    private var windowBuildNanos = 0L
+
+    /** The window being built on the worker while the car drives. */
+    private var windowTask: Task? = null
+
+    /** How many of the held window's tint pieces, in the order they end, are hidden behind the car. */
+    private var hiddenTints = 0
+
+    /** The windows of the drive's route that loaded, and the windows sent, for their data ids. */
+    private var windowsLoaded = 0
+    private var windowIds = 0
+
+    /** When the path sent with a first window loaded while that window had not; null while no path waits for one. */
+    private var pathLoadedAt: Long? = null
 
     /** The data id of the path sent to the source that has not loaded yet; null while none waits. */
     private var sentId: String? = null
@@ -265,20 +315,41 @@ internal class OwnRouteLine(
             refreshPending = false
             drawing = null
             forgetSent()
+            forgetWindow()
             showSdkLine()
             if (ready()) attempt { removeLayers() }
         }
     }
 
     /**
-     * The Debug switch Draw the app's lanes: on, the app's own lanes' layers are in the style with the own line's from
-     * now on; off, they leave it. Nothing of them is added while the own line is off.
+     * The Debug switch Draw the app's lanes: on, the app's own lanes are drawn with the own line from now on; off, they
+     * leave the style. Nothing of them is added while the own line is off. During a drive the route's own line is built
+     * and drawn anew, with or without them, and the SDK's line shows until it is.
      */
     fun setLanes(on: Boolean) {
         if (on == lanes) return
         lanes = on
-        if (!enabled || !ready()) return
-        attempt { if (on) addLanes() else lanePort?.remove() }
+        if (!enabled) return
+        val had = routeId != null && !failed()
+        task?.cancel()
+        task = null
+        refreshPending = false
+        drawing = null
+        forgetSent()
+        forgetWindow()
+        showSdkLine()
+        if (had) {
+            logLine(DRAWER_SDK, REASON_SWITCH)
+            swapFrom = nanos()
+        }
+        if (ready()) {
+            attempt {
+                // Off, they go first: the own layers are added again without the pair of the lit stretches.
+                if (!on) lanePort?.remove()
+                addLayers()
+            }
+        }
+        buildPath()
     }
 
     /** Call from the callback of a style load, with [look] the route line's: the new style has no own layers. */
@@ -290,13 +361,22 @@ internal class OwnRouteLine(
         // state across a style load is not known (the design's JE 1), so it is shown at every one.
         drawn = false
         sentId = null
+        // The new style's source is empty: the lanes' window the map held, or the one on its way, goes again.
+        val keep = pendingWindow ?: window
+        windowTask?.cancel()
+        windowTask = null
+        windowSentId = null
+        pendingWindow = null
+        window = null
+        hiddenTints = 0
+        pathLoadedAt = null
         if (routeId != null && !failed()) {
             logLine(DRAWER_SDK, REASON_STYLE_LOAD)
             swapFrom = nanos()
         }
         attempt { primary.show() }
         attempt { addLayers() }
-        drawing?.let(::send)
+        drawing?.let { send(it, keep, REASON_STYLE_LOAD) }
     }
 
     /**
@@ -326,9 +406,11 @@ internal class OwnRouteLine(
         drawing = null
         // The new route's own line is trimmed from its start until the SDK or the puck says where the car is on it.
         trimStation = 0.0
+        windowsLoaded = 0
         if (!enabled) return
-        // The old route's path may still be loading: its data is no longer wanted.
+        // The old route's path may still be loading: its data is no longer wanted, nor its lanes' window.
         forgetSent()
+        forgetWindow()
         showSdkLine()
         swapFrom = nanos()
         logLine(DRAWER_SDK, if (first) REASON_START else REASON_ROUTE_CHANGE)
@@ -375,12 +457,52 @@ internal class OwnRouteLine(
      * nothing.
      */
     fun onSourceLoaded(dataId: String) {
-        if (dataId != sentId) return
         val loadedAt = nanos()
-        forgetSent()
+        when (dataId) {
+            windowSentId -> windowLoaded(loadedAt)
+            sentId -> {
+                forgetSent()
+                pathLoadedAt = loadedAt
+            }
+            else -> return
+        }
         val drawing = drawing ?: return
-        if (!enabled || !ready()) return
-        show(drawing, loadedAt)
+        val path = pathLoadedAt ?: return
+        if (!enabled || !ready() || drawn) return
+        // With the lanes the path waits for the window sent with it: both are drawn together.
+        if (windowSentId != null) return
+        pathLoadedAt = null
+        show(drawing, max(path, loadedAt))
+    }
+
+    /**
+     * Once per progress update, with the app's lanes drawn: the tint pieces the car has passed are hidden, and where the
+     * next window is due ([DrawingWindows.due]) it is built off the main thread and sent, unless the car has meanwhile
+     * entered a card window.
+     */
+    fun onProgress() {
+        if (!enabled || !lanes || !drawn) return
+        val drawing = drawing ?: return
+        val own = drawing.lanes ?: return
+        val car = trimStation
+        hideTintsBehind(car)
+        if (windowTask != null || windowSentId != null) return
+        if (!own.windows.due(car, (pendingWindow ?: window)?.window, changing = false)) return
+        val wanted = own.windows.windowAt(car)
+        windowTask = worker.run({
+            val from = nanos()
+            own.window(wanted, drawing.table, drawing.runs) to nanos() - from
+        }) { result ->
+            windowTask = null
+            result.fold(
+                onSuccess = { (built, took) -> takeWindow(drawing, own, built, took) },
+                // The route costs its own line, with this one error line.
+                onFailure = { error ->
+                    debugLog.error(WHERE, error)
+                    if (drawing === this.drawing) fallBack(Fallback.EXCEPTION)
+                },
+            )
+        }
     }
 
     /**
@@ -395,7 +517,7 @@ internal class OwnRouteLine(
         if (lanes && lanePort != null && ready()) attempt { lanePort.setColours(MapPalette.lanes(look)) }
         if (!drawn) return
         val drawing = drawing ?: return
-        attempt { layers.setColours(colourStops(drawing.runs, look), casingColour(look)) }
+        attempt { setColours(drawing) }
     }
 
     /**
@@ -413,8 +535,9 @@ internal class OwnRouteLine(
     fun check() {
         if (!enabled || routeId == null || failed() || !ready()) return
         attempt {
-            val lost = drawn && !layers.exist()
-            val late = sentId != null && nanos() - sentAt > LOAD_WAIT_NANOS
+            val lost = drawn && (!layers.exist() || (lanes && lanePort?.exist() == false))
+            val now = nanos()
+            val late = (sentId != null && now - sentAt > LOAD_WAIT_NANOS) || (windowSentId != null && now - windowSentAt > LOAD_WAIT_NANOS)
             if (lost || late) fallBack(Fallback.NO_DATA)
         }
     }
@@ -434,10 +557,16 @@ internal class OwnRouteLine(
         drawing = null
         sdkRouteId = null
         trimStation = 0.0
+        windowsLoaded = 0
+        forgetWindow()
         if (!enabled || !had) return
         forgetSent()
         showSdkLine()
-        if (ready()) attempt { layers.clearPath() }
+        if (ready()) {
+            attempt { layers.clearPath() }
+            // The drawing's source too: the next drive begins with nothing of this one's lanes.
+            if (lanes) attempt { lanePort?.clear() }
+        }
     }
 
     /**
@@ -464,26 +593,37 @@ internal class OwnRouteLine(
         task?.cancel()
         task = null
         forgetSent()
+        forgetWindow()
         released = true
     }
 
+    /** The own line's layers in their order, the bottom one first: the pair of the lit stretches too while [lanes] is on. */
+    val layerIds: List<String> get() = routeLayers().map { it.id }
+
     private fun ready() = styleReady && !released && layers.usable
 
-    /** The own line's layers, and with [lanes] the lanes' after them: in the order they have to be added. */
+    /** The own line's layers: the pair of the lit stretches over the other pair while [lanes] is on. */
+    private fun routeLayers(): List<Layer> = if (lanes) LAYERS + LIT_LAYERS else LAYERS
+
+    /**
+     * The own line's layers, and with [lanes] the lanes' after them: in the order they have to be added. The lanes' go
+     * first where they are there, as the own line's source goes with its layers.
+     */
     private fun addLayers() {
-        layers.add(LAYERS, look)
+        if (lanes) lanePort?.remove()
+        layers.add(routeLayers(), look)
         addLanes()
     }
 
     /** The lanes' layers, empty, under the route line and over the own line ([LaneLayers.positions]), if [lanes] is on. */
     private fun addLanes() {
         if (!lanes) return
-        lanePort?.add(LaneLayers.positions(LaneLayers.PLACEMENT, LAYERS.last().id), MapPalette.lanes(look), laneLatitude)
+        lanePort?.add(LaneLayers.positions(LaneLayers.PLACEMENT, routeLayers().last().id), MapPalette.lanes(look), laneLatitude)
     }
 
     private fun removeLayers() {
+        if (lanes) lanePort?.remove()
         layers.remove()
-        lanePort?.remove()
     }
 
     /** Whether the own line of the route the drive is on failed. */
@@ -495,20 +635,29 @@ internal class OwnRouteLine(
         val routeId = routeId ?: return
         if (!enabled || drawing != null || failed()) return
         val version = ++versions
+        val withLanes = lanes
+        // Where the car is, as the main thread knows it now: the lanes' first window is built around it.
+        val car = CarNow(sdkRouteId, sdkOffset, puckLatitude, puckLongitude, trimStation)
         task?.cancel()
         task = worker.run({
             val from = nanos()
-            val built = build.drawing(version)
-            built to nanos() - from
+            val built = build.drawing(version, withLanes)
+            val took = nanos() - from
+            val first = built.lanes?.let { own ->
+                val start = nanos()
+                own.window(own.windows.windowAt(car.station(built)), built.table, built.runs) to nanos() - start
+            }
+            Triple(built, took, first)
         }) { result ->
             task = null
             result.fold(
-                onSuccess = { (built, took) ->
-                    // A path of a route the drive has left, or built after the switch went off, is dropped.
-                    if (enabled && built.routeId == routeId && routeId == this.routeId) {
+                onSuccess = { (built, took, first) ->
+                    // A path of a route the drive has left, or built after a switch changed, is dropped.
+                    if (enabled && withLanes == lanes && built.routeId == routeId && routeId == this.routeId) {
                         buildNanos = took
+                        windowBuildNanos = first?.second ?: 0L
                         drawing = built
-                        send(built)
+                        send(built, first?.first, REASON_ROUTE)
                         if (refreshPending) {
                             refreshPending = false
                             refreshTraffic()
@@ -534,14 +683,24 @@ internal class OwnRouteLine(
             refreshPending = task != null
             return
         }
+        val held = window
         task?.cancel()
-        task = worker.run({ old.withRuns(traffic.runs(old)) }) { result ->
+        task = worker.run({
+            val runs = traffic.runs(old)
+            // The lit pieces of the window the map holds take the new traffic too.
+            old.withRuns(runs) to held?.let { w -> old.lanes?.levels(w, old.table, runs) }
+        }) { result ->
             task = null
             result.fold(
-                onSuccess = { refreshed ->
+                onSuccess = { (refreshed, levels) ->
                     if (enabled && drawing === old) {
                         drawing = refreshed
-                        if (drawn) attempt { layers.setColours(colourStops(refreshed.runs, look), casingColour(look)) }
+                        if (drawn) {
+                            attempt {
+                                setColours(refreshed)
+                                if (lanes && levels != null && held === window) lanePort?.setStates(emptyList(), levels)
+                            }
+                        }
                     }
                 },
                 onFailure = { debugLog.error(WHERE, it) },
@@ -550,17 +709,123 @@ internal class OwnRouteLine(
     }
 
     /**
-     * Sends [drawing]'s path to the source as data of its own: it is drawn once the map says that data has loaded
-     * ([onSourceLoaded]). Until it has, the own layers stay hidden and the SDK's line shown.
+     * Sends [drawing]'s path to the source as data of its own, and with the lanes the window [first] to theirs: both are
+     * drawn once the map says both have loaded ([onSourceLoaded]). Until they have, the own layers stay hidden and the
+     * SDK's line shown.
      */
-    private fun send(drawing: OwnLineDrawing) {
+    private fun send(drawing: OwnLineDrawing, first: LaneWindow?, reason: String) {
         if (!ready() || failed()) return
         val dataId = "$DATA_ID${++sent}"
         sentId = dataId
         sentAt = nanos()
+        pathLoadedAt = null
         attempt {
             layers.watchLoads(true)
             layers.setPath(drawing.points, dataId)
+            if (lanes && drawing.lanes != null && first != null) sendWindow(first, reason)
+        }
+    }
+
+    /** Sends [window] to the drawing's source as data of its own, the layers' widths first where its latitude asks. */
+    private fun sendWindow(window: LaneWindow, reason: String) {
+        val port = lanePort ?: return
+        val dataId = "$WINDOW_ID${++windowIds}"
+        pendingWindow = window
+        windowSentId = dataId
+        windowSentAt = nanos()
+        windowReason = reason
+        if (!window.latitude.isNaN() && LaneDrawing.stopsStale(laneLatitude, window.latitude)) {
+            laneLatitude = window.latitude
+            port.setLatitude(window.latitude)
+        }
+        port.watchLoads(true)
+        port.setWindow(window.collection, dataId)
+    }
+
+    /**
+     * The window [built] for [drawing], made off the main thread in [took]: sent while it is still the path drawn and
+     * still due, so never inside a card window; a window with nothing to draw over one with nothing either is only kept.
+     */
+    private fun takeWindow(drawing: OwnLineDrawing, own: OwnLanes, built: LaneWindow, took: Long) {
+        if (!enabled || !lanes || !drawn || drawing !== this.drawing || windowSentId != null) return
+        if (!own.windows.due(trimStation, (pendingWindow ?: window)?.window, changing = false)) return
+        windowBuildNanos = took
+        if (built.features == 0 && (window?.features ?: 0) == 0) {
+            window = built
+            hiddenTints = 0
+            return
+        }
+        attempt { sendWindow(built, REASON_AHEAD) }
+    }
+
+    /** The window sent last has loaded: the source holds it from now on, its line is written and its states set. */
+    private fun windowLoaded(loadedAt: Long) {
+        windowSentId = null
+        quietly { lanePort?.watchLoads(false) }
+        val loaded = pendingWindow ?: return
+        pendingWindow = null
+        window = loaded
+        hiddenTints = 0
+        windowsLoaded++
+        debugLog.log(
+            LANE_DRAWING,
+            mapOf(
+                "route" to routes,
+                "window" to windowsLoaded,
+                "reason" to windowReason,
+                "lengthM" to Math.round(loaded.window.meters),
+                "features" to loaded.features,
+                "coordinates" to loaded.coordinates,
+                "bytes" to loaded.bytes,
+                "buildMs" to Math.round(windowBuildNanos / NANOS_PER_MILLI),
+                "loadMs" to Math.round((loadedAt - windowSentAt) / NANOS_PER_MILLI),
+                "budget" to loaded.withinBudget,
+            ),
+        )
+        // Whether feature states outlive a new window's data is not known: they are set again for every window.
+        if (drawn) applyStates(loaded)
+    }
+
+    /** The feature states of [window]: its tint pieces the car has passed hidden, its lit pieces' traffic. */
+    private fun applyStates(window: LaneWindow) {
+        val port = lanePort ?: return
+        var k = 0
+        while (k < window.tints.size && window.tints[k].to <= trimStation) k++
+        hiddenTints = k
+        val behind = window.tints.subList(0, k).map { it.id }
+        if (behind.isNotEmpty() || window.levels.isNotEmpty()) attempt { port.setStates(behind, window.levels) }
+    }
+
+    /** Hides the held window's tint pieces that end at or behind [car] and are not hidden yet: a few calls a second at most. */
+    private fun hideTintsBehind(car: Double) {
+        val held = window ?: return
+        var k = hiddenTints
+        while (k < held.tints.size && held.tints[k].to <= car) k++
+        if (k == hiddenTints) return
+        val passed = held.tints.subList(hiddenTints, k).map { it.id }
+        hiddenTints = k
+        attempt { lanePort?.setStates(passed, emptyList()) }
+    }
+
+    /** No window waits or is built any more, and none is held: a new route's, or none at all, comes next. */
+    private fun forgetWindow() {
+        windowTask?.cancel()
+        windowTask = null
+        val waited = windowSentId != null
+        windowSentId = null
+        pendingWindow = null
+        window = null
+        hiddenTints = 0
+        pathLoadedAt = null
+        if (waited && !released) quietly { lanePort?.watchLoads(false) }
+    }
+
+    /** The colours of [drawing]'s line: with the lanes in its two pairs of layers, else in the one pair. */
+    private fun setColours(drawing: OwnLineDrawing) {
+        if (lanes) {
+            layers.setGradients(laneGradients(drawing.runs, drawing.lanes?.lit.orEmpty(), look))
+        } else {
+            layers.setColours(colourStops(drawing.runs, look), casingColour(look))
         }
     }
 
@@ -574,12 +839,16 @@ internal class OwnRouteLine(
     /** Shows [drawing], whose path the source has loaded: its colours and trim, the own layers, and the SDK's line hidden. */
     private fun show(drawing: OwnLineDrawing, loadedAt: Long) {
         attempt {
-            layers.setColours(colourStops(drawing.runs, look), casingColour(look))
+            setColours(drawing)
             val station = trimStation(drawing, accepted = sdkRouteId == drawing.routeId) ?: 0.0
             trim = drawing.table.pathFraction(station)
             trimStation = station
             layers.setTrim(trim)
             layers.setVisible(true)
+            if (lanes) {
+                lanePort?.setLitVisible(true)
+                window?.let(::applyStates)
+            }
             primary.hide()
             drawn = true
             logLine(
@@ -620,7 +889,11 @@ internal class OwnRouteLine(
     private fun showSdkLine() {
         drawn = false
         quietly { primary.show() }
-        if (ready()) quietly { layers.setVisible(false) }
+        if (ready()) {
+            quietly { layers.setVisible(false) }
+            // What is lit for the route the map holds goes with its line; its road stays until the next window.
+            if (lanes) quietly { lanePort?.setLitVisible(false) }
+        }
     }
 
     /**
@@ -658,10 +931,12 @@ internal class OwnRouteLine(
         sentId = null
         drawn = false
         quietly { primary.show() }
+        forgetWindow()
         if (ready()) {
             if (waited) quietly { layers.watchLoads(false) }
             quietly { layers.setVisible(false) }
             quietly { layers.clearPath() }
+            if (lanes) quietly { lanePort?.clear() }
         }
         logLine(DRAWER_SDK, REASON_FALLBACK, mapOf("ownLineFallback" to cause.logName))
     }
@@ -669,6 +944,25 @@ internal class OwnRouteLine(
     /** A "route_line" line: who draws the route line from now on ([drawer]), why, the drive's route by its count, and [more]. */
     private fun logLine(drawer: String, reason: String, more: Map<String, Any?> = emptyMap()) {
         debugLog.log(ROUTE_LINE, mapOf("drawer" to drawer, "reason" to reason, "route" to routes) + more)
+    }
+
+    /**
+     * Where the car is, as the main thread knew it when a path was sent to be built: the SDK's vanishing point
+     * [sdkOffset] on [sdkRouteId], the puck, and the trim's station. Read on the worker against the built path.
+     */
+    private class CarNow(
+        private val sdkRouteId: String?,
+        private val sdkOffset: Double,
+        private val latitude: Double,
+        private val longitude: Double,
+        private val trimStation: Double,
+    ) {
+        /** The car's station along [drawing]'s route: the SDK's point where it is this route's, else the puck's. */
+        fun station(drawing: OwnLineDrawing): Double = when {
+            sdkRouteId == drawing.table.routeId -> drawing.table.stationAt(sdkOffset)
+            !latitude.isNaN() -> drawing.projection.station(latitude, longitude, trimStation) ?: trimStation
+            else -> trimStation
+        }
     }
 
     /** Runs [change] on the style while the own line falls back: what still fails is only written down. */
@@ -706,6 +1000,21 @@ internal class OwnRouteLine(
         /** What the data ids of the own source's paths begin with. */
         private const val DATA_ID = "own-"
 
+        /** What the data ids of the lanes' windows begin with. */
+        private const val WINDOW_ID = "lanes-"
+
+        /** The debug log's line of each window of the app's own lanes that loaded, and why it was sent. */
+        const val LANE_DRAWING = "lane_drawing"
+
+        /** The first window of a path: at Start, a new route, or a switch turned on. */
+        const val REASON_ROUTE = "route"
+
+        /** The next window, while the car drives. */
+        const val REASON_AHEAD = "ahead"
+
+        /** A colour that draws nothing: a layer's gradient is this where the other pair of layers draws. */
+        const val TRANSPARENT = 0
+
         const val SOURCE = "custommaps-own-route"
         const val CASING = "custommaps-own-route-casing"
         const val LINE = "custommaps-own-route-line"
@@ -738,6 +1047,38 @@ internal class OwnRouteLine(
             ),
         )
 
+        const val LIT_CASING = "custommaps-own-route-lit-casing"
+        const val LIT_LINE = "custommaps-own-route-lit-line"
+
+        /**
+         * With the app's lanes, the route line's second pair of layers, over [LAYERS]: the line and its casing over the
+         * stretches where a lane is lit, at the same widths and in the same colours, transparent everywhere else, as the
+         * first pair is transparent where these draw ([laneGradients]).
+         */
+        val LIT_LAYERS = listOf(
+            Layer(
+                LIT_CASING,
+                casing = true,
+                above = LINE,
+                slot = SLOT,
+                widths = RouteLineWidths.heldFrom(RouteLineWidths.CASING, RouteLineWidths.HOLD_ZOOM),
+                emissiveStrength = 1.0,
+                lit = true,
+            ),
+            Layer(
+                LIT_LINE,
+                casing = false,
+                above = LIT_CASING,
+                slot = SLOT,
+                widths = RouteLineWidths.heldFrom(RouteLineWidths.LINE, RouteLineWidths.HOLD_ZOOM),
+                emissiveStrength = 1.0,
+                lit = true,
+            ),
+        )
+
+        /** Every layer the own line may have in the style. */
+        private val ALL_LAYERS = LAYERS + LIT_LAYERS
+
         // The source as the SDK makes its own: geometry tiles to zoom 16, its tolerance and buffer, and line metrics
         // for the gradient and the trim.
         private const val SOURCE_MAX_ZOOM = 16L
@@ -762,6 +1103,54 @@ internal class OwnRouteLine(
         /** The casing's colour in [look]. */
         fun casingColour(look: Look): Int = MapPalette.routeLine(look).getValue(RouteLineColor.ROUTE_CASING)
 
+        /**
+         * The colours of the route line's two pairs of layers along the path, with the app's lanes: each run of [runs] in
+         * the route line's colours of [look], cut where a lane's [lit] stretch (fractions of the path) begins and ends;
+         * the pair of [LIT_LAYERS] draws over the lit stretches only and the first pair over the rest only, so together
+         * they draw the line the first pair alone would.
+         */
+        fun laneGradients(runs: List<TrafficRun>, lit: List<ClosedFloatingPointRange<Double>>, look: Look): List<Gradient> {
+            val colours = MapPalette.routeLine(look)
+            val casing = casingColour(look)
+            val cuts = lit.flatMap { listOf(it.start, it.endInclusive) }.filter { it > 0.0 && it < 1.0 }.distinct().sorted()
+            // Each piece of a run between two cuts: where it begins, its colour, and whether a lane is lit there.
+            val pieces = ArrayList<Triple<Double, Int, Boolean>>()
+            for (run in runs.ifEmpty { listOf(TrafficRun(0.0, 1.0, TrafficLevel.UNKNOWN)) }) {
+                var from = run.from
+                for (x in cuts.filter { it > run.from && it < run.to } + run.to) {
+                    if (x > from) {
+                        val middle = (from + x) / 2.0
+                        pieces.add(Triple(from, colourOf(run.level, colours), lit.any { middle >= it.start && middle <= it.endInclusive }))
+                    }
+                    from = x
+                }
+            }
+            fun stops(colour: (Int, Boolean) -> Int): List<ColourStop> {
+                val out = ArrayList<ColourStop>()
+                for ((from, line, isLit) in pieces) {
+                    val value = colour(line, isLit)
+                    if (out.isEmpty()) out.add(ColourStop(0.0, value)) else if (out.last().colour != value) out.add(ColourStop(from, value))
+                }
+                return out.ifEmpty { listOf(ColourStop(0.0, colour(colourOf(TrafficLevel.UNKNOWN, colours), false))) }
+            }
+            return listOf(
+                Gradient(CASING, stops { _, isLit -> if (isLit) TRANSPARENT else casing }),
+                Gradient(LINE, stops { line, isLit -> if (isLit) TRANSPARENT else line }),
+                Gradient(LIT_CASING, stops { _, isLit -> if (isLit) casing else TRANSPARENT }),
+                Gradient(LIT_LINE, stops { line, isLit -> if (isLit) line else TRANSPARENT }),
+            )
+        }
+
+        /** [stops] as a step gradient over the line's progress, as the navigation SDK builds its own. */
+        private fun stepGradient(stops: List<ColourStop>): Expression = Expression.ExpressionBuilder("step").apply {
+            lineProgress()
+            color(stops.first().colour)
+            for (stop in stops) stop {
+                literal(stop.from)
+                color(stop.colour)
+            }
+        }.build()
+
         /** The colour of [level] among the route line's [colours], as the SDK colours its line. */
         fun colourOf(level: TrafficLevel, colours: Map<RouteLineColor, Int>): Int = colours.getValue(
             when (level) {
@@ -779,13 +1168,16 @@ internal class OwnRouteLine(
             /** The source in the style now; its data is set through it. */
             private var source: GeoJsonSource? = null
 
+            /** The layers added with it, the bottom one first. */
+            private var added: List<Layer> = emptyList()
+
             /** The map's word on loaded data, while a path waits; the SDK's own route line waits for its data the same way. */
             private var loads: Cancelable? = null
 
             override val usable: Boolean get() = mapboxMap.isValid()
 
             override fun exist(): Boolean =
-                source != null && mapboxMap.styleSourceExists(SOURCE) && LAYERS.all { mapboxMap.styleLayerExists(it.id) }
+                source != null && mapboxMap.styleSourceExists(SOURCE) && added.isNotEmpty() && added.all { mapboxMap.styleLayerExists(it.id) }
 
             override fun add(layers: List<Layer>, look: Look) {
                 // One of them may be left from an addition that failed half way.
@@ -809,10 +1201,13 @@ internal class OwnRouteLine(
                             // Not faded behind 3D buildings, as the SDK's line is not.
                             lineDepthOcclusionFactor(0.0)
                             lineColor(if (layer.casing) casingColour(look) else colourStops(emptyList(), look).first().colour)
+                            // The pair of the lit stretches draws nothing until the path's gradients are set.
+                            if (layer.lit) lineGradient(stepGradient(listOf(ColourStop(0.0, TRANSPARENT))))
                         },
                         layer.above,
                     )
                 }
+                added = layers
             }
 
             override fun setPath(points: List<GeoPoint>, dataId: String) {
@@ -849,20 +1244,25 @@ internal class OwnRouteLine(
                 set(CASING, "line-color", Expression.color(casing))
             }
 
+            override fun setGradients(gradients: List<Gradient>) {
+                for (g in gradients) set(g.layerId, "line-gradient", stepGradient(g.stops))
+            }
+
             override fun setTrim(fraction: Double) {
                 val trim = Value.valueOf(listOf(Value.valueOf(0.0), Value.valueOf(fraction)))
-                for (layer in LAYERS) set(layer.id, "line-trim-offset", trim)
+                for (layer in added) set(layer.id, "line-trim-offset", trim)
             }
 
             override fun setVisible(visible: Boolean) {
                 val visibility = Value.valueOf(if (visible) "visible" else "none")
-                for (layer in LAYERS) set(layer.id, "visibility", visibility)
+                for (layer in added) set(layer.id, "visibility", visibility)
             }
 
             override fun remove() {
-                for (layer in LAYERS.asReversed()) if (mapboxMap.styleLayerExists(layer.id)) mapboxMap.removeStyleLayer(layer.id)
+                for (layer in ALL_LAYERS.asReversed()) if (mapboxMap.styleLayerExists(layer.id)) mapboxMap.removeStyleLayer(layer.id)
                 if (mapboxMap.styleSourceExists(SOURCE)) mapboxMap.removeStyleSource(SOURCE)
                 source = null
+                added = emptyList()
             }
 
             /** One property of one layer, written as it is; the style's refusal is thrown, its words without the value. */

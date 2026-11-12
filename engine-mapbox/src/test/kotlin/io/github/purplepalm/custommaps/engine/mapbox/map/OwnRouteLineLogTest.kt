@@ -25,9 +25,9 @@ class OwnRouteLineLogTest {
     private fun routeLines() = log.lines.filter { it.first == OwnRouteLine.ROUTE_LINE }.map { it.second }
 
     /** A build that takes [took] nanoseconds on the test's clock. */
-    private fun slowBuild(id: String, took: Long) = OwnRouteLine.Build { version ->
+    private fun slowBuild(id: String, took: Long) = OwnRouteLine.Build { version, lanes ->
         scene.now += took
-        scene.build(id).drawing(version)
+        scene.build(id).drawing(version, lanes)
     }
 
     @Test

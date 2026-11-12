@@ -50,6 +50,13 @@ interface MapRenderer {
     fun setOwnRouteLine(enabled: Boolean)
 
     /**
+     * Debug: whether the app draws the freeway lanes of a drive under the route line where the route's lane data has
+     * them, with the route line its own whatever [setOwnRouteLine] says. Off, nothing of them shows. A change applies at
+     * once, also during a drive.
+     */
+    fun setDrawOwnLanes(enabled: Boolean)
+
+    /**
      * Marks [place] on the map with a pin at the place itself, such as the building, wherever a
      * route to it ends; null takes the pin away. One place is marked at a time.
      */

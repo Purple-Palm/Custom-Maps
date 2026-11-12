@@ -5,6 +5,7 @@ import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.RouteLanePlan
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.toGeoPoint
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LegTraffic
 import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.RoutePath
@@ -32,17 +33,20 @@ internal class OwnLineDrawing(
     val projection: PuckProjection,
     /** Each leg's points' stations along the route, as its annotations count its segments: for a refresh's traffic. */
     val legStations: List<DoubleArray>,
+    /** The app's own lanes along the path, where they were asked for and the route has a lane plan; null otherwise. */
+    val lanes: OwnLanes? = null,
 ) {
     /** The same path with the traffic of a refresh. */
-    fun withRuns(runs: List<TrafficRun>): OwnLineDrawing = OwnLineDrawing(routeId, version, points, table, runs, projection, legStations)
+    fun withRuns(runs: List<TrafficRun>): OwnLineDrawing = OwnLineDrawing(routeId, version, points, table, runs, projection, legStations, lanes)
 }
 
 /**
  * The drawing of the route [routeId], whose [legs] and steps' points [shapes] (as the steps' geometry decodes to) the
  * navigator holds, as path [version], through the lanes of its lane [plan] where one was made; without one the path is
- * the route's own line. The route's own line is every point of every step, leg after leg, as the navigation SDK draws
- * the route, and its stations are measured along it as the plan's are. For the route lines' worker or the map's own:
- * it reads every step's shape. Throws where the route has no line to draw.
+ * the route's own line. With [lanes] and a plan, the app's own lanes along the path too ([OwnLanes]). The route's own
+ * line is every point of every step, leg after leg, as the navigation SDK draws the route, and its stations are
+ * measured along it as the plan's are. For the route lines' worker or the map's own: it reads every step's shape.
+ * Throws where the route has no line to draw.
  */
 internal fun ownLineDrawing(
     routeId: String,
@@ -50,6 +54,7 @@ internal fun ownLineDrawing(
     shapes: List<List<List<Point>>>,
     plan: RouteLanePlan?,
     version: Int,
+    lanes: Boolean = false,
 ): OwnLineDrawing {
     val line = ArrayList<GeoPoint>()
     val lineStations = ArrayList<Double>()
@@ -78,10 +83,13 @@ internal fun ownLineDrawing(
         pointStations.add(steps)
     }
     val stations = lineStations.toDoubleArray()
-    val path = plan?.let { RoutePath.of(it.plan, line, version, it.evidence) }
+    // One cross-section for the path and the lanes, so the two agree by construction.
+    val section = plan?.let { CrossSection.of(it.plan, it.evidence) }
+    val path = plan?.let { RoutePath.of(it.plan, line, version, it.evidence, requireNotNull(section)) }
     check(path == null || path.routeId == routeId) { "The plan is another route's" }
     val table = if (path != null) StationTable.of(path) else StationTable.of(routeId, version, line, stations, line, stations)
     val legStations = pointStations.map(::legPointStations)
+    val ownLanes = if (lanes && plan != null && path != null && section != null) OwnLanes.of(plan.plan, path, plan.evidence, section, table) else null
     return OwnLineDrawing(
         routeId = routeId,
         version = version,
@@ -90,6 +98,7 @@ internal fun ownLineDrawing(
         runs = TrafficRuns.of(table, legTraffic(legs, legStations)),
         projection = PuckProjection.of(line, stations),
         legStations = legStations,
+        lanes = ownLanes,
     )
 }
 

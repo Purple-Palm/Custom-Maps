@@ -48,7 +48,7 @@ data class LookSettings(
 /** A recent trip session, and whose token it ran on. */
 data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
-/** The debug section: trip sessions started on this phone, the simulated drive and own route line switches, and the debug log. */
+/** The debug section: trip sessions started on this phone, the simulated drive, own route line and own lanes switches, and the debug log. */
 data class DebugState(
     /** The month's trip sessions, and since when the count runs when that is after the month began. */
     val trips: MonthCount = MonthCount(0),
@@ -59,6 +59,8 @@ data class DebugState(
     val simulateDrive: Boolean = false,
     /** Whether the app draws the route line of a drive itself. */
     val ownRouteLine: Boolean = false,
+    /** Whether the app draws the freeway lanes of a drive itself. */
+    val drawOwnLanes: Boolean = false,
     /** Size of the debug log on the phone; null until measured. */
     val logBytes: Long? = null,
 )
@@ -93,8 +95,13 @@ class SettingsViewModel(
         combine(settings.dayNight, shownLook) { choice, shown -> LookSettings(choice, nextLook(choice, shown)) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
+    /** The three Debug switches, in one value. */
+    private val switches = combine(settings.simulateDrive, settings.ownRouteLine, settings.drawOwnLanes) { simulate, ownLine, ownLanes ->
+        Triple(simulate, ownLine, ownLanes)
+    }
+
     val debug: StateFlow<DebugState> =
-        combine(tripLog.entries, settings.simulateDrive, settings.ownRouteLine, logBytes, tokens) { entries, simulate, ownLine, bytes, list ->
+        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, ownLanes), bytes, list ->
             val time = now()
             DebugState(
                 trips = TripLog.monthCount(entries, time, installedAt()),
@@ -102,6 +109,7 @@ class SettingsViewModel(
                 recentTrips = entries.takeLast(RECENT_TRIPS).asReversed().map { RecentTrip(it, TokenTripCounts.of(it.tokenId, list)) },
                 simulateDrive = simulate,
                 ownRouteLine = ownLine,
+                drawOwnLanes = ownLanes,
                 logBytes = bytes,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
@@ -137,6 +145,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value, which the map keeps too.
                 debugLog.error("settings.setOwnRouteLine", e)
+            }
+        }
+    }
+
+    /** Applies at once, also during a drive: the map draws the freeway lanes itself, or nothing of them. */
+    fun setDrawOwnLanes(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setDrawOwnLanes(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the map keeps too.
+                debugLog.error("settings.setDrawOwnLanes", e)
             }
         }
     }

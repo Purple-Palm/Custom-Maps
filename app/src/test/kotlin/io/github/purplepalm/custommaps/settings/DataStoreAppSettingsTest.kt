@@ -60,6 +60,18 @@ class DataStoreAppSettingsTest {
         assertEquals(LaneZoom.DEFAULT, settings.laneZoom.first())
         assertFalse(settings.laneDetails.first())
         assertFalse(settings.ownRouteLine.first(), "the SDK draws the route line unless the Debug switch says otherwise")
+        assertFalse(settings.drawOwnLanes.first(), "the app draws no lanes unless the Debug switch says otherwise")
+    }
+
+    @Test
+    fun `stores the own lanes switch under its own key`() = runBlocking {
+        settings.setDrawOwnLanes(true)
+        assertTrue(settings.drawOwnLanes.first())
+        assertEquals(true, dataStore.data.first()[booleanPreferencesKey("draw_own_lanes")])
+        assertFalse(settings.ownRouteLine.first(), "the own route line's switch is its own")
+        assertFalse(settings.laneDetails.first())
+        settings.setDrawOwnLanes(false)
+        assertFalse(settings.drawOwnLanes.first())
     }
 
     @Test

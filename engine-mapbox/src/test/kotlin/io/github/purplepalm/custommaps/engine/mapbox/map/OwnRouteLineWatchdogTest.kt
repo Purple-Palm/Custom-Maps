@@ -119,7 +119,7 @@ class OwnRouteLineWatchdogTest {
     fun `a path that fails to build falls back once, and a new drive tries again`() {
         line.setEnabled(true)
         line.onStyleLoaded(Look.NIGHT)
-        line.onRoute("route-a#0", refresh = false, OwnRouteLine.Build { throw IllegalStateException("no path") }, scene.noTraffic)
+        line.onRoute("route-a#0", refresh = false, OwnRouteLine.Build { _, _ -> throw IllegalStateException("no path") }, scene.noTraffic)
         scene.jobs.runAll()
         assertEquals("exception", routeLines().single()["ownLineFallback"])
         assertTrue(style.primaryShown)

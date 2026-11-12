@@ -17,6 +17,7 @@ class FakeAppSettings(
     laneDetails: Boolean = false,
     dayNight: LookChoice = LookChoice.DEFAULT,
     ownRouteLine: Boolean = false,
+    drawOwnLanes: Boolean = false,
 ) : AppSettings {
 
     /** While true every change fails as it does on a full disk, and the stored value stays. */
@@ -45,6 +46,10 @@ class FakeAppSettings(
     override val ownRouteLine = MutableStateFlow(ownRouteLine)
 
     override suspend fun setOwnRouteLine(enabled: Boolean) = store { ownRouteLine.value = enabled }
+
+    override val drawOwnLanes = MutableStateFlow(drawOwnLanes)
+
+    override suspend fun setDrawOwnLanes(enabled: Boolean) = store { drawOwnLanes.value = enabled }
 
     private fun store(change: () -> Unit) {
         if (storageFull) throw IOException("No space left on device")

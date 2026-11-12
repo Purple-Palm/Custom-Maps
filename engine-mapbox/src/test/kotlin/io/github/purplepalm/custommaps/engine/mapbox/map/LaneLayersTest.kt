@@ -182,14 +182,17 @@ class LaneLayersTest {
         lanesOn(scene)
         val calls = scene.style.calls
         assertTrue(calls.indexOf("lanes.add") > calls.lastIndexOf("add"), "after the own line's layers: $calls")
-        assertEquals(LaneLayers.positions(LaneLayers.PLACEMENT, ownLine.last()), scene.lanes.positions)
+        // With the lanes the own line has its second pair of layers, and the lane arrows lie over it.
+        assertEquals(scene.style.added?.map { it.id }, ownLine + OwnRouteLine.LIT_LAYERS.map { it.id })
+        assertEquals(scene.line.layerIds, ownLine + OwnRouteLine.LIT_LAYERS.map { it.id })
+        assertEquals(LaneLayers.positions(LaneLayers.PLACEMENT, OwnRouteLine.LIT_LINE), scene.lanes.positions)
         assertEquals(MapPalette.lanes(Look.NIGHT), scene.lanes.shownColours)
         assertEquals(0.0, scene.lanes.latitude)
-        // A new style has none of them: they come again with it.
+        // A new style has none of them: they come again with it, after the own line's.
         scene.reload()
         scene.style.calls.clear()
         scene.line.onStyleLoaded(Look.DAY)
-        assertEquals(listOf("show", "add", "lanes.add"), scene.style.calls)
+        assertEquals(listOf("show", "lanes.remove", "add", "lanes.add"), scene.style.calls)
         assertEquals(MapPalette.lanes(Look.DAY), scene.lanes.shownColours)
     }
 
@@ -207,22 +210,26 @@ class LaneLayersTest {
     }
 
     @Test
-    fun `the lanes switch adds and removes them while the own line is on`() {
+    fun `the lanes switch adds and removes them while the own line is on, the own line's layers made again with them`() {
         val scene = OwnLineScene()
         scene.line.setEnabled(true)
         scene.line.onStyleLoaded(Look.NIGHT)
         scene.style.calls.clear()
         scene.line.setLanes(true)
-        assertEquals(listOf("lanes.add"), scene.style.calls)
+        // The SDK's line while the own line is made again with its second pair, and the lanes' layers over it.
+        assertEquals(listOf("show", "setVisible", "lanes.setLitVisible", "lanes.remove", "add", "lanes.add"), scene.style.calls)
         assertTrue(scene.lanes.exist())
+        assertEquals(ownLine + OwnRouteLine.LIT_LAYERS.map { it.id }, scene.style.added?.map { it.id })
+        scene.style.calls.clear()
         scene.line.setLanes(false)
-        assertEquals(listOf("lanes.add", "lanes.remove"), scene.style.calls)
+        assertEquals(listOf("show", "setVisible", "lanes.remove", "add"), scene.style.calls)
         assertFalse(scene.lanes.exist())
-        // The own line turned off takes them with its own.
+        assertEquals(ownLine, scene.style.added?.map { it.id })
+        // The own line turned off takes them with its own, theirs first.
         scene.line.setLanes(true)
         scene.style.calls.clear()
         scene.line.setEnabled(false)
-        assertEquals(listOf("show", "setVisible", "remove", "lanes.remove"), scene.style.calls)
+        assertEquals(listOf("show", "setVisible", "lanes.setLitVisible", "lanes.remove", "remove"), scene.style.calls)
         assertFalse(scene.lanes.exist())
     }
 

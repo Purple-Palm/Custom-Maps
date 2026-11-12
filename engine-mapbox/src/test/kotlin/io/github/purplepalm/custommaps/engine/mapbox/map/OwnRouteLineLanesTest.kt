@@ -1,0 +1,263 @@
+package io.github.purplepalm.custommaps.engine.mapbox.map
+
+import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
+import io.github.purplepalm.custommaps.nav.look.Look
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+/**
+ * The own line with the app's lanes on a fake style ([OwnLineScene]), along a made-up freeway exit ([FreewayExit]): the
+ * first window goes with the path, the next ones while the car drives and never inside a card window or while a new
+ * route loads, the feature states, a style load, a look switch, guidance end, and the watchdog.
+ */
+class OwnRouteLineLanesTest {
+
+    private val id = "route-x#0"
+    private val legs = FreewayExit.route(75, listOf(54, 62, 70)).first
+    private val shapes = FreewayExit.route(75, listOf(54, 62, 70)).second
+    private val plan = requireNotNull(FreewayExit.plan(id, legs, shapes))
+
+    /** The route's line and table as every path of it has them: where an SDK fraction lies. */
+    private val reference = ownLineDrawing(id, legs, shapes, plan, 0, lanes = true)
+    private val own = requireNotNull(reference.lanes)
+    private val routeEnd = reference.table.stationAt(1.0)
+
+    private val scene = OwnLineScene()
+    private val style = scene.style
+    private val lanes = scene.lanes
+    private val line = scene.line
+    private val built = ArrayList<OwnLineDrawing>()
+
+    private fun build() = OwnRouteLine.Build { version, withLanes ->
+        ownLineDrawing(id, legs, shapes, plan, version, withLanes).also { built += it }
+    }
+
+    private val traffic = OwnRouteLine.Traffic { it.runs }
+
+    /** The SDK took the car to [station] on the route: an accepted puck update there. */
+    private fun puck(station: Double) {
+        val place = scene.at(station)
+        line.onPuck(place.latitude, place.longitude, accepted = true, sdkRouteId = id, offset = reference.table.routeFraction(station), tracking = true)
+    }
+
+    /** The lanes on, the style loaded, the car at [car] and the route given: its path and first window built. */
+    private fun start(car: Double = 0.0) {
+        line.setLanes(true)
+        line.setEnabled(true)
+        line.onStyleLoaded(Look.NIGHT)
+        puck(car)
+        line.onRoute(id, refresh = false, build(), traffic)
+        scene.jobs.runAll()
+    }
+
+    /** [start], and both loaded: the own line and its lanes drawn. */
+    private fun drawn(car: Double = 0.0) {
+        start(car)
+        scene.load()
+        scene.loadWindow()
+        assertTrue(line.drawn)
+    }
+
+    private fun laneLines() = scene.log.lines.filter { it.first == OwnRouteLine.LANE_DRAWING }.map { it.second }
+
+    @Test
+    fun `the first window goes with the path, and the line is drawn once both have loaded`() {
+        start()
+        assertEquals(1, style.sent.size)
+        assertEquals(1, lanes.sent.size)
+        assertTrue(lanes.watching)
+        scene.load()
+        // The path alone is not drawn: its lanes' window has not loaded.
+        assertFalse(line.drawn)
+        assertTrue(style.primaryShown)
+        scene.loadWindow()
+        assertTrue(line.drawn)
+        assertFalse(style.primaryShown)
+        assertTrue(lanes.litShown)
+        assertFalse(lanes.watching)
+        // Both pairs of the route line coloured, and one line about the window: numbers and words only.
+        assertEquals(setOf(OwnRouteLine.CASING, OwnRouteLine.LINE, OwnRouteLine.LIT_CASING, OwnRouteLine.LIT_LINE), style.gradients.keys)
+        val logged = laneLines().single()
+        assertEquals(setOf("route", "window", "reason", "lengthM", "features", "coordinates", "bytes", "buildMs", "loadMs", "budget"), logged.keys)
+        assertEquals(1, logged["route"])
+        assertEquals(1, logged["window"])
+        assertEquals(OwnRouteLine.REASON_ROUTE, logged["reason"])
+        assertEquals(DrawingWindows.MAX_METERS.toLong(), logged["lengthM"])
+        assertEquals(true, logged["budget"])
+        for (value in logged.values) assertTrue(value is Number || value is Boolean || value is String, "$value")
+    }
+
+    @Test
+    fun `the window may load before the path, and the line waits for the path`() {
+        start()
+        scene.loadWindow()
+        assertFalse(line.drawn)
+        scene.load()
+        assertTrue(line.drawn)
+    }
+
+    @Test
+    fun `while the car drives the next window comes ahead of it, never inside a card window, and holds the car`() {
+        drawn()
+        var held = own.windows.windowAt(0.0)
+        val sentAt = ArrayList<Double>()
+        var car = 0.0
+        while (car <= routeEnd) {
+            puck(car)
+            line.onProgress()
+            scene.jobs.runAll()
+            if (lanes.sent.isNotEmpty()) {
+                assertEquals(1, lanes.sent.size)
+                assertFalse(own.windows.inCard(car), "a window sent inside a card window at $car")
+                sentAt += car
+                held = own.windows.windowAt(car)
+                scene.loadWindow()
+            }
+            assertTrue(held.holds(car) || car > held.to - 1e-6 && held.to >= routeEnd - 1e-6, "nothing drawn at $car: $held")
+            car += 20.0
+        }
+        assertTrue(sentAt.size >= 3, "windows sent at $sentAt")
+        val logged = laneLines()
+        assertEquals(sentAt.size + 1, logged.size)
+        assertTrue(logged.drop(1).all { it["reason"] == OwnRouteLine.REASON_AHEAD })
+        assertEquals((1..logged.size).toList(), logged.map { it["window"] })
+        // A window with nothing in it over one with nothing either is no update: the first ones along the road without lanes.
+        assertTrue(sentAt.first() > 1_000.0, "first sent at ${sentAt.first()}")
+    }
+
+    @Test
+    fun `the tints the car has passed are hidden a few at a time, and set again after each window has loaded`() {
+        // The car well into the run-up, where tints are drawn, from the first window on.
+        val inRunUp = own.windows.cards.first().start + 20.0
+        drawn(car = inRunUp)
+        val window = own.window(own.windows.windowAt(inRunUp), reference.table, reference.runs)
+        assertTrue(window.tints.size >= 4, "${window.tints.size} tint pieces")
+        val behind = { lanes.states.filter { it.second == LaneLayers.Key.STATE_BEHIND }.map { it.first }.toSet() }
+        assertEquals(window.tints.filter { it.to <= inRunUp }.map { it.id }.toSet(), behind())
+        var car = inRunUp
+        while (car + 30.0 <= own.windows.cards.first().endInclusive) {
+            car += 30.0
+            val before = lanes.states.size
+            puck(car)
+            line.onProgress()
+            scene.jobs.runAll()
+            assertEquals(window.tints.filter { it.to <= car }.map { it.id }.toSet(), behind(), "at $car")
+            assertTrue(lanes.states.size - before <= 4, "${lanes.states.size - before} calls at $car")
+        }
+        // Inside the card window nothing more was sent.
+        assertTrue(lanes.sent.isEmpty())
+    }
+
+    @Test
+    fun `nothing is sent while a new route loads, and the old route's window is no longer wanted`() {
+        drawn()
+        // The car on and a reroute onto the same road under a new id: the SDK's line until the new path has loaded.
+        val other = "route-y#0"
+        val otherPlan = requireNotNull(FreewayExit.plan(other, legs, shapes))
+        line.onRoute(other, refresh = false, OwnRouteLine.Build { version, withLanes -> ownLineDrawing(other, legs, shapes, otherPlan, version, withLanes) }, traffic)
+        assertFalse(line.drawn)
+        assertTrue(style.primaryShown)
+        assertFalse(lanes.litShown)
+        // Before its path is built and loaded the car's progress sends nothing.
+        puck(2_500.0)
+        line.onProgress()
+        assertTrue(lanes.sent.isEmpty())
+        scene.jobs.runAll()
+        assertEquals(1, lanes.sent.size, "the new route's first window, with its path")
+        line.onProgress()
+        scene.jobs.runAll()
+        assertEquals(1, lanes.sent.size)
+    }
+
+    @Test
+    fun `guidance end clears the drawing's source and forgets its windows`() {
+        drawn()
+        style.calls.clear()
+        line.onGuidanceEnded()
+        assertTrue("lanes.clear" in style.calls, "${style.calls}")
+        assertNull(lanes.held)
+        assertTrue(style.primaryShown)
+        puck(2_500.0)
+        line.onProgress()
+        scene.jobs.runAll()
+        assertTrue(lanes.sent.isEmpty())
+    }
+
+    @Test
+    fun `a style load sends the window the map held again with the path`() {
+        drawn()
+        val held = lanes.held
+        scene.reload()
+        style.calls.clear()
+        line.onStyleLoaded(Look.DAY)
+        assertEquals(listOf("show", "lanes.remove", "add", "lanes.add", "watchLoads", "setPath", "lanes.watchLoads", "lanes.setWindow"), style.calls)
+        assertEquals(held, lanes.sent.values.single())
+        scene.load()
+        scene.loadWindow()
+        assertTrue(line.drawn)
+        assertEquals("style_load", laneLines().last()["reason"])
+    }
+
+    @Test
+    fun `a look switch colours the lanes and both pairs of the route line`() {
+        drawn()
+        style.calls.clear()
+        line.setLook(Look.DAY)
+        assertEquals(listOf("lanes.setColours", "setGradients"), style.calls)
+        assertEquals(MapPalette.lanes(Look.DAY), lanes.shownColours)
+        assertTrue(style.gradients.getValue(OwnRouteLine.LIT_CASING).any { it.colour == OwnRouteLine.casingColour(Look.DAY) })
+    }
+
+    @Test
+    fun `a style that refuses a window costs the route its own line, never the drive`() {
+        lanes.refuse = "setWindow"
+        start()
+        assertTrue(style.primaryShown)
+        assertFalse(line.drawn)
+        assertEquals("exception", scene.log.lines.last { it.first == OwnRouteLine.ROUTE_LINE }.second["ownLineFallback"])
+        assertTrue("lanes.clear" in style.calls)
+    }
+
+    @Test
+    fun `the watchdog gives the line back when the lanes' layers are gone or a window does not load`() {
+        drawn()
+        lanes.positions = null
+        line.check()
+        assertTrue(style.primaryShown)
+        assertEquals("no_data", scene.log.lines.last { it.first == OwnRouteLine.ROUTE_LINE }.second["ownLineFallback"])
+
+        val late = OwnRouteLineLanesTest()
+        late.drawn()
+        // The car drives on until the next window is sent, which never loads.
+        var car = 0.0
+        while (late.lanes.sent.isEmpty() && car < late.routeEnd) {
+            late.puck(car)
+            late.line.onProgress()
+            late.scene.jobs.runAll()
+            car += 20.0
+        }
+        assertEquals(1, late.lanes.sent.size)
+        late.scene.now += OwnRouteLine.LOAD_WAIT_NANOS + 1
+        late.line.check()
+        assertTrue(late.style.primaryShown)
+    }
+
+    @Test
+    fun `with the lanes switch off nothing of them is touched and the line has its one pair`() {
+        line.setEnabled(true)
+        line.onStyleLoaded(Look.NIGHT)
+        line.onRoute(id, refresh = false, build(), traffic)
+        scene.jobs.runAll()
+        scene.load()
+        assertTrue(line.drawn)
+        puck(3_000.0)
+        line.onProgress()
+        assertTrue(style.calls.none { it.startsWith("lanes.") }, "${style.calls}")
+        assertTrue("setColours" in style.calls && "setGradients" !in style.calls)
+        assertNull(built.last().lanes)
+        assertEquals(OwnRouteLine.LAYERS.map { it.id }, line.layerIds)
+    }
+}

@@ -112,6 +112,7 @@ fun SettingsScreen(
     onLaneDetailsChange: (Boolean) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
+    onDrawOwnLanesChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onBack: () -> Unit,
@@ -156,7 +157,7 @@ fun SettingsScreen(
             SectionDivider()
             GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
             SectionDivider()
-            DebugSection(debug, onSimulateDriveChange, onOwnRouteLineChange, onShareLog, onClearLog, onCrashNow, temporaryDebugKey)
+            DebugSection(debug, onSimulateDriveChange, onOwnRouteLineChange, onDrawOwnLanesChange, onShareLog, onClearLog, onCrashNow, temporaryDebugKey)
             SectionDivider()
 
             SectionTitle(R.string.about_title)
@@ -380,6 +381,7 @@ private fun DebugSection(
     debug: DebugState,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
+    onDrawOwnLanesChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onCrashNow: (() -> Unit)?,
@@ -475,6 +477,25 @@ private fun DebugSection(
         }
         Spacer(Modifier.width(16.dp))
         AppSwitch(checked = debug.ownRouteLine, onCheckedChange = onOwnRouteLineChange)
+    }
+
+    // A test of the freeway lanes the app draws itself, with its own route line.
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.debug_draw_own_lanes),
+                style = MaterialTheme.typography.titleSmall,
+                color = LookTheme.tokens.onCard,
+            )
+            Text(
+                text = stringResource(R.string.debug_draw_own_lanes_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = LookTheme.tokens.onCardMuted,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        AppSwitch(checked = debug.drawOwnLanes, onCheckedChange = onDrawOwnLanesChange)
     }
 
     Spacer(Modifier.height(16.dp))
@@ -687,6 +708,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onLaneDetailsChange = {},
             onSimulateDriveChange = {},
             onOwnRouteLineChange = {},
+            onDrawOwnLanesChange = {},
             onShareLog = {},
             onClearLog = {},
             onBack = {},

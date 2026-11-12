@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
+import com.mapbox.geojson.FeatureCollection
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
@@ -38,6 +39,9 @@ internal class OwnLineScene {
         var watching = false
         var stops: List<OwnRouteLine.ColourStop>? = null
         var casing: Int? = null
+
+        /** The gradients set with the app's lanes, by layer. */
+        val gradients = LinkedHashMap<String, List<OwnRouteLine.ColourStop>>()
         var trim: Double? = null
         var layersVisible = false
         var primaryShown = true
@@ -73,6 +77,11 @@ internal class OwnLineScene {
             record("setColours")
             this.stops = stops
             this.casing = casing
+        }
+
+        override fun setGradients(gradients: List<OwnRouteLine.Gradient>) {
+            record("setGradients")
+            for (g in gradients) this.gradients[g.layerId] = g.stops
         }
 
         override fun setTrim(fraction: Double) {
@@ -141,6 +150,21 @@ internal class OwnLineScene {
         var shownColours: LaneColours? = null
         var latitude: Double? = null
 
+        /** The window the source holds, as the map has parsed it; null for none. */
+        var held: FeatureCollection? = null
+
+        /** Windows sent to the source and not parsed yet, by their data ids, oldest first. */
+        val sent = LinkedHashMap<String, FeatureCollection>()
+
+        /** Whether the map is asked to say when the source's data has loaded. */
+        var watching = false
+
+        /** The feature states set: each piece's id with its state's key and value, in the order they were set. */
+        val states = ArrayList<Triple<String, String, Any?>>()
+
+        /** Whether what is lit for the route is shown. */
+        var litShown = true
+
         override fun exist(): Boolean = positions != null
 
         override fun add(positions: List<LaneLayers.Position>, colours: LaneColours, latitude: Double) {
@@ -160,14 +184,53 @@ internal class OwnLineScene {
             this.latitude = latitude
         }
 
+        override fun setWindow(features: FeatureCollection, dataId: String) {
+            record("setWindow")
+            sent[dataId] = features
+        }
+
+        override fun watchLoads(watch: Boolean) {
+            record("watchLoads")
+            watching = watch
+        }
+
+        override fun clear() {
+            record("clear")
+            sent.clear()
+            held = null
+        }
+
+        override fun setStates(behind: List<String>, levels: List<Pair<String, String?>>) {
+            record("setStates")
+            for (id in behind) states += Triple(id, LaneLayers.Key.STATE_BEHIND, true)
+            for ((id, level) in levels) states += Triple(id, LaneLayers.Key.STATE_LEVEL, level)
+        }
+
+        override fun setLitVisible(visible: Boolean) {
+            record("setLitVisible")
+            litShown = visible
+        }
+
         override fun remove() {
             record("remove")
             positions = null
+            held = null
+            sent.clear()
         }
 
-        /** What a style load does: the new style has none of the lanes' layers. */
+        /** What a style load does: the new style has none of the lanes' layers, nor their source's data. */
         fun reload() {
             positions = null
+            held = null
+            sent.clear()
+        }
+
+        /** The map parses the window sent as [dataId]: the source holds it, and windows sent before it never load. */
+        fun parse(dataId: String) {
+            val keys = sent.keys.toList()
+            val k = keys.indexOf(dataId)
+            held = sent.getValue(dataId)
+            for (older in keys.subList(0, k + 1)) sent.remove(older)
         }
 
         private fun record(call: String) {
@@ -256,9 +319,17 @@ internal class OwnLineScene {
     val built = ArrayList<OwnLineDrawing>()
 
     fun build(id: String, runs: List<TrafficRun> = listOf(TrafficRun(0.0, 1.0, TrafficLevel.UNKNOWN))) =
-        OwnRouteLine.Build { version -> drawing(id, version, runs = runs).also { built += it } }
+        OwnRouteLine.Build { version, _ -> drawing(id, version, runs = runs).also { built += it } }
 
     val noTraffic = OwnRouteLine.Traffic { it.runs }
+
+    /** The map parses the lanes' window sent last and, while it is asked to, says so. */
+    fun loadWindow(): String {
+        val dataId = lanes.sent.keys.last()
+        lanes.parse(dataId)
+        if (lanes.watching) line.onSourceLoaded(dataId)
+        return dataId
+    }
 
     /** The map parses the path sent last and, while it is asked to, says so: as the source's own worker thread does. */
     fun load(): String {

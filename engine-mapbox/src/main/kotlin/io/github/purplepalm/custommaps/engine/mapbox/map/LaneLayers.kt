@@ -1,7 +1,11 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
 import com.mapbox.bindgen.Value
+import com.mapbox.common.Cancelable
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
 import com.mapbox.maps.MapboxMap
+import com.mapbox.maps.SourceDataLoadedType
 import com.mapbox.maps.extension.style.expressions.generated.Expression
 import com.mapbox.maps.extension.style.layers.addLayer
 import com.mapbox.maps.extension.style.layers.addLayerAbove
@@ -82,6 +86,17 @@ internal object LaneLayers {
         const val WIDTH_NORMAL = "normal"
         const val WIDTH_WIDE = "wide"
         const val WIDTH_EDGE = "edge"
+
+        /** The feature state of a tint's piece the car has passed: true, and the piece is not drawn. */
+        const val STATE_BEHIND = "behind"
+
+        /** The feature state of a lit piece where the route has traffic: one of the levels below, else the route's amber. */
+        const val STATE_LEVEL = "level"
+
+        const val LEVEL_MODERATE = "moderate"
+        const val LEVEL_HEAVY = "heavy"
+        const val LEVEL_SEVERE = "severe"
+        const val LEVEL_CLOSED = "closed"
     }
 
     /** Where in the middle slot a layer lies. */
@@ -200,14 +215,38 @@ internal object LaneLayers {
         /** Every layer's widths and minimum zoom for [latitude]. */
         fun setLatitude(latitude: Double)
 
+        /** Gives the source the [features] of one window, as its data [dataId]: the map says when that data has loaded. */
+        fun setWindow(features: FeatureCollection, dataId: String)
+
+        /** Whether the map is to say when the source's data has loaded; asked only while a window waits. */
+        fun watchLoads(watch: Boolean)
+
+        /** Gives the source nothing to draw. */
+        fun clear()
+
+        /**
+         * Feature states: each of [behind], a tint's piece the car has passed, is no longer drawn; each of [levels] is a lit
+         * piece with its traffic level ([Key.STATE_LEVEL]; null for none, the route's amber).
+         */
+        fun setStates(behind: List<String>, levels: List<Pair<String, String?>>)
+
+        /** Shows or hides the layers of what is lit for the route the map holds: the tints, the lit lane and its edges. */
+        fun setLitVisible(visible: Boolean)
+
         /** Takes the layers, the own slots and the source out of the style, whichever of them is there. */
         fun remove()
     }
 
-    /** The drawing's layers and source on [mapboxMap]. */
-    fun on(mapboxMap: MapboxMap): Port = object : Port {
+    /** The layers that show only what is lit for a route, hidden while a new route's drawing loads. */
+    val LIT_LAYERS: List<String> = listOf(TINT, LIT, LIT_EDGES)
+
+    /** The drawing's layers and source on [mapboxMap]; [onLoaded] hears each data id of the source that loaded. */
+    fun on(mapboxMap: MapboxMap, onLoaded: (dataId: String) -> Unit): Port = object : Port {
         /** The source in the style now; its data is set through it. */
         private var source: GeoJsonSource? = null
+
+        /** The map's word on loaded data, while a window waits. */
+        private var loads: Cancelable? = null
 
         override fun exist(): Boolean =
             source != null && mapboxMap.styleSourceExists(SOURCE) && LAYERS.all { mapboxMap.styleLayerExists(it.id) }
@@ -243,7 +282,45 @@ internal object LaneLayers {
             }
         }
 
+        override fun setWindow(features: FeatureCollection, dataId: String) {
+            val source = checkNotNull(source) { "No source" }
+            // The source hands its data to the map on a thread of its own, the one every GeoJSON source shares.
+            source.featureCollection(features, dataId)
+        }
+
+        override fun watchLoads(watch: Boolean) {
+            if (!watch) {
+                loads?.cancel()
+                loads = null
+            } else if (loads == null) {
+                loads = mapboxMap.subscribeSourceDataLoaded { loaded ->
+                    if (loaded.sourceId == SOURCE && loaded.type == SourceDataLoadedType.METADATA) loaded.dataId?.let(onLoaded)
+                }
+            }
+        }
+
+        override fun clear() {
+            source?.featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+        }
+
+        override fun setStates(behind: List<String>, levels: List<Pair<String, String?>>) {
+            // A state that does not take costs the piece its look, nothing more: the answers are not waited for.
+            for (id in behind) {
+                mapboxMap.setFeatureState(SOURCE, id, Value.valueOf(hashMapOf(Key.STATE_BEHIND to Value.valueOf(true)))) {}
+            }
+            for ((id, level) in levels) {
+                mapboxMap.setFeatureState(SOURCE, id, Value.valueOf(hashMapOf(Key.STATE_LEVEL to Value.valueOf(level ?: "")))) {}
+            }
+        }
+
+        override fun setLitVisible(visible: Boolean) {
+            val visibility = Value.valueOf(if (visible) "visible" else "none")
+            for (id in LIT_LAYERS) set(id, "visibility", visibility)
+        }
+
         override fun remove() {
+            loads?.cancel()
+            loads = null
             for (spec in LAYERS.asReversed()) if (mapboxMap.styleLayerExists(spec.id)) mapboxMap.removeStyleLayer(spec.id)
             for (slot in listOf(OVER_SLOT, UNDER_SLOT)) if (mapboxMap.styleLayerExists(slot)) mapboxMap.removeStyleLayer(slot)
             if (mapboxMap.styleSourceExists(SOURCE)) mapboxMap.removeStyleSource(SOURCE)
@@ -268,6 +345,8 @@ internal object LaneLayers {
                 fillEmissiveStrength(spec.emissiveStrength)
                 // A kept lane lies on the asphalt it is part of.
                 if (spec.id == ASPHALT) fillSortKey(keptOnTop())
+                // A tint's piece the car has passed is not drawn: all of it or nothing, never half.
+                if (spec.id == TINT) fillOpacity(notBehind())
             }
         } else {
             lineLayer(spec.id, SOURCE) {
@@ -308,6 +387,16 @@ internal object LaneLayers {
         }
     }
 
+    /** 0 for a piece whose feature state says the car is past it, else 1. */
+    private fun notBehind(): Expression = Expression.switchCase {
+        boolean {
+            featureState { literal(Key.STATE_BEHIND) }
+            literal(false)
+        }
+        literal(0.0)
+        literal(1.0)
+    }
+
     /** A kept lane over the asphalt it lies on. */
     private fun keptOnTop(): Expression =
         Expression.match(Expression.get(Key.KIND), Expression.literal(LaneDrawing.Kind.KEPT_LANE.logName), Expression.literal(1.0), Expression.literal(0.0))
@@ -321,7 +410,19 @@ internal object LaneLayers {
             Expression.color(colours.asphalt),
         )
         TINT -> Expression.color(colours.tint)
-        LIT -> Expression.color(colours.lit)
+        // A lit piece in the colour of its stretch's traffic, by its feature state; the route's amber without one.
+        LIT -> Expression.match {
+            toString { featureState { literal(Key.STATE_LEVEL) } }
+            literal(Key.LEVEL_MODERATE)
+            color(colours.moderate)
+            literal(Key.LEVEL_HEAVY)
+            color(colours.heavy)
+            literal(Key.LEVEL_SEVERE)
+            color(colours.severe)
+            literal(Key.LEVEL_CLOSED)
+            color(colours.closed)
+            color(colours.lit)
+        }
         LIT_EDGES -> Expression.color(colours.litEdge)
         PAINT, PAINT_WIDE -> Expression.match(
             Expression.get(Key.PAINT),

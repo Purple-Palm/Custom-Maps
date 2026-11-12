@@ -46,6 +46,11 @@ interface AppSettings {
     val ownRouteLine: Flow<Boolean>
 
     suspend fun setOwnRouteLine(enabled: Boolean)
+
+    /** Debug: whether the app draws the freeway lanes of a drive itself, under its own route line. */
+    val drawOwnLanes: Flow<Boolean>
+
+    suspend fun setDrawOwnLanes(enabled: Boolean)
 }
 
 /**
@@ -107,6 +112,13 @@ class DataStoreAppSettings(
         onChanged(OWN_ROUTE_LINE.name, enabled)
     }
 
+    override val drawOwnLanes: Flow<Boolean> = preferences.map { it[DRAW_OWN_LANES] ?: false }.distinctUntilChanged()
+
+    override suspend fun setDrawOwnLanes(enabled: Boolean) {
+        dataStore.edit { it[DRAW_OWN_LANES] = enabled }
+        onChanged(DRAW_OWN_LANES.name, enabled)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -118,6 +130,7 @@ class DataStoreAppSettings(
         private val LANE_DETAILS = booleanPreferencesKey("lane_details")
         private val DAY_NIGHT = stringPreferencesKey("day_night")
         private val OWN_ROUTE_LINE = booleanPreferencesKey("own_route_line")
+        private val DRAW_OWN_LANES = booleanPreferencesKey("draw_own_lanes")
 
         private fun CameraStyle.stored(): String = when (this) {
             CameraStyle.MAPBOX_STANDARD -> "mapbox_standard"

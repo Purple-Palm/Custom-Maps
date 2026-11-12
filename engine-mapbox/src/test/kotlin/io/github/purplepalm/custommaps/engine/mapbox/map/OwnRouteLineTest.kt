@@ -156,7 +156,7 @@ class OwnRouteLineTest {
     fun `a path that cannot be built costs the own line, one error line and the fallback's line`() {
         line.setEnabled(true)
         line.onStyleLoaded(Look.NIGHT)
-        line.onRoute("route-a#0", refresh = false, OwnRouteLine.Build { throw IllegalArgumentException("no line") }, noTraffic)
+        line.onRoute("route-a#0", refresh = false, OwnRouteLine.Build { _, _ -> throw IllegalArgumentException("no line") }, noTraffic)
         jobs.runAll()
         assertTrue(style.primaryShown)
         assertFalse(style.ownShown)

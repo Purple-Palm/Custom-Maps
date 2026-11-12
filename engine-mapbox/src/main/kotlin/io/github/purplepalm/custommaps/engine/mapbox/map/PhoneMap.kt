@@ -126,6 +126,8 @@ import kotlinx.coroutines.withContext
  *
  * Behind a Debug switch ([setOwnRouteLine]) the route line of a drive is the app's own, drawn along
  * the lanes of the route's lane plan in place of the navigation SDK's primary line ([OwnRouteLine]).
+ * Behind another ([setDrawOwnLanes]) the app draws the freeway lanes under it too ([OwnLanes]), and
+ * the route line is the app's own whatever the first switch says.
  *
  * While the map exists, the style it shows is among what is kept ahead of the car during guidance
  * for stretches without a connection ([OfflineData]).
@@ -232,9 +234,13 @@ class PhoneMap internal constructor(
             }
         },
         debugLog = debugLog,
-        // The app's own lanes' layers, with their Debug switch on.
-        lanePort = LaneLayers.on(mapboxMap),
+        // The app's own lanes' layers, with their Debug switch on, and the map's word that a window of them loaded.
+        lanePort = LaneLayers.on(mapboxMap) { dataId -> ownLine.onSourceLoaded(dataId) },
     )
+
+    // The two Debug switches the own route line follows: its own, and Draw the app's lanes, which draws it too.
+    private var ownLineSwitch = false
+    private var ownLanesSwitch = false
 
     /** The lane plan of the drive's route, answered on the route lines' worker: the own line's path is built from it. */
     private val planListener: (String, RouteLanePlan?) -> Unit = { routeId, plan ->
@@ -436,8 +442,9 @@ class PhoneMap internal constructor(
         if (AccessErrors.isAccessDenied(error.message)) _accessDenied.value = true
         // Counted for the summary of a trip under way, by kind only.
         engine.onMapError(error.type.name)
-        // The own route line's source: the SDK's line again at once. Its message is left out, as it may quote the path.
-        val ownSource = error.sourceId == OwnRouteLine.SOURCE
+        // The own route line's source, or its lanes': the SDK's line again at once. Its message is left out, as it may
+        // quote the path.
+        val ownSource = error.sourceId == OwnRouteLine.SOURCE || error.sourceId == LaneLayers.SOURCE
         if (ownSource && error.type == MapLoadingErrorType.SOURCE && ownLine.enabled) ownLine.onSourceError()
         val fields = mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId)
         mapErrorFolder.record(
@@ -653,12 +660,32 @@ class PhoneMap internal constructor(
     }
 
     override fun setOwnRouteLine(enabled: Boolean) {
-        if (enabled == ownLine.enabled) return
-        ownLine.setEnabled(enabled)
+        ownLineSwitch = enabled
+        applyOwnLine()
+    }
+
+    override fun setDrawOwnLanes(enabled: Boolean) {
+        ownLanesSwitch = enabled
+        applyOwnLine()
+    }
+
+    /** The own route line on while either switch is, with the lanes while theirs is. */
+    private fun applyOwnLine() {
+        val on = ownLineSwitch || ownLanesSwitch
+        val was = ownLine.enabled
+        if (on == was && ownLanesSwitch == ownLine.lanes) return
+        if (on) {
+            // The lanes first: a line turned on draws them from the start, and one that is on draws itself anew.
+            ownLine.setLanes(ownLanesSwitch)
+            ownLine.setEnabled(true)
+        } else {
+            ownLine.setEnabled(false)
+            ownLine.setLanes(false)
+        }
         // The own layers it added to the middle slot, or took out of it.
         style?.let(::logLayerOrder)
         // During a drive the route it is on gets its own line at once.
-        if (enabled && guidanceState == GuidanceState.ACTIVE) navigatorRoutes.firstOrNull()?.let { ownLineRoute(it, refresh = false) }
+        if (on && !was && guidanceState == GuidanceState.ACTIVE) navigatorRoutes.firstOrNull()?.let { ownLineRoute(it, refresh = false) }
     }
 
     override fun showPlace(place: Place?) {
@@ -929,6 +956,8 @@ class PhoneMap internal constructor(
         camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), engine.runUpKey(progress))
         // Once per update, and published only when it changes.
         _closeView.value = camera.closeView
+        // The app's own lanes, with their switch on: the tints the car has passed, and the next window where it is due.
+        if (ownLine.enabled) ownLine.onProgress()
     }
 
     private fun onPuckMoved(point: Point) {
@@ -1018,10 +1047,13 @@ class PhoneMap internal constructor(
         }
     }
 
-    /** Builds the own line's path of [route] through the lanes of its lane [plan], or along its own line without one. */
-    private fun ownLineBuild(route: NavigationRoute, plan: RouteLanePlan?) = OwnRouteLine.Build { version ->
+    /**
+     * Builds the own line's path of [route] through the lanes of its lane [plan], or along its own line without one;
+     * with the lanes, their drawing along it too.
+     */
+    private fun ownLineBuild(route: NavigationRoute, plan: RouteLanePlan?) = OwnRouteLine.Build { version, lanes ->
         val directions = route.directionsRoute
-        ownLineDrawing(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints(), plan, version)
+        ownLineDrawing(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints(), plan, version, lanes)
     }
 
     /** Gives the data source the route to frame; a route it has already changes nothing. */
@@ -1123,13 +1155,13 @@ class PhoneMap internal constructor(
      */
     private fun logLayerOrder(style: Style) {
         val ids = style.styleLayers.map { it.id }.filter { slotOf(style, it) in ROUTE_SLOTS }
-        val ownLine = OwnRouteLine.LAYERS.map { it.id }
-        val ownLineInPlace = LayerOrder.ownLineInPlace(ids, ownLine)
+        val ownIds = ownLine.layerIds
+        val ownLineInPlace = LayerOrder.ownLineInPlace(ids, ownIds)
         val lanesInPlace = LayerOrder.lanesInPlace(
             ids,
             under = LaneLayers.LAYERS.filter { it.group == LaneLayers.Group.UNDER_ROUTE }.map { it.id },
             over = LaneLayers.LAYERS.filter { it.group == LaneLayers.Group.OVER_ROUTE }.map { it.id },
-            ownLine = ownLine,
+            ownLine = ownIds,
         )
         debugLog.log(
             "map_layers",
