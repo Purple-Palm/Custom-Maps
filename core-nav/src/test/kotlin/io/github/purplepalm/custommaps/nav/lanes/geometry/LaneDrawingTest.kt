@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.nav.lanes.geometry
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.At
@@ -27,6 +28,8 @@ import org.junit.jupiter.api.Test
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.log2
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * The app's own freeway lanes drawn on the made-up routes of [LaneScenes], along made-up lines at sea that run due north
@@ -244,13 +247,14 @@ class LaneDrawingTest {
     }
 
     @Test
-    fun `in a zone where the lanes are not known nothing but asphalt is drawn`() {
+    fun `in a zone where the lanes are not known nothing but asphalt and the lit lane is drawn`() {
         for (route in listOf(LaneScenes.iw31(), LaneScenes.ia())) {
             val d = draw(route)
             val zones = d.evidence.zones.filter { it.cause != LaneEvidence.Zone.Cause.NO_LANE }
             assertTrue(zones.isNotEmpty())
             for (zone in zones) {
-                for (f in d.features.filter { !it.kind.polygon || it.kind == Kind.ARROW }) {
+                // The lit lane goes on through it, at its count from the exit's edge; no line, no symbol, no tint.
+                for (f in d.features.filter { (!it.kind.polygon && it.kind != Kind.LIT_EDGE) || it.kind == Kind.ARROW || it.kind == Kind.TINT }) {
                     assertFalse(f.to > zone.from + 1e-6 && f.from < zone.to - 1e-6, "${route.routeId}: ${f.kind} ${f.from}..${f.to} in the zone ${zone.from}..${zone.to}")
                 }
                 // The asphalt goes on through it.
@@ -516,6 +520,185 @@ class LaneDrawingTest {
         for (s in cut) assertTrue(whole.any { abs(it - s) < 1e-6 }, "a dash at $s")
     }
 
+    // ------------------------------------------------------------------ the lit lane and the tints
+
+    @Test
+    fun `the lit lane is the named lane's width about the path with its edges, inside the card window only`() {
+        val d = draw(LaneScenes.iw31())
+        val lit = d.of(Kind.LIT)
+        val edges = d.of(Kind.LIT_EDGE)
+        assertTrue(lit.size > 40)
+        // One lit stretch: the run-up's window from its start through the ramp to the split, the option lane all along.
+        assertEquals(listOf(LaneEdge.LEFT, LaneEdge.RIGHT), edges.map { it.side })
+        val window = d.plan.windows.first()
+        assertEquals(window.from, lit.minOf { it.from }, LANE_GRID)
+        for (f in lit + edges + d.of(Kind.TINT)) {
+            var x = f.from
+            while (x < f.to) {
+                assertTrue(d.plan.windows.any { x >= it.from - UM && x <= it.to + UM }, "${f.kind} ${f.from}..${f.to} outside the card windows at $x")
+                x += 1.0
+            }
+        }
+        val option = requireNotNull(d.plan.segmentAt(window.from + LANE_GRID)?.named)
+        val exitOnly = d.plan.topology.lanes.single { it.possibleFrom != null && it.id !in d.plan.named }
+        assertTrue(lit.all { it.lane == option })
+        assertTrue(option != exitOnly.id)
+        // Before the gore's arc every corner lies half a lane from the path, square to it; the edges are its sides.
+        for (p in lit.flatMap { it.parts.flatten() }) {
+            val s = station(p)
+            if (s < gore - LaneDrawing.PIECE_METERS) assertEquals(w / 2.0, abs(offset(p) - d.path.offsetAt(s)), 2e-3, "a corner of the lit lane at $s")
+        }
+        for (e in edges) {
+            assertEquals(Width.EDGE, e.width)
+            assertEquals(LaneDrawing.LIT_EDGE_METERS, e.width?.meters)
+            assertEquals(Pattern.SOLID, e.pattern)
+            assertNull(e.paint)
+            assertNull(e.id)
+            val sign = if (e.side == LaneEdge.LEFT) 1.0 else -1.0
+            for (p in e.parts.single()) {
+                val s = station(p)
+                if (s < gore - LaneDrawing.PIECE_METERS) assertEquals(sign * w / 2.0, offset(p) - d.path.offsetAt(s), 2e-3, "the ${e.side} edge at $s")
+            }
+        }
+        // Where the path moves into the option lane, the lit lane moves with it: half a lane about the path all the way.
+        val enter = d.path.moves.first { m ->
+            (m.kind == RoutePath.Move.Kind.ENTER || m.kind == RoutePath.Move.Kind.LANE) && lit.any { covers(it, (m.from + m.to) / 2.0) }
+        }
+        val middle = (enter.from + enter.to) / 2.0
+        assertTrue(abs(enter.offsetTo - enter.offsetFrom) > w / 2.0)
+        val axis = requireNotNull(d.path.axisAt(middle))
+        val across = DrawingProbe.across(axis, middle, lit.filter { covers(it, middle) }.flatMap { it.parts })
+        assertEquals(2, across.size)
+        // Between its corners the outline is the samples simplified like the path's own points.
+        assertEquals(d.path.offsetAt(middle), (across[0] + across[1]) / 2.0, RoutePath.TOLERANCE_METERS)
+        assertEquals(w, across[1] - across[0], RoutePath.TOLERANCE_METERS)
+        // Shown from zoom 16.85 at latitude 0.
+        assertEquals(16.85, LaneDrawing.LIT_MIN_ZOOM)
+        assertEquals(16.85 - 0.2877, LaneDrawing.zoomAt(LaneDrawing.LIT_MIN_ZOOM, 35.0), 1e-4)
+        assertEquals(0.22, LaneDrawing.LIT_EDGE_METERS)
+    }
+
+    @Test
+    fun `the lit lane and the tints come in 50 m pieces whose ids are the same in every window`() {
+        for (route in listOf(LaneScenes.iw31(), LaneScenes.ia())) {
+            val d = draw(route)
+            val pieces = d.features.filter { it.kind == Kind.LIT || it.kind == Kind.TINT }
+            assertTrue(pieces.size > 80, "${route.routeId}: ${pieces.size} pieces")
+            assertEquals(pieces.size, pieces.map { it.id }.toSet().size)
+            assertTrue(d.features.none { it.id != null && it.kind != Kind.LIT && it.kind != Kind.TINT })
+            for (f in pieces) {
+                val k = LaneDrawing.pieceOf(f.from)
+                assertTrue(f.from >= k * LaneDrawing.PIECE_METERS - UM && f.to <= (k + 1) * LaneDrawing.PIECE_METERS + UM, "${f.kind} ${f.from}..${f.to}")
+                assertEquals(if (f.kind == Kind.LIT) LaneDrawing.litId(k) else LaneDrawing.tintId(requireNotNull(f.lane), k), f.id)
+            }
+            // A window that cuts pieces: the pieces wholly inside it are the same features, the cut ones keep their ids.
+            val a = gore - 1_234.5
+            val b = gore - 567.8
+            val window = d.drawing.features(a, b).filter { it.kind == Kind.LIT || it.kind == Kind.TINT }
+            val whole = pieces.associateBy { it.id }
+            assertEquals(pieces.filter { it.to > a + UM && it.from < b - UM }.map { it.id }.toSet(), window.map { it.id }.toSet())
+            var same = 0
+            for (f in window) {
+                val g = requireNotNull(whole[f.id])
+                if (g.from >= a && g.to <= b) {
+                    assertEquals(g, f)
+                    same++
+                } else {
+                    assertEquals(g.kind, f.kind)
+                    assertEquals(g.lane, f.lane)
+                    assertTrue(f.from >= max(a, g.from) - UM && f.to <= min(b, g.to) + UM)
+                }
+            }
+            assertTrue(same > 12, "${route.routeId}: $same")
+        }
+    }
+
+    @Test
+    fun `a lane that stops working ends in a wedge pointing at the lit lane, over 110 m`() {
+        val d = draw(LaneScenes.ia())
+        var left = 0
+        var right = 0
+        var zones = 0
+        var square = 0
+        for ((lane, pieces) in d.of(Kind.TINT).groupBy { requireNotNull(it.lane) }) {
+            for (tinted in runsOf(pieces)) {
+                val after = tinted.to + 1e-3
+                val seg = requireNotNull(d.plan.segmentAt(after))
+                val zone = d.evidence.stretches.firstOrNull { after >= it.from && after < it.to && it.kind == LaneEvidence.Kind.ZONE }
+                val stops = if (zone != null) {
+                    d.plan.segments.any { it.from < zone.to && it.to > after && it.named != null && it.noLane == null && lane !in it.band }
+                } else {
+                    seg.named != null && lane !in seg.band && d.drawing.lanesAt(after).any { it.lane == lane }
+                }
+                if (!stops) {
+                    // A tint that ends where its lane still works (a zone it works through, the window's end) ends square.
+                    val x = tinted.to - 0.37
+                    val place = d.drawing.lanesAt(x).single { it.lane == lane }
+                    val across = DrawingProbe.across(requireNotNull(d.path.axisAt(x)), x, pieces.filter { covers(it, x) }.flatMap { it.parts })
+                    assertEquals(place.width, across[1] - across[0], MM, "lane $lane's tint at $x")
+                    square++
+                    continue
+                }
+                // The lane stops working here, or in the zone that begins here: the tint narrows to nothing at its near edge.
+                val wedge = min(LaneDrawing.WEDGE_METERS, tinted.to - tinted.from)
+                assertEquals(LaneDrawing.WEDGE_METERS, wedge)
+                for (back in listOf(0.37, 27.37, 55.37, 82.37, wedge + 3.37)) {
+                    val x = tinted.to - back
+                    val place = d.drawing.lanesAt(x).single { it.lane == lane }
+                    val leftOfLit = place.centre > d.path.offsetAt(x)
+                    val axis = requireNotNull(d.path.axisAt(x))
+                    val across = DrawingProbe.across(axis, x, pieces.filter { covers(it, x) }.flatMap { it.parts })
+                    assertEquals(2, across.size, "lane $lane at $x")
+                    val expected = place.width * (1.0 - CrossSection.ramp(x, tinted.to - wedge, tinted.to))
+                    assertEquals(expected, across[1] - across[0], RoutePath.TOLERANCE_METERS + MM, "lane $lane's tint at $x")
+                    // The near edge, toward the lit lane, stays on the lane's side; the far one slides onto it.
+                    if (leftOfLit) assertEquals(place.right, across[0], MM) else assertEquals(place.left, across[1], MM)
+                    if (back < 1.0) {
+                        if (leftOfLit) left++ else right++
+                        if (zone != null) zones++
+                    }
+                }
+            }
+        }
+        // Lanes on both sides of the lit lane, lanes that stop working in the zone of the two lanes the route loses, and the
+        // same two lanes working on through the zone before it.
+        assertTrue(left >= 2 && right >= 1 && zones >= 2 && square >= 2, "left $left, right $right, zones $zones, square $square")
+    }
+
+    @Test
+    fun `no lane kept for car pools or buses and no lane only possible is lit or tinted`() {
+        for (route in listOf(LaneScenes.iw31(), LaneScenes.carpoolEnds(), LaneScenes.thirdLaneForCarPools(), LaneScenes.rightLaneForBuses(), LaneScenes.leavesBesidePossible())) {
+            val d = draw(route)
+            for (f in d.features.filter { it.kind == Kind.LIT || it.kind == Kind.TINT || it.kind == Kind.LIT_EDGE }) {
+                assertFalse(d.plan.topology.lanes[requireNotNull(f.lane)].designated, "${route.routeId}: ${f.kind} on lane ${f.lane}")
+            }
+            for (f in d.of(Kind.TINT)) {
+                val middle = (f.from + f.to) / 2.0
+                assertTrue(d.drawing.lanesAt(middle).single { it.lane == f.lane }.state != CrossSection.State.POSSIBLE, "${route.routeId}: lane ${f.lane} at $middle")
+            }
+        }
+        // IW31's exit-only lane is only possible until it opens: tinted from there on, where it works for the exit.
+        val d = draw(LaneScenes.iw31())
+        val exitOnly = d.plan.topology.lanes.single { it.possibleFrom != null && it.id !in d.plan.named }
+        val tint = d.of(Kind.TINT).filter { it.lane == exitOnly.id }
+        assertTrue(tint.isNotEmpty())
+        assertTrue(tint.minOf { it.from } >= exitOnly.opens - UM)
+        assertTrue(tint.minOf { it.from } < exitOnly.opens + LANE_GRID + UM)
+    }
+
+    /** [pieces] of one lane's tint joined where one ends and the next begins: each stretch the lane is tinted. */
+    private fun runsOf(pieces: List<LaneDrawing.Feature>): List<ClosedFloatingPointRange<Double>> {
+        val out = ArrayList<ClosedFloatingPointRange<Double>>()
+        for (f in pieces.sortedBy { it.from }) {
+            val last = out.lastOrNull()
+            if (last != null && f.from <= last.endInclusive + UM) out[out.size - 1] = last.start..max(last.endInclusive, f.to) else out.add(f.from..f.to)
+        }
+        return out
+    }
+
+    private val ClosedFloatingPointRange<Double>.from get() = start
+    private val ClosedFloatingPointRange<Double>.to get() = endInclusive
+
     @Test
     fun `the same route gives the same features`() {
         val one = draw(LaneScenes.iw31()).features
@@ -530,6 +713,9 @@ class LaneDrawingTest {
     private companion object {
         /** Points go through each drawing window's own frame and back: a few micrometres. */
         const val MM = 1e-4
+
+        /** The plan's stations: a window's first lane is named at most this far into it. */
+        const val LANE_GRID = LanePlanner.GRID_METERS
 
         /** A run ends a micrometre before the station where it changes. */
         const val UM = 1e-5

@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
@@ -71,6 +72,7 @@ class LaneTrustTest {
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
+        assertSeen("lit", "tint", "litBeyond", "wedge")
     }
 
     @Test
@@ -82,6 +84,7 @@ class LaneTrustTest {
             check(build("random-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
         }
         assertSeen("line", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
+        assertSeen("lit", "tint", "litBeyond", "wedge")
     }
 
     @Test
@@ -99,6 +102,7 @@ class LaneTrustTest {
         // careful reading of a few of these routes; never on the scenes or the approaches above.
         assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
         assertSeen("line", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
+        assertSeen("lit", "tint", "litBeyond", "wedge")
     }
 
     @Test
@@ -139,6 +143,7 @@ class LaneTrustTest {
         tapersAtEveryEnd(b)
         neverAwayFromTheExit(b)
         notTheEdgeLaneWhileOneMayBeBeyond(b)
+        litAndTints(b)
     }
 
     // ------------------------------------------------------------------ 1: lane lines only where the data gives the count
@@ -183,7 +188,9 @@ class LaneTrustTest {
     // ------------------------------------------------------------------ 2: no double line, no centre line, no chevron
 
     private fun noDoubleNoCentreNoChevron(b: Built) {
-        val known = setOf(Kind.ASPHALT, Kind.KEPT_LANE, Kind.LANE_LINE, Kind.EDGE_LINE, Kind.CHANNEL_LINE, Kind.DIAMOND, Kind.ARROW)
+        val known = setOf(
+            Kind.ASPHALT, Kind.KEPT_LANE, Kind.TINT, Kind.LIT, Kind.LIT_EDGE, Kind.LANE_LINE, Kind.EDGE_LINE, Kind.CHANNEL_LINE, Kind.DIAMOND, Kind.ARROW,
+        )
         for (f in b.features) {
             assertTrue(f.kind in known, "${b.name}: ${f.kind}")
             // Yellow only on the left edge: never a centre line, never an oncoming carriageway's line.
@@ -531,6 +538,166 @@ class LaneTrustTest {
         }
     }
 
+    // ------------------------------------------------------------------ 3, 4, 10: the lit lane and the tints
+
+    private fun litAndTints(b: Built) {
+        val lanes = b.plan.topology.lanes
+        val ids = HashSet<Long>()
+        val turning = turns(b) + folds(b)
+        val moving = b.path.moves.map { it.from - 1e-6 to it.to + 1e-6 }
+        val windows = merged(b.plan.windows.map { it.from to it.to })
+        for (f in b.features) {
+            if (f.kind != Kind.LIT && f.kind != Kind.TINT && f.kind != Kind.LIT_EDGE) continue
+            // Only inside card windows, and on our asphalt.
+            assertTrue(windows.any { f.from >= it.first - 1e-6 && f.to <= it.second + 1e-6 }, "${b.name}: a ${f.kind} over ${f.from}..${f.to} outside the card windows")
+            assertTrue(b.path.drawings.any { f.from >= it.from - 1e-6 && f.to <= it.to + 1e-6 }, "${b.name}: a ${f.kind} over ${f.from}..${f.to} outside the drawings")
+            val lane = lanes[requireNotNull(f.lane)]
+            // 3: never a designated lane.
+            assertFalse(lane.designated, "${b.name}: a ${f.kind} on the designated lane ${lane.id}")
+            if (f.kind == Kind.LIT_EDGE) {
+                assertEquals(null, f.id)
+                continue
+            }
+            // In pieces whose ids are the same in every window.
+            val id = requireNotNull(f.id) { "${b.name}: a ${f.kind} piece without an id" }
+            assertTrue(ids.add(id), "${b.name}: two pieces with the id $id")
+            val piece = LaneDrawing.pieceOf(f.from)
+            assertTrue(f.to <= (piece + 1) * LaneDrawing.PIECE_METERS + 1e-6, "${b.name}: a ${f.kind} piece over ${f.from}..${f.to}")
+            assertEquals(if (f.kind == Kind.LIT) LaneDrawing.litId(piece) else LaneDrawing.tintId(lane.id, piece), id)
+            // Each part of a piece (a piece may hold two, where its lane is lit or tinted on both sides of a gap) at its middle.
+            val middles = f.parts.map { ring ->
+                val stations = ring.map { DrawingProbe.project(b.path.axes, (f.from + f.to) / 2.0, it).first }
+                (stations.min() + stations.max()) / 2.0
+            }
+            val middle = (f.from + f.to) / 2.0
+            for (x in middles) {
+                val seg = requireNotNull(b.plan.segmentAt(x))
+                if (f.kind == Kind.TINT) {
+                    // A lane that still works beside the lit one, drawn as there, where the data gives the lanes.
+                    assertTrue(lane.id in seg.band && lane.id != seg.named && seg.noLane == null, "${b.name}: lane ${lane.id} tinted at $x")
+                    val place = b.drawing.lanesAt(x).firstOrNull { it.lane == lane.id }
+                    assertTrue(place != null && place.state != CrossSection.State.POSSIBLE, "${b.name}: lane ${lane.id} tinted at $x where it is not drawn as there")
+                    val stretch = b.evidence.stretches.firstOrNull { x >= it.from && x < it.to }
+                    assertTrue(stretch != null && (stretch.kind == LaneEvidence.Kind.KNOWN || stretch.kind == LaneEvidence.Kind.BRIDGED), "${b.name}: a tint at $x on a ${stretch?.kind} stretch")
+                } else {
+                    assertTrue(seg.named != null && seg.noLane == null, "${b.name}: lit at $x where no lane is named")
+                }
+            }
+            if (f.kind == Kind.TINT) {
+                saw("tint")
+                continue
+            }
+            // 4: the lit lane is the lane the plan names, and the path's: every corner lies half that lane's width from the
+            // path, square to it (the turns, where the lanes go on straight, and the folds aside).
+            if (turning.any { it.first < f.to && it.second > f.from }) continue
+            val road = b.section.roadAt(f.from) ?: b.route.nodes.last { it.station <= f.from }.road
+            val half = CrossSection.laneMeters(road, lane.kinds) / 2.0
+            for (p in f.parts.flatten()) {
+                val (s, _) = DrawingProbe.project(b.path.axes, middle, p)
+                assertEquals(half, squareFromPath(b, p, s), LIT_CORNER_METERS, "${b.name}: a corner of the lit lane at $s")
+            }
+            saw("lit")
+        }
+        // 10: the lit lane, where it lies in a lane (outside moves), is never the drawn edge lane while a lane may lie beyond it.
+        for (f in b.features.filter { it.kind == Kind.LIT }) {
+            for (x in along(f.from, f.to, 5.0)) {
+                if (moving.any { x >= it.first && x <= it.second } || turning.any { x >= it.first && x <= it.second }) continue
+                val seg = b.plan.segmentAt(x) ?: continue
+                val edge = seg.edge ?: continue
+                val run = lanes[seg.named ?: continue].run
+                val beyond = lanes.any { lane ->
+                    val from = lane.possibleFrom
+                    from != null && lane.run == run && lane.id !in b.plan.named && x >= from + POSSIBLE_SHOWN_METERS && x < lane.opens
+                }
+                if (!beyond) continue
+                val drawn = b.drawing.lanesAt(x)
+                val offset = b.path.offsetAt(x)
+                val under = drawn.firstOrNull { offset <= it.left + 1e-9 && offset >= it.right - 1e-9 }
+                val outer = if (edge == LaneEdge.RIGHT) drawn.lastOrNull() else drawn.firstOrNull()
+                assertTrue(under != null && outer != null && under.lane != outer.lane, "${b.name} at $x: the lit lane is the drawn edge lane while a lane may lie beyond it")
+                saw("litBeyond")
+            }
+        }
+        // The wedges: a tint whose lane stops working where it ends (or in the zone that begins there) narrows to nothing at
+        // its edge toward the lit lane.
+        for ((lane, pieces) in b.features.filter { it.kind == Kind.TINT }.groupBy { requireNotNull(it.lane) }) {
+            for ((from, to) in merged(pieces.map { it.from to it.to })) {
+                val after = to + 1e-3
+                val seg = b.plan.segmentAt(after) ?: continue
+                val zone = b.evidence.stretches.firstOrNull { after >= it.from && after < it.to && it.kind == LaneEvidence.Kind.ZONE }
+                val stops = if (zone != null) {
+                    b.plan.segments.any { it.from < zone.to && it.to > after && it.named != null && it.noLane == null && lane !in it.band }
+                } else {
+                    seg.named != null && seg.noLane == null && lane !in seg.band && b.drawing.lanesAt(after).any { it.lane == lane }
+                }
+                if (!stops) continue
+                val x = to - WEDGE_TIP_METERS
+                val place = b.drawing.lanesAt(x).firstOrNull { it.lane == lane } ?: continue
+                val across = DrawingProbe.across(requireNotNull(b.path.axisAt(x)), x, pieces.filter { x >= it.from && x <= it.to }.flatMap { it.parts })
+                assertEquals(2, across.size, "${b.name}: lane $lane's tint at $x")
+                val wedge = minOf(LaneDrawing.WEDGE_METERS, to - from)
+                if (wedge >= WEDGE_SAMPLED_METERS) {
+                    val expected = place.width * (1.0 - CrossSection.ramp(x, to - wedge, to))
+                    assertEquals(expected, across[1] - across[0], RoutePath.TOLERANCE_METERS, "${b.name}: lane $lane's tint at $x, where it stops working at $to")
+                } else {
+                    // A tint of a metre or two, between the samples a metre apart: narrower than its lane all the same.
+                    assertTrue(across[1] - across[0] < place.width, "${b.name}: lane $lane's tint at $x, where it stops working at $to")
+                }
+                // Its near edge stays on the lane's side toward the lit lane (a lane width from the far one), simplified like the path.
+                if (place.centre > b.path.offsetAt(x)) {
+                    assertEquals(place.right, across[0], RoutePath.TOLERANCE_METERS, "${b.name}: lane $lane's wedge at $x, left of the lit lane")
+                } else {
+                    assertEquals(place.left, across[1], RoutePath.TOLERANCE_METERS, "${b.name}: lane $lane's wedge at $x, right of the lit lane")
+                }
+                saw("wedge")
+            }
+        }
+    }
+
+    /**
+     * How far [p] lies from the path, square to the path's own way: from the path's point where the line to [p] is square to
+     * the path, found near the station [near].
+     */
+    private fun squareFromPath(b: Built, p: GeoPoint, near: Double): Double {
+        val v = SceneLines.local(p)
+        val first = b.path.stations.first()
+        val last = b.path.stations.last()
+        fun point(s: Double): LocalPoint {
+            val axis = b.path.axisAt(s)
+            if (axis != null) return SceneLines.local(axis.toGeo(axis.offset(s, b.path.offsetAt(s))))
+            // Away from the drawings the path is the route's own line.
+            val st = b.path.routeStations
+            val k = (1 until st.size).firstOrNull { st[it] >= s } ?: (st.size - 1)
+            val a = SceneLines.local(b.path.route[k - 1])
+            val c = SceneLines.local(b.path.route[k])
+            val f = if (st[k] > st[k - 1]) ((s - st[k - 1]) / (st[k] - st[k - 1])).coerceIn(0.0, 1.0) else 0.0
+            return LocalPoint(a.x + (c.x - a.x) * f, a.y + (c.y - a.y) * f)
+        }
+        fun ahead(s: Double): Double {
+            val a = point(s - SLOPE_METERS)
+            val c = point(s + SLOPE_METERS)
+            val m = point(s)
+            return (v.x - m.x) * (c.x - a.x) + (v.y - m.y) * (c.y - a.y)
+        }
+        var lo = maxOf(first + SLOPE_METERS, near - SQUARE_SEARCH_METERS)
+        var hi = minOf(last - SLOPE_METERS, near + SQUARE_SEARCH_METERS)
+        repeat(SQUARE_STEPS) {
+            val mid = (lo + hi) / 2.0
+            if (ahead(mid) > 0.0) lo = mid else hi = mid
+        }
+        return v.distanceTo(point((lo + hi) / 2.0))
+    }
+
+    /** [spans] joined where they meet or overlap, in order. */
+    private fun merged(spans: List<Pair<Double, Double>>): List<Pair<Double, Double>> {
+        val out = ArrayList<Pair<Double, Double>>()
+        for (span in spans.sortedBy { it.first }) {
+            val last = out.lastOrNull()
+            if (last != null && span.first <= last.second + 1e-6) out[out.size - 1] = last.first to maxOf(last.second, span.second) else out.add(span)
+        }
+        return out
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /** Stations from [from] to [to] every [step] metres, and one just before [to]. */
@@ -624,6 +791,24 @@ class LaneTrustTest {
 
         /** A lane entered along its taper is narrower than any drawn lane for this far after it opens. */
         const val OPENING_METERS = 1.0
+
+        /** A lit lane's corner lies half a lane from the path, square to it, within this. */
+        const val LIT_CORNER_METERS = 0.005
+
+        /** A wedge at least this long is sampled finely enough to follow its curve. */
+        const val WEDGE_SAMPLED_METERS = 12.0
+
+        /** The path's way is read this far before and after a station, as the drawing reads it. */
+        const val SLOPE_METERS = 0.25
+
+        /** A corner's foot on the path is looked for this far about where it projects onto the road's axis... */
+        const val SQUARE_SEARCH_METERS = 4.0
+
+        /** ...in this many halvings. */
+        const val SQUARE_STEPS = 40
+
+        /** A wedge is measured this far before its tip. */
+        const val WEDGE_TIP_METERS = 0.37
 
         /** The path meets the road's line at a drawing's ends within this. */
         const val END_METERS = 0.01

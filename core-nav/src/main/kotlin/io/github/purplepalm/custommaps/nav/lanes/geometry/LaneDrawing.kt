@@ -61,10 +61,21 @@ import kotlin.math.sin
  *   where the two carriageways' aprons part ([NOSE_GAP_METERS]); no chevrons. Where the route's data has no lanes past
  *   the turn, the lanes it takes go on beside the path, without lane lines between them, to where the path is back on
  *   the new road's line, and from there taper into the map's band ([Part.BEYOND]).
+ * - **The lit lane** ([Kind.LIT], 2.2 and 4.3), inside card windows only, wherever the plan names a lane: that lane's full
+ *   width about the route's path, square to it, so it moves from lane to lane with the path's S and follows a lane
+ *   entered along its taper; its two edges ([Kind.LIT_EDGE], [LIT_EDGE_METERS]). Never a designated lane, never on an
+ *   approach where no lane is named.
+ * - **The tints** ([Kind.TINT]): in the same windows, each other lane of the plan's band as it is drawn, where the data
+ *   gives the lanes (not in a zone), never a designated lane or one only possible. Where its lane stops working (it leaves
+ *   the band while it is still there, or in a zone that begins where the tint ends) its far edge from the lit lane slides
+ *   onto its near edge over [WEDGE_METERS], or the whole tint where it is shorter: a wedge pointing at the lit lane.
+ * - Both are cut into pieces at multiples of [PIECE_METERS] from the route's start, with ids that stay the same in every
+ *   window ([litId], [tintId]): the map hides a tint behind the car and gives a lit piece its traffic by feature state.
  *
  * Widths are ground widths: the map draws each as a zoom-only base-2 expression ([widthStops]), the asphalt and lines
- * from [ASPHALT_MIN_ZOOM], arrows and diamonds from [SYMBOL_MIN_ZOOM], at latitude 0 ([zoomAt] elsewhere), with no
- * opacity ramp. Colours are the map's: this class gives kinds and paints only.
+ * from [ASPHALT_MIN_ZOOM], arrows and diamonds from [SYMBOL_MIN_ZOOM], the lit lane, its edges and the tints from
+ * [LIT_MIN_ZOOM], at latitude 0 ([zoomAt] elsewhere), with no opacity ramp. Colours are the map's (the lit lane amber or
+ * its traffic colour, its edges the route's casing, the tints amber see-through): this class gives kinds and paints only.
  *
  * Built once for a path (off the main thread); [features] gives the features of a stretch of the route, the same
  * features for the same route every time. Pure; never stored.
@@ -90,6 +101,18 @@ class LaneDrawing private constructor(
         /** A lane kept for buses, taxis, motorcycles, mopeds or other vehicles (not car pools, not bicycles): drawn darker. */
         KEPT_LANE(true, "kept_lane"),
 
+        /**
+         * A lane that still works beside the lit one, inside a card window: the map's amber, see-through; where its lane
+         * stops working it ends in a wedge pointing at the lit lane. In pieces ([PIECE_METERS]) with ids.
+         */
+        TINT(true, "tint"),
+
+        /** The lane to drive in, inside a card window: the named lane's width about the route's path. In pieces with ids. */
+        LIT(true, "lit"),
+
+        /** The lit lane's two edges ([LIT_EDGE_METERS]), in the route's casing colour. */
+        LIT_EDGE(false, "lit_edge"),
+
         /** A line between two lanes. */
         LANE_LINE(false, "lane_line"),
 
@@ -113,6 +136,7 @@ class LaneDrawing private constructor(
     enum class Width(val meters: Double) {
         NORMAL(LINE_METERS),
         WIDE(WIDE_LINE_METERS),
+        EDGE(LIT_EDGE_METERS),
     }
 
     /** How a line is cut: solid, or into dashes of [dashMeters] with [gapMeters] between them. */
@@ -266,6 +290,22 @@ class LaneDrawing private constructor(
         /** The arrows and diamonds from this zoom at latitude 0. */
         const val SYMBOL_MIN_ZOOM = 16.5
 
+        /** The lit lane, its edges and the tints from this zoom at latitude 0 (under the opaque route line until the swap). */
+        const val LIT_MIN_ZOOM = 16.85
+
+        /** The lit lane's edges, centred on its sides. */
+        const val LIT_EDGE_METERS = 0.22
+
+        /**
+         * The lit lane and the tints are cut into pieces this long, at its multiples from the route's start: the map changes
+         * a piece by feature state (a tint behind the car hidden, a lit piece's traffic) under an id that stays the same
+         * across windows ([litId], [tintId]).
+         */
+        const val PIECE_METERS = 50.0
+
+        /** A tint whose lane stops working ends in a wedge this long, or as long as the tint where that is shorter. */
+        const val WEDGE_METERS = 110.0
+
         /** A line is never drawn thinner than this on the screen, in dp. */
         const val FLOOR_DP = 1.0
 
@@ -274,6 +314,27 @@ class LaneDrawing private constructor(
 
         /** The last stop of a width's expression, the map's deepest zoom. */
         const val MAX_ZOOM = 24.0
+
+        /** The lit lane's pieces' ids begin here... */
+        private const val LIT_IDS = 1_000_000_000_000L
+
+        /** ...the tints' here, a block for each lane... */
+        private const val TINT_IDS = 2_000_000_000_000L
+
+        /** ...of this many pieces. */
+        private const val LANE_IDS = 10_000_000L
+
+        /** The piece ([PIECE_METERS]) that begins at or holds route station [station]. */
+        fun pieceOf(station: Double): Long = floor(station / PIECE_METERS + PIECE_EPSILON).toLong()
+
+        /** The id of the lit lane's piece [piece]. */
+        fun litId(piece: Long): Long = LIT_IDS + piece
+
+        /** The id of the piece [piece] of the tint on [lane] (an id of the plan's [LaneTopology]). */
+        fun tintId(lane: Int, piece: Long): Long = TINT_IDS + lane * LANE_IDS + piece
+
+        /** A station this close below a piece's start, as a share of a piece, lies on it. */
+        private const val PIECE_EPSILON = 1e-9
 
         /** The drawing of [path], whose lanes are [plan]'s with the plan's second pass of the evidence [evidence] laid out by [section]. */
         fun of(
@@ -343,6 +404,9 @@ class LaneDrawing private constructor(
 
         /** The stub's and the ramp's taper are drawn every this many metres. */
         private const val TAPER_STEP_METERS = 1.0
+
+        /** The path's way at a station is read from its offsets this far before and after it. */
+        private const val SLOPE_METERS = 0.25
     }
 
     /** How one line is drawn. */
@@ -435,6 +499,16 @@ class LaneDrawing private constructor(
         /** Stations where something drawn changes: the samples take each of them and a station just before it. */
         private val events: DoubleArray
 
+        /** The card windows, merged where they meet or overlap, in route order: nothing is lit or tinted outside them. */
+        private val windowSpans: List<Pair<Double, Double>> = run {
+            val out = ArrayList<Pair<Double, Double>>()
+            for (w in plan.windows.sortedBy { it.from }) {
+                val last = out.lastOrNull()
+                if (last != null && w.from <= last.second) out[out.size - 1] = last.first to max(last.second, w.to) else out.add(w.from to w.to)
+            }
+            out
+        }
+
         val spans: List<ClosedFloatingPointRange<Double>>
 
         init {
@@ -512,8 +586,30 @@ class LaneDrawing private constructor(
             }
             diamonds(a, b, out)
             arrows(a, b, out)
+            lit(a, b, out)
+            tints(a, b, out)
             // Stable: within a kind, the order the features were made in, which is route order.
-            return out.sortedBy { it.kind.ordinal }
+            return merged(out).sortedBy { it.kind.ordinal }
+        }
+
+        /** [features] with the parts of each piece made apart (a lit lane or a tint broken inside one piece) as one feature. */
+        private fun merged(features: List<Feature>): List<Feature> {
+            val at = HashMap<Long, Int>()
+            val out = ArrayList<Feature>(features.size)
+            for (f in features) {
+                val id = f.id
+                val k = id?.let { at[it] }
+                if (id == null) {
+                    out.add(f)
+                } else if (k == null) {
+                    at[id] = out.size
+                    out.add(f)
+                } else {
+                    val g = out[k]
+                    out[k] = g.copy(from = min(g.from, f.from), to = max(g.to, f.to), parts = g.parts + f.parts)
+                }
+            }
+            return out
         }
 
         /** The route's carriageway at [station], from the left, as the drawing lays it. */
@@ -1082,6 +1178,259 @@ class LaneDrawing private constructor(
             val a = stretchAt(tail) ?: return false
             val b = stretchAt(tail + ARROW_LENGTH_METERS) ?: return false
             return a === b && a.kind == LaneEvidence.Kind.KNOWN && a.point == node
+        }
+
+        // ------------------------------------------------------------------ the lit lane and the tints
+
+        /** The stretches between [a] and [b] inside both a card window and a drawing, each with its drawing's index. */
+        private fun litRanges(a: Double, b: Double): List<Triple<Double, Double, Int>> {
+            val out = ArrayList<Triple<Double, Double, Int>>()
+            for ((i, d) in drawings.withIndex()) {
+                for ((w0, w1) in windowSpans) {
+                    val s0 = max(max(a, w0), d.from)
+                    val s1 = min(min(b, w1), d.to)
+                    if (s1 - s0 > SAME_STATION) out.add(Triple(s0, s1, i))
+                }
+            }
+            return out
+        }
+
+        /** Stations to sample the lit lane and the tints at from [s0] to [s1]: [samples], each piece's start and the path's moves' ends. */
+        private fun litSamples(s0: Double, s1: Double): List<Double> {
+            val all = ArrayList<Double>(samples(s0, s1))
+            var k = pieceOf(s0) + 1
+            while (k * PIECE_METERS < s1 - SAME_STATION) {
+                all.add(k * PIECE_METERS)
+                k++
+            }
+            for (m in path.moves) {
+                for (x in listOf(m.from, m.to)) if (x > s0 + SAME_STATION && x < s1 - SAME_STATION) all.add(x)
+            }
+            all.sort()
+            val out = ArrayList<Double>(all.size)
+            for (x in all) if (out.isEmpty() || x - out.last() > SAME_STATION / 2.0) out.add(x)
+            return out
+        }
+
+        /** The lane the plan names at [s], where it lights one: never a designated lane, never on an approach where none is named. */
+        private fun namedAt(s: Double): Int? {
+            val seg = plan.segmentAt(s) ?: return null
+            if (seg.noLane != null) return null
+            val named = seg.named ?: return null
+            return if (topology.lanes[named].designated) null else named
+        }
+
+        /**
+         * The lit lane between [a] and [b], inside card windows and drawings wherever the plan names a lane: [named]'s full
+         * width about the route's path, square to the path's own way ([ribbonAt]), so it moves with the path from lane to lane
+         * and along a taper; cut into pieces at multiples of [PIECE_METERS] ([litId]), with its two edges ([Kind.LIT_EDGE]).
+         */
+        private fun lit(a: Double, b: Double, out: MutableList<Feature>) {
+            for ((s0, s1, _) in litRanges(a, b)) {
+                val pieces = Pieces(Kind.LIT, out)
+                val edges = Strip()
+                var lane: Int? = null
+                for (s in litSamples(s0, s1)) {
+                    val named = namedAt(s)
+                    if (named == null) {
+                        pieces.close()
+                        litEdges(edges, lane, out)
+                        continue
+                    }
+                    if (edges.stations.isEmpty()) lane = named
+                    val (l, r) = ribbonAt(s, named)
+                    pieces.add(s, l, r, named) { litId(it) }
+                    edges.stations.add(s)
+                    edges.left.add(l)
+                    edges.right.add(r)
+                }
+                pieces.close()
+                litEdges(edges, lane, out)
+            }
+        }
+
+        /** The lit lane's edges along [edges] as two lines, and [edges] emptied. */
+        private fun litEdges(edges: Strip, lane: Int?, out: MutableList<Feature>) {
+            if (edges.stations.size >= 2 && edges.stations.last() - edges.stations.first() > SAME_STATION) {
+                for ((side, points) in listOf(LaneEdge.LEFT to edges.left, LaneEdge.RIGHT to edges.right)) {
+                    out.add(
+                        Feature(
+                            Kind.LIT_EDGE, edges.stations.first(), edges.stations.last(), listOf(simplify(points)),
+                            width = Width.EDGE, pattern = Pattern.SOLID, lane = lane, side = side,
+                        ),
+                    )
+                }
+            }
+            edges.stations.clear()
+            edges.left.clear()
+            edges.right.clear()
+        }
+
+        /**
+         * The lit lane's left and right edges at [s]: [named]'s full width about the path's point, square to the path's own
+         * way there (the axis' way turned by the offset's slope).
+         */
+        private fun ribbonAt(s: Double, named: Int): Pair<GeoPoint, GeoPoint> {
+            val axis = path.axisAt(s) ?: axisAt(s)
+            val place = axis.at(s)
+            val t = path.offsetAt(s)
+            val slope = (path.offsetAt(s + SLOPE_METERS) - path.offsetAt(s - SLOPE_METERS)) / (2.0 * SLOPE_METERS)
+            val along = 1.0 - place.curvature * t
+            val dx = place.tx * along + place.nx * slope
+            val dy = place.ty * along + place.ny * slope
+            val norm = hypot(dx, dy)
+            // The left normal of the path's way.
+            val nx = -dy / norm
+            val ny = dx / norm
+            val half = CrossSection.laneMeters(roadAt(s), topology.lanes[named].kinds) / 2.0
+            val cx = place.point.x + place.nx * t
+            val cy = place.point.y + place.ny * t
+            return axis.toGeo(LocalPoint(cx + nx * half, cy + ny * half)) to axis.toGeo(LocalPoint(cx - nx * half, cy - ny * half))
+        }
+
+        /**
+         * A stretch where [lane] is tinted, inside the drawing [drawing], from [from] to [to]; [leaves]: it ends where the lane
+         * stops working while it is still there, so it ends in a wedge.
+         */
+        private class TintSpan(val lane: Int, val drawing: Int, val from: Double, val to: Double, val leaves: Boolean)
+
+        /**
+         * Every tinted stretch of the route, in route order. Found once, from the events: a tint begins or ends only where the
+         * band, the named lane, a stretch, a lane or a window does, so a wedge is the same in every window.
+         */
+        private val tintSpans: List<TintSpan> by lazy {
+            val out = ArrayList<TintSpan>()
+            for ((r0, r1, i) in litRanges(Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY)) {
+                val stops = ArrayList<Double>()
+                stops.add(r0)
+                var k = lowerBound(events, r0)
+                while (k < events.size && events[k] < r1) {
+                    if (events[k] > r0 + SAME_STATION && events[k] < r1 - SAME_STATION) stops.add(events[k])
+                    k++
+                }
+                stops.add(r1)
+                val open = LinkedHashMap<Int, Double>()
+                for (j in 0 until stops.size - 1) {
+                    val mid = (stops[j] + stops[j + 1]) / 2.0
+                    val here = tintedAt(i, mid)
+                    for (lane in open.keys.toList()) {
+                        if (lane in here) continue
+                        out.add(TintSpan(lane, i, requireNotNull(open.remove(lane)), stops[j], leavesBand(i, lane, mid)))
+                    }
+                    for (lane in here) if (lane !in open) open[lane] = stops[j]
+                }
+                for ((lane, from) in open) out.add(TintSpan(lane, i, from, r1, false))
+            }
+            out.sortedWith(compareBy<TintSpan>({ it.from }, { it.lane }))
+        }
+
+        /**
+         * The lanes tinted at [s] of the drawing [i]: the band's lanes beside the named one, where the data gives the lanes (not
+         * in a zone); never a designated lane, never one that is only possible.
+         */
+        private fun tintedAt(i: Int, s: Double): Set<Int> {
+            val named = namedAt(s) ?: return emptySet()
+            val stretch = stretchAt(s) ?: return emptySet()
+            if (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED) return emptySet()
+            val band = plan.segmentAt(s)?.band ?: return emptySet()
+            val places = placesAt(drawings[i], ends[i], s, axisAt(s))
+            val out = LinkedHashSet<Int>()
+            for (lane in band) {
+                if (lane == named || topology.lanes[lane].designated) continue
+                val place = places.firstOrNull { it.lane == lane } ?: continue
+                if (place.state != CrossSection.State.POSSIBLE) out.add(lane)
+            }
+            return out
+        }
+
+        /**
+         * Whether [lane], tinted up to where the stretch holding [s] of the drawing [i] begins, stops working there: it is out of
+         * the band while it is still there and a lane is lit beside it; or a zone begins there, where no lane but the lit one is
+         * drawn, and the lane stops working before the zone ends.
+         */
+        private fun leavesBand(i: Int, lane: Int, s: Double): Boolean {
+            val stretch = stretchAt(s)
+            if (stretch != null && stretch.kind == LaneEvidence.Kind.ZONE) {
+                return plan.segments.any { seg ->
+                    seg.from < stretch.to && seg.to > s && seg.named != null && seg.noLane == null && lane !in seg.band
+                }
+            }
+            val seg = plan.segmentAt(s) ?: return false
+            val named = namedAt(s) ?: return false
+            if (lane == named || lane in seg.band) return false
+            return placesAt(drawings[i], ends[i], s, axisAt(s)).any { it.lane == lane }
+        }
+
+        /**
+         * The tints between [a] and [b]: each lane of [tintSpans] as it is drawn, cut into pieces at multiples of
+         * [PIECE_METERS] ([tintId]); where its lane stops working, its far edge from the lit lane slides onto its near edge over
+         * [WEDGE_METERS] (or the whole tint where it is shorter): a wedge pointing at the lit lane.
+         */
+        private fun tints(a: Double, b: Double, out: MutableList<Feature>) {
+            for (span in tintSpans) {
+                val s0 = max(a, span.from)
+                val s1 = min(b, span.to)
+                if (s1 - s0 <= SAME_STATION) continue
+                val d = drawings[span.drawing]
+                val end = ends[span.drawing]
+                val wedge = if (span.leaves) min(WEDGE_METERS, span.to - span.from) else 0.0
+                val pieces = Pieces(Kind.TINT, out)
+                for (s in litSamples(s0, s1)) {
+                    val axis = axisAt(s)
+                    val place = if (end != null && s >= end.begin) {
+                        placesAt(d, end, s, axis).firstOrNull { it.lane == span.lane }
+                    } else {
+                        section.lanes(s, axis).firstOrNull { it.lane == span.lane }
+                    } ?: continue
+                    var left = place.left
+                    var right = place.right
+                    if (wedge > 0.0) {
+                        val f = CrossSection.ramp(s, span.to - wedge, span.to)
+                        if (place.centre > path.offsetAt(s)) left += (right - left) * f else right += (left - right) * f
+                    }
+                    pieces.add(s, axis.toGeo(axis.offset(s, left)), axis.toGeo(axis.offset(s, right)), span.lane) { tintId(span.lane, it) }
+                }
+                pieces.close()
+            }
+        }
+
+        /** Strips of one polygon kind cut into pieces at multiples of [PIECE_METERS], each a feature with its piece's id. */
+        private inner class Pieces(private val kind: Kind, private val out: MutableList<Feature>) {
+            private var strip: Strip? = null
+            private var piece = 0L
+            private var lane = 0
+            private var id = 0L
+
+            /** Adds the sample at [s], its [left] and [right] edges, of [lane]; a piece's start ends the piece before it there. */
+            fun add(s: Double, left: GeoPoint, right: GeoPoint, lane: Int, idOf: (Long) -> Long) {
+                val k = pieceOf(s)
+                val open = strip
+                if (open != null && k != piece) {
+                    if (abs(s - k * PIECE_METERS) <= SAME_STATION) {
+                        open.stations.add(s)
+                        open.left.add(left)
+                        open.right.add(right)
+                    }
+                    close()
+                }
+                val now = strip ?: Strip().also {
+                    strip = it
+                    piece = k
+                    this.lane = lane
+                    id = idOf(k)
+                }
+                now.stations.add(s)
+                now.left.add(left)
+                now.right.add(right)
+            }
+
+            /** Ends the piece being made. */
+            fun close() {
+                val open = strip ?: return
+                strip = null
+                if (open.stations.last() - open.stations.first() <= SAME_STATION) return
+                polygon(open, kind, Part.ROUTE, lane)?.let { out.add(it.copy(id = id)) }
+            }
         }
 
         // ------------------------------------------------------------------ geometry helpers
