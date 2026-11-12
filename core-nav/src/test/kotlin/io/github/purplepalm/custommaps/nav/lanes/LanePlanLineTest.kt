@@ -53,6 +53,13 @@ class LanePlanLineTest {
     }
 
     @Test
+    fun `a keep left given as a continue counts its points' lanes from the left`() {
+        val runUp = windows(fields(LaneScenes.keepLeft())).single { it["kind"] == "run_up" }
+        assertEquals(listOf(-1_200L, 0L), list(runUp["points"]).map { it["atM"] })
+        assertEquals(listOf(1, 0), list(runUp["points"]).map { it["lane"] }, "the second lane from the left, then the left lane")
+    }
+
+    @Test
     fun `a move is placed relative to the lane point it is made for`() {
         val runUp = windows(fields(LaneScenes.s9())).single { it["kind"] == "run_up" }
         // Along the exit lane's taper: the right lane before it opens, the right lane after.

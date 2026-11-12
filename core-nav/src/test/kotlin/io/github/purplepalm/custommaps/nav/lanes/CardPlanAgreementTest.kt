@@ -4,6 +4,7 @@ import io.github.purplepalm.custommaps.nav.guidance.CardLanes
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.GORE
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -34,8 +35,9 @@ class CardPlanAgreementTest {
 
     /**
      * The freeway scenes of the design's agreement check (IA and its far side in place of the brief-shaped ones,
-     * S5 to S9, S13 to S17 and S20 with S9, S14 and S17 at 300 m, IW31; S14 is S9 for the card and the plan):
-     * each row the card shows in order, the exit's own row (the navigation SDK's) first, as before the run-up.
+     * S5 to S9, S13 to S17 and S20 with S9, S14 and S17 at 300 m, IW31; S14 is S9 for the card and the plan), and a
+     * keep left given as a continue: each row the card shows in order, the exit's own row (the navigation SDK's)
+     * first, as before the run-up.
      */
     private val scenes = linkedMapOf(
         "ia" to listOf(row(maneuver, 0.0, listOf(0, 1), 1), row(runUp, 1_330.0, listOf(1), 1, listOf(1, 2, 3, 4)), row(runUp, 0.0, listOf(0, 1), 1)),
@@ -56,6 +58,8 @@ class CardPlanAgreementTest {
         "s16" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 1_200.0, listOf(2), 2, listOf(2, 3, 4)), row(runUp, 0.0, listOf(0), 0)),
         "s17" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 0.0, listOf(0), 0), row(runUp, 0.0, listOf(0), 0)),
         "s20" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 1_600.0, listOf(2), 2, listOf(1, 2, 3)), row(runUp, 700.0, listOf(1), 1), row(runUp, 0.0, listOf(0), 0)),
+        // Counted from the left, the split's side.
+        "keep-left" to listOf(row(maneuver, 0.0, listOf(0, 1), 0), row(runUp, 1_200.0, listOf(1), 1, listOf(1, 2, 3, 4)), row(runUp, 0.0, listOf(0, 1), 0)),
     )
 
     /** The plan's comparison of every row [route]'s card shows, with the row. */
@@ -121,6 +125,19 @@ class CardPlanAgreementTest {
                 } else {
                     assertTrue(result.agree, "$name at ${shown.station}: ${result.why}")
                 }
+            }
+        }
+    }
+
+    @Test
+    fun `a keep left given as a continue agrees with the card as a fork does`() {
+        for (type in listOf(ManeuverType.CONTINUE, ManeuverType.FORK)) {
+            val route = LaneScenes.keepLeft(type)
+            val rows = compared(route)
+            assertEquals(3, rows.size, "$type")
+            for ((shown, result) in rows) {
+                assertTrue(result.agree, "$type at ${shown.station}: ${result.why}")
+                assertEquals(LaneEdge.LEFT, shown.target?.edge ?: LaneEdge.LEFT, "$type: the card's words count from the left")
             }
         }
     }

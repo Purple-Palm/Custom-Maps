@@ -222,7 +222,7 @@ object LanePlanner {
 
     /** An unknown exit at [station] and the maneuver it lies before. */
     private class UnknownExitRecord(val station: Double, route: LaneRoute) {
-        private val node: Int? = route.nodes.indices.firstOrNull { route.nodes[it].station >= station && LaneEvidence.turnsAt(route.nodes[it]) }
+        private val node: Int? = route.nodes.indices.firstOrNull { route.nodes[it].station >= station && LaneEvidence.planTurns(route.nodes[it]) }
 
         fun hold(inWindow: Boolean, droppedAt: Double?) = LanePlan.UnknownExitHold(station, node, inWindow, droppedAt)
     }
@@ -429,7 +429,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
     private val nextTurn = DoubleArray(n).also { next ->
         var k = 0
         for (i in 0 until n) {
-            while (k < nodes.size && (nodes[k].station < stations[i] || !LaneEvidence.turnsAt(nodes[k]))) k++
+            while (k < nodes.size && (nodes[k].station < stations[i] || !LaneEvidence.planTurns(nodes[k]))) k++
             next[i] = if (k < nodes.size) nodes[k].station else Double.POSITIVE_INFINITY
         }
     }

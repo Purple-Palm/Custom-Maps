@@ -160,7 +160,7 @@ object CardPlanAgreement {
     private fun unknownAhead(plan: LanePlan, car: Double): Boolean {
         if (plan.unknownExits.isEmpty()) return false
         val nodes = plan.topology.evidence.route.nodes
-        val stepEnd = nodes.indices.firstOrNull { nodes[it].station >= car && LaneEvidence.turnsAt(nodes[it]) }
+        val stepEnd = nodes.indices.firstOrNull { nodes[it].station >= car && LaneEvidence.planTurns(nodes[it]) }
         return plan.unknownExits.any { it.station >= car && it.node == stepEnd }
     }
 

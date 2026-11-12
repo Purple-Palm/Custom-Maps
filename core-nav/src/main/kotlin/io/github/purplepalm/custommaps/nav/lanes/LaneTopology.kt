@@ -14,9 +14,10 @@ import kotlin.math.min
  *
  * - **Runs.** Consecutive lane points belong to one run while the route goes on along one road between
  *   them, or leaves it at the first point with lanes it can be followed from, which go on onto the
- *   new road (an exit's lanes onto its ramp). A node where the route turns without lane data ends a
- *   run. A run's lanes begin at the node where the route turned onto its road before its first point
- *   and end at its last point: past it the route's data says nothing of its lanes.
+ *   new road (an exit's lanes onto its ramp, a split's lanes onto its branch). A node where the route
+ *   turns ([LaneEvidence.planTurns]) without lane data ends a run. A run's lanes begin at the node where
+ *   the route turned onto its road before its first point and end at its last point: past it the
+ *   route's data says nothing of its lanes.
  * - **Clusters.** Points of one road no more than [RunUpRule.EDGE_CLUSTER_METERS] apart with the same
  *   lanes, and the same ones kept for car pools, are one junction: the same lanes at each.
  * - **What goes on past a point** the route goes straight through: at the exit's edge the lanes open
@@ -103,7 +104,7 @@ class LaneTopology private constructor(
         val cluster: Int,
         /** For each lane the point lists, from the leftmost, the lane it is (an id into [lanes]). */
         val lanes: List<Int>,
-        /** The route turns here ([LaneEvidence.turnsAt]): the exit, fork or turn this point is the lanes of. */
+        /** The route turns here as the plan counts it ([LaneEvidence.planTurns]): the exit, fork, split or turn this point is the lanes of. */
         val turns: Boolean,
         /** The side of the route's next exit ([LaneEvidence.edges]); null where it cannot be told. */
         val edge: LaneEdge?,
@@ -349,7 +350,7 @@ class LaneTopology private constructor(
     private class Builder(val evidence: LaneEvidence) {
         private val route = evidence.route
         private val nodes = route.nodes
-        private val turning = BooleanArray(nodes.size) { LaneEvidence.turnsAt(nodes[it]) }
+        private val turning = BooleanArray(nodes.size) { LaneEvidence.planTurns(nodes[it]) }
         private val edges = evidence.edges
         private val tuning = evidence.tuning
 

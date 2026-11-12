@@ -350,6 +350,20 @@ internal object LaneScenes {
     )
 
     /**
+     * A split at [GORE] where the route keeps left onto the branch the two left lanes of four lead to, given as
+     * [type] (a continue, as the route gives a keep left on its road, or a fork); the other branch leaves on the
+     * right. A lane point 1,200 m before, where the left lane leaves by a road on the left; the arrival, on the
+     * right, 3,000 m after the split. Planned at 27 m/s.
+     */
+    fun keepLeft(type: ManeuverType = ManeuverType.CONTINUE) = route(
+        node(0.0, maneuver = DEPART, planMps = 27.0),
+        node(GORE - 1_200.0, s(false), s(), s(), s(), s(), roads = EXIT_LEFT, planMps = 27.0),
+        node(GORE, sl(), sl(), s(false), s(false), roads = EXIT_RIGHT, maneuver = NodeManeuver(type, slightLeft, viewStaysUp = true), planMps = 27.0),
+        node(GORE + 3_000.0, maneuver = NodeManeuver(ManeuverType.ARRIVE, TurnModifier.RIGHT), planMps = 27.0),
+        id = "keep-left",
+    )
+
+    /**
      * The right lane leaves at an exit with lane data 1,650 m before a right exit, and a road without lane data
      * leaves on the right 950 m before: the lane that is the right lane between the two may be that road's own.
      */
@@ -487,5 +501,6 @@ internal object LaneScenes {
         "two-added" to twoAdded(),
         "edge-then-road" to edgeThenRoad(),
         "dropped-then-wider" to droppedThenWider(),
+        "keep-left" to keepLeft(),
     )
 }

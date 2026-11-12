@@ -295,6 +295,8 @@ class LanePlannerTest {
             listOf(g(1_700.0, 2, 0), g(1_200.0, 2, 0), g(0.0, 2, 0)),
             listOf(Triple(GORE - 2_020.0, 1, 2)),
         ),
+        // A keep left given as a continue: the left of the two lanes that lead on, counted from the left, as for a fork.
+        "keep-left" to Golden(GORE - 2_295.0 to 1, listOf(g(1_200.0, 1, 1), g(0.0, 1, 0))),
     )
 
     @Test
@@ -406,6 +408,35 @@ class LanePlannerTest {
                 assertTrue(first.from - seam.from < LanePlanner.GRID_METERS, "$name: at the first station of the window")
             }
         }
+    }
+
+    @Test
+    fun `a keep left given as a continue is a maneuver of the plan, as a fork is`() {
+        // The card runs up to both; the plan counts from the split's side, not from the arrival's on the right after it.
+        val continued = plan(LaneScenes.keepLeft(ManeuverType.CONTINUE))
+        val forked = plan(LaneScenes.keepLeft(ManeuverType.FORK))
+        for (plan in listOf(continued, forked)) {
+            val split = plan.topology.points.single { it.station == GORE }
+            assertTrue(split.turns)
+            assertEquals(LaneEdge.LEFT, split.edge)
+            assertEquals(LaneEdge.LEFT, plan.at(GORE - 2_000.0).edge)
+            assertEquals(GORE - 2_295.0 to 1, plan.firstNamed())
+            assertEquals(0, plan.at(GORE).namedFromEdge)
+        }
+        assertEquals(forked.segments, continued.segments)
+        assertEquals(forked.windows, continued.windows)
+        // The arrival's side counts only past the split, and so does a road without lane data on that side past it: the
+        // split ends the step before it, so nothing is held for that road and the words need not wait for it there.
+        assertEquals(LaneEdge.RIGHT, LaneEvidence.planEdges(LaneScenes.keepLeft()).last())
+        val keepLeft = LaneScenes.keepLeft()
+        val withRoad = keepLeft.copy(nodes = (keepLeft.nodes + node(GORE + 500.0, roads = LaneScenes.EXIT_RIGHT, planMps = 27.0)).sortedBy { it.station })
+        val past = plan(withRoad)
+        assertEquals(withRoad.nodes.lastIndex, past.unknownExits.single().node)
+        assertFalse(past.at(GORE - 1_000.0).unknownExitAhead)
+        assertEquals(continued.segments.map { it.named }, past.segments.map { it.named })
+        assertFalse(LaneEvidence.planTurns(LaneScenes.keepLeft().nodes.first()), "the departure ends no step")
+        // A continue without lanes is no maneuver of the plan, as it is none of the card's run-ups.
+        assertFalse(LaneEvidence.planTurns(node(0.0, maneuver = NodeManeuver(ManeuverType.CONTINUE, TurnModifier.SLIGHT_LEFT, viewStaysUp = true))))
     }
 
     // ------------------------------------------------------------------ the ramp bridge (D20)

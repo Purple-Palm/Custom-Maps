@@ -198,8 +198,11 @@ class LaneEvidence private constructor(
         }
     }
 
-    /** For each intersection of the route, the side of the route's next exit there ([exitEdges]). */
-    val edges: List<LaneEdge?> by lazy { exitEdges(route) }
+    /**
+     * For each intersection of the route, the side of the next maneuver the lane plan counts there
+     * ([planEdges]): the topology and the plan count lanes from it.
+     */
+    val edges: List<LaneEdge?> by lazy { planEdges(route) }
 
     /** How many lanes the route's lane points list for each kind of designated lane. */
     val designated: Map<DesignatedKind, Int> by lazy { designatedCounts() }
@@ -410,6 +413,35 @@ class LaneEvidence private constructor(
          * the arrival count as turns: nothing reaches across them.
          */
         fun turnsAt(node: RouteNode): Boolean = node.maneuver.let { it != null && it.type !in STRAIGHT_ON }
+
+        /**
+         * Whether the lane plan counts [node] as a maneuver, one that ends a step: where the route turns
+         * ([turnsAt]), and where it keeps to its own lanes of a road that splits, at a maneuver the camera
+         * stays up for, with lanes (a keep left or keep right given as a continue or a merge), as the card
+         * runs up to it ([CardWindows.runUpCounts]). The departure ends no step and is none. Only the plan
+         * reads this; this evidence's own stretches, bridges and gaps keep [turnsAt].
+         */
+        fun planTurns(node: RouteNode): Boolean {
+            val maneuver = node.maneuver ?: return false
+            if (maneuver.type == ManeuverType.DEPART) return false
+            return turnsAt(node) || (maneuver.viewStaysUp && node.isLanePoint)
+        }
+
+        /**
+         * For each intersection of [route], the side of the next maneuver the lane plan counts
+         * ([planTurns], [RunUpRule.exitEdge]), at the intersection itself where it is one; null where it
+         * cannot be told.
+         */
+        fun planEdges(route: LaneRoute): List<LaneEdge?> {
+            val nodes = route.nodes
+            val edges = arrayOfNulls<LaneEdge>(nodes.size)
+            var next: LaneEdge? = null
+            for (i in nodes.indices.reversed()) {
+                if (planTurns(nodes[i])) next = RunUpRule.exitEdge(nodes[i].maneuver?.modifier, nodes[i].lanes)
+                edges[i] = next
+            }
+            return edges.asList()
+        }
 
         /**
          * Whether a road that may be entered leaves [node] on [edge]'s side of the route's way out: its
