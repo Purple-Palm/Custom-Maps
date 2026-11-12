@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.guidance.CardLanes
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
@@ -414,7 +415,7 @@ private fun ManeuverCardLaneChoicePreview() {
     val on = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
     val off = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
     val exit = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         ManeuverCard(
             RouteProgressSnapshot(
                 nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Oak Street"),
@@ -431,7 +432,7 @@ private fun ManeuverCardLaneChoicePreview() {
 @Preview
 @Composable
 private fun ManeuverCardPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         ManeuverCard(
             RouteProgressSnapshot(
                 nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street", "Office"),
@@ -525,7 +526,7 @@ private fun RunUpLeftLanePreview() {
 
 @Composable
 private fun RunUpPreview(maneuver: Maneuver, row: RunUpLanes) {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         ManeuverCard(
             RouteProgressSnapshot(
                 nextManeuver = maneuver,

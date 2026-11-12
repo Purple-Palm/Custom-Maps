@@ -48,6 +48,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -341,7 +342,7 @@ internal fun Context.openDataSettings(debugLog: DebugLog) {
 @Preview(name = "offline chip, each reason, large font", widthDp = 360, fontScale = 1.3f)
 @Composable
 private fun OfflineChipPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -388,7 +389,7 @@ private fun OfflinePillAlonePreview() {
 
 @Composable
 private fun OfflinePillPreview(then: Maneuver?, lanes: LaneInfo?) {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Box(
             Modifier
                 .fillMaxWidth()

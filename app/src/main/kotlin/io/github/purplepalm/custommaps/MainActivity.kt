@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.ui.CustomMapsApp
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import kotlinx.coroutines.flow.first
@@ -23,7 +24,8 @@ class MainActivity : ComponentActivity() {
         val graph = (application as CustomMapsApplication).graph
         recreateWhenTokenChanges(graph)
         setContent {
-            CustomMapsTheme {
+            // The night look until the app chooses one by the sun.
+            CustomMapsTheme(Look.NIGHT) {
                 CustomMapsApp(graph)
             }
         }

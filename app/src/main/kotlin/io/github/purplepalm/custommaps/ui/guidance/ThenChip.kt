@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.Lane
@@ -341,7 +342,7 @@ private fun TurnModifier?.isRight() = this == TurnModifier.SLIGHT_RIGHT || this 
 @Preview(widthDp = 400)
 @Composable
 private fun ManeuverPanelPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         // A grey stand-in for the map, with room for the chip below the card.
         Box(
             Modifier
@@ -384,7 +385,7 @@ private fun ManeuverPanelPreview() {
 private fun ManeuverPanelLaneChoicePreview() {
     val on = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
     val off = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -420,7 +421,7 @@ private fun ManeuverPanelLaneChoicePreview() {
 @Preview(name = "largest font", widthDp = 360, fontScale = 2f)
 @Composable
 private fun ManeuverPanelDestinationPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Box(
             Modifier
                 .fillMaxWidth()

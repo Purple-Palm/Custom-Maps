@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 
@@ -331,7 +332,7 @@ private fun previewRow(n: Int, name: String, active: Boolean, locked: Boolean = 
 @Preview(widthDp = 360)
 @Composable
 private fun TokenListSectionPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Surface {
             TokenListSection(
                 state = TokenState.Ready(
@@ -357,7 +358,7 @@ private fun TokenListSectionPreview() {
 @Preview(widthDp = 360, fontScale = 1.3f)
 @Composable
 private fun TokenListSectionFullDuringTripPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Surface {
             TokenListSection(
                 state = TokenState.Ready(
@@ -385,7 +386,7 @@ private fun TokenListSectionFullDuringTripPreview() {
 @Preview(widthDp = 360)
 @Composable
 private fun TokenListSectionEmptyPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         Surface {
             TokenListSection(
                 state = TokenState.Ready(rows = emptyList(), locked = false, full = false, defaultName = "Main"),

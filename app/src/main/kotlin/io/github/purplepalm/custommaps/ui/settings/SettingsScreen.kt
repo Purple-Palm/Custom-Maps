@@ -44,6 +44,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
@@ -526,7 +527,7 @@ private fun TripKind.labelRes(): Int = when (this) {
 @Preview
 @Composable
 private fun SettingsScreenPreview() {
-    CustomMapsTheme {
+    CustomMapsTheme(Look.NIGHT) {
         SettingsScreen(
             tokens = TokenState.Ready(
                 rows = listOf(
