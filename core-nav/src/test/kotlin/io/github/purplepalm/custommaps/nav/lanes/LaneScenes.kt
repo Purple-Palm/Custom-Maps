@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteLane
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
@@ -79,6 +80,31 @@ internal object LaneScenes {
     fun route(vararg nodes: RouteNode, id: String = "route-1", length: Double = nodes.last().station) =
         LaneRoute(id, steps = nodes.count { it.maneuver != null }, lengthMeters = length, nodes = nodes.toList())
 
+    /**
+     * The stations of the roads without lane data that leave on the side of their step's exit, as the
+     * engine's lane choices read them for the card's words (`exitSideBranches`): an intersection after its
+     * step's first, without lanes, reached on a freeway, where a road that may be entered leaves on the side
+     * of the maneuver that ends the step.
+     */
+    fun sideBranches(route: LaneRoute): List<Double> {
+        val nodes = route.nodes
+        val out = ArrayList<Double>()
+        var stepStart = 0
+        for (m in nodes.indices) {
+            val maneuver = nodes[m].maneuver ?: continue
+            if (m > 0) {
+                val edge = RunUpRule.exitEdge(maneuver.modifier, nodes[m].lanes)
+                if (edge != null) {
+                    for (k in stepStart + 1 until m) {
+                        if (!nodes[k].isLanePoint && nodes[k - 1].freeway && LaneEvidence.branchesOff(nodes[k], edge)) out.add(nodes[k].station)
+                    }
+                }
+            }
+            stepStart = m
+        }
+        return out
+    }
+
     /** A lane point of an approach, [before] metres before the gore. */
     class At(val before: Double, val lanes: List<RouteLane>, val roads: Roads = THROUGH)
 
@@ -131,12 +157,12 @@ internal object LaneScenes {
      * a road on the right; at IA2a and IA2b, 690 and 640 m (a pair 50 m apart with the same lists), the two
      * left lanes cannot be used: no road leaves there, the route only narrows toward its exit. The exit
      * takes the two right lanes of six. Planned at 27 m/s. [farSide]: the right lane leaves at IA0 and the
-     * left one at IA1.
+     * left one at IA1. [ia0At] moves IA0, for the seam's border.
      */
-    fun ia(farSide: Boolean = false): LaneRoute {
+    fun ia(farSide: Boolean = false, ia0At: Double = 2_180.0): LaneRoute {
         val leftLeaves = listOf(s(false), s(), s(), s(), s())
         val rightLeaves = listOf(s(), s(), s(), s(), s(false))
-        val ia0 = if (farSide) At(2_180.0, rightLeaves, EXIT_RIGHT) else At(2_180.0, leftLeaves, EXIT_LEFT)
+        val ia0 = if (farSide) At(ia0At, rightLeaves, EXIT_RIGHT) else At(ia0At, leftLeaves, EXIT_LEFT)
         val ia1 = if (farSide) At(1_330.0, leftLeaves, EXIT_LEFT) else At(1_330.0, rightLeaves, EXIT_RIGHT)
         val narrowing = listOf(s(false), s(false), s(), s(), s())
         return approach(listOf(ia0, ia1, At(690.0, narrowing), At(640.0, narrowing)), iaExit(), id = if (farSide) "ia-far" else "ia")
@@ -235,10 +261,17 @@ internal object LaneScenes {
     )
 
     /** S17: S9 where exit A's intersection has no lanes: a road without lane data leaves on the right 300 m before the exit. */
-    fun s17() = approach(
-        listOf(bare(300.0, EXIT_RIGHT)),
+    fun s17() = unknownExit(300.0, 27.0, id = "s17")
+
+    /**
+     * Five lanes and no lane point before a right exit that only the right lane leads to; a road without lane
+     * data leaves on the right [before] metres before the gore. Planned at [planMps].
+     */
+    fun unknownExit(before: Double, planMps: Double, id: String = "unknown-exit") = approach(
+        listOf(bare(before, EXIT_RIGHT)),
         exit = listOf(s(false), s(false), s(false), s(false), sr()),
-        id = "s17",
+        planMps = planMps,
+        id = id,
     )
 
     /** S20: the right lane leaves at 1,600 m and at 700 m by roads on the right, four lanes at each; a lane added between. */
@@ -250,13 +283,14 @@ internal object LaneScenes {
 
     /**
      * GEOM's S2: a two-lane exit, an option lane the route prefers and a lane dropped to the ramp, whose
-     * ramp splits [splitAfter] m after the gore; the route takes the left branch. 65 mph, 45 on the ramp.
+     * ramp splits [splitAfter] m after the gore; the route takes the left branch. 65 mph, 45 on the ramp
+     * unless [rampMps] says otherwise.
      */
-    fun geomS2(splitAfter: Double) = approach(
+    fun geomS2(splitAfter: Double, rampMps: Double = 45.0 * PlanningSpeed.MPS_PER_MPH) = approach(
         emptyList(),
         exit = listOf(s(false), s(false), option(true, true), sr(true, false)),
         planMps = 65.0 * PlanningSpeed.MPS_PER_MPH,
-        rampMps = 45.0 * PlanningSpeed.MPS_PER_MPH,
+        rampMps = rampMps,
         rampPoints = listOf(splitAfter to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = FORK_LEFT)),
         rampMeters = splitAfter + 300.0,
         id = "geom-s2",

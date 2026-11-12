@@ -12,7 +12,8 @@ import kotlin.math.min
 /**
  * A stretch of the route where the camera is close and the card shows lanes: from [from] to [to]
  * metres along the route, the last part of the step that ends at the maneuver of [node], the index
- * of its intersection in the route.
+ * of its intersection in the route; for a [Kind.RAMP] window the ramp from a gore to the point
+ * [node].
  */
 data class CardWindow(val from: Double, val to: Double, val kind: Kind, val node: Int) {
 
@@ -22,6 +23,13 @@ data class CardWindow(val from: Double, val to: Double, val kind: Kind, val node
 
         /** The approach to a maneuver the camera frames as a junction, on a road that is no freeway. */
         STREET,
+
+        /**
+         * The ramp after a run-up's gore, held to the next point the lane plan constrains there, a split or a
+         * maneuver with lane data, when it lies near ([LanePlanner.RAMP_BRIDGE_SECONDS]): [node] is that point's
+         * intersection. Only the lane plan makes these.
+         */
+        RAMP,
     }
 
     val meters: Double get() = to - from

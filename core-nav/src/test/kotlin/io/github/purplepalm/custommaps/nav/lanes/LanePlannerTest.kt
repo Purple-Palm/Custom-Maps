@@ -13,6 +13,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.option
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.route
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -24,12 +26,15 @@ import org.junit.jupiter.api.Test
 /**
  * Made-up routes only ([LaneScenes]): stations in metres from the route's start, the gore at 6,000 m,
  * lanes from the left, lane ids of the topology. The golden values were worked out with a copy of the
- * design's prototype planner (GEOM's planner with FINAL's naming), run on the same lane topologies with
- * the design's freeway floor and with lanes named only inside card windows; they agree to the 5 m station.
+ * design's prototype planner (GEOM's planner with FINAL's naming, its unknown exits and its seam), run on
+ * the same lane topologies with the design's freeway floor, with lanes named only inside card windows and
+ * with the ramp held to a split; they agree to the 5 m station.
  */
 class LanePlannerTest {
 
-    private fun plan(route: LaneRoute): LanePlan = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)))
+    /** The plan of [route], with the roads without lane data that leave on an exit's side read as the engine reads them. */
+    private fun plan(route: LaneRoute): LanePlan =
+        LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), LaneScenes.sideBranches(route))
 
     /** The last station of the grid where [lane] is in the band. */
     private fun LanePlan.lastInBand(lane: Int): Double? = segments.lastOrNull { lane in it.band }?.let { it.to - LanePlanner.GRID_METERS }
@@ -160,8 +165,8 @@ class LanePlannerTest {
     fun `P6 names the lane with the fewest changes first`() {
         // IA: at the run-up's start the option lane needs no change; the right lane, nearer the edge, leaves at IA1.
         val plan = plan(LaneScenes.ia())
-        assertEquals(GORE - 2_295.0 to 3, plan.firstNamed())
-        assertTrue(4 in plan.at(GORE - 2_295.0).band, "the right lane still works there")
+        assertEquals(GORE - 2_660.0 to 3, plan.firstNamed())
+        assertTrue(4 in plan.at(GORE - 2_660.0).band, "the right lane still works there")
     }
 
     @Test
@@ -196,24 +201,28 @@ class LanePlannerTest {
     private fun g(before: Double, lane: Int?, fromEdge: Int?) = AtPoint(GORE - before, lane, fromEdge)
 
     private val golden = mapOf(
-        // The option lane from the run-up's start: second from the right to IA1, the right lane past it, the second
-        // again from IA2b, where the exit-only lane may already be there.
-        "ia" to Golden(GORE - 2_295.0 to 3, listOf(g(2_180.0, 3, 1), g(1_330.0, 3, 1), g(690.0, 3, 0), g(640.0, 3, 1), g(0.0, 3, 1))),
-        "ia-far" to Golden(GORE - 2_295.0 to 3, listOf(g(2_180.0, 3, 1), g(1_330.0, 3, 0), g(690.0, 3, 0), g(640.0, 3, 1), g(0.0, 3, 1))),
-        // The option lane from the run-up's start, at P2's window: the second from the right, the exit-only lane possible.
-        "iw31" to Golden(GORE - 1_345.0 to 3, listOf(g(2_600.0, null, null), g(1_850.0, null, null), g(620.0, 3, 1), g(0.0, 3, 1))),
-        "s5" to Golden(GORE - 1_775.0 to 1, listOf(g(1_100.0, 1, 0), g(0.0, 1, 0))),
-        "s6" to Golden(GORE - 1_950.0 to 4, listOf(g(1_200.0, 4, 0), g(0.0, 4, 0))),
-        "s7" to Golden(GORE - 750.0 to 0, listOf(g(800.0, null, null), g(0.0, 0, 0))),
+        // The option lane from the run-up's start, which the seam begins 6 s before the band narrows for IA0: second
+        // from the right to IA1, the right lane past it, the second again from IA2b, where the exit-only lane may be.
+        "ia" to Golden(GORE - 2_660.0 to 3, listOf(g(2_180.0, 3, 1), g(1_330.0, 3, 1), g(690.0, 3, 0), g(640.0, 3, 1), g(0.0, 3, 1))),
+        "ia-far" to Golden(GORE - 2_660.0 to 3, listOf(g(2_180.0, 3, 1), g(1_330.0, 3, 0), g(690.0, 3, 0), g(640.0, 3, 1), g(0.0, 3, 1))),
+        // The option lane from the seam, 6 s before the band narrows for P1: the second from the right, the exit-only
+        // lane possible from P1; on the ramp, held to its split, the left lane for the split's left branch.
+        "iw31" to Golden(GORE - 2_365.0 to 3, listOf(g(2_600.0, null, null), g(1_850.0, 3, 1), g(620.0, 3, 1), g(0.0, 3, 1), g(-260.0, 3, 0))),
+        "s5" to Golden(GORE - 1_835.0 to 1, listOf(g(1_100.0, 1, 0), g(0.0, 1, 0))),
+        "s6" to Golden(GORE - 2_010.0 to 4, listOf(g(1_200.0, 4, 0), g(0.0, 4, 0))),
+        // The seam 6 s before the freeway floor narrows the band for the fork, 805 m before it.
+        "s7" to Golden(GORE - 985.0 to 0, listOf(g(800.0, 0, 0), g(0.0, 0, 0))),
         "s8" to Golden(GORE - 2_550.0 to 2, listOf(g(500.0, 2, 1), g(0.0, 4, 0)), listOf(Triple(GORE - 210.0, 2, 4))),
         "s9" to Golden(GORE - 2_295.0 to 3, listOf(g(300.0, 3, 1), g(0.0, 5, 0)), listOf(Triple(GORE - 210.0, 3, 5))),
-        "s13" to Golden(GORE - 675.0 to 2, listOf(g(3_000.0, null, null), g(0.0, 2, 0))),
+        "s13" to Golden(GORE - 965.0 to 2, listOf(g(3_000.0, null, null), g(0.0, 2, 0))),
         "s15" to Golden(GORE - 2_295.0 to 1, listOf(g(1_400.0, 1, 3), g(800.0, 1, 2), g(0.0, 5, 0)), listOf(Triple(GORE - 210.0, 1, 5))),
         "s16" to Golden(GORE - 2_295.0 to 2, listOf(g(1_200.0, 2, 2), g(0.0, 2, 0))),
-        "s17" to Golden(GORE - 675.0 to 4, listOf(g(0.0, 4, 0))),
+        // The road without lane data 300 m before the gore: the lane beside the edge lane until the band holds the
+        // edge lane alone, one comfortable change and the reaction time before the gore.
+        "s17" to Golden(GORE - 1_245.0 to 3, listOf(g(0.0, 4, 0)), listOf(Triple(GORE - 320.0, 3, 4))),
         "s20" to Golden(GORE - 2_295.0 to 1, listOf(g(1_600.0, 1, 2), g(700.0, 1, 1), g(0.0, 5, 0)), listOf(Triple(GORE - 210.0, 1, 5))),
-        "geom-s2-400" to Golden(GORE - 725.0 to 2, listOf(g(0.0, 2, 1), g(-400.0, null, null))),
-        "geom-s2-150" to Golden(GORE - 725.0 to 2, listOf(g(0.0, 2, 1), g(-150.0, null, null))),
+        "geom-s2-400" to Golden(GORE - 975.0 to 2, listOf(g(0.0, 2, 1), g(-400.0, null, null))),
+        "geom-s2-150" to Golden(GORE - 975.0 to 2, listOf(g(0.0, 2, 1), g(-150.0, 2, 0))),
         "geom-s5" to Golden(null, listOf(g(0.0, null, null))),
         "geom-s6" to Golden(null, listOf(g(1_500.0, null, null), g(500.0, null, null), g(0.0, null, null))),
         "street-pocket" to Golden(GORE - 180.0 to 0, listOf(g(200.0, null, null), g(0.0, 2, 0)), listOf(Triple(GORE - 55.0, 0, 2))),
@@ -244,6 +253,201 @@ class LanePlannerTest {
                 assertEquals(expected.second to expected.third, move.from to move.to, name)
             }
         }
+    }
+
+    // ------------------------------------------------------------------ the seam (D15)
+
+    /** Where a scene's run-up begins, in metres before the gore: the band's first narrowing for it, and the seam's begin (null: the latch's own). */
+    private class SeamAt(val narrowing: Double?, val begins: Double?)
+
+    private val seams = mapOf(
+        "ia" to SeamAt(2_500.0, 2_662.0),
+        "ia-far" to SeamAt(2_500.0, 2_662.0),
+        "iw31" to SeamAt(2_195.0, 2_195.0 + 6.0 * 65.0 * PlanningSpeed.MPS_PER_MPH),
+        "s5" to SeamAt(1_675.0, 1_837.0),
+        "s6" to SeamAt(1_830.0, 2_010.0),
+        // The freeway floor narrows the band for the fork and S13's exit 805 m before the gore.
+        "s7" to SeamAt(805.0, 985.0),
+        "s13" to SeamAt(805.0, 967.0),
+        "s17" to SeamAt(1_085.0, 1_247.0),
+        "geom-s2-400" to SeamAt(805.0, 805.0 + 6.0 * 65.0 * PlanningSpeed.MPS_PER_MPH),
+        // Where the band narrows later than 6 s after the latch's own begin, the latch's begin stays.
+        "s8" to SeamAt(850.0, null),
+        "s9" to SeamAt(835.0, null),
+        "s15" to SeamAt(1_720.0, null),
+        "s16" to SeamAt(1_600.0, null),
+        "s20" to SeamAt(1_920.0, null),
+    )
+
+    @Test
+    fun `each run-up begins 6 s before the band first narrows for a lane point within its reach, or where the latch begins it`() {
+        for ((name, want) in seams) {
+            val route = requireNotNull(LaneScenes.all()[name])
+            val plan = plan(route)
+            val seam = plan.seams.single()
+            val latched = CardWindows.latched(route).single { it.kind == CardWindow.Kind.RUN_UP }
+            assertEquals(latched.from, seam.latchFrom, 1e-9, name)
+            assertEquals(latched.node, seam.node, name)
+            assertEquals(GORE - requireNotNull(want.narrowing), requireNotNull(seam.narrowing), 1e-9, "$name: the first narrowing")
+            val begins = want.begins?.let { GORE - it } ?: latched.from
+            assertEquals(begins, seam.from, 1e-6, "$name: where the run-up begins")
+            assertEquals(seam.from, plan.windows.single { it.kind == CardWindow.Kind.RUN_UP }.from, 1e-9, name)
+            if (want.begins != null) {
+                val speed = PlanningSpeed.of(route.nodes[seam.node - 1])
+                assertEquals(seam.narrowing - LanePlanner.SEAM_SECONDS * speed, seam.from, 1e-6, "$name: 6 s before it")
+                assertTrue(seam.earlierMeters > 0.0, name)
+            }
+        }
+    }
+
+    @Test
+    fun `the seam moves a run-up only where 6 s before the narrowing lies before the latch's own begin`() {
+        // IA with IA0 at 1,810 m: the band narrows for it 2,130 m before the gore, and 6 s (162 m) before that lies
+        // after the reach, 2,295 m before the gore: the latch's begin stays.
+        val later = plan(LaneScenes.ia(ia0At = 1_810.0)).seams.single()
+        assertEquals(GORE - 2_130.0, requireNotNull(later.narrowing), 1e-9)
+        assertEquals(later.latchFrom, later.from, 1e-9)
+        assertEquals(0.0, later.earlierMeters, 1e-9)
+        // With IA0 at 1,820 m the band narrows 2,140 m before the gore: the run-up begins 7 m before the reach.
+        val earlier = plan(LaneScenes.ia(ia0At = 1_820.0)).seams.single()
+        assertEquals(GORE - 2_140.0, requireNotNull(earlier.narrowing), 1e-9)
+        assertEquals(GORE - 2_140.0 - LanePlanner.SEAM_SECONDS * 27.0, earlier.from, 1e-9)
+        assertEquals(7.0, earlier.earlierMeters, 1e-9)
+    }
+
+    @Test
+    fun `the seam never begins a run-up before its step`() {
+        // IA whose step begins 2,400 m before the gore, at a maneuver straight on: the seam would begin 2,662 m before.
+        val ia = LaneScenes.ia()
+        val step = node(GORE - 2_400.0, maneuver = NodeManeuver(ManeuverType.CONTINUE), planMps = 27.0)
+        val route = ia.copy(steps = ia.steps + 1, nodes = (ia.nodes + step).sortedBy { it.station })
+        val seam = plan(route).seams.single()
+        assertEquals(GORE - 2_500.0, requireNotNull(seam.narrowing), 1e-9)
+        assertEquals(GORE - 2_400.0, seam.from, 1e-9)
+    }
+
+    @Test
+    fun `no lane is named before the run-up begins, and the first named lane is named where it begins`() {
+        for ((name, route) in LaneScenes.all()) {
+            val plan = plan(route)
+            for (seam in plan.seams) {
+                val window = plan.windows.single { it.kind == CardWindow.Kind.RUN_UP && it.node == seam.node }
+                val first = plan.segments.firstOrNull { it.named != null && it.to > window.from && it.from <= window.to } ?: continue
+                assertTrue(first.from >= seam.from, "$name: named from ${first.from}, the run-up from ${seam.from}")
+                assertTrue(first.from - seam.from < LanePlanner.GRID_METERS, "$name: at the first station of the window")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ the ramp bridge (D20)
+
+    @Test
+    fun `a run-up holds through the ramp to a split the plan constrains within 15 s, naming the lane for it`() {
+        // IW31: the ramp splits 260 m after the gore, 12.9 s at 45 mph; the option lane goes on as the ramp's left
+        // lane, which the split's left branch takes.
+        val route = LaneScenes.iw31()
+        val iw31 = plan(route)
+        val ramp = iw31.windows.single { it.kind == CardWindow.Kind.RAMP }
+        assertEquals(GORE, ramp.from, 1e-9)
+        assertEquals(GORE + 260.0, ramp.to, 1e-9)
+        assertEquals(route.nodes.indexOfFirst { it.station == GORE + 260.0 }, ramp.node)
+        for (station in listOf(GORE + 5.0, GORE + 100.0, GORE + 255.0, GORE + 260.0)) {
+            val segment = iw31.at(station)
+            assertEquals(3, segment.named, "at $station")
+            assertEquals(LaneEdge.LEFT, segment.edge, "the split's side")
+            assertEquals(0, segment.namedFromEdge, "at $station: the left lane")
+        }
+        assertTrue(iw31.moves.isEmpty())
+        // GEOM's S2: a split 150 m after the gore is held to; one 400 m after, 19.9 s, is not, and nothing is named there.
+        assertEquals(listOf(GORE to GORE + 150.0), plan(LaneScenes.geomS2(150.0)).windows.filter { it.kind == CardWindow.Kind.RAMP }.map { it.from to it.to })
+        val far = plan(LaneScenes.geomS2(400.0))
+        assertTrue(far.windows.none { it.kind == CardWindow.Kind.RAMP })
+        assertNull(far.at(GORE + 100.0).named)
+    }
+
+    @Test
+    fun `the ramp is held to a split no more than 15 s of driving after the gore`() {
+        // At 20 m/s on the ramp, 15 s is 300 m.
+        val held = plan(LaneScenes.geomS2(300.0, rampMps = 20.0))
+        assertEquals(GORE + 300.0, held.windows.single { it.kind == CardWindow.Kind.RAMP }.to, 1e-9)
+        assertEquals(2, held.at(GORE + 300.0).named)
+        val notHeld = plan(LaneScenes.geomS2(305.0, rampMps = 20.0))
+        assertTrue(notHeld.windows.none { it.kind == CardWindow.Kind.RAMP })
+        assertNull(notHeld.at(GORE + 5.0).named)
+    }
+
+    // ------------------------------------------------------------------ P7: roads without lane data on the exit's side
+
+    @Test
+    fun `before a road without lane data on the exit's side the edge lane is held back, to the road where there is time`() {
+        // Five lanes, the exit from the right lane only; the road leaves on the right. The hold lasts to the road where it
+        // lies at least one comfortable change and the reaction time before the gore: 295, 320, 340 and 390 m on the grid
+        // at 25, 27, 29 and 33 m/s (design 5.2's P7). Nearer, the right lane is named from there, before the road.
+        val limits = mapOf(25.0 to 295.0, 27.0 to 320.0, 29.0 to 340.0, 33.0 to 390.0)
+        for ((mps, limit) in limits) {
+            for (before in listOf(900.0, 370.0, 300.0, 200.0)) {
+                val label = "$mps m/s, the road $before m before the gore"
+                val plan = plan(LaneScenes.unknownExit(before, mps))
+                val hold = plan.unknownExits.single()
+                assertEquals(GORE - before, hold.station, 1e-9, label)
+                assertEquals(2, hold.node, label)
+                assertTrue(hold.inWindow, label)
+                val edgeFrom = if (before >= limit) before else limit
+                if (before >= limit) assertNull(hold.droppedAt, "$label: held") else assertEquals(GORE - limit, requireNotNull(hold.droppedAt), 1e-9, "$label: dropped")
+                assertEquals(hold.droppedAt == null, hold.held, label)
+                // The lane beside the edge lane up to there, the edge lane after: one move, toward the edge.
+                assertEquals(listOf(Triple(GORE - edgeFrom, 3, 4)), plan.moves.map { Triple(it.station, it.from, it.to) }, label)
+                assertTrue(plan.moves.none { it.back }, label)
+                val beforeIt = plan.at(GORE - edgeFrom - LanePlanner.GRID_METERS)
+                assertEquals(3, beforeIt.named, label)
+                assertEquals(1, beforeIt.namedFromEdge, label)
+                assertTrue(4 in beforeIt.band, "$label: the edge lane works, it is only not named")
+                assertEquals(4, plan.at(GORE - edgeFrom).named, label)
+            }
+        }
+    }
+
+    @Test
+    fun `the card's words wait until the road without lane data is passed`() {
+        val plan = plan(LaneScenes.unknownExit(200.0, 33.0))
+        assertTrue(plan.at(GORE - 1_000.0).unknownExitAhead)
+        assertTrue(plan.at(GORE - 205.0).unknownExitAhead)
+        assertTrue(plan.at(GORE - 200.0).unknownExitAhead, "at the road itself")
+        assertFalse(plan.at(GORE - 195.0).unknownExitAhead)
+        // The hold is dropped 390 m before the gore, the words wait to the road all the same.
+        assertEquals(GORE - 390.0, requireNotNull(plan.unknownExits.single().droppedAt), 1e-9)
+        assertTrue(plan.at(GORE - 300.0).unknownExitAhead)
+        assertEquals(4, plan.at(GORE - 300.0).named)
+        // A route without such roads never waits; a road on the far side of the exit is no unknown exit.
+        assertTrue(plan(LaneScenes.ia()).segments.none { it.unknownExitAhead })
+        assertTrue(plan(LaneScenes.ia()).unknownExits.isEmpty())
+    }
+
+    @Test
+    fun `the freeway floor begins past a road without lane data within it`() {
+        // 27 m/s, the road 370 m before the gore: the hold lasts to the road, so the floor, which would leave the right
+        // lane alone from 805 m before the gore, begins at the road.
+        val route = LaneScenes.unknownExit(370.0, 27.0)
+        val plan = plan(route)
+        assertEquals(listOf(3, 4), plan.at(GORE - 400.0).band)
+        assertEquals(listOf(4), plan.at(GORE - 370.0).band)
+        assertNull(plan.unknownExits.single().droppedAt)
+        // Without the road the floor leaves the right lane alone from 805 m before the gore.
+        val without = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)))
+        assertEquals(listOf(2, 3, 4), without.at(GORE - 810.0).band)
+        assertEquals(listOf(4), without.at(GORE - 805.0).band)
+        assertTrue(without.unknownExits.isEmpty())
+    }
+
+    @Test
+    fun `a road without lane data holds only before the exit of its own step`() {
+        // The road 370 m before the gore given as one past the exit, on the ramp's step: it holds nothing before the gore.
+        val route = LaneScenes.unknownExit(370.0, 27.0)
+        val plan = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), listOf(GORE + 100.0))
+        assertEquals(GORE - 1_245.0 to 4, plan.firstNamed(), "the edge lane from the run-up's start")
+        assertTrue(plan.segments.filter { it.to <= GORE }.none { it.unknownExitAhead })
+        assertTrue(plan.unknownExits.single().held)
+        assertFalse(plan.unknownExits.single().inWindow)
     }
 
     @Test
@@ -296,11 +500,11 @@ class LanePlannerTest {
     }
 
     @Test
-    fun `the planner takes the route's lanes and the card windows, nothing of the car`() {
+    fun `the planner takes the route's lanes, the card windows and the unknown exits' stations, nothing of the car`() {
         val plans = LanePlanner::class.java.methods.filter { it.name == "plan" }
         assertTrue(plans.isNotEmpty())
         for (method in plans) {
-            assertEquals(listOf(LaneTopology::class.java, List::class.java), method.parameterTypes.toList())
+            assertEquals(listOf(LaneTopology::class.java, List::class.java, List::class.java), method.parameterTypes.toList())
         }
     }
 }
