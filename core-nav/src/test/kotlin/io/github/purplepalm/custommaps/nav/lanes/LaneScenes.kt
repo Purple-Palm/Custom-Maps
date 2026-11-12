@@ -367,20 +367,20 @@ internal object LaneScenes {
      * The right lane leaves at an exit with lane data 1,650 m before a right exit, and a road without lane data
      * leaves on the right 950 m before: the lane that is the right lane between the two may be that road's own.
      */
-    fun edgeThenRoad() = approach(
+    fun edgeBeforeRoad() = approach(
         listOf(at(1_650.0, s(), s(), s(), s(), s(false), roads = EXIT_RIGHT), bare(950.0, EXIT_RIGHT)),
         exit = listOf(s(false), s(false), s(false), sr()),
-        id = "edge-then-road",
+        id = "edge-before-road",
     )
 
     /**
      * Only the right lane of three can be used at a point 1,700 m before a right exit, a lane is added on the far
      * side at a point 1,200 m before, and a road without lane data leaves on the right 800 m before.
      */
-    fun droppedThenWider() = approach(
+    fun droppedHoldStays() = approach(
         listOf(at(1_700.0, s(false), s(false), s()), at(1_200.0, s(), s(), s(), s()), bare(800.0, EXIT_RIGHT)),
         exit = listOf(s(false), s(false), s(false), sr()),
-        id = "dropped-then-wider",
+        id = "dropped-hold-stays",
     )
 
     /** Two lanes added on the right at a point 900 m before a right exit, which takes the inner one only. */
@@ -499,8 +499,8 @@ internal object LaneScenes {
         "prefers-left" to prefersLeft(),
         "split-right" to splitRight(),
         "two-added" to twoAdded(),
-        "edge-then-road" to edgeThenRoad(),
-        "dropped-then-wider" to droppedThenWider(),
+        "edge-before-road" to edgeBeforeRoad(),
+        "dropped-hold-stays" to droppedHoldStays(),
         "keep-left" to keepLeft(),
     )
 }

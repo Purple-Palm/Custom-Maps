@@ -56,7 +56,7 @@ class LanePlanLineTest {
     fun `a keep left given as a continue counts its points' lanes from the left`() {
         val runUp = windows(fields(LaneScenes.keepLeft())).single { it["kind"] == "run_up" }
         assertEquals(listOf(-1_200L, 0L), list(runUp["points"]).map { it["atM"] })
-        assertEquals(listOf(1, 0), list(runUp["points"]).map { it["lane"] }, "the second lane from the left, then the left lane")
+        assertEquals(listOf(1, 0), list(runUp["points"]).map { it["lane"] }, "the second lane from the left, and the left lane at the split")
     }
 
     @Test
