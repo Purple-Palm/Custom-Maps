@@ -89,9 +89,11 @@ The same builds also reach the phone through Google Play, where they update by t
    Tap a route, on the map or in the list, to choose it.
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
    notification. The maneuver card shows the next turn, its distance and the lanes; the bottom bar
-   shows the arrival time, what is left, **Overview**/**Recenter** and **End**. Right after a new
-   route, as after leaving the route, the card can dim for a moment and show no distance, until
-   the new route's first instruction arrives.
+   shows the arrival time, what is left, **Overview**/**Recenter** and **End**. With the largest font
+   sizes on a narrow phone, the arrival time and what is left take a row of their own above the two
+   buttons, for the whole drive, so that no number is cut off. Right after a new route, as after
+   leaving the route, the card can dim for a moment and show no distance, until the new route's
+   first instruction arrives.
 5. Guidance stops at the destination (**Done**) or with **End**. Both stop the trip session, and so
    does **End Navigation** in the trip notification.
 

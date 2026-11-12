@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -41,6 +42,7 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
@@ -401,11 +403,36 @@ private val LANE_WORDS_MIN_SIZE = 10.sp
 /** The smallest the time and the distance left in the guidance bar shrink to, at the phone's font scale. */
 private val REMAINING_MIN_SIZE = 12.sp
 
+/** The smallest the arrival time in the guidance bar shrinks to, at the phone's font scale. */
+private val ARRIVAL_MIN_SIZE = 16.sp
+
+/** Between the guidance bar's numbers and its buttons, between its two buttons, and between its two rows. */
+private val BAR_GAP = 8.dp
+
 /**
- * Arrival time, time and distance left, and the controls to change view or end guidance. The texts
- * stay on one line and shrink if they have to, so the arrival time is never split. Overview has a
- * border of its own and a label in the card's ink in both looks: Material's outlined button would
- * draw a border the card hardly shows (1.28:1 at night) and a muted label.
+ * The widest clock times the guidance bar shows: a two-digit hour, in either half of the day. Its
+ * digits are all as wide, so no arrival time is wider than these.
+ */
+internal val WIDEST_ARRIVALS = listOf("12:00 AM", "12:00 PM")
+
+/**
+ * A time left as wide as the time left of any drive under ten hours, with digits all as wide: the
+ * guidance bar keeps room for it, so a drive that falls under an hour keeps the bar it started with.
+ */
+internal const val WIDE_TIME_LEFT = "9 hr 59 min"
+
+/**
+ * Arrival time, time and distance left, and the controls to change view or end guidance. The
+ * numbers shrink if they have to, never below [ARRIVAL_MIN_SIZE] and [REMAINING_MIN_SIZE], and stand
+ * beside the two buttons where they fit there at those sizes. Where they do not, as with the largest
+ * font sizes on a narrow phone, they take a row of their own across the bar, above the buttons
+ * ([barRows]), so that no number is ever cut. That depends on the phone's width and font, not on the
+ * drive: the bar keeps room for the widest numbers a drive shows ([WIDEST_ARRIVALS], [WIDE_TIME_LEFT],
+ * or the drive's own where they are wider) and for the wider of Overview and Recenter, so it keeps
+ * one layout from the start of a drive to its end, and one height once the numbers show, and the
+ * camera's padding with it.
+ * Overview has a border of its own and a label in the card's ink in both looks: Material's outlined
+ * button would draw a border the card hardly shows (1.28:1 at night) and a muted label.
  */
 @Composable
 fun GuidanceBar(
@@ -416,79 +443,178 @@ fun GuidanceBar(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LookTheme.tokens
+    // The numbers read at a glance a step heavier than Material's, for sunlight.
+    val arrivalStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = TABULAR_DIGITS)
+    val remainingStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+    // What Material's buttons set their labels in.
+    val labelStyle = MaterialTheme.typography.labelLarge
+    val arrival = progress?.let { ImperialFormat.arrivalTime(ZonedDateTime.now(), it.durationRemaining) }
+    val time = progress?.let { ImperialFormat.duration(it.durationRemaining) }
+    val distance = progress?.let { ImperialFormat.distance(it.distanceRemaining).toString() }
+    val toggleLabel = stringResource(if (following) R.string.guidance_overview else R.string.guidance_recenter)
+    val otherLabel = stringResource(if (following) R.string.guidance_recenter else R.string.guidance_overview)
+    // How wide the numbers are at their smallest, and how much wider the toggle's other label is
+    // than the one it shows, in pixels; the measurer keeps what it has measured.
+    val measurer = rememberTextMeasurer()
+    val numbers = maxOf(
+        (WIDEST_ARRIVALS + listOfNotNull(arrival)).maxOf { measurer.widthOf(it, arrivalStyle.copy(fontSize = ARRIVAL_MIN_SIZE)) },
+        listOfNotNull(WIDE_TIME_LEFT, time).maxOf { measurer.widthOf(it, remainingStyle.copy(fontSize = REMAINING_MIN_SIZE)) },
+    )
+    val toggleSlack = (measurer.widthOf(otherLabel, labelStyle) - measurer.widthOf(toggleLabel, labelStyle)).coerceAtLeast(0)
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = tokens.card,
         shadowElevation = tokens.overMapElevation,
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                if (progress != null) {
-                    // The numbers read at a glance a step heavier than Material's, for sunlight.
-                    val arrivalStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = TABULAR_DIGITS)
-                    Text(
-                        text = ImperialFormat.arrivalTime(ZonedDateTime.now(), progress.durationRemaining),
-                        style = arrivalStyle,
-                        color = tokens.glanceAccent,
-                        maxLines = 1,
-                        autoSize = TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = arrivalStyle.fontSize),
-                    )
-                    RemainingLine(
-                        time = ImperialFormat.duration(progress.durationRemaining),
-                        distance = ImperialFormat.distance(progress.distanceRemaining).toString(),
-                        color = tokens.onCardMuted,
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.guidance_starting),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = tokens.onCardMuted,
-                    )
+        Layout(
+            content = {
+                Column(Modifier.layoutId(BarPart.NUMBERS)) {
+                    if (arrival != null && time != null && distance != null) {
+                        Text(
+                            text = arrival,
+                            style = arrivalStyle,
+                            color = tokens.glanceAccent,
+                            maxLines = 1,
+                            autoSize = TextAutoSize.StepBased(minFontSize = ARRIVAL_MIN_SIZE, maxFontSize = arrivalStyle.fontSize),
+                        )
+                        RemainingLine(time = time, distance = distance, style = remainingStyle, color = tokens.onCardMuted)
+                    } else {
+                        Text(
+                            text = stringResource(R.string.guidance_starting),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = tokens.onCardMuted,
+                        )
+                    }
                 }
-            }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(
-                onClick = onToggleOverview,
-                border = BorderStroke(1.dp, tokens.outline),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
-                contentPadding = COMPACT_BUTTON_PADDING,
-            ) {
-                Text(stringResource(if (following) R.string.guidance_overview else R.string.guidance_recenter))
-            }
-            Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = onEnd,
-                contentPadding = COMPACT_BUTTON_PADDING,
-                colors = ButtonDefaults.buttonColors(containerColor = tokens.danger, contentColor = tokens.onDanger),
-            ) {
-                Text(stringResource(R.string.guidance_end))
+                OutlinedButton(
+                    onClick = onToggleOverview,
+                    modifier = Modifier.layoutId(BarPart.TOGGLE),
+                    border = BorderStroke(1.dp, tokens.outline),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
+                    contentPadding = COMPACT_BUTTON_PADDING,
+                ) {
+                    Text(toggleLabel)
+                }
+                Button(
+                    onClick = onEnd,
+                    modifier = Modifier.layoutId(BarPart.END),
+                    contentPadding = COMPACT_BUTTON_PADDING,
+                    colors = ButtonDefaults.buttonColors(containerColor = tokens.danger, contentColor = tokens.onDanger),
+                ) {
+                    Text(stringResource(R.string.guidance_end))
+                }
+            },
+            modifier = Modifier.padding(16.dp),
+        ) { measurables, constraints ->
+            val gap = BAR_GAP.roundToPx()
+            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+            val toggle = measurables.first { it.layoutId == BarPart.TOGGLE }.measure(loose)
+            val end = measurables.first { it.layoutId == BarPart.END }.measure(loose)
+            val numbersPart = measurables.first { it.layoutId == BarPart.NUMBERS }
+            // The buttons and the gaps beside them, with room for the toggle's wider label.
+            val buttons = gap + toggle.width + toggleSlack + gap + end.width
+            val bounded = constraints.hasBoundedWidth
+            if (!bounded || barRows(constraints.maxWidth, buttons, numbers) == BarRows.ONE) {
+                val room = if (bounded) (constraints.maxWidth - buttons).coerceAtLeast(0) else Constraints.Infinity
+                val column = numbersPart.measure(loose.copy(maxWidth = room))
+                val width = if (bounded) constraints.maxWidth else column.width + buttons
+                val height = constraints.constrainHeight(maxOf(column.height, toggle.height, end.height))
+                layout(width, height) {
+                    column.placeRelative(0, (height - column.height) / 2)
+                    toggle.placeRelative(width - end.width - gap - toggle.width, (height - toggle.height) / 2)
+                    end.placeRelative(width - end.width, (height - end.height) / 2)
+                }
+            } else {
+                // The numbers across the whole bar, and the buttons under them where they were.
+                val column = numbersPart.measure(loose)
+                val width = constraints.maxWidth
+                val buttonsTop = column.height + gap
+                val buttonsHeight = maxOf(toggle.height, end.height)
+                layout(width, constraints.constrainHeight(buttonsTop + buttonsHeight)) {
+                    column.placeRelative(0, 0)
+                    toggle.placeRelative(width - end.width - gap - toggle.width, buttonsTop + (buttonsHeight - toggle.height) / 2)
+                    end.placeRelative(width - end.width, buttonsTop + (buttonsHeight - end.height) / 2)
+                }
             }
         }
     }
 }
 
+/** The parts of the guidance bar, by which its layout finds them. */
+private enum class BarPart { NUMBERS, TOGGLE, END }
+
+/** Where the guidance bar's numbers stand: beside its two buttons, or in a row of their own above them. */
+internal enum class BarRows { ONE, TWO }
+
+/**
+ * Where the numbers go in a guidance bar [width] wide inside its padding, all in pixels: beside its
+ * buttons, [buttons] wide with the gaps beside them, when [numbers], the widest the arrival time and
+ * the time left are at their smallest sizes, fit into what the buttons leave; otherwise in a row of
+ * their own across the whole bar, above the buttons, so that no number is ever cut.
+ */
+internal fun barRows(width: Int, buttons: Int, numbers: Int): BarRows =
+    if (numbers <= width - buttons) BarRows.ONE else BarRows.TWO
+
+/** How the time and the distance left are shown ([remainingForm]). */
+internal enum class RemainingForm {
+    /** Both on one line, as in "18 min · 12.3 mi". */
+    BOTH,
+
+    /** The time alone; the screen reader says both. */
+    TIME,
+
+    /** The time, and the distance under it, each wrapping at its spaces if it must. */
+    STACKED,
+}
+
+/**
+ * How the time and the distance left are shown in a column [room] wide, from how wide [both] on one
+ * line and the [time] alone are at their smallest size, all in pixels: both where they fit, else the
+ * time alone where it fits, else the two on lines of their own, so that neither is ever cut.
+ */
+internal fun remainingForm(room: Int, both: Int, time: Int): RemainingForm = when {
+    both <= room -> RemainingForm.BOTH
+    time <= room -> RemainingForm.TIME
+    else -> RemainingForm.STACKED
+}
+
+/** How wide [text] is on one line in [style], in pixels. */
+private fun TextMeasurer.widthOf(text: String, style: TextStyle): Int = measure(text, style, maxLines = 1, softWrap = false).size.width
+
 /**
  * The time and distance left on one line, shrinking to fit, never below [REMAINING_MIN_SIZE]. Where
- * even that leaves no room, as with a large font on a drive of more than an hour, the time alone,
- * so that nothing is cut off; the screen reader says both.
+ * even that leaves no room, the time alone where that fits, and otherwise the time and the distance
+ * on lines of their own ([remainingForm]), so that nothing is cut off; the screen reader says both.
+ * In the guidance bar the time alone always fits: the bar keeps room for it.
  */
 @Composable
-private fun RemainingLine(time: String, distance: String, color: Color) {
-    val style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+private fun RemainingLine(time: String, distance: String, style: TextStyle, color: Color) {
     val both = stringResource(R.string.guidance_remaining, time, distance)
     val measurer = rememberTextMeasurer()
     BoxWithConstraints {
-        val smallest = measurer.measure(both, style.copy(fontSize = REMAINING_MIN_SIZE), maxLines = 1, softWrap = false)
-        val whole = !constraints.hasBoundedWidth || smallest.size.width <= constraints.maxWidth
-        Text(
-            text = if (whole) both else time,
-            style = style,
-            color = color,
-            maxLines = 1,
-            autoSize = TextAutoSize.StepBased(minFontSize = REMAINING_MIN_SIZE, maxFontSize = style.fontSize),
-            modifier = if (whole) Modifier else Modifier.clearAndSetSemantics { contentDescription = both },
-        )
+        val smallest = style.copy(fontSize = REMAINING_MIN_SIZE)
+        val form = if (constraints.hasBoundedWidth) {
+            remainingForm(constraints.maxWidth, both = measurer.widthOf(both, smallest), time = measurer.widthOf(time, smallest))
+        } else {
+            RemainingForm.BOTH
+        }
+        when (form) {
+            RemainingForm.BOTH, RemainingForm.TIME -> Text(
+                text = if (form == RemainingForm.BOTH) both else time,
+                style = style,
+                color = color,
+                maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = REMAINING_MIN_SIZE, maxFontSize = style.fontSize),
+                modifier = if (form == RemainingForm.BOTH) Modifier else Modifier.clearAndSetSemantics { contentDescription = both },
+            )
+            RemainingForm.STACKED -> Text(
+                text = "$time\n$distance",
+                style = smallest,
+                color = color,
+                modifier = Modifier.clearAndSetSemantics { contentDescription = both },
+            )
+        }
     }
 }
 
@@ -683,9 +809,11 @@ private fun RunUpPreview(look: Look, maneuver: Maneuver, row: RunUpLanes) {
 }
 
 /**
- * The guidance bar while the camera follows the car and in the overview, and on a long drive, on a
- * narrow phone, also with a large and the largest font: Overview's border and label read in both
- * looks, and the time and distance left shrink to fit, never below 12 sp, or show the time alone.
+ * The guidance bar while the camera follows the car and in the overview, on a long drive, and
+ * before the first progress, on a narrow phone, also with a large and the largest font: Overview's
+ * border and label read in both looks, and the time and distance left shrink to fit, never below
+ * 12 sp, or show the time alone. With the largest font the numbers, and the words before the first
+ * progress, take a row of their own above the buttons.
  */
 @Preview(name = "guidance bar", widthDp = 360)
 @Preview(name = "guidance bar, large font", widthDp = 360, fontScale = 1.3f)
@@ -698,9 +826,12 @@ private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Loo
             Spacer(Modifier.height(12.dp))
             GuidanceBar(previewExitProgress(), following = false, onToggleOverview = {}, onEnd = {})
             Spacer(Modifier.height(12.dp))
-            // A long drive: with a large font only the time fits.
+            // A long drive: with a large font only the time fits beside the buttons; with the
+            // largest, both fit in the row of their own.
             val long = previewExitProgress().copy(distanceRemaining = Distance.miles(48.0), durationRemaining = 75.minutes)
             GuidanceBar(long, following = true, onToggleOverview = {}, onEnd = {})
+            Spacer(Modifier.height(12.dp))
+            GuidanceBar(progress = null, following = true, onToggleOverview = {}, onEnd = {})
         }
     }
 }

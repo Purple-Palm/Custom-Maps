@@ -891,6 +891,14 @@ On the road:
 41. **A real drive across dusk with Large on a freeway,** when one comes: a change due during a
     lane-choice close-up waits for it (`heldBy` `CLOSE_VIEW`).
 
+The guidance bar with a large font, at home:
+
+42. **A simulated drive with the largest font size** in Android's settings: the arrival time and the
+    time and distance left are whole, in a row of their own above **Overview** and **End**, and the
+    bar keeps its height from the first numbers to the end of the drive, also across **Overview** and
+    **Recenter**. With a smaller font size they stand beside the two buttons, the time left alone
+    where both do not fit; at no size is a number cut off.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
