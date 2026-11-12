@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.guidance
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -39,6 +40,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
@@ -121,6 +123,7 @@ fun ManeuverCard(
                         Text(
                             text = distance.unit,
                             style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Medium,
                             color = tokens.onCardMuted,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
@@ -128,6 +131,7 @@ fun ManeuverCard(
                     Text(
                         text = maneuver.primaryText,
                         style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Medium,
                         color = tokens.onCard,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -163,6 +167,7 @@ fun ManeuverCard(
                             label = words?.let { stringResource(it.short) },
                             description = words?.let { stringResource(it.long) },
                             labelShare = LANE_WORDS_MAX_WIDTH_SHARE,
+                            labelMinSize = LANE_WORDS_MIN_SIZE,
                             onLabelShown = if (words != null && key != null) { shown -> onRunUpWords(key, shown) } else null,
                         )
                     }
@@ -193,14 +198,14 @@ internal fun cardContentAlpha(pending: Boolean, dimmed: Float): Float = if (pend
  *
  * With a [label], for lanes that are not the next maneuver's, the label stands at the start of the
  * row in small type: a lane choice's distance, or on the run-up to an exit the lanes to use in
- * words. It takes at most [labelShare] of the row and shrinks to fit, and shows whole or not at
- * all: a label wider than its share at the smallest size is left out, never cut. The lanes stay in
- * the middle of the row while there is room for that beside the label, and move over, and get
- * narrower, when there is not. The row is as high as its lanes are without a label, and the band
- * ([laneRowGeometry]), so a label that comes or goes never changes the card's height; lanes made
- * narrower by it stand in the middle of the lanes' height, with their bars right under them. A
- * [description] is what the screen reader says for the row. [onLabelShown] hears, each time the
- * row is placed with a label, whether the label was shown or left out.
+ * words. It takes at most [labelShare] of the row and shrinks to fit, not below [labelMinSize],
+ * and shows whole or not at all: a label wider than its share at that size is left out, never cut.
+ * The lanes stay in the middle of the row while there is room for that beside the label, and move
+ * over, and get narrower, when there is not. The row is as high as its lanes are without a label,
+ * and the band ([laneRowGeometry]), so a label that comes or goes never changes the card's height;
+ * lanes made narrower by it stand in the middle of the lanes' height, with their bars right under
+ * them. A [description] is what the screen reader says for the row. [onLabelShown] hears, each time
+ * the row is placed with a label, whether the label was shown or left out.
  */
 @Composable
 fun LanesRow(
@@ -209,6 +214,7 @@ fun LanesRow(
     label: String? = null,
     description: String? = null,
     labelShare: Float = LANE_LABEL_MAX_WIDTH_SHARE,
+    labelMinSize: TextUnit = LANE_DISTANCE_MIN_SIZE,
     onLabelShown: ((Boolean) -> Unit)? = null,
 ) {
     val tokens = LookTheme.tokens
@@ -221,7 +227,7 @@ fun LanesRow(
     Layout(
         content = {
             lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim) }
-            if (label != null) LaneLabel(label, labelStyle, Modifier.layoutId(LaneRowPart.LABEL))
+            if (label != null) LaneLabel(label, labelStyle, labelMinSize, Modifier.layoutId(LaneRowPart.LABEL))
             lanes.lanes.forEachIndexed { index, lane ->
                 if (isLaneToTake(lane)) LaneBar(highlight, Modifier.layoutId(LaneBarOf(index)))
             }
@@ -234,7 +240,7 @@ fun LanesRow(
         val lanesHeight = laneRowHeight(width, count, fullSlot)
         // The label keeps to a share of the row and to the lanes' height; its text shrinks to fit,
         // and a text that does not fit at its smallest size is left out.
-        val smallest = label?.let { measurer.measure(it, labelStyle.copy(fontSize = LANE_LABEL_MIN_SIZE), maxLines = 1, softWrap = false).size }
+        val smallest = label?.let { measurer.measure(it, labelStyle.copy(fontSize = labelMinSize), maxLines = 1, softWrap = false).size }
         val fits = smallest != null && wordsFit(smallest.width, width, labelShare) && smallest.height <= lanesHeight
         val shown = if (fits) {
             measurables.firstOrNull { it.layoutId == LaneRowPart.LABEL }
@@ -336,16 +342,19 @@ internal fun planLaneRow(width: Int, lanes: Int, fullSlot: Int, reserved: Int): 
 internal fun wordsFit(textWidthAtMinSize: Int, rowWidth: Int, share: Float): Boolean =
     textWidthAtMinSize <= (rowWidth * share).roundToInt()
 
-/** The label at the start of a lane row: how far ahead the lanes are, for example "0.4 mi", or the lanes to use in words. */
+/**
+ * The label at the start of a lane row: how far ahead the lanes are, for example "0.4 mi", or the
+ * lanes to use in words. Its text shrinks to fit, never below [minSize].
+ */
 @Composable
-private fun LaneLabel(text: String, style: TextStyle, modifier: Modifier = Modifier) {
+private fun LaneLabel(text: String, style: TextStyle, minSize: TextUnit, modifier: Modifier = Modifier) {
     Text(
         text = text,
         modifier = modifier,
         style = style,
         color = LookTheme.tokens.onCardMuted,
         maxLines = 1,
-        autoSize = TextAutoSize.StepBased(minFontSize = LANE_LABEL_MIN_SIZE, maxFontSize = style.fontSize),
+        autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = style.fontSize),
     )
 }
 
@@ -379,8 +388,18 @@ internal const val LANE_LABEL_MAX_WIDTH_SHARE = 0.3f
  */
 internal const val LANE_WORDS_MAX_WIDTH_SHARE = 0.45f
 
-/** The smallest the label's text shrinks to; at the phone's font scale. */
-private val LANE_LABEL_MIN_SIZE = 10.sp
+/** The smallest a lane choice's distance shrinks to, at the phone's font scale: a number read at a glance. */
+private val LANE_DISTANCE_MIN_SIZE = 12.sp
+
+/**
+ * The smallest the lanes to use in words shrink to on the run-up to an exit, at the phone's font
+ * scale. Smaller than a distance's: the longest words still fit with the largest font, where at
+ * 12 sp they would be left out.
+ */
+private val LANE_WORDS_MIN_SIZE = 10.sp
+
+/** The smallest the time and the distance left in the guidance bar shrink to, at the phone's font scale. */
+private val REMAINING_MIN_SIZE = 12.sp
 
 /**
  * Arrival time, time and distance left, and the controls to change view or end guidance. The texts
@@ -406,7 +425,8 @@ fun GuidanceBar(
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 if (progress != null) {
-                    val arrivalStyle = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = TABULAR_DIGITS)
+                    // The numbers read at a glance a step heavier than Material's, for sunlight.
+                    val arrivalStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = TABULAR_DIGITS)
                     Text(
                         text = ImperialFormat.arrivalTime(ZonedDateTime.now(), progress.durationRemaining),
                         style = arrivalStyle,
@@ -414,17 +434,10 @@ fun GuidanceBar(
                         maxLines = 1,
                         autoSize = TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = arrivalStyle.fontSize),
                     )
-                    val remainingStyle = MaterialTheme.typography.bodyMedium
-                    Text(
-                        text = stringResource(
-                            R.string.guidance_remaining,
-                            ImperialFormat.duration(progress.durationRemaining),
-                            ImperialFormat.distance(progress.distanceRemaining).toString(),
-                        ),
-                        style = remainingStyle,
+                    RemainingLine(
+                        time = ImperialFormat.duration(progress.durationRemaining),
+                        distance = ImperialFormat.distance(progress.distanceRemaining).toString(),
                         color = tokens.onCardMuted,
-                        maxLines = 1,
-                        autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = remainingStyle.fontSize),
                     )
                 } else {
                     Text(
@@ -452,6 +465,30 @@ fun GuidanceBar(
                 Text(stringResource(R.string.guidance_end))
             }
         }
+    }
+}
+
+/**
+ * The time and distance left on one line, shrinking to fit, never below [REMAINING_MIN_SIZE]. Where
+ * even that leaves no room, as with a large font on a drive of more than an hour, the time alone,
+ * so that nothing is cut off; the screen reader says both.
+ */
+@Composable
+private fun RemainingLine(time: String, distance: String, color: Color) {
+    val style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+    val both = stringResource(R.string.guidance_remaining, time, distance)
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints {
+        val smallest = measurer.measure(both, style.copy(fontSize = REMAINING_MIN_SIZE), maxLines = 1, softWrap = false)
+        val whole = !constraints.hasBoundedWidth || smallest.size.width <= constraints.maxWidth
+        Text(
+            text = if (whole) both else time,
+            style = style,
+            color = color,
+            maxLines = 1,
+            autoSize = TextAutoSize.StepBased(minFontSize = REMAINING_MIN_SIZE, maxFontSize = style.fontSize),
+            modifier = if (whole) Modifier else Modifier.clearAndSetSemantics { contentDescription = both },
+        )
     }
 }
 
@@ -521,6 +558,7 @@ private fun ManeuverCardLaneChoicePreview(@PreviewParameter(LookParameter::class
 }
 
 @Preview(widthDp = 360)
+@Preview(name = "large font", widthDp = 360, fontScale = 1.3f)
 @Composable
 private fun ManeuverCardPreview(@PreviewParameter(LookParameter::class) look: Look) {
     PreviewOnMap(look) { ManeuverCard(previewExitProgress()) }
@@ -645,11 +683,13 @@ private fun RunUpPreview(look: Look, maneuver: Maneuver, row: RunUpLanes) {
 }
 
 /**
- * The guidance bar while the camera follows the car and in the overview, on a narrow phone, also
- * with a large font: Overview's border and label read in both looks.
+ * The guidance bar while the camera follows the car and in the overview, and on a long drive, on a
+ * narrow phone, also with a large and the largest font: Overview's border and label read in both
+ * looks, and the time and distance left shrink to fit, never below 12 sp, or show the time alone.
  */
 @Preview(name = "guidance bar", widthDp = 360)
 @Preview(name = "guidance bar, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "guidance bar, largest font", widthDp = 360, fontScale = 2f)
 @Composable
 private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Look) {
     PreviewOnMap(look) {
@@ -657,6 +697,10 @@ private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Loo
             GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {})
             Spacer(Modifier.height(12.dp))
             GuidanceBar(previewExitProgress(), following = false, onToggleOverview = {}, onEnd = {})
+            Spacer(Modifier.height(12.dp))
+            // A long drive: with a large font only the time fits.
+            val long = previewExitProgress().copy(distanceRemaining = Distance.miles(48.0), durationRemaining = 75.minutes)
+            GuidanceBar(long, following = true, onToggleOverview = {}, onEnd = {})
         }
     }
 }

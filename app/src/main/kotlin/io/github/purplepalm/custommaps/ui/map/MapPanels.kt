@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -247,9 +248,11 @@ fun RouteSheet(
                     border = if (selected) BorderStroke(2.dp, tokens.accentInk) else null,
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        // Read at a glance: a step heavier than Material's, for sunlight.
                         Text(
                             text = ImperialFormat.duration(route.duration),
                             style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
                             color = if (selected) tokens.glanceAccent else tokens.onCard,
                         )
                         val via = route.summary.takeIf { it.isNotBlank() }?.let { stringResource(R.string.route_via, it) }
@@ -354,6 +357,7 @@ private fun PlaceCardPreview(@PreviewParameter(LookParameter::class) look: Look)
 /** Two routes, the first selected, with the note of a route that ends away from the place and of a simulated drive. */
 @Preview(name = "routes", widthDp = 360)
 @Preview(name = "routes, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "routes, largest font", widthDp = 360, fontScale = 2f)
 @Composable
 private fun RouteSheetPreview(@PreviewParameter(LookParameter::class) look: Look) {
     PreviewOnMap(look) {
