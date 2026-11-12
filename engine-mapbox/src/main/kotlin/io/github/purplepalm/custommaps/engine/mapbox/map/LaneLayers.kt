@@ -1,0 +1,336 @@
+package io.github.purplepalm.custommaps.engine.mapbox.map
+
+import com.mapbox.bindgen.Value
+import com.mapbox.maps.MapboxMap
+import com.mapbox.maps.extension.style.expressions.generated.Expression
+import com.mapbox.maps.extension.style.layers.addLayer
+import com.mapbox.maps.extension.style.layers.addLayerAbove
+import com.mapbox.maps.extension.style.layers.addLayerBelow
+import com.mapbox.maps.extension.style.layers.generated.fillLayer
+import com.mapbox.maps.extension.style.layers.generated.lineLayer
+import com.mapbox.maps.extension.style.layers.generated.slotLayer
+import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
+import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
+import com.mapbox.maps.extension.style.sources.addSource
+import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
+import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
+
+/**
+ * The layers that draw the app's own lanes on the map (the own lanes' design 2.2, 7 and 9), from one GeoJSON source
+ * ([SOURCE]) of the features [LaneDrawing] makes, each with a [Key.KIND] and, for lines and symbols, its [Key.PAINT]
+ * and [Key.WIDTH].
+ *
+ * Their order inside the style's middle slot, from the bottom (design 7): Standard's roads, which lie below the slot;
+ * the [Group.UNDER_ROUTE] layers, below the navigation SDK's route line ([LayerOrder.ROUTE_LINE_BOTTOM]): the asphalt
+ * with lanes kept for buses and the like darker on it, the tints, the lit lane and its edges, the paint lines of two
+ * widths and the paint's shapes (the car-pool diamonds); the SDK's other routes (its primary line hidden while the app
+ * draws its own); the app's own route line; the [Group.OVER_ROUTE] layers above it, the lane arrows and their edge;
+ * the SDK's maneuver arrow; and in the top slot the 3D buildings and the labels.
+ *
+ * Every width is the feature's ground width as a zoom-only base-2 expression ([LaneDrawing.widthStops]) and every layer
+ * shows from its minimum zoom ([LaneDrawing.ASPHALT_MIN_ZOOM], [LaneDrawing.SYMBOL_MIN_ZOOM],
+ * [LaneDrawing.LIT_MIN_ZOOM]), both for the latitude the drawing lies at, made again when that moves
+ * [LaneDrawing.LATITUDE_STEP_DEGREES]; no layer has an opacity ramp. Colours come from [MapPalette.lanes] of the look
+ * ([LaneColours]) and every layer has emissive strength 1, so the style's light changes none of them. The layers add no
+ * attribution of their own.
+ *
+ * Two ways to keep the order are built, [PLACEMENT] chooses: own slots in the middle slot ([Placement.SLOTS]: two
+ * [UNDER_SLOT] and [OVER_SLOT] markers, every layer in one of them, so the order holds whatever the creation order),
+ * or chained positions ([Placement.CHAINED]: each layer added right below the route line's bottom layer, or right above
+ * the layer before it). Whether a slot inside a slot works on a phone is not known; the chained positions are what the
+ * app's own route line already uses, so they are the choice until the "map_layers" line shows the slots in order.
+ */
+internal object LaneLayers {
+
+    /** The drawing's source: the features of one drawing window. */
+    const val SOURCE = "custommaps-lanes"
+
+    const val ASPHALT = "custommaps-lanes-asphalt"
+    const val TINT = "custommaps-lanes-tint"
+    const val LIT = "custommaps-lanes-lit"
+    const val LIT_EDGES = "custommaps-lanes-lit-edges"
+    const val PAINT = "custommaps-lanes-paint"
+    const val PAINT_WIDE = "custommaps-lanes-paint-wide"
+    const val SHAPES = "custommaps-lanes-shapes"
+    const val ARROWS = "custommaps-lanes-arrows"
+    const val ARROW_EDGES = "custommaps-lanes-arrow-edges"
+
+    /** The own slots of [Placement.SLOTS]: one under the navigation SDK's route line, one over the app's own route line. */
+    const val UNDER_SLOT = "custommaps-lanes-under"
+    const val OVER_SLOT = "custommaps-lanes-over"
+
+    /** Mapbox Standard's slot of the route line. */
+    const val SLOT = "middle"
+
+    /** The lane arrows' edge, on the screen. */
+    const val ARROW_EDGE_DP = 1.0
+
+    /** The property names of a drawn feature, as the layers read them. */
+    object Key {
+        /** [LaneDrawing.Kind.logName]. */
+        const val KIND = "kind"
+
+        /** A line's or a symbol's paint: [PAINT_WHITE] or [PAINT_YELLOW]. */
+        const val PAINT = "paint"
+
+        /** A line's width: [WIDTH_NORMAL], [WIDTH_WIDE] or [WIDTH_EDGE]. */
+        const val WIDTH = "width"
+
+        const val PAINT_WHITE = "white"
+        const val PAINT_YELLOW = "yellow"
+        const val WIDTH_NORMAL = "normal"
+        const val WIDTH_WIDE = "wide"
+        const val WIDTH_EDGE = "edge"
+    }
+
+    /** Where in the middle slot a layer lies. */
+    enum class Group {
+        /** Below the navigation SDK's route line, its other routes and the app's own route line. */
+        UNDER_ROUTE,
+
+        /** Above the app's own route line, below the SDK's maneuver arrow. */
+        OVER_ROUTE,
+    }
+
+    /**
+     * One layer: [id]; a [fill] or a line; the [kinds] of feature it draws, a line's of [width] only where one is
+     * given; its [group]; shown from [minZoom] at latitude 0; a line [fixedDp] wide on the screen where given, else at
+     * the ground width of [width]; [emissiveStrength] 1, so the style's light leaves its colours as they are.
+     */
+    class Spec(
+        val id: String,
+        val fill: Boolean,
+        val kinds: List<LaneDrawing.Kind>,
+        val width: LaneDrawing.Width?,
+        val group: Group,
+        val minZoom: Double,
+        val fixedDp: Double? = null,
+        val emissiveStrength: Double = 1.0,
+    )
+
+    /** The lines of paint, of both widths. */
+    private val PAINT_KINDS = listOf(LaneDrawing.Kind.LANE_LINE, LaneDrawing.Kind.EDGE_LINE, LaneDrawing.Kind.CHANNEL_LINE)
+
+    /** The drawing's layers, the bottom one first. */
+    val LAYERS: List<Spec> = listOf(
+        Spec(ASPHALT, true, listOf(LaneDrawing.Kind.ASPHALT, LaneDrawing.Kind.KEPT_LANE), null, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
+        Spec(TINT, true, listOf(LaneDrawing.Kind.TINT), null, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM),
+        Spec(LIT, true, listOf(LaneDrawing.Kind.LIT), null, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM),
+        Spec(LIT_EDGES, false, listOf(LaneDrawing.Kind.LIT_EDGE), LaneDrawing.Width.EDGE, Group.UNDER_ROUTE, LaneDrawing.LIT_MIN_ZOOM),
+        Spec(PAINT, false, PAINT_KINDS, LaneDrawing.Width.NORMAL, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
+        Spec(PAINT_WIDE, false, PAINT_KINDS, LaneDrawing.Width.WIDE, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
+        Spec(SHAPES, false, listOf(LaneDrawing.Kind.DIAMOND), LaneDrawing.Width.NORMAL, Group.UNDER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM),
+        Spec(ARROWS, true, listOf(LaneDrawing.Kind.ARROW), null, Group.OVER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM),
+        Spec(ARROW_EDGES, false, listOf(LaneDrawing.Kind.ARROW), null, Group.OVER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM, fixedDp = ARROW_EDGE_DP),
+    )
+
+    /** How the drawing's layers keep their places in the middle slot. */
+    enum class Placement {
+        /** In two own slots inside the middle slot: [UNDER_SLOT] and [OVER_SLOT]. */
+        SLOTS,
+
+        /** Each right below the route line's bottom layer, or right above the layer before it, in the middle slot. */
+        CHAINED,
+    }
+
+    /** The way the app places the drawing's layers: chained positions, until nested slots are seen to work on a phone. */
+    val PLACEMENT = Placement.CHAINED
+
+    /** The value of [Key.WIDTH] for a line of [width]. */
+    fun widthName(width: LaneDrawing.Width): String = when (width) {
+        LaneDrawing.Width.NORMAL -> Key.WIDTH_NORMAL
+        LaneDrawing.Width.WIDE -> Key.WIDTH_WIDE
+        LaneDrawing.Width.EDGE -> Key.WIDTH_EDGE
+    }
+
+    /** The value of [Key.PAINT] for [paint]. */
+    fun paintName(paint: LaneDrawing.Paint): String = when (paint) {
+        LaneDrawing.Paint.WHITE -> Key.PAINT_WHITE
+        LaneDrawing.Paint.YELLOW -> Key.PAINT_YELLOW
+    }
+
+    /**
+     * Where one layer goes as it is added: [id], in [slot], right below [below] or right above [above] where one is
+     * given, else at the end of its slot; [marker] for an own slot of [Placement.SLOTS], which draws nothing.
+     */
+    data class Position(val id: String, val slot: String, val below: String? = null, val above: String? = null, val marker: Boolean = false)
+
+    /**
+     * The drawing's layers in the order they are added, each with where it goes, by [placement]: first the layers under
+     * the route line's bottom layer, and after them the ones over [overAnchor], the topmost layer of the app's own route
+     * line.
+     */
+    fun positions(placement: Placement, overAnchor: String): List<Position> {
+        val under = LAYERS.filter { it.group == Group.UNDER_ROUTE }
+        val over = LAYERS.filter { it.group == Group.OVER_ROUTE }
+        return when (placement) {
+            Placement.CHAINED -> {
+                // Each one right below the route line's bottom layer lies above the one added before it.
+                val out = under.map { Position(it.id, SLOT, below = LayerOrder.ROUTE_LINE_BOTTOM) }.toMutableList()
+                var anchor = overAnchor
+                for (spec in over) {
+                    out.add(Position(spec.id, SLOT, above = anchor))
+                    anchor = spec.id
+                }
+                out
+            }
+            Placement.SLOTS ->
+                listOf(
+                    Position(UNDER_SLOT, SLOT, below = LayerOrder.ROUTE_LINE_BOTTOM, marker = true),
+                    Position(OVER_SLOT, SLOT, above = overAnchor, marker = true),
+                ) + under.map { Position(it.id, UNDER_SLOT) } + over.map { Position(it.id, OVER_SLOT) }
+        }
+    }
+
+    /** The drawing's layers and source in the style of one map. Every call may throw where the style refuses. */
+    interface Port {
+        /** Whether the style has the source and every layer of [LAYERS]. */
+        fun exist(): Boolean
+
+        /**
+         * Adds the source, with nothing in it, and [LAYERS] where [positions] put them, in [colours], with widths and
+         * minimum zooms for [latitude]; whatever of them is there already is taken out first.
+         */
+        fun add(positions: List<Position>, colours: LaneColours, latitude: Double)
+
+        /** Every layer's colours from now on. */
+        fun setColours(colours: LaneColours)
+
+        /** Every layer's widths and minimum zoom for [latitude]. */
+        fun setLatitude(latitude: Double)
+
+        /** Takes the layers, the own slots and the source out of the style, whichever of them is there. */
+        fun remove()
+    }
+
+    /** The drawing's layers and source on [mapboxMap]. */
+    fun on(mapboxMap: MapboxMap): Port = object : Port {
+        /** The source in the style now; its data is set through it. */
+        private var source: GeoJsonSource? = null
+
+        override fun exist(): Boolean =
+            source != null && mapboxMap.styleSourceExists(SOURCE) && LAYERS.all { mapboxMap.styleLayerExists(it.id) }
+
+        override fun add(positions: List<Position>, colours: LaneColours, latitude: Double) {
+            // One of them may be left from an addition that failed half way.
+            remove()
+            val created = geoJsonSource(SOURCE) {}
+            mapboxMap.addSource(created)
+            source = created
+            for (position in positions) {
+                val layer = if (position.marker) {
+                    slotLayer(position.id) { slot(position.slot) }
+                } else {
+                    layerOf(LAYERS.first { it.id == position.id }, position.slot, colours, latitude)
+                }
+                when {
+                    position.below != null -> mapboxMap.addLayerBelow(layer, position.below)
+                    position.above != null -> mapboxMap.addLayerAbove(layer, position.above)
+                    else -> mapboxMap.addLayer(layer)
+                }
+            }
+        }
+
+        override fun setColours(colours: LaneColours) {
+            for (spec in LAYERS) set(spec.id, if (spec.fill) "fill-color" else "line-color", colourOf(spec, colours))
+        }
+
+        override fun setLatitude(latitude: Double) {
+            for (spec in LAYERS) {
+                set(spec.id, "minzoom", Value.valueOf(LaneDrawing.zoomAt(spec.minZoom, latitude)))
+                if (!spec.fill) set(spec.id, "line-width", widthOf(spec, latitude))
+            }
+        }
+
+        override fun remove() {
+            for (spec in LAYERS.asReversed()) if (mapboxMap.styleLayerExists(spec.id)) mapboxMap.removeStyleLayer(spec.id)
+            for (slot in listOf(OVER_SLOT, UNDER_SLOT)) if (mapboxMap.styleLayerExists(slot)) mapboxMap.removeStyleLayer(slot)
+            if (mapboxMap.styleSourceExists(SOURCE)) mapboxMap.removeStyleSource(SOURCE)
+            source = null
+        }
+
+        /** One property of one layer; the style's refusal is thrown, its words without the value. */
+        private fun set(layerId: String, property: String, value: Value) {
+            val error = mapboxMap.setStyleLayerProperty(layerId, property, value).error
+            if (error != null) throw IllegalStateException("The style refused $property of $layerId")
+        }
+    }
+
+    /** [spec] as a layer of [SOURCE] in [slot], in [colours], for [latitude]. */
+    private fun layerOf(spec: Spec, slot: String, colours: LaneColours, latitude: Double) =
+        if (spec.fill) {
+            fillLayer(spec.id, SOURCE) {
+                slot(slot)
+                filter(filterOf(spec))
+                minZoom(LaneDrawing.zoomAt(spec.minZoom, latitude))
+                fillColor(colourOf(spec, colours))
+                fillEmissiveStrength(spec.emissiveStrength)
+                // A kept lane lies on the asphalt it is part of.
+                if (spec.id == ASPHALT) fillSortKey(keptOnTop())
+            }
+        } else {
+            lineLayer(spec.id, SOURCE) {
+                slot(slot)
+                filter(filterOf(spec))
+                minZoom(LaneDrawing.zoomAt(spec.minZoom, latitude))
+                // Dashes end where they are cut; paint meets at its corners.
+                lineCap(LineCap.BUTT)
+                lineJoin(if (spec.id == LIT_EDGES) LineJoin.ROUND else LineJoin.MITER)
+                lineWidth(widthOf(spec, latitude))
+                lineColor(colourOf(spec, colours))
+                lineEmissiveStrength(spec.emissiveStrength)
+            }
+        }
+
+    /** The features [spec] draws: its kinds, and for a line of paint its width. */
+    private fun filterOf(spec: Spec): Expression {
+        val kinds = Expression.inExpression {
+            get(Key.KIND)
+            literal(spec.kinds.map { it.logName })
+        }
+        val width = spec.width
+        return if (width == null || spec.kinds.none { it in PAINT_KINDS }) {
+            kinds
+        } else {
+            Expression.all(kinds, Expression.eq(Expression.get(Key.WIDTH), Expression.literal(widthName(width))))
+        }
+    }
+
+    /** The line width of [spec]: its fixed width on the screen, or its ground width for [latitude]. */
+    private fun widthOf(spec: Spec, latitude: Double): Expression {
+        spec.fixedDp?.let { return Expression.literal(it) }
+        val meters = requireNotNull(spec.width) { "A line needs a width" }.meters
+        return Expression.interpolate {
+            exponential { literal(2.0) }
+            zoom()
+            for ((zoom, dp) in LaneDrawing.widthStops(meters, latitude)) stop(zoom, dp)
+        }
+    }
+
+    /** A kept lane over the asphalt it lies on. */
+    private fun keptOnTop(): Expression =
+        Expression.match(Expression.get(Key.KIND), Expression.literal(LaneDrawing.Kind.KEPT_LANE.logName), Expression.literal(1.0), Expression.literal(0.0))
+
+    /** The colour of [spec]'s features in [colours]. */
+    private fun colourOf(spec: Spec, colours: LaneColours): Expression = when (spec.id) {
+        ASPHALT -> Expression.match(
+            Expression.get(Key.KIND),
+            Expression.literal(LaneDrawing.Kind.KEPT_LANE.logName),
+            Expression.color(colours.keptLane),
+            Expression.color(colours.asphalt),
+        )
+        TINT -> Expression.color(colours.tint)
+        LIT -> Expression.color(colours.lit)
+        LIT_EDGES -> Expression.color(colours.litEdge)
+        PAINT, PAINT_WIDE -> Expression.match(
+            Expression.get(Key.PAINT),
+            Expression.literal(Key.PAINT_YELLOW),
+            Expression.color(colours.yellow),
+            Expression.color(colours.white),
+        )
+        SHAPES, ARROWS -> Expression.color(colours.white)
+        ARROW_EDGES -> Expression.color(colours.arrowEdge)
+        else -> throw IllegalArgumentException("No colour for ${spec.id}")
+    }
+}

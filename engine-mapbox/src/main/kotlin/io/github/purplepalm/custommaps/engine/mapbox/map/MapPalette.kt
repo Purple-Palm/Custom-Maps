@@ -105,6 +105,59 @@ internal object MapPalette {
     const val PLATINUM = 0xFFE5E4E2.toInt()
     const val GRAPHITE = 0xFF0E1013.toInt()
 
+    /** White paint of the app's own lanes by day; at night it is [PLATINUM], never pure white on the dark map. */
+    const val PAINT_WHITE_DAY = 0xFFFFFFFF.toInt()
+
+    /** Yellow paint of the app's own lanes, the left edge line: first settings, to be judged on the phone. */
+    const val PAINT_YELLOW_NIGHT = 0xFFC9BD7C.toInt()
+    const val PAINT_YELLOW_DAY = 0xFFD6C886.toInt()
+
+    /**
+     * A lane that still works beside the lit one, in the app's own lanes: the route's amber laid over the drawn road at
+     * [TINT_SHARE_NIGHT] at night and [TINT_SHARE_DAY] by day, as one opaque colour.
+     */
+    const val TINT_NIGHT = 0xFF7D6948.toInt()
+    const val TINT_DAY = 0xFF93784C.toInt()
+    const val TINT_SHARE_NIGHT = 0.30
+    const val TINT_SHARE_DAY = 0.38
+
+    /** A lane kept for buses, taxis and the like is the drawn road this much darker (a first setting). */
+    const val KEPT_LANE_DARKER = 0.25
+
+    /**
+     * The colours of the app's own lanes in [look] (the own lanes' design 2.4). The road they are drawn on is the
+     * road colour lane details have in the look ([HD_ROADS_NIGHT], [HD_ROADS_DAY]); the lit lane is the route's amber
+     * with the route's casing as its edges; jams on the dark drawn road are the night's colours in both looks, since
+     * the road is dark in both and the day's reds would not stand out on it.
+     */
+    fun lanes(look: Look): LaneColours {
+        val night = look == Look.NIGHT
+        val asphalt = argbOf(if (night) HD_ROADS_NIGHT else HD_ROADS_DAY)
+        return LaneColours(
+            asphalt = asphalt,
+            keptLane = darker(asphalt, KEPT_LANE_DARKER),
+            white = if (night) PLATINUM else PAINT_WHITE_DAY,
+            yellow = if (night) PAINT_YELLOW_NIGHT else PAINT_YELLOW_DAY,
+            lit = AMBER,
+            litEdge = if (night) CASING_NIGHT else CASING_DAY,
+            tint = if (night) TINT_NIGHT else TINT_DAY,
+            arrowEdge = GRAPHITE,
+            moderate = TRAFFIC_MODERATE,
+            heavy = TRAFFIC_HEAVY_NIGHT,
+            severe = TRAFFIC_SEVERE_NIGHT,
+            closed = CLOSED_NIGHT,
+        )
+    }
+
+    /** A colour of the basemap's config, #RRGGBB, as an opaque ARGB value. */
+    fun argbOf(hex: String): Int = (0xFF shl 24) or hex.removePrefix("#").toInt(16)
+
+    /** [argb], opaque, with each channel [share] darker, rounded. */
+    fun darker(argb: Int, share: Double): Int {
+        fun channel(shift: Int) = Math.round((argb shr shift and 0xFF) * (1.0 - share)).toInt() shl shift
+        return (0xFF shl 24) or channel(16) or channel(8) or channel(0)
+    }
+
     /**
      * The colours the app gives the route line in [look], as plain ARGB values. Every colour it does
      * not name, such as restricted roads, stays the navigation SDK's own.
@@ -173,6 +226,27 @@ internal sealed interface LookValue {
     /** The style's own value: the key is written with no value, which gives it back to the style. */
     data object Restore : LookValue
 }
+
+/**
+ * The colours of the app's own lanes in one look ([MapPalette.lanes]), as plain ARGB values: the drawn [asphalt] (also
+ * the eraser's), a [keptLane] for buses and the like, [white] and [yellow] paint (lines and lane arrows), the [lit] lane
+ * and its [litEdge]s, a [tint]ed lane, the lane arrows' [arrowEdge], and the lit lane where the route has traffic or a
+ * closure on it.
+ */
+internal data class LaneColours(
+    val asphalt: Int,
+    val keptLane: Int,
+    val white: Int,
+    val yellow: Int,
+    val lit: Int,
+    val litEdge: Int,
+    val tint: Int,
+    val arrowEdge: Int,
+    val moderate: Int,
+    val heavy: Int,
+    val severe: Int,
+    val closed: Int,
+)
 
 /** The colours of the route line the app sets, for the route and for the other routes. */
 internal enum class RouteLineColor {

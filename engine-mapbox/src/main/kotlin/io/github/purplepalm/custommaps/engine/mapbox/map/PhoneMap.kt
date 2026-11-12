@@ -232,6 +232,8 @@ class PhoneMap internal constructor(
             }
         },
         debugLog = debugLog,
+        // The app's own lanes' layers, with their Debug switch on.
+        lanePort = LaneLayers.on(mapboxMap),
     )
 
     /** The lane plan of the drive's route, answered on the route lines' worker: the own line's path is built from it. */
@@ -1120,13 +1122,22 @@ class PhoneMap internal constructor(
      * order they are drawn, and whether the maneuver arrow lies above the route line in it.
      */
     private fun logLayerOrder(style: Style) {
-        val ids = style.styleLayers.map { it.id }.filter { slotOf(style, it) == ROUTE_SLOT }
-        val ownLineInPlace = LayerOrder.ownLineInPlace(ids, OwnRouteLine.LAYERS.map { it.id })
+        val ids = style.styleLayers.map { it.id }.filter { slotOf(style, it) in ROUTE_SLOTS }
+        val ownLine = OwnRouteLine.LAYERS.map { it.id }
+        val ownLineInPlace = LayerOrder.ownLineInPlace(ids, ownLine)
+        val lanesInPlace = LayerOrder.lanesInPlace(
+            ids,
+            under = LaneLayers.LAYERS.filter { it.group == LaneLayers.Group.UNDER_ROUTE }.map { it.id },
+            over = LaneLayers.LAYERS.filter { it.group == LaneLayers.Group.OVER_ROUTE }.map { it.id },
+            ownLine = ownLine,
+        )
         debugLog.log(
             "map_layers",
             mapOf("arrowAboveLine" to LayerOrder.arrowAboveLine(ids), "middle" to ids) +
                 // Only while the own route line's layers are in the style.
-                (if (ownLineInPlace != null) mapOf("ownLine" to ownLineInPlace) else emptyMap()),
+                (if (ownLineInPlace != null) mapOf("ownLine" to ownLineInPlace) else emptyMap()) +
+                // Only while the app's own lanes' layers are.
+                (if (lanesInPlace != null) mapOf("lanes" to lanesInPlace) else emptyMap()),
         )
     }
 
@@ -1432,6 +1443,9 @@ class PhoneMap internal constructor(
 
         /** Standard style slot above roads and below 3D buildings and labels. */
         private const val ROUTE_SLOT = "middle"
+
+        /** The slots the "map_layers" line lists: the route's, and the own lanes' slots inside it where they are used. */
+        private val ROUTE_SLOTS = setOf(ROUTE_SLOT, LaneLayers.UNDER_SLOT, LaneLayers.OVER_SLOT)
         private const val ROUTE_TAP_RADIUS_DP = 30f
         private const val FADE_IN_MS = 250L
         private const val CAMERA_SAMPLE_MS = 1_000L

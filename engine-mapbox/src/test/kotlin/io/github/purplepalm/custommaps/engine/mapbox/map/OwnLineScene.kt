@@ -131,6 +131,51 @@ internal class OwnLineScene {
         val ownShown: Boolean get() = added != null && sourceData != null && layersVisible
     }
 
+    /** The layers of the app's own lanes in the same fake style: every call recorded in its [calls] as "lanes." and its name. */
+    class Lanes(private val calls: MutableList<String>) : LaneLayers.Port {
+        /** The call that throws, as a style that refuses it. */
+        var refuse: String? = null
+
+        /** Where the layers were put, as the last addition asked; null while they are not in the style. */
+        var positions: List<LaneLayers.Position>? = null
+        var shownColours: LaneColours? = null
+        var latitude: Double? = null
+
+        override fun exist(): Boolean = positions != null
+
+        override fun add(positions: List<LaneLayers.Position>, colours: LaneColours, latitude: Double) {
+            record("add")
+            this.positions = positions
+            shownColours = colours
+            this.latitude = latitude
+        }
+
+        override fun setColours(colours: LaneColours) {
+            record("setColours")
+            shownColours = colours
+        }
+
+        override fun setLatitude(latitude: Double) {
+            record("setLatitude")
+            this.latitude = latitude
+        }
+
+        override fun remove() {
+            record("remove")
+            positions = null
+        }
+
+        /** What a style load does: the new style has none of the lanes' layers. */
+        fun reload() {
+            positions = null
+        }
+
+        private fun record(call: String) {
+            calls += "lanes.$call"
+            if (call == refuse) throw IllegalStateException("the style refused")
+        }
+    }
+
     /** A worker whose jobs run when the test says, on the test's own thread. */
     class Jobs : OwnRouteLine.Worker {
         private val waiting = ArrayList<() -> Unit>()
@@ -168,13 +213,20 @@ internal class OwnLineScene {
     }
 
     val style = Style()
+    val lanes = Lanes(style.calls)
     val jobs = Jobs()
     val log = Lines()
 
     /** The test's clock, in nanoseconds. */
     var now = 0L
 
-    val line = OwnRouteLine(style, style, jobs, log) { now }
+    val line = OwnRouteLine(style, style, jobs, log, lanes) { now }
+
+    /** What a style load does to the fake style: none of the own layers, the lanes' neither, and the SDK's line shown. */
+    fun reload() {
+        style.reload()
+        lanes.reload()
+    }
 
     private val metersPerDegree = Math.toRadians(1.0) * Geo.EARTH_RADIUS_METERS
 

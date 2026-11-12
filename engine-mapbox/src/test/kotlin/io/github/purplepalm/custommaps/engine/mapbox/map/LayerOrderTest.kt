@@ -77,5 +77,37 @@ class LayerOrderTest {
     @Test
     fun `the route line's top layer is the navigation SDK's`() {
         assertEquals("mapbox-top-level-route-layer", LayerOrder.ROUTE_LINE_TOP)
+        assertEquals("mapbox-bottom-level-route-layer", LayerOrder.ROUTE_LINE_BOTTOM)
+    }
+
+    private val under = listOf("custommaps-lanes-asphalt", "custommaps-lanes-lit", "custommaps-lanes-paint")
+    private val over = listOf("custommaps-lanes-arrows", "custommaps-lanes-arrow-edges")
+
+    @Test
+    fun `the own lanes lie under the SDK's route line, their arrows over the own line and under the maneuver arrow`() {
+        assertEquals(true, LayerOrder.lanesInPlace(under + line + own + over + arrow, under, over, own))
+        // Without the own route line in the style the arrows still have to lie over the SDK's line.
+        assertEquals(true, LayerOrder.lanesInPlace(under + line + over + arrow, under, over, own))
+        assertEquals(true, LayerOrder.lanesInPlace(under + line + own + over, under, over, own), "no maneuver arrow yet")
+    }
+
+    @Test
+    fun `any layer of the own lanes out of its place is out of place`() {
+        val cases = mapOf(
+            "the asphalt over the paint" to listOf(under[2], under[1], under[0]) + line + own + over + arrow,
+            "a layer inside the SDK's route line" to under.take(2) + line.take(2) + under.drop(2) + line.drop(2) + own + over + arrow,
+            "the arrows under the own line" to under + line + over + own + arrow,
+            "the arrows' edge under the arrows" to under + line + own + over.reversed() + arrow,
+            "the arrows over the maneuver arrow" to under + line + own + arrow + over,
+            "an arrow layer under the lane arrows" to under + line + own + listOf(arrow[0]) + over + arrow.drop(1),
+            "no SDK route line" to under + own + over + arrow,
+        )
+        for ((what, ids) in cases) assertEquals(false, LayerOrder.lanesInPlace(ids, under, over, own), what)
+    }
+
+    @Test
+    fun `without every layer of the own lanes there is no place to tell`() {
+        assertNull(LayerOrder.lanesInPlace(line + own + arrow, under, over, own))
+        assertNull(LayerOrder.lanesInPlace(under + line + own + over.take(1) + arrow, under, over, own))
     }
 }

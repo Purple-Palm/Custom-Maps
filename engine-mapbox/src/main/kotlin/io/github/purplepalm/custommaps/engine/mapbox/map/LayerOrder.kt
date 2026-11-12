@@ -16,6 +16,9 @@ internal object LayerOrder {
     /** The route line's topmost layer; every other layer of the route line lies below it. */
     const val ROUTE_LINE_TOP = RouteLayerConstants.TOP_LEVEL_ROUTE_LINE_LAYER_ID
 
+    /** The route line's bottom layer; every other layer of the route line, its other routes included, lies above it. */
+    const val ROUTE_LINE_BOTTOM = RouteLayerConstants.BOTTOM_LEVEL_ROUTE_LINE_LAYER_ID
+
     /** What the ids of the maneuver arrow's layers start with: its shaft, its head and their casings. */
     const val ARROW_PREFIX = "mapbox-navigation-arrow-"
 
@@ -42,5 +45,27 @@ internal object LayerOrder {
         val lowestArrow = ids.indexOfFirst { it.startsWith(ARROW_PREFIX) }
         val ordered = own.zipWithNext().all { (below, above) -> above > below }
         return ordered && lineTop in 0 until own.first() && (lowestArrow < 0 || lowestArrow > own.last())
+    }
+
+    /**
+     * Whether the app's own lanes lie as the design orders them in [ids], from first drawn to last: [under], the drawing's
+     * layers under the route, in their order and all below the navigation SDK's route line (its bottom layer); [over],
+     * the lane arrows and their edge, in their order, above the SDK's route line and above every layer of the app's own
+     * route line ([ownLine]) that is there, and below every layer of the maneuver arrow. Null when the lanes' layers are
+     * not in the style.
+     */
+    fun lanesInPlace(ids: List<String>, under: List<String>, over: List<String>, ownLine: List<String>): Boolean? {
+        val low = under.map { ids.indexOf(it) }
+        val high = over.map { ids.indexOf(it) }
+        if (low.any { it < 0 } || high.any { it < 0 }) return null
+        val lineBottom = ids.indexOf(ROUTE_LINE_BOTTOM)
+        val lineTop = ids.indexOf(ROUTE_LINE_TOP)
+        val ownTop = ownLine.map { ids.indexOf(it) }.maxOrNull() ?: -1
+        val lowestArrow = ids.indexOfFirst { it.startsWith(ARROW_PREFIX) }
+        val ordered = low.zipWithNext().all { (below, above) -> above > below } && high.zipWithNext().all { (below, above) -> above > below }
+        return ordered &&
+            lineBottom >= 0 && low.last() < lineBottom &&
+            lineTop >= 0 && high.first() > maxOf(lineTop, ownTop) &&
+            (lowestArrow < 0 || lowestArrow > high.last())
     }
 }

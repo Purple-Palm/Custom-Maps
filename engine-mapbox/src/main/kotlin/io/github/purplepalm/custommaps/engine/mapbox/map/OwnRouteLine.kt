@@ -65,13 +65,18 @@ import kotlin.math.max
  *
  * The debug log gets a "route_line" line at each change of who draws the line, with the swap's times where the own
  * line took over, and the camera line a "routeLine" object once a second ([diagnostics]): numbers and words only.
- * Main thread only.
+ *
+ * Behind a second Debug switch, Draw the app's lanes ([setLanes]), the layers of the app's own lanes ([LaneLayers]) are
+ * in the style with the own line's: added after them, empty, at every style load and when either switch is turned on,
+ * in the look's colours. Main thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
     private val primary: Primary,
     private val worker: Worker,
     private val debugLog: DebugLog,
+    /** The layers of the app's own lanes ([LaneLayers]), in the style with the own line's while [lanes] is on; null for none. */
+    private val lanePort: LaneLayers.Port? = null,
     /** The clock, in nanoseconds, for how long a path has waited to load. */
     private val nanos: () -> Long = System::nanoTime,
 ) {
@@ -166,6 +171,16 @@ internal class OwnRouteLine(
     var enabled = false
         private set
 
+    /**
+     * Whether the app's own lanes are drawn with the own line (the Debug switch Draw the app's lanes): their layers are in
+     * the style whenever the own line's are, added after them at every style load ([LaneLayers]).
+     */
+    var lanes = false
+        private set
+
+    /** The latitude the lanes' widths and minimum zooms are set for. */
+    private var laneLatitude = 0.0
+
     private var styleReady = false
     private var released = false
     private var look = Look.NIGHT
@@ -235,7 +250,7 @@ internal class OwnRouteLine(
         if (on == enabled) return
         enabled = on
         if (on) {
-            if (ready()) attempt { layers.add(LAYERS, look) }
+            if (ready()) attempt { addLayers() }
             buildPath()
         } else {
             // The SDK's line again during a drive: the line says so.
@@ -251,8 +266,19 @@ internal class OwnRouteLine(
             drawing = null
             forgetSent()
             showSdkLine()
-            if (ready()) attempt { layers.remove() }
+            if (ready()) attempt { removeLayers() }
         }
+    }
+
+    /**
+     * The Debug switch Draw the app's lanes: on, the app's own lanes' layers are in the style with the own line's from
+     * now on; off, they leave it. Nothing of them is added while the own line is off.
+     */
+    fun setLanes(on: Boolean) {
+        if (on == lanes) return
+        lanes = on
+        if (!enabled || !ready()) return
+        attempt { if (on) addLanes() else lanePort?.remove() }
     }
 
     /** Call from the callback of a style load, with [look] the route line's: the new style has no own layers. */
@@ -269,7 +295,7 @@ internal class OwnRouteLine(
             swapFrom = nanos()
         }
         attempt { primary.show() }
-        attempt { layers.add(LAYERS, look) }
+        attempt { addLayers() }
         drawing?.let(::send)
     }
 
@@ -364,7 +390,10 @@ internal class OwnRouteLine(
     fun setLook(look: Look) {
         if (look == this.look) return
         this.look = look
-        if (!enabled || !drawn) return
+        if (!enabled) return
+        // The lanes' layers take the look whether or not a route is drawn.
+        if (lanes && lanePort != null && ready()) attempt { lanePort.setColours(MapPalette.lanes(look)) }
+        if (!drawn) return
         val drawing = drawing ?: return
         attempt { layers.setColours(colourStops(drawing.runs, look), casingColour(look)) }
     }
@@ -439,6 +468,23 @@ internal class OwnRouteLine(
     }
 
     private fun ready() = styleReady && !released && layers.usable
+
+    /** The own line's layers, and with [lanes] the lanes' after them: in the order they have to be added. */
+    private fun addLayers() {
+        layers.add(LAYERS, look)
+        addLanes()
+    }
+
+    /** The lanes' layers, empty, under the route line and over the own line ([LaneLayers.positions]), if [lanes] is on. */
+    private fun addLanes() {
+        if (!lanes) return
+        lanePort?.add(LaneLayers.positions(LaneLayers.PLACEMENT, LAYERS.last().id), MapPalette.lanes(look), laneLatitude)
+    }
+
+    private fun removeLayers() {
+        layers.remove()
+        lanePort?.remove()
+    }
 
     /** Whether the own line of the route the drive is on failed. */
     private fun failed() = routeId != null && routeId == failedRouteId
