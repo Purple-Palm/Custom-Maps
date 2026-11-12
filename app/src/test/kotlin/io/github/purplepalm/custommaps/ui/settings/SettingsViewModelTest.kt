@@ -332,6 +332,29 @@ class SettingsViewModelTest {
         assertTrue(viewModel.debug.value.simulateDrive)
     }
 
+    @Test
+    fun `the own route line is off until switched on, and the switch is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        runCurrent()
+        assertFalse(viewModel.debug.value.ownRouteLine)
+        viewModel.setOwnRouteLine(true)
+        runCurrent()
+        assertTrue(settings.ownRouteLine.value)
+        assertTrue(viewModel.debug.value.ownRouteLine)
+        assertFalse(viewModel.debug.value.simulateDrive, "the other Debug switch is its own")
+    }
+
+    @Test
+    fun `an own route line switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setOwnRouteLine(true)
+        runCurrent()
+        assertFalse(viewModel.debug.value.ownRouteLine)
+        assertFalse(settings.ownRouteLine.value)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
     /** The look on screen, and what the next change is asked with. */
     private val shown = MutableStateFlow(Look.DAY)
     private val asked = mutableListOf<Pair<LookChoice, Look>>()

@@ -237,8 +237,8 @@ internal class MapboxNavigationEngine(
 
     /**
      * The lane plan of the primary route the drive is on, held with the route's id ([LanePlans]): each
-     * primary route the drive uses gets its "lane_evidence" line and its plan, once. Nothing on the screen
-     * reads it yet. Main thread.
+     * primary route the drive uses gets its "lane_evidence" line and its plan, once. Of the screen only the
+     * app's own route line reads it, behind a Debug switch. Main thread.
      */
     internal val lanePlans = LanePlans()
 

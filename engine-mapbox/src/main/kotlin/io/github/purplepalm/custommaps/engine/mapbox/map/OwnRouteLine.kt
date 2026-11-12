@@ -1,0 +1,561 @@
+package io.github.purplepalm.custommaps.engine.mapbox.map
+
+import com.mapbox.bindgen.Value
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.LineString
+import com.mapbox.geojson.Point
+import com.mapbox.maps.MapboxMap
+import com.mapbox.maps.extension.style.expressions.generated.Expression
+import com.mapbox.maps.extension.style.layers.addLayerAbove
+import com.mapbox.maps.extension.style.layers.generated.lineLayer
+import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
+import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
+import com.mapbox.maps.extension.style.sources.addSource
+import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
+import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
+import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
+import io.github.purplepalm.custommaps.nav.lanes.geometry.StationTable
+import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficLevel
+import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficRun
+import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
+
+/**
+ * The route line drawn by the app itself (the design's 5.3), behind the Debug switch App's own route line, which is
+ * off unless turned on. With the switch off nothing here touches the style or the navigation SDK's line.
+ *
+ * With the switch on, during guidance, the route's path is drawn from the app's own GeoJSON source: the route's own
+ * line, moved into the lanes the route's lane plan names, as a line and its casing with the SDK's widths
+ * ([RouteLineWidths], held from zoom 16.5 as with lane details on), the route line's colours of the look
+ * ([MapPalette.routeLine]) and the SDK's traffic levels. The SDK's primary line is hidden meanwhile
+ * ([Primary.hide]); it keeps receiving the routes and the progress as always, so its hidden line stays trimmed and
+ * showing it again is right at once. The SDK's other routes and its maneuver arrow are drawn as before: the own layers
+ * lie in the style's middle slot right above the SDK's route line and below the arrow ([LAYERS]). Before Start, in the
+ * preview, nothing changes.
+ *
+ * The traveled part is trimmed with the SDK's own vanishing point, a fraction of the SDK's route measured as the map
+ * measures lines, taken onto the path through the path's station table ([StationTable]) and only through the table of
+ * that route. Where the SDK skips its point while the drive is tracked, the app's own projection of the puck
+ * ([PuckProjection]) stands in.
+ *
+ * The path, its table and its traffic are built once for a route, off the main thread ([Worker]), as soon as the
+ * route's lane plan is there or could not be made; a traffic refresh builds the traffic again and nothing else. Per
+ * accepted puck update the main thread does one lookup in the table and sets the trim of the two layers. A failure
+ * costs the own line and one error line, never the drive: the SDK's line is shown again. Main thread only.
+ */
+internal class OwnRouteLine(
+    private val layers: Layers,
+    private val primary: Primary,
+    private val worker: Worker,
+    private val debugLog: DebugLog,
+) {
+
+    /** The own line's source and layers in the style of one map. Every call may throw where the style refuses. */
+    interface Layers {
+        /** False before the map can be asked and once it is gone. */
+        val usable: Boolean
+
+        /** Whether the style has the source and every layer of [LAYERS]. */
+        fun exist(): Boolean
+
+        /** Adds the source, with nothing in it, and [layers] in their order, in [look]'s colours, shown. */
+        fun add(layers: List<Layer>, look: Look)
+
+        /** Gives the source the path through [points]. */
+        fun setPath(points: List<GeoPoint>)
+
+        /** Gives the source nothing to draw. */
+        fun clearPath()
+
+        /** The line's colours along the path from each of [stops] on, and the casing's [casing]. */
+        fun setColours(stops: List<ColourStop>, casing: Int)
+
+        /** Trims both layers from the path's start to [fraction] of its projected length. */
+        fun setTrim(fraction: Double)
+
+        /** Shows or hides both layers. */
+        fun setVisible(visible: Boolean)
+
+        /** Takes the layers and the source out of the style, whichever of them is there. */
+        fun remove()
+    }
+
+    /** The navigation SDK's primary route line. Its routes and progress are fed elsewhere, as always. */
+    interface Primary {
+        fun show()
+
+        fun hide()
+    }
+
+    /** Work off the main thread, one job at a time. */
+    interface Worker {
+        /** Runs [work] off the main thread and hands its result to [done] on the main thread, unless cancelled first. */
+        fun <T> run(work: () -> T, done: (Result<T>) -> Unit): Task
+    }
+
+    /** A job of the [Worker]. */
+    fun interface Task {
+        fun cancel()
+    }
+
+    /** Builds the drawing of one path of a route, off the main thread: [version] tells it from the route's earlier ones. */
+    fun interface Build {
+        fun drawing(version: Int): OwnLineDrawing
+    }
+
+    /** Gives the traffic of a route along a drawing's path, off the main thread, for a refresh. */
+    fun interface Traffic {
+        fun runs(drawing: OwnLineDrawing): List<TrafficRun>
+    }
+
+    /** One of the own line's layers as it goes into the style: in [slot], right above the layer [above], with [widths]. */
+    data class Layer(
+        val id: String,
+        val casing: Boolean,
+        val above: String,
+        val slot: String,
+        val widths: List<RouteLineWidths.Stop>,
+        val emissiveStrength: Double,
+    )
+
+    /** From [from], a fraction of the path's projected length, the line is [colour] up to the next stop. */
+    data class ColourStop(val from: Double, val colour: Int)
+
+    /** Whether the Debug switch is on. */
+    var enabled = false
+        private set
+
+    private var styleReady = false
+    private var released = false
+    private var look = Look.NIGHT
+
+    /** The primary route of the drive while guidance runs; null outside guidance. */
+    private var routeId: String? = null
+
+    /** What builds that route's path; null while its lane plan is on its way. */
+    private var build: Build? = null
+
+    private var traffic: Traffic? = null
+
+    /** Counts the paths built, for their versions. */
+    private var versions = 0
+
+    /** The route's path as built; null before it is, and outside guidance. */
+    private var drawing: OwnLineDrawing? = null
+
+    /** The build or the refresh under way on the worker. */
+    private var task: Task? = null
+
+    /** A refresh came while the path was being built from the traffic before it: the traffic is read again once it is. */
+    private var refreshPending = false
+
+    /** Whether the own line is drawn and the SDK's primary line hidden. */
+    var drawn = false
+        private set
+
+    /** The trim the layers have, and the route station it stands for. */
+    private var trim = 0.0
+    private var trimStation = 0.0
+
+    // The SDK's newest vanishing point it accepted, and the newest puck, kept for a path drawn between two updates.
+    private var sdkRouteId: String? = null
+    private var sdkOffset = 0.0
+    private var puckLatitude = Double.NaN
+    private var puckLongitude = Double.NaN
+    private var tracking = false
+
+    /** The Debug switch: on, the own line is drawn during guidance from now on; off, the SDK's line is shown and the own layers leave the style. */
+    fun setEnabled(on: Boolean) {
+        if (on == enabled) return
+        enabled = on
+        if (on) {
+            if (ready()) attempt { layers.add(LAYERS, look) }
+            buildPath()
+        } else {
+            task?.cancel()
+            task = null
+            refreshPending = false
+            drawing = null
+            showSdkLine()
+            if (ready()) attempt { layers.remove() }
+        }
+    }
+
+    /** Call from the callback of a style load, with [look] the route line's: the new style has no own layers. */
+    fun onStyleLoaded(look: Look) {
+        styleReady = true
+        this.look = look
+        if (!enabled) return
+        // The SDK's line of the new style is shown until the own line is drawn on it.
+        drawn = false
+        attempt { primary.show() }
+        attempt { layers.add(LAYERS, look) }
+        drawing?.let(::draw)
+    }
+
+    /**
+     * The drive's primary route during guidance: [routeId], a [refresh] of its traffic or not. [build] builds its path,
+     * null while its lane plan is on its way ([onPlan]); [traffic] gives its traffic for a refresh. A new route shows the
+     * SDK's line until its own path is drawn.
+     */
+    fun onRoute(routeId: String, refresh: Boolean, build: Build?, traffic: Traffic) {
+        if (routeId == this.routeId) {
+            this.traffic = traffic
+            if (build != null && this.build == null) {
+                this.build = build
+                buildPath()
+            } else if (refresh) {
+                refreshTraffic()
+            }
+            return
+        }
+        this.routeId = routeId
+        this.build = build
+        this.traffic = traffic
+        task?.cancel()
+        task = null
+        refreshPending = false
+        drawing = null
+        // The new route's own line is trimmed from its start until the SDK or the puck says where the car is on it.
+        trimStation = 0.0
+        if (!enabled) return
+        showSdkLine()
+        buildPath()
+    }
+
+    /** The lane plan of the route [routeId] is there, or could not be made: [build] builds its path. */
+    fun onPlan(routeId: String, build: Build) {
+        if (routeId != this.routeId || this.build != null) return
+        this.build = build
+        buildPath()
+    }
+
+    /**
+     * A puck update the SDK's route line was given: [accepted] where the SDK moved its vanishing point, [offset] on the
+     * route [sdkRouteId], or skipped it; [tracking] while the navigator follows the car on the route. Sets the own line's
+     * trim: the SDK's point through the path's station table, or where the SDK skipped it while [tracking], the app's
+     * own projection of the puck.
+     */
+    fun onPuck(latitude: Double, longitude: Double, accepted: Boolean, sdkRouteId: String?, offset: Double, tracking: Boolean) {
+        if (!enabled) return
+        puckLatitude = latitude
+        puckLongitude = longitude
+        this.tracking = tracking
+        if (accepted && sdkRouteId != null) {
+            this.sdkRouteId = sdkRouteId
+            sdkOffset = offset
+        }
+        val drawing = drawing ?: return
+        if (!drawn) return
+        val station = trimStation(drawing, accepted) ?: return
+        setTrim(drawing, station)
+    }
+
+    /** The route line's colours of [look] from now on. */
+    fun setLook(look: Look) {
+        if (look == this.look) return
+        this.look = look
+        if (!enabled || !drawn) return
+        val drawing = drawing ?: return
+        attempt { layers.setColours(colourStops(drawing.runs, look), casingColour(look)) }
+    }
+
+    /** Guidance ended: the SDK's line is shown, as it is in the preview, and the own source is cleared. */
+    fun onGuidanceEnded() {
+        val had = routeId != null || drawn || task != null
+        routeId = null
+        build = null
+        traffic = null
+        task?.cancel()
+        task = null
+        refreshPending = false
+        drawing = null
+        sdkRouteId = null
+        trimStation = 0.0
+        if (!enabled || !had) return
+        showSdkLine()
+        if (ready()) attempt { layers.clearPath() }
+    }
+
+    /** The map is going away: nothing is built or set any more. */
+    fun release() {
+        released = true
+        task?.cancel()
+        task = null
+    }
+
+    private fun ready() = styleReady && !released && layers.usable
+
+    /** Builds the path of the route the drive is on, if its plan is there, the switch is on and no path is built yet. */
+    private fun buildPath() {
+        val build = build ?: return
+        val routeId = routeId ?: return
+        if (!enabled || drawing != null) return
+        val version = ++versions
+        task?.cancel()
+        task = worker.run({ build.drawing(version) }) { result ->
+            task = null
+            result.fold(
+                onSuccess = { built ->
+                    // A path of a route the drive has left, or built after the switch went off, is dropped.
+                    if (enabled && built.routeId == routeId && routeId == this.routeId) {
+                        drawing = built
+                        draw(built)
+                        if (refreshPending) {
+                            refreshPending = false
+                            refreshTraffic()
+                        }
+                    }
+                },
+                // The SDK's line stays: the route costs its own line and this one error line.
+                onFailure = { debugLog.error(WHERE, it) },
+            )
+        }
+    }
+
+    /** A refresh: the traffic again along the path drawn, and the line's colours with it. */
+    private fun refreshTraffic() {
+        if (!enabled) return
+        val traffic = traffic ?: return
+        val old = drawing
+        if (old == null) {
+            // A path under way was built from the traffic before this refresh.
+            refreshPending = task != null
+            return
+        }
+        task?.cancel()
+        task = worker.run({ old.withRuns(traffic.runs(old)) }) { result ->
+            task = null
+            result.fold(
+                onSuccess = { refreshed ->
+                    if (enabled && drawing === old) {
+                        drawing = refreshed
+                        if (drawn) attempt { layers.setColours(colourStops(refreshed.runs, look), casingColour(look)) }
+                    }
+                },
+                onFailure = { debugLog.error(WHERE, it) },
+            )
+        }
+    }
+
+    /** Draws [drawing] on the style: its path, colours and trim, the own layers shown and the SDK's line hidden. */
+    private fun draw(drawing: OwnLineDrawing) {
+        if (!ready()) return
+        attempt {
+            layers.setPath(drawing.points)
+            layers.setColours(colourStops(drawing.runs, look), casingColour(look))
+            val station = trimStation(drawing, accepted = sdkRouteId == drawing.routeId) ?: 0.0
+            trim = drawing.table.pathFraction(station)
+            trimStation = station
+            layers.setTrim(trim)
+            layers.setVisible(true)
+            primary.hide()
+            drawn = true
+        }
+    }
+
+    /**
+     * Where along the route the own line is trimmed: the SDK's vanishing point where it [accepted] one of this route,
+     * else, while the drive is tracked, the app's own projection of the puck; null where neither says.
+     */
+    private fun trimStation(drawing: OwnLineDrawing, accepted: Boolean): Double? = when {
+        // The SDK's point through this path's table only where the SDK's route is this one.
+        accepted && sdkRouteId == drawing.table.routeId -> drawing.table.stationAt(sdkOffset)
+        tracking && !puckLatitude.isNaN() -> drawing.projection.station(puckLatitude, puckLongitude, trimStation)
+        else -> null
+    }
+
+    private fun setTrim(drawing: OwnLineDrawing, station: Double) {
+        val fraction = drawing.table.pathFraction(station)
+        trimStation = station
+        if (fraction == trim) return
+        trim = fraction
+        attempt { layers.setTrim(fraction) }
+    }
+
+    /** The SDK's line is shown and the own layers hidden. */
+    private fun showSdkLine() {
+        drawn = false
+        attempt { primary.show() }
+        if (ready()) attempt { layers.setVisible(false) }
+    }
+
+    /**
+     * Runs [change] on the style; where the style refuses, the own line is given up for now: the SDK's line is shown,
+     * the own layers hidden, and the error goes to the debug log.
+     */
+    private inline fun attempt(change: () -> Unit) {
+        try {
+            change()
+        } catch (e: RuntimeException) {
+            debugLog.error(WHERE, e)
+            drawn = false
+            try {
+                primary.show()
+                if (ready()) layers.setVisible(false)
+            } catch (again: RuntimeException) {
+                debugLog.error(WHERE, again)
+            }
+        }
+    }
+
+    companion object {
+        /** Where an error line says the own route line failed. */
+        const val WHERE = "ownRouteLine"
+
+        const val SOURCE = "custommaps-own-route"
+        const val CASING = "custommaps-own-route-casing"
+        const val LINE = "custommaps-own-route-line"
+
+        /** Mapbox Standard's slot above the roads, the navigation SDK's route line's. */
+        const val SLOT = "middle"
+
+        /**
+         * The own line's layers, the bottom one first: the casing right above the SDK's route line's top layer, the line
+         * right above the casing, both below the SDK's maneuver arrow, whose layers lie above the route line's top layer.
+         * Their widths are the SDK's up to zoom 16.5 and those of 16.5 from there on in, the line never narrowed;
+         * emissive strength 1, so the style's light does not dim them, as the SDK's line.
+         */
+        val LAYERS = listOf(
+            Layer(
+                CASING,
+                casing = true,
+                above = LayerOrder.ROUTE_LINE_TOP,
+                slot = SLOT,
+                widths = RouteLineWidths.heldFrom(RouteLineWidths.CASING, RouteLineWidths.HOLD_ZOOM),
+                emissiveStrength = 1.0,
+            ),
+            Layer(
+                LINE,
+                casing = false,
+                above = CASING,
+                slot = SLOT,
+                widths = RouteLineWidths.heldFrom(RouteLineWidths.LINE, RouteLineWidths.HOLD_ZOOM),
+                emissiveStrength = 1.0,
+            ),
+        )
+
+        // The source as the SDK makes its own: geometry tiles to zoom 16, its tolerance and buffer, and line metrics
+        // for the gradient and the trim.
+        private const val SOURCE_MAX_ZOOM = 16L
+        private const val SOURCE_TOLERANCE = 0.375
+        private const val SOURCE_BUFFER = 32L
+
+        /**
+         * The line's colours along the path: each run's level in the route line's colours of [look], a stop where the
+         * colour changes; one stop at the path's start for a path without traffic.
+         */
+        fun colourStops(runs: List<TrafficRun>, look: Look): List<ColourStop> {
+            val colours = MapPalette.routeLine(look)
+            val out = ArrayList<ColourStop>()
+            for (run in runs) {
+                val colour = colourOf(run.level, colours)
+                if (out.isEmpty() || out.last().colour != colour) out.add(ColourStop(if (out.isEmpty()) 0.0 else run.from, colour))
+            }
+            if (out.isEmpty()) out.add(ColourStop(0.0, colourOf(TrafficLevel.UNKNOWN, colours)))
+            return out
+        }
+
+        /** The casing's colour in [look]. */
+        fun casingColour(look: Look): Int = MapPalette.routeLine(look).getValue(RouteLineColor.ROUTE_CASING)
+
+        /** The colour of [level] among the route line's [colours], as the SDK colours its line. */
+        fun colourOf(level: TrafficLevel, colours: Map<RouteLineColor, Int>): Int = colours.getValue(
+            when (level) {
+                TrafficLevel.UNKNOWN -> RouteLineColor.ROUTE_UNKNOWN
+                TrafficLevel.LOW -> RouteLineColor.ROUTE_LOW
+                TrafficLevel.MODERATE -> RouteLineColor.ROUTE_MODERATE
+                TrafficLevel.HEAVY -> RouteLineColor.ROUTE_HEAVY
+                TrafficLevel.SEVERE -> RouteLineColor.ROUTE_SEVERE
+                TrafficLevel.CLOSED -> RouteLineColor.ROUTE_CLOSED
+            },
+        )
+
+        /** The own line's source and layers on [mapboxMap]. */
+        fun layersOn(mapboxMap: MapboxMap): Layers = object : Layers {
+            /** The source in the style now; its data is set through it. */
+            private var source: GeoJsonSource? = null
+
+            override val usable: Boolean get() = mapboxMap.isValid()
+
+            override fun exist(): Boolean =
+                source != null && mapboxMap.styleSourceExists(SOURCE) && LAYERS.all { mapboxMap.styleLayerExists(it.id) }
+
+            override fun add(layers: List<Layer>, look: Look) {
+                // One of them may be left from an addition that failed half way.
+                remove()
+                val created = geoJsonSource(SOURCE) {
+                    lineMetrics(true)
+                    maxzoom(SOURCE_MAX_ZOOM)
+                    tolerance(SOURCE_TOLERANCE)
+                    buffer(SOURCE_BUFFER)
+                }
+                mapboxMap.addSource(created)
+                source = created
+                for (layer in layers) {
+                    mapboxMap.addLayerAbove(
+                        lineLayer(layer.id, SOURCE) {
+                            slot(layer.slot)
+                            lineCap(LineCap.ROUND)
+                            lineJoin(LineJoin.ROUND)
+                            lineWidth(RouteLineWidths.expression(layer.widths))
+                            lineEmissiveStrength(layer.emissiveStrength)
+                            // Not faded behind 3D buildings, as the SDK's line is not.
+                            lineDepthOcclusionFactor(0.0)
+                            lineColor(if (layer.casing) casingColour(look) else colourStops(emptyList(), look).first().colour)
+                        },
+                        layer.above,
+                    )
+                }
+            }
+
+            override fun setPath(points: List<GeoPoint>) {
+                val source = checkNotNull(source) { "No source" }
+                // The source hands its data to the map on a thread of its own.
+                source.geometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude, it.latitude) }))
+            }
+
+            override fun clearPath() {
+                source?.featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+            }
+
+            override fun setColours(stops: List<ColourStop>, casing: Int) {
+                val gradient = Expression.ExpressionBuilder("step").apply {
+                    lineProgress()
+                    color(stops.first().colour)
+                    for (stop in stops) stop {
+                        literal(stop.from)
+                        color(stop.colour)
+                    }
+                }.build()
+                set(LINE, "line-gradient", gradient)
+                set(CASING, "line-color", Expression.color(casing))
+            }
+
+            override fun setTrim(fraction: Double) {
+                val trim = Value.valueOf(listOf(Value.valueOf(0.0), Value.valueOf(fraction)))
+                for (layer in LAYERS) set(layer.id, "line-trim-offset", trim)
+            }
+
+            override fun setVisible(visible: Boolean) {
+                val visibility = Value.valueOf(if (visible) "visible" else "none")
+                for (layer in LAYERS) set(layer.id, "visibility", visibility)
+            }
+
+            override fun remove() {
+                for (layer in LAYERS.asReversed()) if (mapboxMap.styleLayerExists(layer.id)) mapboxMap.removeStyleLayer(layer.id)
+                if (mapboxMap.styleSourceExists(SOURCE)) mapboxMap.removeStyleSource(SOURCE)
+                source = null
+            }
+
+            /** One property of one layer, written as it is; the style's refusal is thrown, its words without the value. */
+            private fun set(layerId: String, property: String, value: Value) {
+                val error = mapboxMap.setStyleLayerProperty(layerId, property, value).error
+                if (error != null) throw IllegalStateException("The style refused $property of $layerId")
+            }
+        }
+    }
+}

@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.settings
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.nav.look.LookChoice
@@ -58,6 +59,18 @@ class DataStoreAppSettingsTest {
         assertEquals(CameraStyle.SMOOTH_FOLLOW, settings.cameraStyle.first())
         assertEquals(LaneZoom.DEFAULT, settings.laneZoom.first())
         assertFalse(settings.laneDetails.first())
+        assertFalse(settings.ownRouteLine.first(), "the SDK draws the route line unless the Debug switch says otherwise")
+    }
+
+    @Test
+    fun `stores the own route line switch under its own key`() = runBlocking {
+        settings.setOwnRouteLine(true)
+        assertTrue(settings.ownRouteLine.first())
+        assertEquals(true, dataStore.data.first()[booleanPreferencesKey("own_route_line")])
+        assertFalse(settings.simulateDrive.first(), "the other Debug switch is its own")
+        assertFalse(settings.laneDetails.first())
+        settings.setOwnRouteLine(false)
+        assertFalse(settings.ownRouteLine.first())
     }
 
     @Test
@@ -174,6 +187,7 @@ class DataStoreAppSettingsTest {
         settings.setLaneDetails(true)
         settings.setDayNight(LookChoice.NIGHT)
         settings.setDayNight(LookChoice.AUTO)
+        settings.setOwnRouteLine(true)
         assertEquals(
             listOf<Pair<String, Any>>(
                 "simulate_drive" to true,
@@ -182,6 +196,7 @@ class DataStoreAppSettingsTest {
                 "lane_details" to true,
                 "day_night" to "night",
                 "day_night" to "auto",
+                "own_route_line" to true,
             ),
             changes,
         )

@@ -157,6 +157,8 @@ fun MapScreen(
     LaunchedEffect(phoneMap) { settings.laneZoom.collect(phoneMap::setLaneZoom) }
     // And for lane markings on the map, where the map has them.
     LaunchedEffect(phoneMap) { settings.laneDetails.collect(phoneMap::setLaneDetails) }
+    // And for the Debug switch that has the app draw the route line itself.
+    LaunchedEffect(phoneMap) { settings.ownRouteLine.collect(phoneMap::setOwnRouteLine) }
     // The pin of the place picked from search, of the routes, the drive and the arrival. It goes
     // when the place does: the place card closed, guidance ended.
     val pinnedPlace = state.pinnedPlace

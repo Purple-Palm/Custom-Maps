@@ -19,8 +19,8 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
 /*
  * The lane plan of each primary route a drive uses (the app's own lanes, design 5): built once for the
  * route, off the main thread, from the route the navigator already holds, and held with the route's id
- * for as long as the drive is on it. No request; nothing of it is stored. Nothing on the screen reads it
- * yet: the debug log compares it with the card's lane row.
+ * for as long as the drive is on it. No request; nothing of it is stored. The debug log compares it with
+ * the card's lane row, and the app's own route line, behind a Debug switch, runs through its lanes.
  */
 
 /** One primary route's lane plan, as the engine holds it ([LanePlans]). */
@@ -85,12 +85,22 @@ internal class LanePlans {
     var held: RouteLanePlan? = null
         private set
 
+    /** The route whose plan was answered last, made or not; null before the first answer of a drive. */
+    private var answeredRouteId: String? = null
+
+    /** Told of each answer that is taken ([deliver]): the route's id and its plan, or null where none could be made. */
+    private val listeners = ArrayList<(routeId: String, plan: RouteLanePlan?) -> Unit>(1)
+
+    /** The worker's answer for a route's plan: [plan], or null where it could not be made. */
+    class Answer(val plan: RouteLanePlan?)
+
     /** A drive begins: its routes are on their way to the navigator, and no plan of the drive before is kept. */
     fun begin() {
         drive++
         asked = 0
         answered = 0
         held = null
+        answeredRouteId = null
         routes.begin()
     }
 
@@ -110,7 +120,24 @@ internal class LanePlans {
         if (plan != null && plan.routeId != ticket.routeId) return false
         answered = ticket.n
         held = plan
+        answeredRouteId = ticket.routeId
+        for (listener in listeners.toList()) listener(ticket.routeId, plan)
         return true
+    }
+
+    /**
+     * The answer for the plan of [routeId] once the worker has given it, made or not; null while it is on its way, for a
+     * route an answer of which a newer route's has taken over, and outside a drive.
+     */
+    fun answerFor(routeId: String?): Answer? = if (routeId != null && routeId == answeredRouteId) Answer(held) else null
+
+    /** [listener] hears every answer taken from now on ([deliver]), on the main thread, until [removeListener]. */
+    fun addListener(listener: (routeId: String, plan: RouteLanePlan?) -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun removeListener(listener: (routeId: String, plan: RouteLanePlan?) -> Unit) {
+        listeners.remove(listener)
     }
 
     /** The plan of the route [routeId], the one a progress update is of; null for any other route and while none is held. */
@@ -120,6 +147,7 @@ internal class LanePlans {
     fun end() {
         drive++
         held = null
+        answeredRouteId = null
         routes.end()
     }
 

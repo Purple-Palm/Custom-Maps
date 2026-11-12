@@ -54,6 +54,26 @@ class LayerOrderTest {
         assertNull(LayerOrder.arrowAboveLine(emptyList()))
     }
 
+    private val own = listOf("custommaps-own-route-casing", "custommaps-own-route-line")
+
+    @Test
+    fun `the own route line lies above the SDK's route line and below the arrow, its casing first`() {
+        assertEquals(true, LayerOrder.ownLineInPlace(line + own + arrow, own))
+        assertEquals(false, LayerOrder.ownLineInPlace(line + own.reversed() + arrow, own), "the line under its casing")
+        assertEquals(false, LayerOrder.ownLineInPlace(line + arrow + own, own), "over the arrow")
+        assertEquals(false, LayerOrder.ownLineInPlace(own + line + arrow, own), "under the SDK's line")
+        assertEquals(false, LayerOrder.ownLineInPlace(listOf(arrow[0]) + line + own + arrow.drop(1), own), "one arrow layer under it")
+        assertEquals(true, LayerOrder.ownLineInPlace(line + own, own), "no arrow yet")
+        assertEquals(false, LayerOrder.ownLineInPlace(own + arrow, own), "no route line")
+    }
+
+    @Test
+    fun `without the own route line there is no place to tell`() {
+        assertNull(LayerOrder.ownLineInPlace(line + arrow, own))
+        assertNull(LayerOrder.ownLineInPlace(line + own.take(1) + arrow, own))
+        assertEquals(own, OwnRouteLine.LAYERS.map { it.id })
+    }
+
     @Test
     fun `the route line's top layer is the navigation SDK's`() {
         assertEquals("mapbox-top-level-route-layer", LayerOrder.ROUTE_LINE_TOP)

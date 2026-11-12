@@ -16,6 +16,7 @@ class FakeAppSettings(
     laneZoom: LaneZoom = LaneZoom.DEFAULT,
     laneDetails: Boolean = false,
     dayNight: LookChoice = LookChoice.DEFAULT,
+    ownRouteLine: Boolean = false,
 ) : AppSettings {
 
     /** While true every change fails as it does on a full disk, and the stored value stays. */
@@ -40,6 +41,10 @@ class FakeAppSettings(
     override val dayNight = MutableStateFlow(dayNight)
 
     override suspend fun setDayNight(choice: LookChoice) = store { dayNight.value = choice }
+
+    override val ownRouteLine = MutableStateFlow(ownRouteLine)
+
+    override suspend fun setOwnRouteLine(enabled: Boolean) = store { ownRouteLine.value = enabled }
 
     private fun store(change: () -> Unit) {
         if (storageFull) throw IOException("No space left on device")

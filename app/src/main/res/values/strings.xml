@@ -180,6 +180,8 @@
     <string name="debug_log_clear_message">All routes, drives and searches recorded on this phone are deleted.</string>
     <string name="debug_simulate_drive">Simulate drive</string>
     <string name="debug_simulate_drive_note">Start replays the route instead of following GPS, for testing without driving. Each run counts as a trip.</string>
+    <string name="debug_own_route_line">App\'s own route line</string>
+    <string name="debug_own_route_line_note">During guidance the app draws the route line itself, as Mapbox would, to compare the two; Mapbox\'s line comes back if the app\'s fails.</string>
     <string name="debug_crash_now">Crash now</string>
     <string name="debug_crash_now_note">Debug builds only. Ends the app at once with an error, as a crash would, to check that the crash and how the app ended are in the debug log.</string>
     <string name="debug_crash_now_title">Crash the app now?</string>

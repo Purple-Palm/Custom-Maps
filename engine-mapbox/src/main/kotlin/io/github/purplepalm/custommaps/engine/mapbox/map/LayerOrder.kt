@@ -29,4 +29,18 @@ internal object LayerOrder {
         if (lineTop < 0 || lowestArrow < 0) return null
         return lowestArrow > lineTop
     }
+
+    /**
+     * Whether the app's own route line ([ownLayers], its casing and its line, the casing first) lies as it should in
+     * [ids], from first drawn to last: above the navigation SDK's route line, whose primary it replaces, the line above
+     * its casing, and every layer of the maneuver arrow above both. Null when the own line is not in the style.
+     */
+    fun ownLineInPlace(ids: List<String>, ownLayers: List<String>): Boolean? {
+        val own = ownLayers.map { ids.indexOf(it) }
+        if (own.any { it < 0 }) return null
+        val lineTop = ids.indexOf(ROUTE_LINE_TOP)
+        val lowestArrow = ids.indexOfFirst { it.startsWith(ARROW_PREFIX) }
+        val ordered = own.zipWithNext().all { (below, above) -> above > below }
+        return ordered && lineTop in 0 until own.first() && (lowestArrow < 0 || lowestArrow > own.last())
+    }
 }

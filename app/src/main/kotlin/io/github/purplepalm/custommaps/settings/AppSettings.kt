@@ -41,6 +41,11 @@ interface AppSettings {
     val dayNight: Flow<LookChoice>
 
     suspend fun setDayNight(choice: LookChoice)
+
+    /** Debug: whether the app draws the route line of a drive itself, in place of the navigation SDK's. */
+    val ownRouteLine: Flow<Boolean>
+
+    suspend fun setOwnRouteLine(enabled: Boolean)
 }
 
 /**
@@ -95,6 +100,13 @@ class DataStoreAppSettings(
         onChanged(DAY_NIGHT.name, stored)
     }
 
+    override val ownRouteLine: Flow<Boolean> = preferences.map { it[OWN_ROUTE_LINE] ?: false }.distinctUntilChanged()
+
+    override suspend fun setOwnRouteLine(enabled: Boolean) {
+        dataStore.edit { it[OWN_ROUTE_LINE] = enabled }
+        onChanged(OWN_ROUTE_LINE.name, enabled)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -105,6 +117,7 @@ class DataStoreAppSettings(
         private val LANE_ZOOM = stringPreferencesKey("lane_zoom")
         private val LANE_DETAILS = booleanPreferencesKey("lane_details")
         private val DAY_NIGHT = stringPreferencesKey("day_night")
+        private val OWN_ROUTE_LINE = booleanPreferencesKey("own_route_line")
 
         private fun CameraStyle.stored(): String = when (this) {
             CameraStyle.MAPBOX_STANDARD -> "mapbox_standard"

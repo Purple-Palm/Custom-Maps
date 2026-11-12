@@ -43,6 +43,13 @@ interface MapRenderer {
     fun setLaneDetails(enabled: Boolean)
 
     /**
+     * Debug: whether the route line of a drive is drawn by the app itself, along the lanes of the
+     * route's lane plan, in place of the navigation SDK's, which comes back by itself if the app's
+     * fails. Off, nothing changes. A change applies at once, also during a drive.
+     */
+    fun setOwnRouteLine(enabled: Boolean)
+
+    /**
      * Marks [place] on the map with a pin at the place itself, such as the building, wherever a
      * route to it ends; null takes the pin away. One place is marked at a time.
      */

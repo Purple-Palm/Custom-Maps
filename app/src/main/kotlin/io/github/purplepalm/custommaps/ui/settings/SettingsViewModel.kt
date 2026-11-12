@@ -48,7 +48,7 @@ data class LookSettings(
 /** A recent trip session, and whose token it ran on. */
 data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
-/** The debug section: trip sessions started on this phone, the simulated drive switch and the debug log. */
+/** The debug section: trip sessions started on this phone, the simulated drive and own route line switches, and the debug log. */
 data class DebugState(
     /** The month's trip sessions, and since when the count runs when that is after the month began. */
     val trips: MonthCount = MonthCount(0),
@@ -57,6 +57,8 @@ data class DebugState(
     /** Newest first. */
     val recentTrips: List<RecentTrip> = emptyList(),
     val simulateDrive: Boolean = false,
+    /** Whether the app draws the route line of a drive itself. */
+    val ownRouteLine: Boolean = false,
     /** Size of the debug log on the phone; null until measured. */
     val logBytes: Long? = null,
 )
@@ -92,13 +94,14 @@ class SettingsViewModel(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
     val debug: StateFlow<DebugState> =
-        combine(tripLog.entries, settings.simulateDrive, logBytes, tokens) { entries, simulate, bytes, list ->
+        combine(tripLog.entries, settings.simulateDrive, settings.ownRouteLine, logBytes, tokens) { entries, simulate, ownLine, bytes, list ->
             val time = now()
             DebugState(
                 trips = TripLog.monthCount(entries, time, installedAt()),
                 tripsByToken = TokenTripCounts.rows(TripLog.countByToken(entries, time), list).takeIf { it.size > 1 }.orEmpty(),
                 recentTrips = entries.takeLast(RECENT_TRIPS).asReversed().map { RecentTrip(it, TokenTripCounts.of(it.tokenId, list)) },
                 simulateDrive = simulate,
+                ownRouteLine = ownLine,
                 logBytes = bytes,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
@@ -122,6 +125,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value.
                 debugLog.error("settings.setSimulateDrive", e)
+            }
+        }
+    }
+
+    /** Applies at once, also during a drive: the map draws the route line itself, or the SDK does again. */
+    fun setOwnRouteLine(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setOwnRouteLine(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the map keeps too.
+                debugLog.error("settings.setOwnRouteLine", e)
             }
         }
     }

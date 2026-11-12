@@ -34,7 +34,10 @@ import com.mapbox.maps.plugin.logo.logo
 import com.mapbox.maps.plugin.scalebar.scalebar
 import com.mapbox.navigation.base.route.NavigationRoute
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import com.mapbox.navigation.base.trip.model.RouteProgressState
+import com.mapbox.navigation.base.utils.DecodeUtils.stepsGeometryToPoints
 import com.mapbox.navigation.core.MapboxNavigation
+import com.mapbox.navigation.core.directions.session.RoutesExtra
 import com.mapbox.navigation.core.directions.session.RoutesObserver
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationObserver
@@ -61,6 +64,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
+import io.github.purplepalm.custommaps.engine.mapbox.navigation.RouteLanePlan
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.MapRenderer
@@ -85,6 +89,7 @@ import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.Place
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -94,6 +99,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The phone's map: Mapbox Standard with 3D buildings in the day or the night look ([setLook]), the
@@ -116,6 +122,9 @@ import kotlinx.coroutines.launch
  * them on ([LaneDetails]). The puck stays where the navigator puts the car, on the line of the
  * road: nothing here moves it sideways into a lane, since no position the phone has says which
  * lane the car is in.
+ *
+ * Behind a Debug switch ([setOwnRouteLine]) the route line of a drive is the app's own, drawn along
+ * the lanes of the route's lane plan in place of the navigation SDK's primary line ([OwnRouteLine]).
  *
  * While the map exists, the style it shows is among what is kept ahead of the car during guidance
  * for stretches without a connection ([OfflineData]).
@@ -185,6 +194,50 @@ class PhoneMap internal constructor(
 
     /** When the traveled part of the route line last took the puck's position, in nanoseconds. */
     private var routeLineUpdatedAt = 0L
+
+    /** Where the own route line's paths are built: off the main thread, one at a time. */
+    private val ownLineWorker = Dispatchers.Default.limitedParallelism(1)
+
+    /**
+     * The route line drawn by the app itself, behind the Debug switch; with the switch off it touches
+     * nothing. The SDK's route line is fed as always either way.
+     */
+    private val ownLine = OwnRouteLine(
+        OwnRouteLine.layersOn(mapboxMap),
+        primary = object : OwnRouteLine.Primary {
+            override fun show() {
+                style?.let(routeLineView::showPrimaryRoute)
+            }
+
+            override fun hide() {
+                style?.let(routeLineView::hidePrimaryRoute)
+            }
+        },
+        worker = object : OwnRouteLine.Worker {
+            override fun <T> run(work: () -> T, done: (Result<T>) -> Unit): OwnRouteLine.Task {
+                val job = scope.launch(ownLineWorker) {
+                    val result = try {
+                        Result.success(work())
+                    } catch (e: RuntimeException) {
+                        Result.failure(e)
+                    } catch (e: OutOfMemoryError) {
+                        // What the path took is free again here: it costs the own line, never the drive.
+                        Result.failure(e)
+                    }
+                    withContext(Dispatchers.Main) { done(result) }
+                }
+                return OwnRouteLine.Task { job.cancel() }
+            }
+        },
+        debugLog = debugLog,
+    )
+
+    /** The lane plan of the drive's route, answered on the route lines' worker: the own line's path is built from it. */
+    private val planListener: (String, RouteLanePlan?) -> Unit = { routeId, plan ->
+        if (ownLine.enabled) {
+            navigatorRoutes.firstOrNull()?.takeIf { it.id == routeId }?.let { ownLine.onPlan(routeId, ownLineBuild(it, plan)) }
+        }
+    }
 
     /** The step whose maneuver arrow was worked out last: route, leg and step; null before any. */
     private var arrowStep: String? = null
@@ -343,7 +396,7 @@ class PhoneMap internal constructor(
     /** During guidance the navigator's routes are drawn instead of the preview. */
     private val routesObserver = RoutesObserver { result ->
         navigatorRoutes = result.navigationRoutes
-        if (guidanceState == GuidanceState.ACTIVE) showNavigatorRoutes()
+        if (guidanceState == GuidanceState.ACTIVE) showNavigatorRoutes(refresh = result.reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)
     }
 
     private val routeProgressObserver = RouteProgressObserver { progress -> onRouteProgress(progress) }
@@ -469,6 +522,8 @@ class PhoneMap internal constructor(
             // data, then the route line's colours.
             applyLook(lookApplier.onStyleLoaded())
             clearArrows()
+            // The own route line's layers, with its switch on: above the route line and below the arrow.
+            ownLine.onStyleLoaded(lookApplier.routeLineLook)
             logLayerOrder(loaded)
             // Lane details are set a moment after this callback, never within it (see LaneDetails).
             laneDetails.onStyleLoaded()
@@ -509,6 +564,7 @@ class PhoneMap internal constructor(
         mapView.gestures.addOnMapClickListener(mapClickListener)
 
         MapboxNavigationApp.registerObserver(navigationObserver)
+        engine.lanePlans.addListener(planListener)
         // The style this map shows is kept ahead of the car during guidance from now on. The style
         // may still be loading: it is taken when it has loaded, and again each time it loads.
         offlineData.attachMap(mapboxMap)
@@ -586,6 +642,15 @@ class PhoneMap internal constructor(
     override fun setLaneDetails(enabled: Boolean) {
         laneDetails.setEnabled(enabled)
         applyRouteLineWidths()
+    }
+
+    override fun setOwnRouteLine(enabled: Boolean) {
+        if (enabled == ownLine.enabled) return
+        ownLine.setEnabled(enabled)
+        // The own layers it added to the middle slot, or took out of it.
+        style?.let(::logLayerOrder)
+        // During a drive the route it is on gets its own line at once.
+        if (enabled && guidanceState == GuidanceState.ACTIVE) navigatorRoutes.firstOrNull()?.let { ownLineRoute(it, refresh = false) }
     }
 
     override fun showPlace(place: Place?) {
@@ -684,6 +749,8 @@ class PhoneMap internal constructor(
         mapErrorFolder.flush()
         scope.cancel()
         MapboxNavigationApp.unregisterObserver(navigationObserver)
+        engine.lanePlans.removeListener(planListener)
+        ownLine.release()
         // Nothing is kept ahead for this map any more, and nothing there holds on to it.
         offlineData.detachMap(mapboxMap)
         platformPuck.onGlide = null
@@ -738,6 +805,7 @@ class PhoneMap internal constructor(
     private fun applyRouteLineLook(style: Style, look: Look) {
         routeLineView.updateDynamicOptions(style) { routeLineColorResources(MapPalette.routeLineColorResources(look)) }
         if (framedRoute != null) routeLineApi.getRouteDrawData { value -> routeLineView.renderRouteDrawData(style, value) }
+        if (ownLine.enabled) ownLine.setLook(look)
     }
 
     /**
@@ -773,6 +841,8 @@ class PhoneMap internal constructor(
         when (state) {
             GuidanceState.PREVIEW -> {
                 useLocationProvider(guidance = false)
+                // The preview shows the SDK's line, never the own one.
+                if (ownLine.enabled) ownLine.onGuidanceEnded()
                 val routes = engine.previewRoutes.value
                 if (routes.isEmpty()) return
                 drawRoutes(routes)
@@ -795,6 +865,8 @@ class PhoneMap internal constructor(
             }
             GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                 useLocationProvider(guidance = false)
+                // The SDK's line shown again, for the next preview, and the own source cleared.
+                if (ownLine.enabled) ownLine.onGuidanceEnded()
                 clearRoutes()
                 camera.onGuidanceEnded()
                 _closeView.value = false
@@ -895,9 +967,23 @@ class PhoneMap internal constructor(
         // Read again: the route line counts its interval from the end of its own work.
         routeLineUpdatedAt = SystemClock.elapsedRealtimeNanos()
         if (update.isValue) routeLineView.renderRouteLineUpdate(style, update)
+        if (ownLine.enabled) trimOwnLine(point, accepted = update.isValue)
     }
 
-    private fun showNavigatorRoutes() {
+    /**
+     * The own route line's trim for the same update: the SDK's vanishing point where it took one, on the
+     * route it holds; else, while the navigator follows the car on the route, the app's own projection.
+     */
+    private fun trimOwnLine(point: Point, accepted: Boolean) {
+        val tracking = lastProgress?.currentState == RouteProgressState.TRACKING
+        if (accepted) {
+            ownLine.onPuck(point.latitude(), point.longitude(), true, routeLineApi.getPrimaryNavigationRoute()?.id, routeLineApi.getVanishPointOffset(), tracking)
+        } else {
+            ownLine.onPuck(point.latitude(), point.longitude(), false, null, Double.NaN, tracking)
+        }
+    }
+
+    private fun showNavigatorRoutes(refresh: Boolean = false) {
         val routes = navigatorRoutes
         if (routes.isEmpty()) return
         // Where an alternative still shares the road with the route, as behind the car and up to
@@ -905,8 +991,27 @@ class PhoneMap internal constructor(
         // leaves the route; it is read on the phone, with no request. It is valid until the routes
         // change again, and every change comes through here.
         drawRoutes(routes, navigation?.getAlternativeMetadataFor(routes).orEmpty())
+        if (ownLine.enabled) ownLineRoute(routes.first(), refresh)
         frameRoute(routes.first())
         viewportDataSource.evaluate()
+    }
+
+    /**
+     * Gives the own route line the drive's primary [route]: what builds its path once the route's lane
+     * plan has been answered (otherwise the plan's own answer brings it, [planListener]), and its traffic
+     * for a [refresh].
+     */
+    private fun ownLineRoute(route: NavigationRoute, refresh: Boolean) {
+        val answer = engine.lanePlans.answerFor(route.id)
+        ownLine.onRoute(route.id, refresh, answer?.let { ownLineBuild(route, it.plan) }) { drawing ->
+            ownLineRuns(route.directionsRoute.legs().orEmpty(), drawing)
+        }
+    }
+
+    /** Builds the own line's path of [route] through the lanes of its lane [plan], or along its own line without one. */
+    private fun ownLineBuild(route: NavigationRoute, plan: RouteLanePlan?) = OwnRouteLine.Build { version ->
+        val directions = route.directionsRoute
+        ownLineDrawing(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints(), plan, version)
     }
 
     /** Gives the data source the route to frame; a route it has already changes nothing. */
@@ -1008,7 +1113,13 @@ class PhoneMap internal constructor(
      */
     private fun logLayerOrder(style: Style) {
         val ids = style.styleLayers.map { it.id }.filter { slotOf(style, it) == ROUTE_SLOT }
-        debugLog.log("map_layers", mapOf("arrowAboveLine" to LayerOrder.arrowAboveLine(ids), "middle" to ids))
+        val ownLineInPlace = LayerOrder.ownLineInPlace(ids, OwnRouteLine.LAYERS.map { it.id })
+        debugLog.log(
+            "map_layers",
+            mapOf("arrowAboveLine" to LayerOrder.arrowAboveLine(ids), "middle" to ids) +
+                // Only while the own route line's layers are in the style.
+                (if (ownLineInPlace != null) mapOf("ownLine" to ownLineInPlace) else emptyMap()),
+        )
     }
 
     /** The slot a layer of the style is in; null for one in none. */

@@ -107,6 +107,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 onLaneZoomChange = settingsViewModel::setLaneZoom,
                 onLaneDetailsChange = settingsViewModel::setLaneDetails,
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
+                onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
                 onShareLog = {
                     scope.launch {
                         val files = settingsViewModel.exportLog(graph.debugLogHeader())

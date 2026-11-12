@@ -372,6 +372,40 @@ class LanePlansTest {
     }
 
     @Test
+    fun `a route's answer is there once its plan came back, made or not, and the listeners hear it`() {
+        val plans = LanePlans()
+        val heard = ArrayList<Pair<String, RouteLanePlan?>>()
+        val listener: (String, RouteLanePlan?) -> Unit = { id, plan -> heard += id to plan }
+        plans.addListener(listener)
+        plans.begin()
+        val ticket = requireNotNull(plans.onCommitted("route-a#0"))
+        assertNull(plans.answerFor("route-a#0"), "on its way")
+        val plan = heldFor("route-a#0")
+        assertTrue(plans.deliver(ticket, plan))
+        assertSame(plan, plans.answerFor("route-a#0")?.plan)
+        assertNull(plans.answerFor("route-b#0"))
+        assertNull(plans.answerFor(null))
+        assertEquals(listOf("route-a#0" to plan), heard)
+        // A route whose plan could not be made has an answer too: no plan.
+        val reroute = requireNotNull(plans.onRoutesChanged("route-b#0", refresh = false))
+        assertNull(plans.answerFor("route-b#0"))
+        assertTrue(plans.deliver(reroute, null))
+        assertNotNull(plans.answerFor("route-b#0"))
+        assertNull(plans.answerFor("route-b#0")?.plan)
+        assertNull(plans.answerFor("route-a#0"), "the newer route's answer has taken over")
+        assertEquals("route-b#0" to null, heard.last())
+        // An answer not taken is not heard; nor is anything after the listener left.
+        val third = requireNotNull(plans.onRoutesChanged("route-c#0", refresh = false))
+        assertFalse(plans.deliver(reroute, null))
+        assertEquals(2, heard.size)
+        plans.removeListener(listener)
+        assertTrue(plans.deliver(third, heldFor("route-c#0")))
+        assertEquals(2, heard.size)
+        plans.end()
+        assertNull(plans.answerFor("route-c#0"), "outside a drive")
+    }
+
+    @Test
     fun `a new drive starts with no plan held`() {
         val plans = LanePlans()
         plans.begin()
