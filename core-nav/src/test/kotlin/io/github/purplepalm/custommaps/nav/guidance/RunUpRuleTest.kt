@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.guidance
 
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule.LanePoint
+import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneTarget
 import io.github.purplepalm.custommaps.nav.model.RouteLane
@@ -34,7 +35,7 @@ class RunUpRuleTest {
     private fun sl(valid: Boolean = true) = open(valid, sl)
 
     /** A lane kept for car pools, which the route does not use. */
-    private fun hov(valid: Boolean = false, active: Boolean? = valid) = RouteLane(setOf(s), valid = valid, active = active, designated = true)
+    private fun hov(valid: Boolean = false, active: Boolean? = valid) = RouteLane(setOf(s), valid = valid, active = active, kinds = setOf(DesignatedKind.HOV))
 
     private fun point(key: String, ahead: Double, vararg lanes: RouteLane) = LanePoint(key, ahead, lanes.toList())
 
@@ -406,7 +407,7 @@ class RunUpRuleTest {
         assertTrue(row.lanes.lanes[0].isRecommended)
         assertEquals(s, row.lanes.lanes[0].activeIndication)
         assertNull(row.need)
-        val onlyPreferred = RouteLane(setOf(s), valid = null, active = true, designated = true)
+        val onlyPreferred = RouteLane(setOf(s), valid = null, active = true, kinds = setOf(DesignatedKind.BUS))
         val unknownSide = RunUpRule.row(null, emptyList(), "E", listOf(onlyPreferred, s(false), s(false)), false)
         assertEquals("E [H* s s] '' odd=designated_only", describe(unknownSide))
         // Nothing marked at all: nothing lit.

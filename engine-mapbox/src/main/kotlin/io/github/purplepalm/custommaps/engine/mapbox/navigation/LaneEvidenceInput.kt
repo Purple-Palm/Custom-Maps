@@ -1,13 +1,11 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
-import com.mapbox.api.directions.v5.models.IntersectionLanes
 import com.mapbox.api.directions.v5.models.MaxSpeed
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.api.directions.v5.models.SpeedLimit
 import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.camera.Polyline
 import io.github.purplepalm.custommaps.nav.geo.Geo
-import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.NodeManeuver
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
@@ -27,7 +25,7 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  * - its station: the step's start plus how far along the step's shape it lies, measured as the lane
  *   choices measure their points ([stepLanes]); a step's start is where the shapes of the steps before
  *   it end;
- * - its lanes ([routeLanes]) and, for each, the kinds of vehicle it is kept for;
+ * - its lanes ([routeLanes]), each with the kinds of vehicle it is kept for;
  * - its roads, the ones that may be entered, and the ones the route comes in and leaves on;
  * - whether the road that leaves it is a freeway ([isFreeway]) or a ramp ([RoadKind.isRamp]);
  * - the maneuver its step begins with, for the first intersection of each step;
@@ -64,7 +62,6 @@ internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<
                     RouteNode(
                         station = stepStart + meters[j],
                         lanes = intersection.routeLanes(),
-                        laneKinds = intersection.lanes().orEmpty().filterNotNull().map { it.designatedKinds() },
                         bearings = intersection.bearings().orEmpty(),
                         entry = intersection.entry().orEmpty(),
                         inIndex = intersection.`in`(),
@@ -85,10 +82,6 @@ internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<
     }
     return LaneRoute(routeId, steps, stepStart, nodes)
 }
-
-/** The kinds of vehicle a lane is kept for, as the route's lane access names them; none for a lane open to every car. */
-internal fun IntersectionLanes.designatedKinds(): Set<DesignatedKind> =
-    access()?.designated().orEmpty().mapTo(LinkedHashSet()) { DesignatedKind.of(it) }
 
 /**
  * The posted speed of this stretch in metres a second; null where the route does not know it, where

@@ -29,7 +29,10 @@ class LaneEvidenceTest {
     private fun sr(valid: Boolean = true) = RouteLane(setOf(slightRight), valid = valid)
     private fun sl(valid: Boolean = true) = RouteLane(setOf(slightLeft), valid = valid)
     private fun option(valid: Boolean = true) = RouteLane(setOf(straight, slightRight), valid = valid)
-    private fun hov(valid: Boolean = false) = RouteLane(setOf(straight), valid = valid, designated = true)
+    private fun hov(valid: Boolean = false) = kept(valid, DesignatedKind.HOV)
+
+    /** A lane kept for [kinds] of vehicle. */
+    private fun kept(valid: Boolean, vararg kinds: DesignatedKind) = RouteLane(setOf(straight), valid = valid, kinds = kinds.toSet())
 
     /**
      * The roads at an intersection other than the two the route takes: it comes in from the south
@@ -50,11 +53,9 @@ class LaneEvidenceTest {
         roads: Roads = through,
         road: RoadKind = RoadKind.FREEWAY,
         maneuver: NodeManeuver? = null,
-        kinds: List<Set<DesignatedKind>> = emptyList(),
     ) = RouteNode(
         station = at,
         lanes = lanes.toList(),
-        laneKinds = kinds,
         bearings = listOf(180, 0) + roads.others.map { it.first },
         entry = listOf(false, true) + roads.others.map { it.second },
         inIndex = 0,
@@ -617,11 +618,10 @@ class LaneEvidenceTest {
 
     @Test
     fun `designated lanes are counted by kind`() {
-        val kinds = listOf(setOf(DesignatedKind.HOV), emptySet(), setOf(DesignatedKind.BUS, DesignatedKind.TAXI), emptySet())
         val route = route(
             start(),
-            node(1_000.0, hov(), s(), hov(), s(), kinds = kinds),
-            node(2_000.0, hov(), s()),
+            node(1_000.0, hov(), s(), kept(false, DesignatedKind.BUS, DesignatedKind.TAXI), s()),
+            node(2_000.0, kept(false, DesignatedKind.OTHER), s()),
             node(3_000.0, maneuver = arrive),
         )
         val counts = evidence(route).designated
@@ -629,7 +629,7 @@ class LaneEvidenceTest {
         assertEquals(1, counts[DesignatedKind.HOV])
         assertEquals(1, counts[DesignatedKind.BUS])
         assertEquals(1, counts[DesignatedKind.TAXI])
-        assertEquals(1, counts[DesignatedKind.OTHER], "a designated lane whose kinds were not read")
+        assertEquals(1, counts[DesignatedKind.OTHER], "a lane kept for a kind the app does not know")
         assertEquals(0, counts[DesignatedKind.BICYCLE])
     }
 

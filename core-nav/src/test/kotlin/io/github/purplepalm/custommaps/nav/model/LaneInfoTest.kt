@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.model
 
+import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -64,7 +65,7 @@ class LaneInfoTest {
         assertTrue(RouteLane(straight, valid = null, active = true).usable, "the preferred flag where the route gives no other")
         assertFalse(RouteLane(straight, valid = false, active = true).usable, "valid decides where it is given")
         assertFalse(RouteLane(straight).usable, "no flags: not marked")
-        assertFalse(RouteLane(straight, valid = true, active = true, designated = true).usable, "kept for car pools")
-        assertTrue(RouteLane(straight, valid = true, designated = true).marked)
+        assertFalse(RouteLane(straight, valid = true, active = true, kinds = setOf(DesignatedKind.HOV)).usable, "kept for car pools")
+        assertTrue(RouteLane(straight, valid = true, kinds = setOf(DesignatedKind.HOV)).marked)
     }
 }

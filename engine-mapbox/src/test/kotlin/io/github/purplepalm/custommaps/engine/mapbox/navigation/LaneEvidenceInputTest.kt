@@ -148,11 +148,11 @@ class LaneEvidenceInputTest {
     fun `lanes come as the route lists them, with the kinds each is kept for`() {
         val point = route().nodes[4]
         assertEquals(5, point.lanes.size)
-        assertEquals(RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, active = false, designated = true), point.lanes[0])
+        assertEquals(RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, active = false, kinds = setOf(DesignatedKind.HOV)), point.lanes[0])
         assertTrue(point.lanes[1].usable)
         assertEquals(
             listOf(setOf(DesignatedKind.HOV), emptySet(), emptySet(), emptySet(), setOf(DesignatedKind.BUS, DesignatedKind.TAXI)),
-            point.laneKinds,
+            point.lanes.map { it.kinds },
         )
         assertTrue(route().nodes[1].lanes.isEmpty())
     }

@@ -1,5 +1,7 @@
 package io.github.purplepalm.custommaps.nav.model
 
+import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
+
 /**
  * One lane of a point on the route as the route lists it, read as it is: its arrows and the route's
  * own flags. Lanes come from the leftmost. The card works out from these which lanes to light on
@@ -14,9 +16,16 @@ data class RouteLane(
     val active: Boolean? = null,
     /** The arrow the route takes from this lane; null where the route does not say. */
     val validIndication: TurnModifier? = null,
-    /** Kept for buses, car pools, taxis and the like. */
-    val designated: Boolean = false,
+    /**
+     * The kinds of vehicle the lane is kept for, as the route's lane access lists them: car pools,
+     * buses, taxis and the like, a kind the route names that the app does not know as
+     * [DesignatedKind.OTHER]. Empty for a lane open to every car.
+     */
+    val kinds: Set<DesignatedKind> = emptySet(),
 ) {
+    /** Kept for some kinds of vehicle only: buses, car pools, taxis and the like. */
+    val designated: Boolean get() = kinds.isNotEmpty()
+
     /** The route marks this lane for itself: valid, else preferred, else not. */
     val marked: Boolean get() = valid ?: active ?: false
 

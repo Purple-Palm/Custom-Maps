@@ -95,10 +95,11 @@ data class NodeManeuver(
 data class RouteNode(
     /** Along the route from its start, in metres, as the steps' shapes measure it. */
     val station: Double,
-    /** Every lane of the intersection as the route lists it, from the leftmost; empty where the route has no lanes for it. */
+    /**
+     * Every lane of the intersection as the route lists it, from the leftmost, with the kinds of
+     * vehicle each is kept for; empty where the route has no lanes for it.
+     */
     val lanes: List<RouteLane> = emptyList(),
-    /** For each of [lanes], the kinds of vehicle it is kept for: empty for a lane open to every car. Empty as a whole where not read. */
-    val laneKinds: List<Set<DesignatedKind>> = emptyList(),
     /** The roads at the intersection, each as its bearing in degrees clockwise from north. */
     val bearings: List<Int?> = emptyList(),
     /** For each of [bearings], whether a car may take that road from here. */

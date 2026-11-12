@@ -20,7 +20,7 @@ class CardWindowsTest {
     private fun s(valid: Boolean = true) = RouteLane(setOf(TurnModifier.STRAIGHT), valid = valid)
     private fun sr(valid: Boolean = true) = RouteLane(setOf(TurnModifier.SLIGHT_RIGHT), valid = valid)
     private fun option() = RouteLane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), valid = true)
-    private fun hov() = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, designated = true)
+    private fun hov() = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, kinds = setOf(DesignatedKind.HOV))
 
     private val exitLanes = arrayOf(s(false), s(false), s(false), sr())
 

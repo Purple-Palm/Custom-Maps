@@ -150,11 +150,8 @@ class LaneEvidence private constructor(
     private fun designatedCounts(): Map<DesignatedKind, Int> {
         val counts = DesignatedKind.entries.associateWithTo(LinkedHashMap()) { 0 }
         for (p in lanePoints) {
-            val node = route.nodes[p]
-            for (l in node.lanes.indices) {
-                val kinds = node.laneKinds.getOrNull(l).orEmpty()
-                val counted = if (kinds.isEmpty() && node.lanes[l].designated) setOf(DesignatedKind.OTHER) else kinds
-                for (kind in counted) counts[kind] = counts.getValue(kind) + 1
+            for (lane in route.nodes[p].lanes) {
+                for (kind in lane.kinds) counts[kind] = counts.getValue(kind) + 1
             }
         }
         return counts

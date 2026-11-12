@@ -11,6 +11,7 @@ import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
+import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneTarget
@@ -528,6 +529,49 @@ class LaneChoicesTest {
             ),
             fields,
         )
+    }
+
+    @Test
+    fun `each lane keeps the kinds of vehicle it is kept for, any other word as other, and the card one flag`() {
+        val names = listOf("hov", "bus", "taxi", "motorcycle", "moped", "bicycle")
+        val lanes = names.map { lane(false, designated = listOf(it)) } + listOf(
+            lane(true),
+            lane(true, designated = emptyList()),
+            IntersectionLanes.builder().valid(true).indications(listOf("straight")).access(IntersectionLaneAccess.builder().build()).build(),
+            lane(true, designated = listOf("bus", "taxi")),
+            lane(false, designated = listOf("delivery")),
+            lane(false, designated = listOf("HOV")),
+            IntersectionLanes.builder()
+                .valid(false)
+                .indications(listOf("straight"))
+                .access(IntersectionLaneAccess.builder().designated(listOf<String?>(null)).build())
+                .build(),
+        )
+        val read = intersection(3, lanes).routeLanes()
+        assertEquals(
+            listOf(
+                setOf(DesignatedKind.HOV),
+                setOf(DesignatedKind.BUS),
+                setOf(DesignatedKind.TAXI),
+                setOf(DesignatedKind.MOTORCYCLE),
+                setOf(DesignatedKind.MOPED),
+                setOf(DesignatedKind.BICYCLE),
+                emptySet(),
+                emptySet(),
+                emptySet(),
+                setOf(DesignatedKind.BUS, DesignatedKind.TAXI),
+                setOf(DesignatedKind.OTHER),
+                setOf(DesignatedKind.OTHER),
+                setOf(DesignatedKind.OTHER),
+            ),
+            read.map { it.kinds },
+            "the route's own names, an open lane however it says so, and anything else as a kind the app does not know",
+        )
+        assertEquals(listOf(false, false, false, false, false, false, true, true, true, false, false, false, false), read.map { it.usable })
+        // The card draws the same lanes dim, still from one flag a lane.
+        val card = requireNotNull(intersection(3, lanes).lanesAhead()).lanes
+        assertEquals(read.map { it.designated }, card.map { it.designated })
+        assertEquals(10, requireNotNull(intersection(3, lanes).laneCounts()).designated)
     }
 
     @Test

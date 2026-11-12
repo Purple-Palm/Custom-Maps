@@ -16,7 +16,8 @@ class LaneEvidenceLineTest {
     private fun s(valid: Boolean = true) = RouteLane(setOf(TurnModifier.STRAIGHT), valid = valid)
     private fun sr(valid: Boolean = true) = RouteLane(setOf(TurnModifier.SLIGHT_RIGHT), valid = valid)
     private fun option() = RouteLane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), valid = true)
-    private fun hov() = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, designated = true)
+    /** A lane kept for car pools, or for a kind of vehicle the app does not know ([DesignatedKind.OTHER]). */
+    private fun hov(kind: DesignatedKind = DesignatedKind.HOV) = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, kinds = setOf(kind))
 
     private fun node(
         at: Double,
@@ -24,11 +25,9 @@ class LaneEvidenceLineTest {
         road: RoadKind = RoadKind.FREEWAY,
         maneuver: NodeManeuver? = null,
         exitRight: Boolean = false,
-        kinds: List<Set<DesignatedKind>> = emptyList(),
     ) = RouteNode(
         station = at,
         lanes = lanes.toList(),
-        laneKinds = kinds,
         bearings = if (exitRight) listOf(180, 0, 30) else listOf(180, 0),
         entry = if (exitRight) listOf(false, true, true) else listOf(false, true),
         inIndex = 0,
@@ -94,9 +93,9 @@ class LaneEvidenceLineTest {
         val nodes = listOf(
             node(0.0, maneuver = NodeManeuver(ManeuverType.DEPART)),
             node(1_000.0, s(), s(), s(), sr(false), sr(false), exitRight = true),
-            node(3_200.0, hov(), s(), s(), s(), kinds = listOf(setOf(DesignatedKind.HOV), emptySet(), emptySet(), emptySet())),
+            node(3_200.0, hov(), s(), s(), s()),
             node(3_500.0, exitRight = true),
-            node(4_000.0, hov(), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(4_000.0, hov(DesignatedKind.OTHER), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRamp),
             node(4_300.0, road = RoadKind.RAMP, maneuver = NodeManeuver(ManeuverType.ARRIVE)),
         )
         val evidence = LaneEvidence.of(LaneRoute("route-2#0", 3, 4_300.0, nodes))
@@ -112,8 +111,8 @@ class LaneEvidenceLineTest {
         assertEquals(1, fields["unexplained"])
         assertEquals(mapOf("count" to 1, "sideUnknown" to 1), fields["exitSideAdded"])
         assertEquals(1, fields["unknownExits"])
-        assertEquals(1, (fields["designated"] as Map<*, *>)["hov"], "the car-pool lane whose kinds were read")
-        assertEquals(1, (fields["designated"] as Map<*, *>)["other"], "the gore's car-pool lane, its kinds not read")
+        assertEquals(1, (fields["designated"] as Map<*, *>)["hov"], "the car-pool lane")
+        assertEquals(1, (fields["designated"] as Map<*, *>)["other"], "the gore's lane, kept for a kind the app does not know")
         assertEquals(
             mapOf("known" to 2_500L, "bridged" to 300L, "none" to 1_200L),
             fields["freewayM"],

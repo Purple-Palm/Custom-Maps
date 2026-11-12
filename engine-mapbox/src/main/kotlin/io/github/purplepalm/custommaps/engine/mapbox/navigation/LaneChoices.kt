@@ -14,6 +14,7 @@ import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
+import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Lane
@@ -549,8 +550,9 @@ internal fun StepIntersection.lanesAhead(): LaneInfo? {
 
 /**
  * Every lane of this intersection as the route lists it, from the leftmost, read as it is: its
- * arrows, whether the route can be followed from it and prefers it, and whether it is kept for
- * some vehicles. Empty when the route has no lanes for it.
+ * arrows, whether the route can be followed from it and prefers it, and the kinds of vehicle it is
+ * kept for ([designatedKinds]). Empty when the route has no lanes for it. Nothing in it throws on
+ * odd lane data: a word the app does not know is a kind of its own, never an error.
  */
 internal fun StepIntersection.routeLanes(): List<RouteLane> {
     val all = lanes() ?: return emptyList()
@@ -563,12 +565,21 @@ internal fun StepIntersection.routeLanes(): List<RouteLane> {
                 valid = lane.valid(),
                 active = lane.active(),
                 validIndication = ManeuverMapping.modifier(lane.validIndication()),
-                designated = lane.isDesignated(),
+                kinds = lane.designatedKinds(),
             ),
         )
     }
     return lanes
 }
+
+/**
+ * The kinds of vehicle a lane is kept for, as the route's lane access names them
+ * ([DesignatedKind.of]: a name the app does not list, or none, is [DesignatedKind.OTHER]); empty for
+ * a lane open to every car. A lane is kept for some vehicles exactly when this is not empty, as
+ * [isDesignated] reads it for the card.
+ */
+internal fun IntersectionLanes.designatedKinds(): Set<DesignatedKind> =
+    access()?.designated().orEmpty().mapTo(LinkedHashSet()) { DesignatedKind.of(it) }
 
 /**
  * Every lane of this intersection as the route lists it, from the leftmost, for the debug log: its
