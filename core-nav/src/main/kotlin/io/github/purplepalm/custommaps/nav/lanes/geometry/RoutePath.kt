@@ -31,7 +31,10 @@ import kotlin.math.min
  *   freeways, clamp(v x [MOVE_SECONDS_STREET], 25, 80 m) on streets, at the planning speed), starting at the plan's
  *   station, ahead of the car. Into a lane its neighbour feeds (a deceleration lane) it moves along that lane's own
  *   taper, with no S. The lane it heads for lies where it runs at its full width, and while that lane is still opening
- *   the path goes no farther toward it than where it begins.
+ *   the path goes no farther toward it than where it begins. A move blends from where the path would be without it
+ *   toward its lane as that lane lies along the way, so the path moves with lanes that move together (at a ramp's start,
+ *   in a zone); a move into a lane still opening sets off only the way that lane lies where the move ends, so it waits
+ *   for the lane rather than set off the wrong way and come back.
  * - **No lane named (C1).** Ahead of an approach where no lane can be named (only a lane kept for car pools or buses
  *   can be used, or the lanes to use lie beyond one), the plan heads for the road's line, where the path runs on that
  *   approach: the band's middle before it leads the path toward the road's line and never past it, so the path reaches
@@ -245,14 +248,36 @@ class RoutePath private constructor(
 
         /** Straight on from [offset] at the turn at [turn] (its station), then onto the new road's line. */
         data class Turn(val turn: Double, val offset: Double) : Piece()
+
+        /** Where the path was, [offset], held: where a return begins, or a band the next band takes over from. */
+        data class Held(val offset: Double) : Piece()
     }
 
     /** Where the plan heads from before [station] on the run [run]: the middle of [lane], or the road's line where it is null (C1). */
     private class Ref(val station: Double, val run: Int, val lane: Int?)
 
-    /** A move in progress: [offset] left over at [from], gone by [to]. */
-    private class Residual(val from: Double, val to: Double, val offset: Double) {
-        fun at(station: Double): Double = offset * (1.0 - CrossSection.ramp(station, from, to))
+    /**
+     * What the path follows, with the moves still under way: the piece it followed before them and each move after it, a
+     * half-cosine blend from where the path would be without it toward its own piece, the newest toward the piece the path
+     * follows now.
+     * Every piece keeps its own value along the way, so where the lanes move together (at a ramp's start, in a zone) the path
+     * moves with them, while a lane that is still opening draws the path in only as fast as the move goes. A move toward a
+     * named lane that is the only one under way sets off only the way that lane lies from the path where the move ends: where
+     * the lane is still opening on the other side, the path waits for it rather than setting off the wrong way and coming back.
+     */
+    private class Layer(var piece: Piece, var hold: Double, val from: Double, val to: Double, val way: Int, val waits: Boolean) {
+        /** The value of [piece] at the station being solved. */
+        var value = hold
+
+        /** Where the path is with this layer, [below] being where it would be without it, at [station]. */
+        fun blend(below: Double, station: Double): Double {
+            var gap = value - below
+            if (waits && gap * way <= 0.0) gap = 0.0
+            return below + gap * CrossSection.ramp(station, from, to)
+        }
+
+        /** Whether its move is over at [station], [below] being where the path would be without it: never while it still waits. */
+        fun over(below: Double, station: Double): Boolean = station >= to && !(waits && (value - below) * way < -SAME_OFFSET_METERS)
     }
 
     /** A stretch to draw: from where the lanes begin to where the path is back on the road's line, at most. */
@@ -528,9 +553,9 @@ class RoutePath private constructor(
         /** The path's offset at every sample of every window of [region]. */
         private fun solve(region: Region, axes: List<RoadAxis>, samples: List<DoubleArray>): List<DoubleArray> {
             val out = samples.map { DoubleArray(it.size) }
-            val residuals = ArrayList<Residual>()
-            var hold = 0.0
-            var piece: Piece = Piece.Middle
+            // The piece the path followed before the moves under way, and one layer for each move; the last one's piece is the one
+            // the path follows now.
+            val layers = arrayListOf(Layer(Piece.Middle, 0.0, 0.0, 0.0, 0, false))
             var last = region.from
             for ((k, axis) in axes.withIndex()) {
                 val s = samples[k]
@@ -540,48 +565,100 @@ class RoutePath private constructor(
                         out[k][j] = out[k - 1].last()
                         continue
                     }
+                    for (layer in layers) layer.value = valueOf(layer.piece, station, axis, layer.hold)
+                    val piece = layers.last().piece
+                    val hold = layers.last().hold
                     // A turn goes straight on from where the path is: its piece and the moves still under way.
-                    val next = pieceAt(region, station, axis, piece) { valueOf(piece, station, axis, hold) + residuals.sumOf { it.at(station) } }
-                    // At a change, the old piece's value here; the band's middle never steps back behind it either. Between two
-                    // bands, where the path was: a lane that ends at its edge with no taper takes the old band's middle with it.
-                    val old = when {
-                        next == piece -> 0.0
-                        piece is Piece.Band && next is Piece.Band -> hold
-                        else -> valueOf(piece, station, axis, hold)
-                    }
-                    val value = valueOf(next, station, axis, if (next != piece && next is Piece.Band) old else hold)
+                    val next = pieceAt(region, station, axis, piece) { pathOf(layers, station) }
                     if (next != piece) {
-                        val drawn = old + residuals.sumOf { it.at(station) }
+                        // The old piece's value here; the band's middle never steps back behind it either. Between two bands,
+                        // where the path was: a lane that ends at its edge with no taper takes the old band's middle with it.
+                        val bands = piece is Piece.Band && next is Piece.Band
+                        val old = if (bands) hold else layers.last().value
+                        // A band the path leaves is held where it was: its middle steps where one of its lanes is no longer
+                        // drawn (at a ramp's start, or where a lane leaves at the edge with no taper).
+                        if (piece is Piece.Band) {
+                            layers.last().let {
+                                it.piece = Piece.Held(old)
+                                it.value = old
+                            }
+                        }
+                        val value = valueOf(next, station, axis, if (next is Piece.Band) old else hold)
+                        val drawn = pathOf(layers, station)
                         // Where a drawing ends, its turn or its return takes over the moves still under way, so none runs on
                         // past the drawing: the turn from where the path is, the return from there to the road's line.
                         val turns = next is Piece.Turn && piece !is Piece.Turn
                         val returns = next == Piece.Middle && region.drawings.any { abs(it.to - station) < 1e-6 && !it.turnsAtEnd }
-                        if (turns || returns) residuals.clear()
                         val jump = value - if (turns || returns) drawn else old
-                        if (!turns && abs(jump) > SAME_OFFSET_METERS) {
+                        if (turns || returns) {
+                            layers.clear()
+                            layers.add(Layer(if (turns) next else Piece.Held(drawn), if (turns) value else drawn, 0.0, 0.0, 0, false).also { it.value = it.hold })
+                        }
+                        // Into a named lane that is still opening the path moves even from where it is already: the lane's middle may
+                        // swing either way while it opens, and the move waits for it to come the way it ends up. Not into a lane its
+                        // neighbour feeds: the path follows its taper from the feeder's middle, with no S.
+                        val opening = next is Piece.Named && topology.lanes[next.lane].fedBy == null &&
+                            section.place(next.lane, station, axis)?.state == CrossSection.State.OPENING
+                        if (!turns && (abs(jump) > SAME_OFFSET_METERS || opening && !returns)) {
                             val kind = when {
                                 piece == Piece.Middle -> Move.Kind.ENTER
                                 returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
                             val length = if (kind == Move.Kind.RETURN) RETURN_METERS else beforeRampStart(region, station, jump, moveLength(station, jump))
-                            residuals.add(Residual(station, station + length, -jump))
-                            moves.add(Move(station, station + length, drawn, value, kind))
+                            val end = station + length
+                            // A move toward a named lane, the only one under way, sets off only the way that lane lies from the
+                            // path where the move ends.
+                            val waits = next is Piece.Named && layers.size == 1
+                            val way = if (waits) {
+                                val endAxis = axes.lastOrNull { it.from <= end } ?: axis
+                                valueOf(next, end, endAxis, value) - valueOf(layers.last().piece, end, endAxis, layers.last().value)
+                            } else {
+                                0.0
+                            }
+                            layers.add(Layer(next, value, station, end, if (abs(way) <= SAME_OFFSET_METERS) 0 else if (way > 0.0) 1 else -1, waits).also { it.value = value })
+                            moves.add(Move(station, end, drawn, value, kind))
+                        } else if (!turns) {
+                            // No move: the path follows the new piece from where the old one was.
+                            layers.last().let {
+                                it.piece = next
+                                it.value = value
+                            }
                         }
                         if (turns) {
                             val turn = next as Piece.Turn
                             moves.add(Move(station, continuationEnd(axis, turn), turn.offset, 0.0, Move.Kind.TURN))
                         }
                     }
-                    piece = next
-                    hold = value
-                    residuals.removeAll { it.to <= station }
-                    out[k][j] = value + residuals.sumOf { it.at(station) }
+                    for (layer in layers) layer.hold = layer.value
+                    out[k][j] = pathOf(layers, station)
+                    settle(layers, station)
                     last = station
                 }
             }
             foldsOf(axes, samples, out)
             return out
+        }
+
+        /** Where the path is at [station]: the first layer's value, blended toward each next one's. */
+        private fun pathOf(layers: List<Layer>, station: Double): Double {
+            var path = layers[0].value
+            for (i in 1 until layers.size) path = layers[i].blend(path, station)
+            return path
+        }
+
+        /** Lets go of the moves that are over at [station]: the last one over becomes what the path follows before the rest. */
+        private fun settle(layers: ArrayList<Layer>, station: Double) {
+            var below = layers[0].value
+            var over = 0
+            for (i in 1 until layers.size) {
+                if (layers[i].over(below, station)) over = i
+                below = layers[i].blend(below, station)
+            }
+            if (over > 0) {
+                repeat(over) { layers.removeAt(0) }
+                layers[0].let { it.hold = it.value }
+            }
         }
 
         /** Where a turn's straight-on line has blended onto the new road's line. */
@@ -641,6 +718,7 @@ class RoutePath private constructor(
                 toward(middle, hold, piece.ref, piece.begins, piece.edge)
             }
             is Piece.Turn -> CrossSection.continuation(axis, piece.turn, piece.offset, station)
+            is Piece.Held -> piece.offset
         }
 
         /** The named [lane]'s middle; into a lane its neighbour feeds, along its taper from the feeder's middle. */

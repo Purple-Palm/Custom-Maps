@@ -441,7 +441,7 @@ class RoutePathTest {
         val end = requireNotNull(section.edges(conflict.to, requireNotNull(path.axisAt(conflict.to))))
         assertTrue(end.asphaltLeft < -w, "the drawn asphalt ends ${end.asphaltLeft} m right of the road's line")
         // From where the drawing begins to well past the conflict's end the path lies on the drawn asphalt, moving only right,
-        // toward the exit's edge, and it is in the lane the plan names 50 m past the conflict's end.
+        // toward the exit's edge, and it is in the lane the plan names 200 m past the conflict's end.
         var prev = path.offsetAt(drawing.from)
         var station = drawing.from
         while (station < conflict.to + 200.0) {
@@ -452,9 +452,39 @@ class RoutePathTest {
             assertTrue(offset <= prev + 1e-9, "at $station: the path moves left, from $prev to $offset")
             prev = offset
         }
-        val named = requireNotNull(built.plan.segmentAt(conflict.to + 50.0)?.named)
-        assertEquals(section.place(named, conflict.to + 50.0, path.axisAt(conflict.to + 50.0))!!.centre, path.offsetAt(conflict.to + 50.0), 1e-6)
+        val named = requireNotNull(built.plan.segmentAt(conflict.to + 200.0)?.named)
+        assertEquals(section.place(named, conflict.to + 200.0, path.axisAt(conflict.to + 200.0))!!.centre, path.offsetAt(conflict.to + 200.0), 1e-6)
         checkRules("conflict drift", built)
+    }
+
+    @Test
+    fun `a move into a lane still opening waits for the lane and never comes back`() {
+        val built = build(openingSwing())
+        val section = built.section
+        val path = built.path
+        // The scene: no lane works up to 850 m before the gore, where the plan names a lane that opens next to where the path
+        // is, its middle swinging right at first and left of the path as it widens.
+        val conflict = built.plan.flags.single { it.kind == LanePlan.Flag.Kind.CONFLICT }
+        assertEquals(gore - 850.0, conflict.to, 1e-9)
+        val start = path.offsetAt(conflict.to)
+        val named = requireNotNull(built.plan.segmentAt(conflict.to + 1.0)?.named)
+        val at = { station: Double -> requireNotNull(section.place(named, station, path.axisAt(station))) }
+        assertEquals(CrossSection.State.OPENING, at(conflict.to + 1.0).state)
+        assertTrue(at(conflict.to + 1.0).centre < at(conflict.to).centre, "the lane's middle swings right where it opens")
+        val end = at(conflict.to + 300.0).centre
+        assertTrue(end > start + 1.0, "the lane ends at $end")
+        // The move sets off only left, the way the lane lies where the move ends: the path waits while the lane's middle swings
+        // right, moves only left and never past the lane's middle, and is in the lane 300 m on.
+        var prev = start
+        var station = conflict.to
+        while (station < conflict.to + 300.0) {
+            station += 1.0
+            val now = path.offsetAt(station)
+            assertTrue(now >= prev - 1e-9 && now <= end + 1e-9, "at $station: from $prev to $now, the lane's middle at $end")
+            prev = now
+        }
+        assertEquals(end, path.offsetAt(conflict.to + 300.0), 1e-9)
+        checkRules("opening swing", built)
     }
 
     @Test
@@ -728,8 +758,8 @@ class RoutePathTest {
      * card windows; it is on the road's line on an approach where no lane is named (C1); it meets the route's line at every
      * drawing end; it never steps sideways inside a drawing; at a ramp's start inside a drawing it lies on the asphalt of the
      * lanes that go on; where no lane works it keeps to the drawn carriageway, on its asphalt where that stretch ends inside a
-     * drawing and through the moves under way there; where a drawing ends, its turn or its return takes over a move still
-     * under way.
+     * drawing and through the moves under way there, and a move from there into a lane still opening goes one way; where a
+     * drawing ends, its turn or its return takes over a move still under way.
      */
     private fun checkRules(name: String, built: Built): Int {
         val path = built.path
@@ -884,6 +914,36 @@ class RoutePathTest {
                     )
                 }
                 station += 1.0
+            }
+        }
+        // A move that begins where a stretch where no lane works ends, into a lane still opening there, goes one way, from
+        // where it begins toward where it ends (up to the next move), and never past it: it waits for the lane rather than set
+        // off the wrong way and come back. The turns and the blends around a fold aside.
+        val across = path.moves.filter { it.kind == RoutePath.Move.Kind.ENTER || it.kind == RoutePath.Move.Kind.LANE }.sortedBy { it.from }
+        for (conflict in plan.flags) {
+            if (conflict.kind != LanePlan.Flag.Kind.CONFLICT) continue
+            val drawing = path.drawings.firstOrNull { conflict.to > it.from && conflict.to < it.to } ?: continue
+            val skip = turns(built) + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+            for ((i, move) in across.withIndex()) {
+                if (move.from < conflict.to - 1e-6 || move.from > conflict.to + 1.0) continue
+                val lane = plan.segmentAt(move.from + 1e-6)?.named ?: continue
+                if (built.section.place(lane, move.from + 1e-6, path.axisAt(move.from))?.state != CrossSection.State.OPENING) continue
+                val end = minOf(move.to, drawing.to, across.getOrNull(i + 1)?.from ?: move.to)
+                val to = path.offsetAt(end)
+                val sign = if (to >= path.offsetAt(move.from)) 1.0 else -1.0
+                var prev = path.offsetAt(move.from)
+                var station = move.from
+                while (station < end - 1e-9) {
+                    station = minOf(end, station + 1.0)
+                    val now = path.offsetAt(station)
+                    if (skip.none { station >= it.first && station <= it.second }) {
+                        assertTrue(
+                            (now - prev) * sign >= -1e-9 && (now - to) * sign <= 1e-9,
+                            "$name at $station: the move into the opening lane $lane goes from $prev to $now, toward $to",
+                        )
+                    }
+                    prev = now
+                }
             }
         }
         // At a drawing's end its turn or its return takes over a move still under way: past the turn the path is the turn's
@@ -1116,6 +1176,17 @@ class RoutePathTest {
         ),
         exit = listOf(s(false), s(false), s(false), sr(), sr()),
         id = "conflict-drift",
+    )
+
+    /**
+     * A right exit past a lane that opens with a swing: two lanes 1,600 m before the gore and three 800 m before, the right one
+     * not to take; four at the exit, the right two to take. No lane works up to 850 m before the gore, where two lanes open
+     * left of the lane drawn there and the plan names the right one of them, whose middle swings right at first as it opens.
+     */
+    private fun openingSwing() = LaneScenes.approach(
+        listOf(At(1_600.0, listOf(s(), s(false))), At(800.0, listOf(s(), s(), s(false)))),
+        exit = listOf(s(false), s(false), sr(), sr()),
+        id = "opening-swing",
     )
 
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
