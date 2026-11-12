@@ -1285,6 +1285,11 @@ class PhoneMap internal constructor(
      * them, and "hdRoadsReapplied" how often they had to be set again since the map was made: 0
      * unless something keeps turning them off.
      *
+     * "routeLine", only with the Debug switch for the app's own route line on, says whether the own
+     * line is drawn ("own"), how often its trim was set that second ("trims"), how far at most its
+     * trimmed end lay from the SDK's vanishing point along the route ("trimLagM", in meters) and how
+     * long its part of a puck update took at most on the main thread ("trimMaxMs").
+     *
      * "aheadM", while the camera follows the car, is how much road the camera as shown has clear
      * above the car, in meters, by the look-ahead model ([LookAhead]): from the car's row, the
      * padding's bottom edge, to the padding's top edge, under the card. With the speed it says how
@@ -1331,7 +1336,9 @@ class PhoneMap internal constructor(
             "steps" to cameraSteps.take(),
             "fixes" to fixes,
             "keyPoints" to lastKeyPoints.takeIf { hasFix },
-        ) + camera.diagnostics() + junctionPoints.diagnostics() + laneDetails.diagnostics() + mapOf(
+        ) + camera.diagnostics() + junctionPoints.diagnostics() + laneDetails.diagnostics() +
+            // With the Debug switch on: who draws the route line, and how its trim keeps up.
+            (if (ownLine.enabled) ownLine.diagnostics() else emptyMap()) + mapOf(
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "paddingChanges" to paddingChanges.takeIf { it > 0 },
             "render" to takeFrameStats(),

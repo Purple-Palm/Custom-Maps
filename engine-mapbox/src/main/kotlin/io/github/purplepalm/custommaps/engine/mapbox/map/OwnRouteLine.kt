@@ -17,6 +17,7 @@ import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.StationTable
@@ -24,6 +25,8 @@ import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficLevel
 import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficRun
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * The route line drawn by the app itself (the design's 5.3), behind the Debug switch App's own route line, which is
@@ -58,7 +61,11 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  * the main thread and sent to the source with a data id of its own, and only once the map says that data has loaded
  * ([onSourceLoaded]) are the path's table, colours and trim taken up together, the own layers shown and the SDK's line
  * hidden again. In between the driver sees the SDK's line on the new route, never the old path, and no trim of the new
- * route is applied through the old route's table. Main thread only.
+ * route is applied through the old route's table.
+ *
+ * The debug log gets a "route_line" line at each change of who draws the line, with the swap's times where the own
+ * line took over, and the camera line a "routeLine" object once a second ([diagnostics]): numbers and words only.
+ * Main thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
@@ -199,6 +206,16 @@ internal class OwnRouteLine(
     /** How many routes of the drive the own line was given, for the "route_line" line. */
     private var routes = 0
 
+    /** When the swap under way began (a new route, a style load), and how long the worker took for its path, in [nanos]. */
+    private var swapFrom = 0L
+    private var buildNanos = 0L
+
+    // For the camera line: the trims set, the largest distance along the route between the own trim and the SDK's
+    // vanishing point, and the longest time a puck update took here, since the last line.
+    private var trims = 0
+    private var trimLagMeters = Double.NaN
+    private var trimMaxNanos = 0L
+
     /** Counts the paths sent to the source, for their data ids. */
     private var sent = 0
 
@@ -221,6 +238,8 @@ internal class OwnRouteLine(
             if (ready()) attempt { layers.add(LAYERS, look) }
             buildPath()
         } else {
+            // The SDK's line again during a drive: the line says so.
+            if (routeId != null) logLine(DRAWER_SDK, REASON_SWITCH)
             // The route too is forgotten: with the switch on again the map names the route the drive is on at that time.
             failedRouteId = null
             routeId = null
@@ -245,6 +264,10 @@ internal class OwnRouteLine(
         // state across a style load is not known (the design's JE 1), so it is shown at every one.
         drawn = false
         sentId = null
+        if (routeId != null && !failed()) {
+            logLine(DRAWER_SDK, REASON_STYLE_LOAD)
+            swapFrom = nanos()
+        }
         attempt { primary.show() }
         attempt { layers.add(LAYERS, look) }
         drawing?.let(::send)
@@ -266,6 +289,7 @@ internal class OwnRouteLine(
             }
             return
         }
+        val first = this.routeId == null
         this.routeId = routeId
         this.build = build
         this.traffic = traffic
@@ -280,6 +304,8 @@ internal class OwnRouteLine(
         // The old route's path may still be loading: its data is no longer wanted.
         forgetSent()
         showSdkLine()
+        swapFrom = nanos()
+        logLine(DRAWER_SDK, if (first) REASON_START else REASON_ROUTE_CHANGE)
         buildPath()
     }
 
@@ -307,8 +333,14 @@ internal class OwnRouteLine(
         }
         val drawing = drawing ?: return
         if (!drawn) return
-        val station = trimStation(drawing, accepted) ?: return
-        setTrim(drawing, station)
+        val start = nanos()
+        trimStation(drawing, accepted)?.let { setTrim(drawing, it) }
+        // How far the own line's trimmed end lies from the SDK's vanishing point, along the route, where it is this route's.
+        if (this.sdkRouteId == drawing.table.routeId) {
+            val lag = abs(trimStation - drawing.table.stationAt(sdkOffset))
+            if (trimLagMeters.isNaN() || lag > trimLagMeters) trimLagMeters = lag
+        }
+        trimMaxNanos = max(trimMaxNanos, nanos() - start)
     }
 
     /**
@@ -318,10 +350,11 @@ internal class OwnRouteLine(
      */
     fun onSourceLoaded(dataId: String) {
         if (dataId != sentId) return
+        val loadedAt = nanos()
         forgetSent()
         val drawing = drawing ?: return
         if (!enabled || !ready()) return
-        show(drawing)
+        show(drawing, loadedAt)
     }
 
     /** The route line's colours of [look] from now on. */
@@ -357,6 +390,7 @@ internal class OwnRouteLine(
     /** Guidance ended: the SDK's line is shown, as it is in the preview, and the own source is cleared. */
     fun onGuidanceEnded() {
         val had = routeId != null || drawn || task != null
+        if (enabled && had) logLine(DRAWER_SDK, REASON_GUIDANCE_END)
         failedRouteId = null
         routes = 0
         routeId = null
@@ -372,6 +406,25 @@ internal class OwnRouteLine(
         forgetSent()
         showSdkLine()
         if (ready()) attempt { layers.clearPath() }
+    }
+
+    /**
+     * The camera line's "routeLine", once a second while the switch is on: [drawn] as "own", the "trims" set, "trimLagM",
+     * the largest distance along the route between the own line's trimmed end and the SDK's vanishing point, and
+     * "trimMaxMs", the longest a puck update took here on the main thread; the last two left out without a sample. Counted
+     * afresh from here.
+     */
+    fun diagnostics(): Map<String, Any?> {
+        val fields = mapOf(
+            "own" to drawn,
+            "trims" to trims,
+            "trimLagM" to trimLagMeters.takeUnless { it.isNaN() }?.let { Motion.round(it, 1) },
+            "trimMaxMs" to trimMaxNanos.takeIf { it > 0L }?.let { Motion.round(it / NANOS_PER_MILLI, 2) },
+        ).filterValues { it != null }
+        trims = 0
+        trimLagMeters = Double.NaN
+        trimMaxNanos = 0L
+        return mapOf("routeLine" to fields)
     }
 
     /** The map is going away: nothing is built or set any more. */
@@ -394,12 +447,17 @@ internal class OwnRouteLine(
         if (!enabled || drawing != null || failed()) return
         val version = ++versions
         task?.cancel()
-        task = worker.run({ build.drawing(version) }) { result ->
+        task = worker.run({
+            val from = nanos()
+            val built = build.drawing(version)
+            built to nanos() - from
+        }) { result ->
             task = null
             result.fold(
-                onSuccess = { built ->
+                onSuccess = { (built, took) ->
                     // A path of a route the drive has left, or built after the switch went off, is dropped.
                     if (enabled && built.routeId == routeId && routeId == this.routeId) {
+                        buildNanos = took
                         drawing = built
                         send(built)
                         if (refreshPending) {
@@ -465,7 +523,7 @@ internal class OwnRouteLine(
     }
 
     /** Shows [drawing], whose path the source has loaded: its colours and trim, the own layers, and the SDK's line hidden. */
-    private fun show(drawing: OwnLineDrawing) {
+    private fun show(drawing: OwnLineDrawing, loadedAt: Long) {
         attempt {
             layers.setColours(colourStops(drawing.runs, look), casingColour(look))
             val station = trimStation(drawing, accepted = sdkRouteId == drawing.routeId) ?: 0.0
@@ -475,6 +533,17 @@ internal class OwnRouteLine(
             layers.setVisible(true)
             primary.hide()
             drawn = true
+            logLine(
+                DRAWER_OWN,
+                REASON_LOADED,
+                mapOf(
+                    "swapMs" to Math.round((loadedAt - swapFrom) / NANOS_PER_MILLI),
+                    "loadMs" to Math.round((loadedAt - sentAt) / NANOS_PER_MILLI),
+                    "buildMs" to Math.round(buildNanos / NANOS_PER_MILLI),
+                    "points" to drawing.points.size,
+                    "version" to drawing.version,
+                ),
+            )
         }
     }
 
@@ -494,6 +563,7 @@ internal class OwnRouteLine(
         trimStation = station
         if (fraction == trim) return
         trim = fraction
+        trims++
         attempt { layers.setTrim(fraction) }
     }
 
@@ -544,7 +614,12 @@ internal class OwnRouteLine(
             quietly { layers.setVisible(false) }
             quietly { layers.clearPath() }
         }
-        debugLog.log(ROUTE_LINE, mapOf("drawer" to DRAWER_SDK, "reason" to REASON_FALLBACK, "ownLineFallback" to cause.logName, "route" to routes))
+        logLine(DRAWER_SDK, REASON_FALLBACK, mapOf("ownLineFallback" to cause.logName))
+    }
+
+    /** A "route_line" line: who draws the route line from now on ([drawer]), why, the drive's route by its count, and [more]. */
+    private fun logLine(drawer: String, reason: String, more: Map<String, Any?> = emptyMap()) {
+        debugLog.log(ROUTE_LINE, mapOf("drawer" to drawer, "reason" to reason, "route" to routes) + more)
     }
 
     /** Runs [change] on the style while the own line falls back: what still fails is only written down. */
@@ -560,10 +635,21 @@ internal class OwnRouteLine(
         /** Where an error line says the own route line failed. */
         const val WHERE = "ownRouteLine"
 
-        /** The debug log's line about who draws the route line. */
+        /** The debug log's line about who draws the route line, and its words. */
         const val ROUTE_LINE = "route_line"
         const val DRAWER_SDK = "sdk"
+        const val DRAWER_OWN = "own"
+
+        /** The own line begins with the drive's route: at Start, on a map made anew, or with the switch turned on during a drive. */
+        const val REASON_START = "start"
+        const val REASON_ROUTE_CHANGE = "route_change"
+        const val REASON_LOADED = "loaded"
         const val REASON_FALLBACK = "fallback"
+        const val REASON_SWITCH = "switch"
+        const val REASON_STYLE_LOAD = "style_load"
+        const val REASON_GUIDANCE_END = "guidance_end"
+
+        private const val NANOS_PER_MILLI = 1_000_000.0
 
         /** A path sent to the source that has not loaded after this long, during guidance, counts as no data: 10 s. */
         const val LOAD_WAIT_NANOS = 10_000_000_000L

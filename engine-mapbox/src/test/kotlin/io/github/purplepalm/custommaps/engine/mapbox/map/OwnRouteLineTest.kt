@@ -161,8 +161,9 @@ class OwnRouteLineTest {
         assertTrue(style.primaryShown)
         assertFalse(style.ownShown)
         assertFalse(line.drawn)
-        assertEquals(listOf("error", "route_line"), log.types())
-        assertEquals(OwnRouteLine.WHERE, log.lines.first().second["where"])
+        // The line the swap began with, the error, and the fallback's line.
+        assertEquals(listOf("route_line", "error", "route_line"), log.types())
+        assertEquals(OwnRouteLine.WHERE, log.lines[1].second["where"])
         assertEquals("exception", log.lines.last().second["ownLineFallback"])
     }
 
@@ -177,7 +178,8 @@ class OwnRouteLineTest {
         assertTrue(style.primaryShown)
         assertFalse(style.layersVisible)
         assertFalse(line.drawn)
-        assertEquals(listOf("error", "route_line"), log.types())
+        assertEquals(listOf("route_line", "error", "route_line"), log.types())
+        assertEquals("fallback", log.lines.last().second["reason"])
     }
 
     @Test

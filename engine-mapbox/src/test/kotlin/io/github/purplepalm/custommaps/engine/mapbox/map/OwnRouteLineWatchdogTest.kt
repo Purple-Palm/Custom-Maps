@@ -18,8 +18,8 @@ class OwnRouteLineWatchdogTest {
     private val log = scene.log
     private val line = scene.line
 
-    /** The "route_line" lines written, with their fields. */
-    private fun routeLines() = log.lines.filter { it.first == OwnRouteLine.ROUTE_LINE }.map { it.second }
+    /** The "route_line" lines of the fallbacks, with their fields. */
+    private fun routeLines() = log.lines.filter { it.first == OwnRouteLine.ROUTE_LINE && it.second["reason"] == "fallback" }.map { it.second }
 
     /** The own line given up: the SDK's line shown, the own layers hidden and their source cleared, nothing waiting. */
     private fun assertGivenUp() {
@@ -37,7 +37,7 @@ class OwnRouteLineWatchdogTest {
         line.onSourceError()
         assertGivenUp()
         assertEquals(listOf(mapOf("drawer" to "sdk", "reason" to "fallback", "ownLineFallback" to "source", "route" to 1)), routeLines())
-        assertEquals(listOf("route_line"), log.types(), "the map's own error line says the rest")
+        assertFalse("error" in log.types(), "the map's own error line says the rest")
         // Trims and refreshes change nothing any more.
         style.calls.clear()
         line.onPuck(scene.at(400.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = 0.4, tracking = true)
@@ -52,8 +52,8 @@ class OwnRouteLineWatchdogTest {
         style.refuse = "setTrim"
         line.onPuck(scene.at(400.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = 0.4, tracking = true)
         assertGivenUp()
-        assertEquals(listOf("error", "route_line"), log.types())
-        assertEquals(OwnRouteLine.WHERE, log.lines.first().second["where"])
+        assertEquals(1, log.types().count { it == "error" })
+        assertEquals(OwnRouteLine.WHERE, log.lines.single { it.first == "error" }.second["where"])
         assertEquals("exception", routeLines().single()["ownLineFallback"])
     }
 
@@ -141,7 +141,7 @@ class OwnRouteLineWatchdogTest {
         line.onStyleLoaded(Look.NIGHT)
         assertTrue(style.primaryShown)
         assertFalse(line.drawn)
-        // On the new style the own source then fails to load: the SDK's line stays.
+        // On the new style the own source fails to load: the SDK's line stays.
         line.onSourceError()
         assertGivenUp()
         assertEquals("source", routeLines().single()["ownLineFallback"])
