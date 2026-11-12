@@ -13,6 +13,7 @@ import com.mapbox.maps.CameraState
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.ImageHolder
 import com.mapbox.maps.MapInitOptions
+import com.mapbox.maps.MapLoadingErrorType
 import com.mapbox.maps.MapView
 import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.Style
@@ -433,10 +434,14 @@ class PhoneMap internal constructor(
         if (AccessErrors.isAccessDenied(error.message)) _accessDenied.value = true
         // Counted for the summary of a trip under way, by kind only.
         engine.onMapError(error.type.name)
+        // The own route line's source: the SDK's line again at once. Its message is left out, as it may quote the path.
+        val ownSource = error.sourceId == OwnRouteLine.SOURCE
+        if (ownSource && error.type == MapLoadingErrorType.SOURCE && ownLine.enabled) ownLine.onSourceError()
+        val fields = mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId)
         mapErrorFolder.record(
             type = "map_error",
             key = RepeatFolder.keyOf(error.type.name, error.message),
-            fields = mapOf("errorType" to error.type.name, "message" to error.message, "source" to error.sourceId),
+            fields = if (ownSource) fields - "message" else fields,
             origin = error.sourceId,
         )
     }
@@ -1234,6 +1239,8 @@ class PhoneMap internal constructor(
                 delay(CAMERA_SAMPLE_MS)
                 // Lane details are looked at with each line, and set again if something turned them off.
                 laneDetails.check()
+                // The own route line, with its switch on: the SDK's line again where it has no data.
+                if (ownLine.enabled) ownLine.check()
                 // Taken even when hidden, so every logged line covers one second. In the background
                 // the map draws nothing; the "activity" lines say when that was.
                 val sample = cameraSample()

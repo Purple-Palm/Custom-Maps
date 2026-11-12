@@ -45,8 +45,13 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  *
  * The path, its table and its traffic are built once for a route, off the main thread ([Worker]), as soon as the
  * route's lane plan is there or could not be made; a traffic refresh builds the traffic again and nothing else. Per
- * accepted puck update the main thread does one lookup in the table and sets the trim of the two layers. A failure
- * costs the own line and one error line, never the drive: the SDK's line is shown again.
+ * accepted puck update the main thread does one lookup in the table and sets the trim of the two layers.
+ *
+ * A watchdog gives the line back to the SDK at once ([Fallback]): where the own source reports a loading error
+ * ([onSourceError]), where the style refuses a call or a path cannot be built (an exception, caught here), or where
+ * the own line has no data while guidance runs ([check]). The SDK's line is shown, the own drawing is taken away, one
+ * "route_line" line says why, and the route is not tried again: the next route is. A failure costs the own line and
+ * at most one error line with it, never the drive.
  *
  * At every change of route (Start, a new route, a reroute, another route taken) and at every style load, such as on a
  * map made anew, the SDK's line is shown first, already trimmed, and the own layers hidden; the new path is built off
@@ -60,6 +65,8 @@ internal class OwnRouteLine(
     private val primary: Primary,
     private val worker: Worker,
     private val debugLog: DebugLog,
+    /** The clock, in nanoseconds, for how long a path has waited to load. */
+    private val nanos: () -> Long = System::nanoTime,
 ) {
 
     /** The own line's source and layers in the style of one map. Every call may throw where the style refuses. */
@@ -136,6 +143,18 @@ internal class OwnRouteLine(
     /** From [from], a fraction of the path's projected length, the line is [colour] up to the next stop. */
     data class ColourStop(val from: Double, val colour: Int)
 
+    /** Why the own line gave the route line back to the SDK, as the "route_line" line names it. */
+    enum class Fallback(val logName: String) {
+        /** The map reported a loading error of the own source. */
+        SOURCE("source"),
+
+        /** The style refused a call, or the route's path could not be built: an exception, caught here. */
+        EXCEPTION("exception"),
+
+        /** Guidance runs and the own line has no data: its layers left the style, or a path sent did not load in time. */
+        NO_DATA("no_data"),
+    }
+
     /** Whether the Debug switch is on. */
     var enabled = false
         private set
@@ -171,6 +190,15 @@ internal class OwnRouteLine(
     /** The data id of the path sent to the source that has not loaded yet; null while none waits. */
     private var sentId: String? = null
 
+    /** When that path was sent, in [nanos]. */
+    private var sentAt = 0L
+
+    /** The route whose own line failed: it is not tried again, the next route is. */
+    private var failedRouteId: String? = null
+
+    /** How many routes of the drive the own line was given, for the "route_line" line. */
+    private var routes = 0
+
     /** Counts the paths sent to the source, for their data ids. */
     private var sent = 0
 
@@ -194,6 +222,7 @@ internal class OwnRouteLine(
             buildPath()
         } else {
             // The route too is forgotten: with the switch on again the map names the route the drive is on at that time.
+            failedRouteId = null
             routeId = null
             build = null
             traffic = null
@@ -240,6 +269,7 @@ internal class OwnRouteLine(
         this.routeId = routeId
         this.build = build
         this.traffic = traffic
+        routes++
         task?.cancel()
         task = null
         refreshPending = false
@@ -303,9 +333,32 @@ internal class OwnRouteLine(
         attempt { layers.setColours(colourStops(drawing.runs, look), casingColour(look)) }
     }
 
+    /**
+     * The map reported a loading error of the own source: the SDK's line again at once, and the own drawing taken
+     * away, while a route is drawn or on its way.
+     */
+    fun onSourceError() {
+        if (enabled && routeId != null) fallBack(Fallback.SOURCE)
+    }
+
+    /**
+     * Once a second during guidance: the own line falls back where it should be drawn and has no data, as when its
+     * layers have left the style, or a path sent has not loaded within [LOAD_WAIT_NANOS].
+     */
+    fun check() {
+        if (!enabled || routeId == null || failed() || !ready()) return
+        attempt {
+            val lost = drawn && !layers.exist()
+            val late = sentId != null && nanos() - sentAt > LOAD_WAIT_NANOS
+            if (lost || late) fallBack(Fallback.NO_DATA)
+        }
+    }
+
     /** Guidance ended: the SDK's line is shown, as it is in the preview, and the own source is cleared. */
     fun onGuidanceEnded() {
         val had = routeId != null || drawn || task != null
+        failedRouteId = null
+        routes = 0
         routeId = null
         build = null
         traffic = null
@@ -331,11 +384,14 @@ internal class OwnRouteLine(
 
     private fun ready() = styleReady && !released && layers.usable
 
+    /** Whether the own line of the route the drive is on failed. */
+    private fun failed() = routeId != null && routeId == failedRouteId
+
     /** Builds the path of the route the drive is on, if its plan is there, the switch is on and no path is built yet. */
     private fun buildPath() {
         val build = build ?: return
         val routeId = routeId ?: return
-        if (!enabled || drawing != null) return
+        if (!enabled || drawing != null || failed()) return
         val version = ++versions
         task?.cancel()
         task = worker.run({ build.drawing(version) }) { result ->
@@ -352,8 +408,11 @@ internal class OwnRouteLine(
                         }
                     }
                 },
-                // The SDK's line stays: the route costs its own line and this one error line.
-                onFailure = { debugLog.error(WHERE, it) },
+                // The route costs its own line, with this one error line.
+                onFailure = { error ->
+                    debugLog.error(WHERE, error)
+                    if (routeId == this.routeId) fallBack(Fallback.EXCEPTION)
+                },
             )
         }
     }
@@ -388,9 +447,10 @@ internal class OwnRouteLine(
      * ([onSourceLoaded]). Until it has, the own layers stay hidden and the SDK's line shown.
      */
     private fun send(drawing: OwnLineDrawing) {
-        if (!ready()) return
+        if (!ready() || failed()) return
         val dataId = "$DATA_ID${++sent}"
         sentId = dataId
+        sentAt = nanos()
         attempt {
             layers.watchLoads(true)
             layers.setPath(drawing.points, dataId)
@@ -401,7 +461,7 @@ internal class OwnRouteLine(
     private fun forgetSent() {
         val waited = sentId != null
         sentId = null
-        if (waited && !released) attempt { layers.watchLoads(false) }
+        if (waited && !released) quietly { layers.watchLoads(false) }
     }
 
     /** Shows [drawing], whose path the source has loaded: its colours and trim, the own layers, and the SDK's line hidden. */
@@ -440,32 +500,73 @@ internal class OwnRouteLine(
     /** The SDK's line is shown and the own layers hidden. */
     private fun showSdkLine() {
         drawn = false
-        attempt { primary.show() }
-        if (ready()) attempt { layers.setVisible(false) }
+        quietly { primary.show() }
+        if (ready()) quietly { layers.setVisible(false) }
     }
 
     /**
-     * Runs [change] on the style; where the style refuses, the own line is given up for now: the SDK's line is shown,
-     * the own layers hidden, and the error goes to the debug log.
+     * Runs [change] on the style; where the style refuses, the error goes to the debug log and the own line falls back
+     * to the SDK's for the route ([fallBack]); without a route, the SDK's line is shown all the same.
      */
     private inline fun attempt(change: () -> Unit) {
         try {
             change()
         } catch (e: RuntimeException) {
             debugLog.error(WHERE, e)
-            drawn = false
-            try {
-                primary.show()
-                if (ready()) layers.setVisible(false)
-            } catch (again: RuntimeException) {
-                debugLog.error(WHERE, again)
+            if (enabled && routeId != null) {
+                fallBack(Fallback.EXCEPTION)
+            } else {
+                drawn = false
+                quietly { primary.show() }
+                if (ready()) quietly { layers.setVisible(false) }
             }
+        }
+    }
+
+    /**
+     * The watchdog: the SDK's line at once, the own drawing taken away (its layers hidden, its source cleared, nothing
+     * waiting to load, no path kept), one "route_line" line with [cause], and no other try for the route the drive is
+     * on; the next route gets one. Once per route.
+     */
+    private fun fallBack(cause: Fallback) {
+        if (failed()) return
+        failedRouteId = routeId
+        task?.cancel()
+        task = null
+        refreshPending = false
+        drawing = null
+        val waited = sentId != null
+        sentId = null
+        drawn = false
+        quietly { primary.show() }
+        if (ready()) {
+            if (waited) quietly { layers.watchLoads(false) }
+            quietly { layers.setVisible(false) }
+            quietly { layers.clearPath() }
+        }
+        debugLog.log(ROUTE_LINE, mapOf("drawer" to DRAWER_SDK, "reason" to REASON_FALLBACK, "ownLineFallback" to cause.logName, "route" to routes))
+    }
+
+    /** Runs [change] on the style while the own line falls back: what still fails is only written down. */
+    private inline fun quietly(change: () -> Unit) {
+        try {
+            change()
+        } catch (e: RuntimeException) {
+            debugLog.error(WHERE, e)
         }
     }
 
     companion object {
         /** Where an error line says the own route line failed. */
         const val WHERE = "ownRouteLine"
+
+        /** The debug log's line about who draws the route line. */
+        const val ROUTE_LINE = "route_line"
+        const val DRAWER_SDK = "sdk"
+        const val REASON_FALLBACK = "fallback"
+
+        /** A path sent to the source that has not loaded after this long, during guidance, counts as no data: 10 s. */
+        const val LOAD_WAIT_NANOS = 10_000_000_000L
 
         /** What the data ids of the own source's paths begin with. */
         private const val DATA_ID = "own-"
