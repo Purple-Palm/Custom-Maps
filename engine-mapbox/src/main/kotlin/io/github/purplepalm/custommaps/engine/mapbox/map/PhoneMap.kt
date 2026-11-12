@@ -621,8 +621,8 @@ class PhoneMap internal constructor(
     /**
      * Puts the Mapbox logo and the attribution button in a fixed strip at the bottom left of the map,
      * just above [bottomInset] pixels of navigation bar or keyboard. The screen keeps that strip free
-     * of panels ([ORNAMENT_STRIP_DP]), so the logo is never covered and does not move with the panels.
-     * Mapbox lets apps move the logo but not resize or fade it.
+     * of panels ([ORNAMENT_STRIP_DP]), so the logo is never covered, not even by a panel's shadow,
+     * and does not move with the panels. Mapbox lets apps move the logo but not resize or fade it.
      */
     fun setOrnamentBottomInset(bottomInset: Int) {
         val bottom = bottomInset + ORNAMENT_MARGIN_DP * density
@@ -1292,8 +1292,15 @@ class PhoneMap internal constructor(
         private const val LOGO_WIDTH_DP = 85f
         private const val LOGO_HEIGHT_DP = 21f
 
+        /**
+         * Free above the logo and the attribution button. The shadow under a panel over the light map
+         * reaches about 10 dp below it, so this keeps it off the logo and the (i); the same in both
+         * looks, so a change of look never moves a panel.
+         */
+        private const val SHADOW_CLEARANCE_DP = 12f
+
         /** Height of the strip above the bottom inset that the logo and attribution need; panels stay above it. */
-        const val ORNAMENT_STRIP_DP = ORNAMENT_MARGIN_DP + LOGO_HEIGHT_DP + ORNAMENT_MARGIN_DP
+        const val ORNAMENT_STRIP_DP = ORNAMENT_MARGIN_DP + LOGO_HEIGHT_DP + SHADOW_CLEARANCE_DP
 
         /** Standard style slot above roads and below 3D buildings and labels. */
         private const val ROUTE_SLOT = "middle"

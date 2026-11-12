@@ -33,11 +33,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
 
 /**
  * The saved Mapbox tokens, one line each, with the active one marked, and Add below them while
@@ -69,7 +72,7 @@ fun TokenListSection(
                 Text(
                     text = stringResource(R.string.token_list_empty),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = LookTheme.tokens.onCardMuted,
                 )
             }
             Column(Modifier.selectableGroup()) {
@@ -93,7 +96,7 @@ fun TokenListSection(
                 Text(
                     text = stringResource(R.string.token_locked_during_guidance),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = LookTheme.tokens.onCard,
                 )
             }
         }
@@ -101,12 +104,12 @@ fun TokenListSection(
         Text(
             text = stringResource(R.string.token_list_note),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = LookTheme.tokens.onCardMuted,
         )
         Text(
             text = stringResource(R.string.token_storage_note),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = LookTheme.tokens.onCardMuted,
             modifier = Modifier.padding(top = 4.dp),
         )
     }
@@ -165,7 +168,7 @@ private fun TokenLine(row: TokenRow, locked: Boolean, onUse: () -> Unit, onRenam
             text = row.name,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = if (row.active) FontWeight.SemiBold else null,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = LookTheme.tokens.onCard,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -174,7 +177,7 @@ private fun TokenLine(row: TokenRow, locked: Boolean, onUse: () -> Unit, onRenam
         Text(
             text = row.masked,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = LookTheme.tokens.onCardMuted,
             maxLines = 1,
         )
         if (row.active) {
@@ -182,7 +185,7 @@ private fun TokenLine(row: TokenRow, locked: Boolean, onUse: () -> Unit, onRenam
             Text(
                 text = stringResource(R.string.token_list_active),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = LookTheme.tokens.accentInk,
                 maxLines = 1,
             )
         }
@@ -191,7 +194,7 @@ private fun TokenLine(row: TokenRow, locked: Boolean, onUse: () -> Unit, onRenam
                 Icon(
                     painter = painterResource(R.drawable.ic_more),
                     contentDescription = stringResource(R.string.token_menu, row.name),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = LookTheme.tokens.onCardMuted,
                 )
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -331,8 +334,8 @@ private fun previewRow(n: Int, name: String, active: Boolean, locked: Boolean = 
 
 @Preview(widthDp = 360)
 @Composable
-private fun TokenListSectionPreview() {
-    CustomMapsTheme(Look.NIGHT) {
+private fun TokenListSectionPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
         Surface {
             TokenListSection(
                 state = TokenState.Ready(
@@ -357,8 +360,8 @@ private fun TokenListSectionPreview() {
 
 @Preview(widthDp = 360, fontScale = 1.3f)
 @Composable
-private fun TokenListSectionFullDuringTripPreview() {
-    CustomMapsTheme(Look.NIGHT) {
+private fun TokenListSectionFullDuringTripPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
         Surface {
             TokenListSection(
                 state = TokenState.Ready(
@@ -385,8 +388,8 @@ private fun TokenListSectionFullDuringTripPreview() {
 
 @Preview(widthDp = 360)
 @Composable
-private fun TokenListSectionEmptyPreview() {
-    CustomMapsTheme(Look.NIGHT) {
+private fun TokenListSectionEmptyPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
         Surface {
             TokenListSection(
                 state = TokenState.Ready(rows = emptyList(), locked = false, full = false, defaultName = "Main"),

@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenProblem
+import io.github.purplepalm.custommaps.ui.theme.AccentButton
 
 /**
  * Field for pasting a Mapbox public token, with its Save button. The typed value is kept in plain
@@ -49,7 +49,7 @@ fun TokenEditor(
             error = problem?.let { tokenProblemText(it) },
         )
         Spacer(Modifier.height(12.dp))
-        Button(
+        AccentButton(
             onClick = {
                 val refused = onSave(input)
                 if (refused == null) input = "" else problem = refused

@@ -15,11 +15,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,7 +30,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalDensity
@@ -41,8 +43,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,7 +61,9 @@ import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
-import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
+import io.github.purplepalm.custommaps.ui.theme.PreviewOnMap
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -102,12 +108,27 @@ private const val THEN_FADE_MS = 180
 /**
  * The chip's bounds grow downward from under the card, and the chip keeps its lower edge on
  * theirs: it is pulled out from under the card, not unrolled in place. Nothing of it shows above
- * the bounds' upper edge, which lies behind the card.
+ * the bounds' upper edge, which lies behind the card: [ABOVE_THE_TOP] clips there. The transition
+ * itself clips nothing, since it would clip the chip's shadow too.
  */
-private val THEN_ENTER = expandVertically(tween(THEN_ENTER_MS, easing = EaseOutCubic), expandFrom = Alignment.Bottom)
+private val THEN_ENTER = expandVertically(tween(THEN_ENTER_MS, easing = EaseOutCubic), expandFrom = Alignment.Bottom, clip = false)
 
 /** The same way back up. */
-private val THEN_EXIT = shrinkVertically(tween(THEN_EXIT_MS, easing = EaseInCubic), shrinkTowards = Alignment.Bottom)
+private val THEN_EXIT = shrinkVertically(tween(THEN_EXIT_MS, easing = EaseInCubic), shrinkTowards = Alignment.Bottom, clip = false)
+
+/**
+ * Cuts off what lies above the chip's bounds, and only that: at its sides and below it the chip's
+ * shadow over the light map shows, as far as such a shadow reaches.
+ */
+private val ABOVE_THE_TOP: Shape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val reach = with(density) { SHADOW_ROOM.toPx() }
+        return Outline.Rectangle(Rect(-reach, 0f, size.width + reach, size.height + reach))
+    }
+}
+
+/** Beyond the reach of the shadow under anything over the map. */
+private val SHADOW_ROOM = 12.dp
 
 /** Inside a chip that stays: the old arrow or road is gone before the new one comes, and the chip's width follows. */
 private val THEN_FADE: AnimatedContentTransitionScope<Maneuver>.() -> ContentTransform = {
@@ -191,7 +212,12 @@ internal fun bandWidths(cardWidth: Int, gap: Int): BandWidths {
 @Composable
 private fun ThenChipSlot(then: Maneuver?, modifier: Modifier = Modifier) {
     val transition = updateTransition(targetState = then, label = "then")
-    transition.AnimatedVisibility(visible = { it != null }, modifier = modifier, enter = THEN_ENTER, exit = THEN_EXIT) {
+    transition.AnimatedVisibility(
+        visible = { it != null },
+        modifier = modifier.graphicsLayer(shape = ABOVE_THE_TOP, clip = true),
+        enter = THEN_ENTER,
+        exit = THEN_EXIT,
+    ) {
         // While it slides away the target is null: it leaves with the arrow it had.
         val shown = transition.targetState ?: transition.currentState
         if (shown != null) ThenChip(shown)
@@ -201,11 +227,14 @@ private fun ThenChipSlot(then: Maneuver?, modifier: Modifier = Modifier) {
 @Composable
 private fun ThenChip(maneuver: Maneuver) {
     val description = thenDescription(maneuver)
+    val tokens = LookTheme.tokens
     Surface(
         // One sentence for a screen reader, in place of the label, the arrow and the road.
         modifier = Modifier.clearAndSetSemantics { contentDescription = description },
         shape = THEN_CHIP_SHAPE,
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.card,
+        // Its top lies under the card, so the shadow shows only where it hangs over the map.
+        shadowElevation = tokens.overMapElevation,
     ) {
         Row(
             // The top of the chip stays under the card's rounded bottom edge.
@@ -215,7 +244,7 @@ private fun ThenChip(maneuver: Maneuver) {
             Text(
                 text = stringResource(R.string.guidance_then),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = tokens.onCardMuted,
                 maxLines = 1,
             )
             Spacer(Modifier.width(10.dp))
@@ -227,11 +256,11 @@ private fun ThenChip(maneuver: Maneuver) {
                 label = "then arrow",
                 contentKey = { glyphKey(it.type, it.modifier, it.roundaboutExitDegrees) },
             ) { shown ->
-                // Platinum, not amber: amber stays for what the driver does now.
+                // In the card's ink, not amber: amber stays for what the driver does now.
                 ManeuverGlyph(
                     type = shown.type,
                     turn = shown.modifier,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = tokens.onCard,
                     modifier = Modifier.size(THEN_GLYPH),
                     roundaboutExitDegrees = shown.roundaboutExitDegrees,
                 )
@@ -258,7 +287,7 @@ private fun ThenLabel(maneuver: Maneuver) {
             text = label,
             modifier = Modifier.padding(start = 8.dp),
             style = style,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = LookTheme.tokens.onCard,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             // A long road name is cut. The side of the destination is the whole message, so it
@@ -341,38 +370,30 @@ private fun TurnModifier?.isRight() = this == TurnModifier.SLIGHT_RIGHT || this 
 
 @Preview(widthDp = 400)
 @Composable
-private fun ManeuverPanelPreview() {
-    CustomMapsTheme(Look.NIGHT) {
-        // A grey stand-in for the map, with room for the chip below the card.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(280.dp)
-                .background(Color(0xFF2B3036))
-                .padding(12.dp),
-        ) {
-            ManeuverPanel(
-                RouteProgressSnapshot(
-                    nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.LEFT, "Oak Street"),
-                    distanceToNextManeuver = Distance.feet(350.0),
-                    lanes = LaneInfo(
-                        listOf(
-                            Lane(setOf(TurnModifier.LEFT), isRecommended = true, activeIndication = TurnModifier.LEFT),
-                            Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
-                            Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.RIGHT), isRecommended = false),
-                        ),
+private fun ManeuverPanelPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    // With room for the chip below the card.
+    PreviewOnMap(look, Modifier.height(280.dp)) {
+        ManeuverPanel(
+            RouteProgressSnapshot(
+                nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.LEFT, "Oak Street"),
+                distanceToNextManeuver = Distance.feet(350.0),
+                lanes = LaneInfo(
+                    listOf(
+                        Lane(setOf(TurnModifier.LEFT), isRecommended = true, activeIndication = TurnModifier.LEFT),
+                        Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
+                        Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.RIGHT), isRecommended = false),
                     ),
-                    distanceRemaining = Distance.miles(2.1),
-                    durationRemaining = 7.minutes,
-                    following = FollowingManeuver(
-                        Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street"),
-                        distanceAfterNext = Distance.meters(120.0),
-                        durationAfterNext = 10.seconds,
-                    ),
-                    showThen = true,
                 ),
-            )
-        }
+                distanceRemaining = Distance.miles(2.1),
+                durationRemaining = 7.minutes,
+                following = FollowingManeuver(
+                    Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street"),
+                    distanceAfterNext = Distance.meters(120.0),
+                    durationAfterNext = 10.seconds,
+                ),
+                showThen = true,
+            ),
+        )
     }
 }
 
@@ -382,34 +403,26 @@ private fun ManeuverPanelPreview() {
  */
 @Preview(name = "lane choice and Then", widthDp = 360)
 @Composable
-private fun ManeuverPanelLaneChoicePreview() {
+private fun ManeuverPanelLaneChoicePreview(@PreviewParameter(LookParameter::class) look: Look) {
     val on = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
     val off = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
-    CustomMapsTheme(Look.NIGHT) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(300.dp)
-                .background(Color(0xFF2B3036))
-                .padding(12.dp),
-        ) {
-            ManeuverPanel(
-                RouteProgressSnapshot(
-                    nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Oak Street"),
-                    distanceToNextManeuver = Distance.miles(0.5),
-                    lanes = null,
-                    distanceRemaining = Distance.miles(3.4),
-                    durationRemaining = 6.minutes,
-                    following = FollowingManeuver(
-                        Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street"),
-                        distanceAfterNext = Distance.meters(300.0),
-                        durationAfterNext = 20.seconds,
-                    ),
-                    showThen = true,
-                    laneChoiceAhead = LanesAhead(Distance.miles(0.3), LaneInfo(listOf(on, on, on, off, off))),
+    PreviewOnMap(look, Modifier.height(300.dp)) {
+        ManeuverPanel(
+            RouteProgressSnapshot(
+                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Oak Street"),
+                distanceToNextManeuver = Distance.miles(0.5),
+                lanes = null,
+                distanceRemaining = Distance.miles(3.4),
+                durationRemaining = 6.minutes,
+                following = FollowingManeuver(
+                    Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street"),
+                    distanceAfterNext = Distance.meters(300.0),
+                    durationAfterNext = 20.seconds,
                 ),
-            )
-        }
+                showThen = true,
+                laneChoiceAhead = LanesAhead(Distance.miles(0.3), LaneInfo(listOf(on, on, on, off, off))),
+            ),
+        )
     }
 }
 
@@ -420,30 +433,22 @@ private fun ManeuverPanelLaneChoicePreview() {
 @Preview(name = "large font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "largest font", widthDp = 360, fontScale = 2f)
 @Composable
-private fun ManeuverPanelDestinationPreview() {
-    CustomMapsTheme(Look.NIGHT) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(320.dp)
-                .background(Color(0xFF2B3036))
-                .padding(12.dp),
-        ) {
-            ManeuverPanel(
-                RouteProgressSnapshot(
-                    nextManeuver = Maneuver(ManeuverType.ROUNDABOUT, TurnModifier.RIGHT, "Elm Street", roundaboutExitNumber = 2, roundaboutExitDegrees = 180.0),
-                    distanceToNextManeuver = Distance.feet(500.0),
-                    lanes = null,
-                    distanceRemaining = Distance.miles(0.2),
-                    durationRemaining = 1.minutes,
-                    following = FollowingManeuver(
-                        Maneuver(ManeuverType.ARRIVE, TurnModifier.RIGHT, "Elm Street"),
-                        distanceAfterNext = Distance.meters(90.0),
-                        durationAfterNext = 12.seconds,
-                    ),
-                    showThen = true,
+private fun ManeuverPanelDestinationPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look, Modifier.height(320.dp)) {
+        ManeuverPanel(
+            RouteProgressSnapshot(
+                nextManeuver = Maneuver(ManeuverType.ROUNDABOUT, TurnModifier.RIGHT, "Elm Street", roundaboutExitNumber = 2, roundaboutExitDegrees = 180.0),
+                distanceToNextManeuver = Distance.feet(500.0),
+                lanes = null,
+                distanceRemaining = Distance.miles(0.2),
+                durationRemaining = 1.minutes,
+                following = FollowingManeuver(
+                    Maneuver(ManeuverType.ARRIVE, TurnModifier.RIGHT, "Elm Street"),
+                    distanceAfterNext = Distance.meters(90.0),
+                    durationAfterNext = 12.seconds,
                 ),
-            )
-        }
+                showThen = true,
+            ),
+        )
     }
 }

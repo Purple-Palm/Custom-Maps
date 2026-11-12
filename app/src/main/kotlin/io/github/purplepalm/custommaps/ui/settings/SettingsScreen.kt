@@ -25,7 +25,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,6 +40,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
@@ -54,7 +54,10 @@ import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
+import io.github.purplepalm.custommaps.ui.theme.AppSwitch
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
 import io.github.purplepalm.custommaps.ui.token.TokenListSection
 import io.github.purplepalm.custommaps.ui.token.TokenRow
 import io.github.purplepalm.custommaps.ui.token.TokenState
@@ -107,7 +110,7 @@ fun SettingsScreen(
      */
     temporaryDebugKey: Boolean = false,
 ) {
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(modifier = modifier.fillMaxSize(), color = LookTheme.tokens.screen) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -120,14 +123,14 @@ fun SettingsScreen(
                     Icon(
                         painter = painterResource(R.drawable.ic_arrow_back),
                         contentDescription = stringResource(R.string.navigate_back),
-                        tint = MaterialTheme.colorScheme.onBackground,
+                        tint = LookTheme.tokens.onCard,
                     )
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = stringResource(R.string.settings_title),
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = LookTheme.tokens.onCard,
                 )
             }
             Spacer(Modifier.height(24.dp))
@@ -148,12 +151,12 @@ fun SettingsScreen(
                     stringResource(R.string.build_revision),
                 ),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LookTheme.tokens.onCardMuted,
             )
             Text(
                 text = stringResource(R.string.about_map_data),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LookTheme.tokens.onCardMuted,
                 modifier = Modifier.padding(top = 4.dp),
             )
             PrivacyPolicyButton()
@@ -188,7 +191,7 @@ private fun GuidanceSection(
     Text(
         text = stringResource(R.string.camera_style_title),
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = LookTheme.tokens.onCard,
     )
     Column(Modifier.selectableGroup()) {
         CameraStyle.entries.forEach { style ->
@@ -207,12 +210,12 @@ private fun GuidanceSection(
                     Text(
                         text = stringResource(style.titleRes()),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = LookTheme.tokens.onCard,
                     )
                     Text(
                         text = stringResource(style.noteRes()),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = LookTheme.tokens.onCardMuted,
                     )
                 }
             }
@@ -221,7 +224,7 @@ private fun GuidanceSection(
     Text(
         text = stringResource(R.string.camera_style_note),
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = LookTheme.tokens.onCardMuted,
     )
 
     Spacer(Modifier.height(16.dp))
@@ -234,16 +237,16 @@ private fun GuidanceSection(
             Text(
                 text = stringResource(R.string.lane_details_title),
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = LookTheme.tokens.onCard,
             )
             Text(
                 text = stringResource(R.string.lane_details_note),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LookTheme.tokens.onCardMuted,
             )
         }
         Spacer(Modifier.width(16.dp))
-        Switch(checked = guidance.laneDetails, onCheckedChange = onLaneDetailsChange)
+        AppSwitch(checked = guidance.laneDetails, onCheckedChange = onLaneDetailsChange)
     }
 }
 
@@ -253,7 +256,7 @@ private fun LaneZoomBlock(guidance: GuidanceSettings, onLaneZoomChange: (LaneZoo
     Text(
         text = stringResource(R.string.lane_zoom_title),
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = LookTheme.tokens.onCard,
     )
     SingleChoiceSegmentedButtonRow(
         modifier = Modifier
@@ -275,7 +278,7 @@ private fun LaneZoomBlock(guidance: GuidanceSettings, onLaneZoomChange: (LaneZoo
         Text(
             text = stringResource(mode.noteRes()),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = LookTheme.tokens.onCardMuted,
         )
     }
     if (guidance.cameraStyle == CameraStyle.MAPBOX_STANDARD) {
@@ -283,7 +286,7 @@ private fun LaneZoomBlock(guidance: GuidanceSettings, onLaneZoomChange: (LaneZoo
         Text(
             text = stringResource(R.string.lane_zoom_mapbox_standard_note),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = LookTheme.tokens.onCard,
             modifier = Modifier.padding(top = 4.dp),
         )
     }
@@ -308,20 +311,20 @@ private fun DebugSection(
             else -> stringResource(tripsSinceRes(trips.began), trips.count, TRIPS_SINCE_DAY.format(since))
         },
         style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = LookTheme.tokens.onCard,
     )
     // By the token each ran on, when there is more than one line.
     debug.tripsByToken.forEach { row ->
         Text(
             text = stringResource(R.string.debug_trips_token, tripsOfText(row.of), row.count),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = LookTheme.tokens.onCard,
         )
     }
     Text(
         text = stringResource(R.string.debug_trips_note),
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = LookTheme.tokens.onCardMuted,
     )
     TextButton(onClick = { uriHandler.openUri(MAPBOX_STATISTICS_URL) }) {
         Text(stringResource(R.string.debug_open_statistics))
@@ -331,13 +334,13 @@ private fun DebugSection(
     Text(
         text = stringResource(R.string.debug_recent_title),
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = LookTheme.tokens.onCard,
     )
     if (debug.recentTrips.isEmpty()) {
         Text(
             text = stringResource(R.string.debug_recent_empty),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = LookTheme.tokens.onCardMuted,
         )
     }
     debug.recentTrips.forEach { (trip, token) ->
@@ -350,7 +353,7 @@ private fun DebugSection(
                 if (token == TripsOf.BeforeNames) null else tripsOfText(token),
             ).joinToString(" · "),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = LookTheme.tokens.onCardMuted,
         )
     }
 
@@ -360,16 +363,16 @@ private fun DebugSection(
             Text(
                 text = stringResource(R.string.debug_simulate_drive),
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = LookTheme.tokens.onCard,
             )
             Text(
                 text = stringResource(R.string.debug_simulate_drive_note),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LookTheme.tokens.onCardMuted,
             )
         }
         Spacer(Modifier.width(16.dp))
-        Switch(checked = debug.simulateDrive, onCheckedChange = onSimulateDriveChange)
+        AppSwitch(checked = debug.simulateDrive, onCheckedChange = onSimulateDriveChange)
     }
 
     Spacer(Modifier.height(16.dp))
@@ -377,7 +380,7 @@ private fun DebugSection(
         Text(
             text = stringResource(R.string.debug_temporary_key),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
+            color = LookTheme.tokens.danger,
             modifier = Modifier.padding(bottom = 8.dp),
         )
     }
@@ -396,7 +399,7 @@ private fun CrashNowBlock(onCrashNow: () -> Unit) {
     Text(
         text = stringResource(R.string.debug_crash_now_note),
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = LookTheme.tokens.onCardMuted,
     )
     TextButton(onClick = { confirm = true }) { Text(stringResource(R.string.debug_crash_now)) }
     if (confirm) {
@@ -425,7 +428,7 @@ private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: (
     Text(
         text = stringResource(R.string.debug_log_title),
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = LookTheme.tokens.onCard,
     )
     Text(
         text = when {
@@ -434,12 +437,12 @@ private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: (
             else -> stringResource(R.string.debug_log_size, SizeFormat.bytes(logBytes))
         },
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = LookTheme.tokens.onCard,
     )
     Text(
         text = stringResource(R.string.debug_log_note),
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = LookTheme.tokens.onCardMuted,
     )
     val hasLog = (logBytes ?: 0L) > 0L
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -472,7 +475,7 @@ private fun SectionTitle(@StringRes text: Int) {
     Text(
         text = stringResource(text),
         style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
+        color = LookTheme.tokens.accentInk,
         modifier = Modifier.padding(bottom = 8.dp),
     )
 }
@@ -480,7 +483,7 @@ private fun SectionTitle(@StringRes text: Int) {
 @Composable
 private fun SectionDivider() {
     Spacer(Modifier.height(24.dp))
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    HorizontalDivider(color = LookTheme.tokens.divider)
     Spacer(Modifier.height(24.dp))
 }
 
@@ -524,10 +527,12 @@ private fun TripKind.labelRes(): Int = when (this) {
     TripKind.FREE_DRIVE -> R.string.debug_trip_free_drive
 }
 
-@Preview
+/** The whole page, its switches one on and one off, on a narrow phone and with a large font. */
+@Preview(name = "settings", widthDp = 360, heightDp = 1600)
+@Preview(name = "settings, large font", widthDp = 360, heightDp = 2000, fontScale = 1.3f)
 @Composable
-private fun SettingsScreenPreview() {
-    CustomMapsTheme(Look.NIGHT) {
+private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
         SettingsScreen(
             tokens = TokenState.Ready(
                 rows = listOf(

@@ -6,7 +6,6 @@ import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -32,15 +31,23 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
+import io.github.purplepalm.custommaps.ui.theme.PreviewOnMap
 import kotlinx.coroutines.flow.collectLatest
 
 /**
  * The replay slider of a simulated drive, like a video player's progress bar: a thin track, amber
  * where the drive has played and a quiet grey ahead, and a white dot where the drive is. The row is
- * as tall as a finger needs; the track and the dot are small.
+ * as tall as a finger needs; the track and the dot are small. One design for both looks: a graphite
+ * casing along the track and a graphite ring around the dot carry them over the light map, and at
+ * night the dot, the amber and the grey do.
  *
  * The drive's position comes once a second. Between two of them the dot glides, in the draw phase
  * only: a glide draws the slider again on each frame, but composes nothing, and it stops as soon
@@ -80,9 +87,8 @@ fun ReplaySlider(position: State<ReplayPosition?>, onSeek: (Double) -> Unit, mod
     val percent by remember(position) { derivedStateOf { position.value?.percent ?: 0 } }
     val name = stringResource(R.string.replay_position)
     val said = stringResource(R.string.replay_position_percent, percent)
-    val played = MaterialTheme.colorScheme.primary
-    val ahead = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = AHEAD_ALPHA)
-    val casing = MaterialTheme.colorScheme.background.copy(alpha = CASING_ALPHA)
+    val tokens = LookTheme.tokens
+    val colors = SliderColors(played = tokens.accent, ahead = tokens.sliderRest, ink = tokens.mapInk, dot = tokens.sliderDot)
     Box(
         modifier
             .fillMaxWidth()
@@ -114,26 +120,29 @@ fun ReplaySlider(position: State<ReplayPosition?>, onSeek: (Double) -> Unit, mod
             }
             .drawBehind {
                 val holding = held.value
-                drawSlider(holding ?: glide.at(frame.longValue), holding != null, played, ahead, casing)
+                drawSlider(holding ?: glide.at(frame.longValue), holding != null, colors)
             },
     )
 }
 
+/** The slider's colours: the played part, the part ahead, the ink of the casing and the ring, the dot. */
+private class SliderColors(val played: Color, val ahead: Color, val ink: Color, val dot: Color)
+
 /** The track from end to end, the played part over it, and the dot at [fraction] of it, larger while held. */
-private fun DrawScope.drawSlider(fraction: Float, holding: Boolean, played: Color, ahead: Color, casing: Color) {
+private fun DrawScope.drawSlider(fraction: Float, holding: Boolean, colors: SliderColors) {
     val y = size.height / 2f
     val start = TRACK_INSET.toPx()
     val end = size.width - start
     if (end <= start) return
     val x = start + (end - start) * fraction
     val track = TRACK_WIDTH.toPx()
-    // A dark edge keeps the track and the dot plain over any part of the map.
-    drawLine(casing, Offset(start, y), Offset(end, y), strokeWidth = track + 2f * EDGE.toPx(), cap = StrokeCap.Round)
-    drawLine(ahead, Offset(start, y), Offset(end, y), strokeWidth = track, cap = StrokeCap.Round)
-    if (x > start) drawLine(played, Offset(start, y), Offset(x, y), strokeWidth = track, cap = StrokeCap.Round)
+    // The ink's casing and ring keep the track and the dot plain over any part of the map.
+    drawLine(colors.ink, Offset(start, y), Offset(end, y), strokeWidth = track + 2f * CASING.toPx(), cap = StrokeCap.Round)
+    drawLine(colors.ahead, Offset(start, y), Offset(end, y), strokeWidth = track, cap = StrokeCap.Round)
+    if (x > start) drawLine(colors.played, Offset(start, y), Offset(x, y), strokeWidth = track, cap = StrokeCap.Round)
     val radius = (if (holding) HELD_DOT else DOT).toPx() / 2f
-    drawCircle(casing, radius = radius + EDGE.toPx(), center = Offset(x, y))
-    drawCircle(Color.White, radius = radius, center = Offset(x, y))
+    drawCircle(colors.ink, radius = radius + RING.toPx(), center = Offset(x, y))
+    drawCircle(colors.dot, radius = radius, center = Offset(x, y))
 }
 
 /** Where on the track [x] pixels from the row's start lie, from 0 to 1, with the track [inset] from each end of a row [width] wide. */
@@ -199,12 +208,22 @@ private val TRACK_WIDTH = 4.dp
 private val DOT = 12.dp
 private val HELD_DOT = 16.dp
 
-/** The dark edge around the track and the dot. */
-private val EDGE = 1.dp
+/** The casing on each side of the track. */
+private val CASING = 1.dp
+
+/** The ring around the dot. */
+private val RING = 1.5.dp
 
 /** From each end of the row to the end of the track: the held dot fits, with room to spare. */
 private val TRACK_INSET = 12.dp
 
-private const val AHEAD_ALPHA = 0.45f
-private const val CASING_ALPHA = 0.6f
 private const val PERCENT = 100f
+
+/** The slider of a simulated drive 40 % of the way, over the map, on a narrow phone. */
+@Preview(name = "replay slider", widthDp = 360)
+@Composable
+private fun ReplaySliderPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) {
+        ReplaySlider(position = remember { mutableStateOf(ReplayPosition(seconds = 240.0, durationSeconds = 600.0)) }, onSeek = {})
+    }
+}

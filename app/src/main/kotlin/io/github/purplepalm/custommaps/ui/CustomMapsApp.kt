@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +27,7 @@ import io.github.purplepalm.custommaps.ui.settings.crashNow
 import io.github.purplepalm.custommaps.ui.settings.isDebuggable
 import io.github.purplepalm.custommaps.ui.settings.shareDebugLog
 import io.github.purplepalm.custommaps.ui.settings.signedWithDefaultDebugKey
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
 import io.github.purplepalm.custommaps.ui.token.TokenSetupScreen
 import io.github.purplepalm.custommaps.ui.token.TokenViewModel
 import kotlinx.coroutines.launch
@@ -44,10 +44,11 @@ fun CustomMapsApp(graph: AppGraph) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // The page colour shows until the map has drawn, and behind its fade-in.
     Box(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(LookTheme.tokens.screen),
     ) {
         when (access) {
             MapsAccess.Checking -> Unit

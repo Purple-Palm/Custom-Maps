@@ -15,6 +15,12 @@ internal object Sources {
     /** The text of [path], under [root], with its comments taken out: what the compiler reads. */
     fun code(path: String): String = withoutComments(File(root, path).readText())
 
+    /** Every Kotlin file under [dir] of [root] (all of them for ""), by its path from [root]. */
+    fun filesUnder(dir: String): Map<String, File> =
+        File(root, dir).walkTopDown().filter { it.isFile && it.extension == "kt" }
+            .associateBy { it.relativeTo(root).invariantSeparatorsPath }
+            .toSortedMap()
+
     /** What lies between the braces of the function whose declaration starts with [declaration]. */
     fun functionBody(code: String, declaration: String): String {
         val start = code.indexOf(declaration)

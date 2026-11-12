@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +40,7 @@ import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.guidance.CardLanes
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
@@ -49,7 +52,11 @@ import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
-import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.theme.AccentButton
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
+import io.github.purplepalm.custommaps.ui.theme.LookTokens
+import io.github.purplepalm.custommaps.ui.theme.PreviewOnMap
 import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
@@ -77,17 +84,19 @@ fun ManeuverCard(
 ) {
     val maneuver = progress.nextManeuver
     val distance = ImperialFormat.distance(progress.distanceToNextManeuver)
+    val tokens = LookTheme.tokens
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(CARD_CORNER),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.card,
+        shadowElevation = tokens.overMapElevation,
     ) {
-        Column(Modifier.padding(16.dp).alpha(cardContentAlpha(progress.pending))) {
+        Column(Modifier.padding(16.dp).alpha(cardContentAlpha(progress.pending, tokens.pendingCardAlpha))) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ManeuverGlyph(
                     type = maneuver.type,
                     turn = maneuver.modifier,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = tokens.accentInk,
                     modifier = Modifier.size(72.dp),
                     roundaboutExitDegrees = maneuver.roundaboutExitDegrees,
                 )
@@ -100,20 +109,20 @@ fun ManeuverCard(
                             text = distance.value,
                             style = MaterialTheme.typography.displayMedium.copy(fontFeatureSettings = TABULAR_DIGITS),
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = tokens.onCard,
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             text = distance.unit,
                             style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = tokens.onCardMuted,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
                     }
                     Text(
                         text = maneuver.primaryText,
                         style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = tokens.onCard,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -125,7 +134,7 @@ fun ManeuverCard(
                         Text(
                             text = details,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = tokens.onCardMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -162,15 +171,15 @@ fun ManeuverCard(
 /** Tells nobody whether a run-up's words fitted: for the previews. */
 private val NO_WORDS_REPORT: (String, Boolean) -> Unit = { _, _ -> }
 
-/** How opaque the card's content is: dimmed while the card waits for a new route's first instruction. */
-internal fun cardContentAlpha(pending: Boolean): Float = if (pending) PENDING_CARD_ALPHA else 1f
-
-/** The content of a pending card, dimmed. */
-private const val PENDING_CARD_ALPHA = 0.45f
+/**
+ * How opaque the card's content is: [dimmed], the look's own share ([LookTokens.pendingCardAlpha]),
+ * while the card waits for a new route's first instruction, and fully opaque otherwise.
+ */
+internal fun cardContentAlpha(pending: Boolean, dimmed: Float): Float = if (pending) dimmed else 1f
 
 /**
- * Lanes from left to right; the ones to use are amber, the others dim, and so is a lane kept for
- * car pools or buses. Every lane is shown: when there are more than fit, all of them get narrower,
+ * Lanes from left to right; the ones to use in [LookTokens.laneOn], the others in
+ * [LookTokens.laneOff], and so is a lane kept for car pools or buses. Every lane is shown: when there are more than fit, all of them get narrower,
  * since the lane to take is often the last one.
  *
  * With a [label], for lanes that are not the next maneuver's, the label stands at the start of the
@@ -193,8 +202,9 @@ fun LanesRow(
     labelShare: Float = LANE_LABEL_MAX_WIDTH_SHARE,
     onLabelShown: ((Boolean) -> Unit)? = null,
 ) {
-    val highlight = MaterialTheme.colorScheme.primary
-    val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    val tokens = LookTheme.tokens
+    val highlight = tokens.laneOn
+    val dim = tokens.laneOff
     val labelStyle = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_DIGITS)
     val measurer = rememberTextMeasurer()
     val count = lanes.lanes.size
@@ -269,7 +279,7 @@ private fun LaneLabel(text: String, style: TextStyle) {
     Text(
         text = text,
         style = style,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = LookTheme.tokens.onCardMuted,
         maxLines = 1,
         autoSize = TextAutoSize.StepBased(minFontSize = LANE_LABEL_MIN_SIZE, maxFontSize = style.fontSize),
     )
@@ -301,7 +311,9 @@ private val LANE_LABEL_MIN_SIZE = 10.sp
 
 /**
  * Arrival time, time and distance left, and the controls to change view or end guidance. The texts
- * stay on one line and shrink if they have to, so the arrival time is never split.
+ * stay on one line and shrink if they have to, so the arrival time is never split. Overview has a
+ * border of its own and a label in the card's ink in both looks: Material's outlined button would
+ * draw a border the card hardly shows (1.28:1 at night) and a muted label.
  */
 @Composable
 fun GuidanceBar(
@@ -311,10 +323,12 @@ fun GuidanceBar(
     onEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LookTheme.tokens
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.card,
+        shadowElevation = tokens.overMapElevation,
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -323,7 +337,7 @@ fun GuidanceBar(
                     Text(
                         text = ImperialFormat.arrivalTime(ZonedDateTime.now(), progress.durationRemaining),
                         style = arrivalStyle,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = tokens.glanceAccent,
                         maxLines = 1,
                         autoSize = TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = arrivalStyle.fontSize),
                     )
@@ -335,7 +349,7 @@ fun GuidanceBar(
                             ImperialFormat.distance(progress.distanceRemaining).toString(),
                         ),
                         style = remainingStyle,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = tokens.onCardMuted,
                         maxLines = 1,
                         autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = remainingStyle.fontSize),
                     )
@@ -343,22 +357,24 @@ fun GuidanceBar(
                     Text(
                         text = stringResource(R.string.guidance_starting),
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = tokens.onCardMuted,
                     )
                 }
             }
             Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = onToggleOverview, contentPadding = COMPACT_BUTTON_PADDING) {
+            OutlinedButton(
+                onClick = onToggleOverview,
+                border = BorderStroke(1.dp, tokens.outline),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
+                contentPadding = COMPACT_BUTTON_PADDING,
+            ) {
                 Text(stringResource(if (following) R.string.guidance_overview else R.string.guidance_recenter))
             }
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = onEnd,
                 contentPadding = COMPACT_BUTTON_PADDING,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ),
+                colors = ButtonDefaults.buttonColors(containerColor = tokens.danger, contentColor = tokens.onDanger),
             ) {
                 Text(stringResource(R.string.guidance_end))
             }
@@ -368,16 +384,18 @@ fun GuidanceBar(
 
 @Composable
 fun ArrivedCard(destination: Place?, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    val tokens = LookTheme.tokens
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.card,
+        shadowElevation = tokens.overMapElevation,
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             ManeuverGlyph(
                 type = ManeuverType.ARRIVE,
                 turn = null,
-                color = MaterialTheme.colorScheme.primary,
+                color = tokens.accentInk,
                 modifier = Modifier.size(48.dp),
             )
             Spacer(Modifier.width(16.dp))
@@ -385,19 +403,19 @@ fun ArrivedCard(destination: Place?, onDone: () -> Unit, modifier: Modifier = Mo
                 Text(
                     text = stringResource(R.string.guidance_arrived),
                     style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = tokens.onCard,
                 )
                 destination?.let {
                     Text(
                         text = it.name,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = tokens.onCardMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-            Button(onClick = onDone) {
+            AccentButton(onClick = onDone) {
                 Text(stringResource(R.string.guidance_done))
             }
         }
@@ -411,11 +429,11 @@ fun ArrivedCard(destination: Place?, onDone: () -> Unit, modifier: Modifier = Mo
 @Preview(name = "lane choice ahead", widthDp = 360)
 @Preview(name = "lane choice ahead, largest font", widthDp = 360, fontScale = 2f)
 @Composable
-private fun ManeuverCardLaneChoicePreview() {
+private fun ManeuverCardLaneChoicePreview(@PreviewParameter(LookParameter::class) look: Look) {
     val on = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
     val off = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false)
     val exit = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
-    CustomMapsTheme(Look.NIGHT) {
+    PreviewOnMap(look) {
         ManeuverCard(
             RouteProgressSnapshot(
                 nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 12: Oak Street"),
@@ -429,28 +447,37 @@ private fun ManeuverCardLaneChoicePreview() {
     }
 }
 
-@Preview
+@Preview(widthDp = 360)
 @Composable
-private fun ManeuverCardPreview() {
-    CustomMapsTheme(Look.NIGHT) {
-        ManeuverCard(
-            RouteProgressSnapshot(
-                nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street", "Office"),
-                distanceToNextManeuver = Distance.miles(0.4),
-                lanes = LaneInfo(
-                    listOf(
-                        Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
-                        Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
-                        Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), true, TurnModifier.SLIGHT_RIGHT),
-                        Lane(setOf(TurnModifier.SLIGHT_RIGHT), true, TurnModifier.SLIGHT_RIGHT),
-                    ),
-                ),
-                distanceRemaining = Distance.miles(12.3),
-                durationRemaining = 18.minutes,
-            ),
-        )
-    }
+private fun ManeuverCardPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) { ManeuverCard(previewExitProgress()) }
 }
+
+/**
+ * Right after a new route, until the navigator's first instruction for it: the new route's
+ * maneuver dimmed, less by day where the card is white, with no distance and no lanes.
+ */
+@Preview(name = "pending card", widthDp = 360)
+@Composable
+private fun ManeuverCardPendingPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) { ManeuverCard(previewExitProgress().copy(lanes = null, pending = true)) }
+}
+
+/** The exit of the previews: two lanes go on, two take the exit. */
+private fun previewExitProgress() = RouteProgressSnapshot(
+    nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street", "Office"),
+    distanceToNextManeuver = Distance.miles(0.4),
+    lanes = LaneInfo(
+        listOf(
+            Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
+            Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false),
+            Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), true, TurnModifier.SLIGHT_RIGHT),
+            Lane(setOf(TurnModifier.SLIGHT_RIGHT), true, TurnModifier.SLIGHT_RIGHT),
+        ),
+    ),
+    distanceRemaining = Distance.miles(12.3),
+    durationRemaining = 18.minutes,
+)
 
 /**
  * The run-up to an exit, on a narrow phone at three font sizes: the one row with the lanes to use
@@ -461,8 +488,9 @@ private fun ManeuverCardPreview() {
 @Preview(name = "run-up, right lane, larger font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "run-up, right lane, largest font", widthDp = 360, fontScale = 2f)
 @Composable
-private fun RunUpRightLanePreview() {
+private fun RunUpRightLanePreview(@PreviewParameter(LookParameter::class) look: Look) {
     RunUpPreview(
+        look,
         Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
         RunUpLanes(
             LaneInfo(listOf(previewCarPool, previewOn(false), previewOn(false), previewOn(false), previewOn(false), previewExit)),
@@ -477,8 +505,9 @@ private fun RunUpRightLanePreview() {
 @Preview(name = "run-up, 2 right, larger font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "run-up, 2 right, largest font", widthDp = 360, fontScale = 2f)
 @Composable
-private fun RunUpTwoRightPreview() {
+private fun RunUpTwoRightPreview(@PreviewParameter(LookParameter::class) look: Look) {
     RunUpPreview(
+        look,
         Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
         RunUpLanes(
             LaneInfo(listOf(previewCarPool, previewOn(false), previewOn(false), previewOn(false), previewExit, previewExit)),
@@ -494,8 +523,9 @@ private fun RunUpTwoRightPreview() {
 @Preview(name = "run-up, 2nd from right, larger font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "run-up, 2nd from right, largest font", widthDp = 360, fontScale = 2f)
 @Composable
-private fun RunUpSecondFromRightPreview() {
+private fun RunUpSecondFromRightPreview(@PreviewParameter(LookParameter::class) look: Look) {
     RunUpPreview(
+        look,
         Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
         RunUpLanes(
             LaneInfo(listOf(previewCarPool, previewOn(false), previewOn(false), previewOn(true), previewLeaving)),
@@ -511,9 +541,10 @@ private fun RunUpSecondFromRightPreview() {
 @Preview(name = "run-up, left lane past a car pool lane, larger font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "run-up, left lane past a car pool lane, largest font", widthDp = 360, fontScale = 2f)
 @Composable
-private fun RunUpLeftLanePreview() {
+private fun RunUpLeftLanePreview(@PreviewParameter(LookParameter::class) look: Look) {
     val left = Lane(setOf(TurnModifier.SLIGHT_LEFT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_LEFT)
     RunUpPreview(
+        look,
         Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_LEFT, "Exit 31: Elm Street"),
         RunUpLanes(
             LaneInfo(listOf(previewCarPool, left, previewOn(false), previewOn(false), previewOn(false))),
@@ -525,8 +556,8 @@ private fun RunUpLeftLanePreview() {
 }
 
 @Composable
-private fun RunUpPreview(maneuver: Maneuver, row: RunUpLanes) {
-    CustomMapsTheme(Look.NIGHT) {
+private fun RunUpPreview(look: Look, maneuver: Maneuver, row: RunUpLanes) {
+    PreviewOnMap(look) {
         ManeuverCard(
             RouteProgressSnapshot(
                 nextManeuver = maneuver,
@@ -538,6 +569,29 @@ private fun RunUpPreview(maneuver: Maneuver, row: RunUpLanes) {
             ),
         )
     }
+}
+
+/**
+ * The guidance bar while the camera follows the car and in the overview, on a narrow phone, also
+ * with a large font: Overview's border and label read in both looks.
+ */
+@Preview(name = "guidance bar", widthDp = 360)
+@Preview(name = "guidance bar, large font", widthDp = 360, fontScale = 1.3f)
+@Composable
+private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) {
+        Column {
+            GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {})
+            Spacer(Modifier.height(12.dp))
+            GuidanceBar(previewExitProgress(), following = false, onToggleOverview = {}, onEnd = {})
+        }
+    }
+}
+
+@Preview(name = "arrived", widthDp = 360)
+@Composable
+private fun ArrivedCardPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) { ArrivedCard(Place("Office", "12 Oak Street", GeoPoint(0.0, 0.0)), onDone = {}) }
 }
 
 /** A lane for car pools: drawn dim, never lit while another lane can be used. */

@@ -17,11 +17,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
 
 /**
  * First launch, or every token deleted: no map can be shown until the driver pastes a Mapbox
@@ -34,7 +37,7 @@ fun TokenSetupScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(modifier = modifier.fillMaxSize(), color = LookTheme.tokens.screen) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -46,26 +49,26 @@ fun TokenSetupScreen(
             Text(
                 text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = LookTheme.tokens.onCard,
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.home_tagline),
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LookTheme.tokens.onCardMuted,
             )
             Spacer(Modifier.height(32.dp))
 
             Text(
                 text = stringResource(R.string.token_title),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = LookTheme.tokens.onCard,
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.token_missing_explainer),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LookTheme.tokens.onCardMuted,
             )
             Spacer(Modifier.height(16.dp))
             TokenEditor(saveLabel = R.string.token_save, onSave = onSaveToken)
@@ -78,10 +81,10 @@ fun TokenSetupScreen(
     }
 }
 
-@Preview
+@Preview(widthDp = 360)
 @Composable
-private fun TokenSetupScreenPreview() {
-    CustomMapsTheme(Look.NIGHT) {
+private fun TokenSetupScreenPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
         TokenSetupScreen(onSaveToken = { null }, onOpenSettings = {})
     }
 }

@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -89,6 +88,7 @@ import io.github.purplepalm.custommaps.ui.guidance.GuidanceBar
 import io.github.purplepalm.custommaps.ui.guidance.ManeuverPanel
 import io.github.purplepalm.custommaps.ui.guidance.ReplaySlider
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -399,6 +399,7 @@ fun MapScreen(
             }
         }
 
+        // Material's snackbar reads the inverse roles: the look's dark card with an amber action.
         SnackbarHost(
             hostState = snackbar,
             modifier = Modifier
@@ -522,12 +523,13 @@ private fun GuidanceBarSlot(
 
 @Composable
 private fun MyLocationButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainer) {
+    val tokens = LookTheme.tokens
+    Surface(modifier = modifier, shape = CircleShape, color = tokens.card, shadowElevation = tokens.overMapElevation) {
         IconButton(onClick = onClick) {
             Icon(
                 painterResource(R.drawable.ic_my_location),
                 contentDescription = stringResource(R.string.map_my_location),
-                tint = MaterialTheme.colorScheme.onSurface,
+                tint = tokens.onCard,
             )
         }
     }

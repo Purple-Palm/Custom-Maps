@@ -6,9 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.annotation.StringRes
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -43,6 +40,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -67,7 +65,9 @@ import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_PADDING
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_SHAPE
 import io.github.purplepalm.custommaps.ui.guidance.thenSideMinFont
-import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
+import io.github.purplepalm.custommaps.ui.theme.PreviewOnMap
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.delay
@@ -217,10 +217,12 @@ fun OfflineChip(reason: State<OfflineReason>, onOpenSettings: () -> Unit, modifi
     val sentence = offlineSentenceRes(current)
     if (sentence != null) {
         val blocked = offersSettings(current)
+        val tokens = LookTheme.tokens
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            color = tokens.card,
+            shadowElevation = tokens.overMapElevation,
         ) {
             Row(
                 modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = if (blocked) 8.dp else 16.dp, bottom = 8.dp),
@@ -230,13 +232,13 @@ fun OfflineChip(reason: State<OfflineReason>, onOpenSettings: () -> Unit, modifi
                     painterResource(R.drawable.ic_offline),
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.error,
+                    tint = tokens.danger,
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
                     text = stringResource(sentence),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = tokens.onCard,
                     modifier = Modifier
                         .weight(1f)
                         .padding(vertical = 4.dp)
@@ -266,10 +268,12 @@ fun OfflinePill(reason: State<OfflineReason>, modifier: Modifier = Modifier) {
     val sentence = offlineSentenceRes(reason.value)
     if (sentence != null) {
         val description = stringResource(sentence)
+        val tokens = LookTheme.tokens
         Surface(
             modifier = modifier.clearAndSetSemantics { contentDescription = description },
             shape = THEN_CHIP_SHAPE,
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            color = tokens.card,
+            shadowElevation = tokens.overMapElevation,
         ) {
             Row(
                 // The top of the tab stays under the card's rounded bottom edge, like the Then chip's.
@@ -284,14 +288,14 @@ fun OfflinePill(reason: State<OfflineReason>, modifier: Modifier = Modifier) {
                     painterResource(R.drawable.ic_offline),
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.error,
+                    tint = tokens.danger,
                 )
                 Spacer(Modifier.width(6.dp))
                 val style = MaterialTheme.typography.labelLarge
                 Text(
                     text = stringResource(R.string.offline_short),
                     style = style,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = tokens.onCard,
                     maxLines = 1,
                     autoSize = TextAutoSize.StepBased(minFontSize = LocalDensity.current.thenSideMinFont(), maxFontSize = style.fontSize),
                 )
@@ -341,16 +345,9 @@ internal fun Context.openDataSettings(debugLog: DebugLog) {
 @Preview(name = "offline chip, each reason", widthDp = 360)
 @Preview(name = "offline chip, each reason, large font", widthDp = 360, fontScale = 1.3f)
 @Composable
-private fun OfflineChipPreview() {
-    CustomMapsTheme(Look.NIGHT) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                // A grey stand-in for the map.
-                .background(Color(0xFF2B3036))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+private fun OfflineChipPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SearchBar(text = "", searching = false, onTextChange = {}, onClear = {}, onOpenSettings = {})
             for (reason in listOf(OfflineReason.NO_NETWORK, OfflineReason.NO_INTERNET, OfflineReason.BLOCKED)) {
                 OfflineChip(reason = remember { mutableStateOf(reason) }, onOpenSettings = {})
@@ -367,8 +364,9 @@ private fun OfflineChipPreview() {
 @Preview(name = "offline tab beside a long Then chip, large font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "offline tab beside a long Then chip, narrow screen", widthDp = 320, fontScale = 1.3f)
 @Composable
-private fun OfflinePillBesideThenPreview() {
+private fun OfflinePillBesideThenPreview(@PreviewParameter(LookParameter::class) look: Look) {
     OfflinePillPreview(
+        look,
         then = Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Pine Street Old Mill Extension"),
         lanes = LaneInfo(
             listOf(
@@ -383,33 +381,25 @@ private fun OfflinePillBesideThenPreview() {
 /** The tab alone, under a card without lanes. */
 @Preview(name = "offline tab alone", widthDp = 360)
 @Composable
-private fun OfflinePillAlonePreview() {
-    OfflinePillPreview(then = null, lanes = null)
+private fun OfflinePillAlonePreview(@PreviewParameter(LookParameter::class) look: Look) {
+    OfflinePillPreview(look, then = null, lanes = null)
 }
 
 @Composable
-private fun OfflinePillPreview(then: Maneuver?, lanes: LaneInfo?) {
-    CustomMapsTheme(Look.NIGHT) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(300.dp)
-                .background(Color(0xFF2B3036))
-                .padding(12.dp),
-        ) {
-            val reason = remember { mutableStateOf(OfflineReason.NO_NETWORK) }
-            ManeuverPanel(
-                progress = RouteProgressSnapshot(
-                    nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.LEFT, "Oak Street"),
-                    distanceToNextManeuver = Distance.feet(350.0),
-                    lanes = lanes,
-                    distanceRemaining = Distance.miles(2.1),
-                    durationRemaining = 7.minutes,
-                    following = then?.let { FollowingManeuver(it, distanceAfterNext = Distance.meters(120.0), durationAfterNext = 10.seconds) },
-                    showThen = then != null,
-                ),
-                endTab = { OfflinePill(reason) },
-            )
-        }
+private fun OfflinePillPreview(look: Look, then: Maneuver?, lanes: LaneInfo?) {
+    PreviewOnMap(look, Modifier.height(300.dp)) {
+        val reason = remember { mutableStateOf(OfflineReason.NO_NETWORK) }
+        ManeuverPanel(
+            progress = RouteProgressSnapshot(
+                nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.LEFT, "Oak Street"),
+                distanceToNextManeuver = Distance.feet(350.0),
+                lanes = lanes,
+                distanceRemaining = Distance.miles(2.1),
+                durationRemaining = 7.minutes,
+                following = then?.let { FollowingManeuver(it, distanceAfterNext = Distance.meters(120.0), durationAfterNext = 10.seconds) },
+                showThen = then != null,
+            ),
+            endTab = { OfflinePill(reason) },
+        )
     }
 }

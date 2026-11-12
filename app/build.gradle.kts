@@ -154,9 +154,9 @@ dependencies {
 
 // Files the unit tests read from the repository at run time instead of from the classpath: the
 // privacy policy (PrivacyPolicyTest), resource XML (BackupRulesTest, DebugLogPathsTest,
-// OfflineChipStateTest) and the app's Kotlin sources (ThemeContentOnceTest). As inputs of the test
-// task, a change to one runs the tests again instead of taking their result from the build cache,
-// and a missing policy fails the build.
+// OfflineChipStateTest) and the app's Kotlin sources (ThemeContentOnceTest, NoHexColorTest,
+// PendingCardTest). As inputs of the test task, a change to one runs the tests again instead of
+// taking their result from the build cache, and a missing policy fails the build.
 val privacyPolicy = rootProject.layout.projectDirectory.file("docs/PRIVACY.md")
 val appResources = layout.projectDirectory.dir("src/main/res")
 val appSources = layout.projectDirectory.dir("src/main/kotlin")
