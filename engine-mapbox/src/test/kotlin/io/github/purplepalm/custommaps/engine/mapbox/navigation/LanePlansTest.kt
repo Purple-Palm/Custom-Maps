@@ -259,6 +259,21 @@ class LanePlansTest {
     }
 
     @Test
+    fun `a plan the memory left cannot hold costs one error line too, never the drive`() {
+        // The job runs on the route lines' worker in the engine's own scope, where an error that escaped would end
+        // the app: the plan's own failure stays here.
+        val lines = Lines()
+        val (legs, shapes) = shortRoute()
+        val failing = planRoute("route-d#0", { legs }, { shapes }, debugLog = lines,
+            planner = { _, _, _ -> throw OutOfMemoryError("a made-up shortage") },
+        )
+        assertNull(failing)
+        assertEquals(listOf(LaneEvidenceLine.TYPE, "error"), lines.types())
+        assertEquals(LANE_PLAN_ERROR, lines.lines.last().second["where"])
+        assertTrue((lines.lines.last().second["error"] as String).contains("OutOfMemoryError"))
+    }
+
+    @Test
     fun `work no longer wanted makes no line and no plan`() {
         val lines = Lines()
         val (legs, shapes) = shortRoute()

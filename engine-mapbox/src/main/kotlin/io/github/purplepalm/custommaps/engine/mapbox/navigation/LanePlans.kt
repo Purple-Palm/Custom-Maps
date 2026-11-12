@@ -138,9 +138,10 @@ internal class RouteChange(val old: RouteLanePlan, val car: GeoPoint, val oldNea
  * [shapes] the navigator already holds: reads it ([laneRouteInput]), makes its lane plan with the stations of
  * the roads without lane data that leave on an exit's side, as plain numbers, and writes its "lane_evidence"
  * line, then its "lane_plan" line, with the hand-over of the lit lane after [change], a change of route. A
- * route that cannot be read costs its line and its plan; a plan that cannot be made costs one error line and
- * the "lane_plan" line, and the "lane_evidence" line is the first pass's alone. Neither costs the drive.
- * [active] tells whether the work is still wanted, between its stages.
+ * route that cannot be read costs its line and its plan; a plan that cannot be made, or that the memory left
+ * cannot hold, costs one error line and the "lane_plan" line, and the "lane_evidence" line is the first pass's
+ * alone. Neither costs the drive: the job runs where nothing else would catch an error. [active] tells whether
+ * the work is still wanted, between its stages.
  *
  * @param planner the planner, [LanePlanner.plan]; tests give one that fails
  * @param nanos the clock the work is timed on
@@ -166,15 +167,22 @@ internal fun planRoute(
         // A route that cannot be read costs its line, never the drive.
         debugLog.error(LaneEvidenceLine.TYPE, e)
         return null
+    } catch (e: OutOfMemoryError) {
+        debugLog.error(LaneEvidenceLine.TYPE, e)
+        return null
     }
     if (!active()) return null
-    var failure: RuntimeException? = null
+    var failure: Throwable? = null
     val held = try {
         val topology = LaneTopology.of(first)
         val plan = planner(topology, CardWindows.latched(input.route), input.unknownExits)
         val line = lazy { carryLine(shapes(), input) }
         RouteLanePlan(input, plan, plan.evidence(), (nanos() - start) / NANOS_PER_MILLI, line)
     } catch (e: RuntimeException) {
+        failure = e
+        null
+    } catch (e: OutOfMemoryError) {
+        // What the plan took is free again here: it costs the plan and its error line, never the drive.
         failure = e
         null
     }
