@@ -92,6 +92,7 @@ class OwnRouteLineLogTest {
     @Test
     fun `the camera line's routeLine counts the trims, the lag behind the SDK's point and the time`() {
         val drawing = scene.drawn()
+        scene.style.calls.clear()
         assertEquals(mapOf("routeLine" to mapOf("own" to true, "trims" to 0)), line.diagnostics(), "no puck update yet")
         val table = drawing.table
         // Two updates on the SDK's point: no lag.
@@ -105,6 +106,8 @@ class OwnRouteLineLogTest {
         val skipped = line.diagnostics()["routeLine"] as Map<*, *>
         assertEquals(1, skipped["trims"])
         assertEquals(20.0, skipped["trimLagM"] as Double, 0.05)
+        // Each trim counted is one call to the style, and the puck updates made no other.
+        assertEquals(List(3) { "setTrim" }, scene.style.calls)
         // Counted afresh each second.
         assertEquals(mapOf("routeLine" to mapOf("own" to true, "trims" to 0)), line.diagnostics())
     }

@@ -354,6 +354,26 @@ class OwnRouteLineTest {
     }
 
     @Test
+    fun `a puck update only trims the line and a change of look only colours it, with no path sent again`() {
+        val drawing = drawn()
+        style.calls.clear()
+        // A point the SDK accepted on the drawn route, a point it skipped while the drive is tracked, and a point of
+        // another route: each a trim of the two layers, never a GeoJSON update.
+        line.onPuck(at(400.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = drawing.table.routeFraction(400.0), tracking = true)
+        line.onPuck(at(450.0).latitude, 0.0, accepted = false, sdkRouteId = null, offset = Double.NaN, tracking = true)
+        line.onPuck(at(500.0).latitude, 0.0, accepted = true, sdkRouteId = "route-z#0", offset = 0.2, tracking = true)
+        assertEquals(listOf("setTrim", "setTrim", "setTrim"), style.calls)
+        assertTrue(style.sent.isEmpty(), "no path sent to the source")
+        assertFalse(style.watching, "no load waited for")
+        assertEquals(drawing.points, style.sourceData)
+        assertEquals(drawing.table.pathFraction(500.0), style.trim!!, 1e-9)
+        style.calls.clear()
+        line.setLook(Look.DAY)
+        assertEquals(listOf("setColours"), style.calls)
+        assertTrue(style.sent.isEmpty())
+    }
+
+    @Test
     fun `a path drawn after the SDK took its point is trimmed there at once`() {
         line.setEnabled(true)
         line.onStyleLoaded(Look.NIGHT)
