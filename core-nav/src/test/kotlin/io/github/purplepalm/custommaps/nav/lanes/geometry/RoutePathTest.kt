@@ -284,6 +284,45 @@ class RoutePathTest {
     }
 
     @Test
+    fun `past an approach where no lane is named the path keeps to the road's line through the ramp's start, into its lane after`() {
+        val built = build(beyondKeptLaneWithSplit())
+        val plan = built.plan
+        val section = built.section
+        val path = built.path
+        // The scene: no lane can be named on the exit's approach (C1); past the gore the route goes on onto a ramp with lanes,
+        // whose card window names the ramp's lane toward the split. At the gore the ramp's lanes go on straight along the
+        // freeway, across the ramp's line, until it lies farther out, and blend onto the ramp from there.
+        assertEquals(LanePlan.NoLane.Cause.DESIGNATED_BETWEEN, plan.noLane.single().cause)
+        val ramp = plan.windows.single { it.kind == CardWindow.Kind.RAMP }
+        assertEquals(gore, ramp.from, 1e-9)
+        val start = section.rampStarts.single()
+        assertEquals(gore, start.station, 1e-9)
+        assertTrue(abs(start.shift) > w)
+        val axis = requireNotNull(path.axisAt(gore + 1.0))
+        val settled = max(gore, CrossSection.crossing(axis, start.begin(axis), gore, start.shift)) + CrossSection.RAMP_BLEND_METERS
+        assertTrue(plan.segments.first { it.named != null }.from < settled - CrossSection.RAMP_BLEND_METERS)
+        // The path keeps to the road's line from the drawing's start until the ramp's lanes lie on the ramp, and enters the
+        // named lane from there with one S: never beside the drawn ramp.
+        val enter = path.moves.first()
+        assertEquals(RoutePath.Move.Kind.ENTER, enter.kind)
+        assertTrue(enter.from >= settled && enter.from < settled + 1.0, "the path enters at ${enter.from}, the lanes settle at $settled")
+        var station = path.drawings.single().from
+        while (station < enter.from) {
+            assertEquals(0.0, path.offsetAt(station), 1e-12, "at $station")
+            station += 1.0
+        }
+        station = ramp.from
+        while (station < ramp.to) {
+            val offset = path.offsetAt(station)
+            val edges = requireNotNull(section.edges(station, requireNotNull(path.axisAt(station))))
+            assertTrue(abs(offset) < 1e-12 || offset <= edges.asphaltLeft && offset >= edges.asphaltRight, "at $station: $offset off the ramp")
+            station += 1.0
+        }
+        assertEquals(listOf(RoutePath.Move.Kind.ENTER, RoutePath.Move.Kind.TURN), path.moves.map { it.kind })
+        checkRules("past an approach without a lane, a split", built)
+    }
+
+    @Test
     fun `where a drawing ends at a turn with a move under way the turn takes the move over from where the path is`() {
         val built = build(lateMove())
         val path = built.path
@@ -638,6 +677,19 @@ class RoutePathTest {
                 val seg = plan.segmentAt(station)
                 val drawn = path.drawings.any { station >= it.from && station < it.to }
                 val named = seg?.named
+                // On the drawn asphalt or on the road's line wherever the plan names a lane, inside moves and at a ramp's
+                // start too; the blends around a fold aside.
+                val folded = path.folds.any { station >= it.from - RoutePath.RETURN_METERS && station <= it.to + RoutePath.RETURN_METERS }
+                if (seg != null && seg.inWindow && named != null && seg.noLane == null && drawn && !folded) {
+                    val offset = path.offsetAt(station)
+                    val edges = built.section.edges(station, requireNotNull(path.axisAt(station)))
+                    if (edges != null && abs(offset) > 1e-9) {
+                        assertTrue(
+                            offset <= edges.asphaltLeft + 1e-6 && offset >= edges.asphaltRight - 1e-6,
+                            "$name at $station: $offset off the drawn asphalt ${edges.asphaltRight}..${edges.asphaltLeft}",
+                        )
+                    }
+                }
                 if (seg != null && seg.inWindow && named != null && seg.noLane == null && drawn && free(station)) {
                     val axis = path.axisAt(station)!!
                     val offset = path.offsetAt(station)
@@ -868,6 +920,18 @@ class RoutePathTest {
             id = "beyond-kept-lane",
         )
     }
+
+    /**
+     * [beyondKeptLane]'s right exit beyond a lane kept for car pools, with lane data on its ramp: the ramp splits 180 m past
+     * the gore, where the route keeps left.
+     */
+    private fun beyondKeptLaneWithSplit() = LaneScenes.approach(
+        listOf(At(2_200.0, listOf(s(), s(), s(), hov())), At(1_100.0, listOf(s(), s(), s(), hov(), s()))),
+        exit = listOf(s(false), s(false), s(false), hov(), sr()),
+        planMps = 26.5,
+        rampPoints = listOf(180.0 to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT)),
+        id = "beyond-kept-lane-with-split",
+    )
 
     /**
      * A right exit with too few lanes open to every car for a run-up: two lanes 2,000 m before the gore, the right one kept for

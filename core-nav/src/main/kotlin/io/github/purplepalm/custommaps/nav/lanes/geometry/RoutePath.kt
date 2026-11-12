@@ -33,7 +33,9 @@ import kotlin.math.min
  * - **No lane named (C1).** Ahead of an approach where no lane can be named (only a lane kept for car pools or buses
  *   can be used, or the lanes to use lie beyond one), the plan heads for the road's line, where the path runs on that
  *   approach: the band's middle before it leads the path toward the road's line and never past it, so the path reaches
- *   the approach on the line with no move back to it.
+ *   the approach on the line with no move back to it. Where such an approach ends at a turn onto a road with lanes, the
+ *   path keeps to the road's line until those lanes lie on the new road ([CrossSection.RampStart]) and moves into its
+ *   lane from there.
  * - **Turns.** Where the route turns onto another road with lanes, the path goes on with its lane straight along the
  *   old road until the new road's line lies farther out, then blends onto it ([CrossSection.RampStart]): the route
  *   geometry's diagonal at a gore is never drawn. Where the drawing ends at such a turn, the path goes on straight from
@@ -572,6 +574,10 @@ class RoutePath private constructor(
             val drawing = region.drawings.firstOrNull { station >= it.from && station < it.to } ?: return Piece.Middle
             val seg: PlanSegment = plan.segmentAt(station) ?: return Piece.Middle
             if (seg.noLane != null) return Piece.Middle
+            // On the road's line through a ramp's start (past an approach where no lane is named): the lanes there still go on
+            // straight along the old road, across the new road's line, so the path stays on that line until they lie on the
+            // new road, and moves into its lane from there.
+            if (current == Piece.Middle && onRampStart(station, axis)) return Piece.Middle
             val named = seg.named
             if (seg.inWindow && named != null) return Piece.Named(named)
             val edge = when (seg.edge) {
@@ -582,6 +588,16 @@ class RoutePath private constructor(
             val ref = refs.firstOrNull { it.station > station && it.station < drawing.to + 1e-6 && it.run == seg.run }
                 ?.let { r -> if (r.lane == null) 0.0 else section.place(r.lane, r.station)?.centre }
             return Piece.Band(seg.band, ref, edge)
+        }
+
+        /**
+         * Whether [station] lies where a ramp's start keeps the lanes on their straight-on lines along [axis]: from the turn to
+         * where they have blended onto the new road, [CrossSection.RAMP_BLEND_METERS] past where its line lies farther out.
+         */
+        private fun onRampStart(station: Double, axis: RoadAxis): Boolean = section.rampStarts.any {
+            if (station < it.station || station >= it.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS) return@any false
+            val crossing = max(it.station, CrossSection.crossing(axis, it.begin(axis), it.station, it.shift))
+            station < crossing + CrossSection.RAMP_BLEND_METERS
         }
 
         /** What [piece] puts the path at, at [station], [hold] being where it was. */
