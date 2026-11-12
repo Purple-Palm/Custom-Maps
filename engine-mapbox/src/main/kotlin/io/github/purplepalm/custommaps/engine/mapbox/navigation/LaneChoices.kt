@@ -693,7 +693,7 @@ private const val FULL_TURN = 360
 private const val HALF_TURN = 180
 
 /** A coordinate outside the globe is no place to measure from. */
-private fun Point.toGeoPoint(): GeoPoint? {
+internal fun Point.toGeoPoint(): GeoPoint? {
     val latitude = latitude()
     val longitude = longitude()
     return if (latitude in -90.0..90.0 && longitude in -180.0..180.0) GeoPoint(latitude, longitude) else null

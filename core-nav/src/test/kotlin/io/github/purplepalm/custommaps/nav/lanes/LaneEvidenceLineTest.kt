@@ -1,0 +1,174 @@
+package io.github.purplepalm.custommaps.nav.lanes
+
+import io.github.purplepalm.custommaps.nav.debug.JsonLines
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.RouteLane
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import java.time.Instant
+
+/** Made-up routes only: stations in metres from the route's start, an invented route id. */
+class LaneEvidenceLineTest {
+
+    private fun s(valid: Boolean = true) = RouteLane(setOf(TurnModifier.STRAIGHT), valid = valid)
+    private fun sr(valid: Boolean = true) = RouteLane(setOf(TurnModifier.SLIGHT_RIGHT), valid = valid)
+    private fun option() = RouteLane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), valid = true)
+    private fun hov() = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, designated = true)
+
+    private fun node(
+        at: Double,
+        vararg lanes: RouteLane,
+        road: RoadKind = RoadKind.FREEWAY,
+        maneuver: NodeManeuver? = null,
+        exitRight: Boolean = false,
+        kinds: List<Set<DesignatedKind>> = emptyList(),
+    ) = RouteNode(
+        station = at,
+        lanes = lanes.toList(),
+        laneKinds = kinds,
+        bearings = if (exitRight) listOf(180, 0, 30) else listOf(180, 0),
+        entry = if (exitRight) listOf(false, true, true) else listOf(false, true),
+        inIndex = 0,
+        outIndex = 1,
+        freeway = road == RoadKind.FREEWAY,
+        ramp = road == RoadKind.RAMP,
+        maneuver = maneuver,
+    )
+
+    private val offRamp = NodeManeuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, viewStaysUp = true)
+
+    /** The IA scene of LaneEvidenceTest: five lanes at four points, the gore 5,000 m along, a turn and the arrival after it. */
+    private fun ia(routeId: String = "route-ia#0"): LaneRoute {
+        val nodes = listOf(
+            node(0.0, maneuver = NodeManeuver(ManeuverType.DEPART)),
+            node(2_820.0, s(false), s(), s(), s(), s()),
+            node(3_670.0, s(), s(), s(), s(), s(false)),
+            node(4_310.0, s(false), s(false), s(), s(), s()),
+            node(4_360.0, s(false), s(false), s(), s(), s()),
+            node(5_000.0, s(false), s(false), s(false), s(false), option(), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(5_300.0, road = RoadKind.RAMP),
+            node(5_500.0, road = RoadKind.STREET, maneuver = NodeManeuver(ManeuverType.TURN, TurnModifier.RIGHT)),
+            node(5_600.0, road = RoadKind.STREET, maneuver = NodeManeuver(ManeuverType.ARRIVE)),
+        )
+        return LaneRoute(routeId, steps = 4, lengthMeters = 5_600.0, nodes = nodes)
+    }
+
+    @Test
+    fun `the line of a route counts what its lane data covers, in numbers`() {
+        val fields = LaneEvidenceLine.fields(LaneEvidence.of(ia()))
+        assertEquals(
+            listOf(
+                "routeId", "lengthM", "steps", "lanePoints", "freewayM", "rampM", "streetM", "gaps", "unexplained",
+                "exitSideAdded", "unknownExits", "windows", "streetTurns", "designated", "noLanes",
+            ),
+            fields.keys.toList(),
+        )
+        assertEquals("route-ia#0", fields["routeId"])
+        assertEquals(5_600L, fields["lengthM"])
+        assertEquals(4, fields["steps"])
+        assertEquals(mapOf("freeway" to 5, "ramp" to 0, "street" to 0), fields["lanePoints"])
+        assertEquals(mapOf("known" to 3_180L, "bridged" to 0L, "none" to 1_820L), fields["freewayM"])
+        assertEquals(mapOf("known" to 0L, "bridged" to 0L, "none" to 500L), fields["rampM"])
+        assertEquals(mapOf("known" to 0L, "bridged" to 0L, "none" to 100L), fields["streetM"])
+        // Counts are Int and metres Long, as the line writes them.
+        assertEquals(mapOf<String, Any>("count" to 0, "m" to 0L, "inWindow" to 0, "inWindowM" to 0L, "shortOutside" to 0), fields["gaps"])
+        assertEquals(0, fields["unexplained"])
+        assertEquals(mapOf("count" to 1, "sideUnknown" to 0), fields["exitSideAdded"])
+        assertEquals(0, fields["unknownExits"])
+        assertEquals(mapOf("runUps" to 1, "street" to 1), fields["windows"])
+        assertEquals(mapOf("withLanes" to 0, "withoutLanes" to 1), fields["streetTurns"])
+        assertEquals(
+            mapOf("hov" to 0, "bus" to 0, "taxi" to 0, "motorcycle" to 0, "moped" to 0, "bicycle" to 0, "other" to 0),
+            fields["designated"],
+        )
+        assertEquals(false, fields["noLanes"])
+    }
+
+    @Test
+    fun `gaps, unexplained changes, unknown exits and designated lanes are counted`() {
+        // A split 3,000 m before the exit takes two lanes; a road leaves on the exit's side between two points that agree.
+        val nodes = listOf(
+            node(0.0, maneuver = NodeManeuver(ManeuverType.DEPART)),
+            node(1_000.0, s(), s(), s(), sr(false), sr(false), exitRight = true),
+            node(3_400.0, hov(), s(), s(), s(), s(), kinds = listOf(setOf(DesignatedKind.HOV), emptySet(), emptySet(), emptySet(), emptySet())),
+            node(3_700.0, exitRight = true),
+            node(4_000.0, hov(), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(4_300.0, road = RoadKind.RAMP, maneuver = NodeManeuver(ManeuverType.ARRIVE)),
+        )
+        val evidence = LaneEvidence.of(LaneRoute("route-2#0", 3, 4_300.0, nodes))
+        val fields = LaneEvidenceLine.fields(evidence)
+        // Past the split three lanes go on; the next point lists five: 1,400 m without lane data, about 1,060 m of it in the run-up.
+        val gaps = fields["gaps"] as Map<*, *>
+        assertEquals(1, gaps["count"])
+        assertEquals(1_400L, gaps["m"])
+        assertEquals(1, gaps["inWindow"])
+        assertEquals(Math.round(evidence.gaps.single().inWindowMeters), gaps["inWindowM"])
+        assertEquals(0, gaps["shortOutside"])
+        assertEquals(1, fields["unexplained"])
+        assertEquals(mapOf("count" to 2, "sideUnknown" to 2), fields["exitSideAdded"])
+        assertEquals(1, fields["unknownExits"])
+        assertEquals(1, (fields["designated"] as Map<*, *>)["hov"], "the car-pool lane whose kinds were read")
+        assertEquals(1, (fields["designated"] as Map<*, *>)["other"], "the gore's car-pool lane, its kinds not read")
+        val freeway = fields["freewayM"] as Map<*, *>
+        assertEquals(4_000L, (freeway["known"] as Long) + (freeway["bridged"] as Long) + (freeway["none"] as Long))
+        assertEquals(300L, freeway["bridged"], "from 3,400 m to the exit's reach at 3,700 m")
+    }
+
+    @Test
+    fun `a route without lane points says so`() {
+        val nodes = listOf(node(0.0, maneuver = NodeManeuver(ManeuverType.DEPART)), node(900.0, maneuver = NodeManeuver(ManeuverType.ARRIVE)))
+        val fields = LaneEvidenceLine.fields(LaneEvidence.of(LaneRoute("route-3#0", 2, 900.0, nodes)))
+        assertEquals(true, fields["noLanes"])
+        assertEquals(mapOf("known" to 0L, "bridged" to 0L, "none" to 900L), fields["freewayM"])
+    }
+
+    @Test
+    fun `the line is a few hundred bytes`() {
+        // A route id as long as the navigator's: a response id of 56 characters and the route's index.
+        val routeId = "Abc0Def1Ghi2Jkl3Mno4Pqr5Stu6Vwx7Yz89Abc0Def1Ghi2Jkl3Mno4#0"
+        val line = JsonLines.event(Instant.parse("2000-01-01T00:00:00Z"), LaneEvidenceLine.TYPE, LaneEvidenceLine.fields(LaneEvidence.of(ia(routeId))))
+        val bytes = line.toByteArray(Charsets.UTF_8).size
+        println("lane_evidence line: $bytes bytes: $line")
+        assertTrue(bytes in 450..750, "$bytes bytes")
+        assertFalse(line.substringAfter(LaneEvidenceLine.TYPE).contains("."), "whole numbers only: no coordinate, no fraction")
+    }
+
+    // ------------------------------------------------------------------ which routes get a line
+
+    @Test
+    fun `the route a drive starts on gets its line once the navigator has it`() {
+        val routes = LaneEvidenceLine.Routes()
+        routes.begin()
+        assertFalse(routes.onRoutesChanged("a#0", refresh = false), "the navigator tells of its new routes before the commit's answer")
+        assertTrue(routes.onCommitted("a#0"))
+        assertFalse(routes.onRoutesChanged("a#0", refresh = false), "the same primary route: only its alternatives changed")
+    }
+
+    @Test
+    fun `a reroute and a route switched to get a line, a refresh never`() {
+        val routes = LaneEvidenceLine.Routes()
+        routes.begin()
+        routes.onCommitted("a#0")
+        assertTrue(routes.onRoutesChanged("b#0", refresh = false), "a reroute")
+        assertFalse(routes.onRoutesChanged("b#0", refresh = true), "its refresh")
+        assertFalse(routes.onRoutesChanged("c#0", refresh = true), "whatever it says")
+        assertTrue(routes.onRoutesChanged("b#1", refresh = false), "an alternative the driver took")
+        assertFalse(routes.onRoutesChanged(null, refresh = false), "the routes cleared")
+    }
+
+    @Test
+    fun `nothing is written outside a drive, and a new drive starts over`() {
+        val routes = LaneEvidenceLine.Routes()
+        assertFalse(routes.onRoutesChanged("a#0", refresh = false), "before any drive")
+        routes.begin()
+        assertTrue(routes.onCommitted("a#0"))
+        routes.end()
+        assertFalse(routes.onRoutesChanged("b#0", refresh = false), "after the drive ended")
+        routes.begin()
+        assertTrue(routes.onCommitted("a#0"), "the same route on a new drive has a line of its own")
+        assertFalse(routes.onCommitted(null))
+    }
+}

@@ -139,4 +139,7 @@ data class LaneRoute(
             require(nodes[i].station >= nodes[i - 1].station) { "Intersection $i lies before intersection ${i - 1}" }
         }
     }
+
+    /** The kind of road that leads to the intersection [index]: the one that leaves the intersection before it; at the route's start its own. */
+    fun approachRoad(index: Int): RoadKind = nodes[if (index > 0) index - 1 else index].road
 }

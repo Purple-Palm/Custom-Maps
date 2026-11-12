@@ -17,6 +17,7 @@ import com.mapbox.navigation.base.route.RouterOrigin
 import com.mapbox.navigation.base.trip.model.RouteLegProgress
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.trip.model.RouteProgressState
+import com.mapbox.navigation.base.utils.DecodeUtils.stepsGeometryToPoints
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.arrival.ArrivalObserver
 import com.mapbox.navigation.core.directions.session.RoutesExtra
@@ -59,6 +60,8 @@ import io.github.purplepalm.custommaps.nav.guidance.StartFreshness
 import io.github.purplepalm.custommaps.nav.guidance.StartPlan
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
+import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
+import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -86,12 +89,14 @@ import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -222,6 +227,12 @@ internal class MapboxNavigationEngine(
      * they read the shape of every step, and one at a time, so the lines keep their order.
      */
     private val routeLines = Dispatchers.Default.limitedParallelism(1)
+
+    /** Which of the drive's routes get a "lane_evidence" line: each primary route it uses, once. */
+    private val laneEvidenceRoutes = LaneEvidenceLine.Routes()
+
+    /** The "lane_evidence" lines on their way through [routeLines]; the end of a drive drops them. Main thread. */
+    private val laneEvidenceJobs = ArrayList<Job>()
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
@@ -778,9 +789,10 @@ internal class MapboxNavigationEngine(
 
     /**
      * Writes a debug line that describes whole routes. Its fields are put together on a background
-     * thread, so the line is written a moment after the lines that follow it in the code.
+     * thread, so the line is written a moment after the lines that follow it in the code. A line whose
+     * job is cancelled before it is written is not written.
      */
-    private fun logRoutes(type: String, fields: () -> Map<String, Any?>) {
+    private fun logRoutes(type: String, fields: () -> Map<String, Any?>): Job =
         scope.launch(routeLines) {
             val built = try {
                 fields()
@@ -789,8 +801,29 @@ internal class MapboxNavigationEngine(
                 debugLog.error(type, e)
                 return@launch
             }
-            debugLog.log(type, built)
+            if (isActive) debugLog.log(type, built)
         }
+
+    /**
+     * Writes the "lane_evidence" line of [route], a primary route of the drive: where the route's own
+     * lane data holds along it and how far, in numbers ([LaneEvidence], [LaneEvidenceLine]). The
+     * route is read once, on the route lines' worker and after the lines before it; the evidence is
+     * forgotten with the line.
+     */
+    private fun logLaneEvidence(route: NavigationRoute) {
+        laneEvidenceJobs.removeAll { it.isCompleted }
+        laneEvidenceJobs += logRoutes(LaneEvidenceLine.TYPE) {
+            val directions = route.directionsRoute
+            val lanes = laneRoute(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints())
+            LaneEvidenceLine.fields(LaneEvidence.of(lanes))
+        }
+    }
+
+    /** The drive ended: no "lane_evidence" line of it is written any more, and none still on its way is. */
+    private fun endLaneEvidence() {
+        laneEvidenceRoutes.end()
+        laneEvidenceJobs.forEach { it.cancel() }
+        laneEvidenceJobs.clear()
     }
 
     /** The "route_request" line of every route request the app sends, before a trip or inside one. */
@@ -885,7 +918,9 @@ internal class MapboxNavigationEngine(
                 )
                 startPlan = StartPlan.AS_PREVIEWED
                 // The route the drive starts on, the first of the routes handed over.
-                val routeId = _previewRoutes.value.firstOrNull()?.id
+                val primary = _previewRoutes.value.firstOrNull()
+                val routeId = primary?.id
+                laneEvidenceRoutes.begin()
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
                 navigation?.setNavigationRoutes(_previewRoutes.value) { result ->
@@ -896,6 +931,8 @@ internal class MapboxNavigationEngine(
                     val error = result.error
                     if (error == null) {
                         debugLog.log("routes_committed", mapOf("routeId" to routeId, "ignoredAlternatives" to result.value?.ignoredAlternatives?.keys))
+                        // Where the lane data of the route the drive starts on holds, now that the navigator has it.
+                        if (primary != null && laneEvidenceRoutes.onCommitted(primary.id)) logLaneEvidence(primary)
                         dispatch(GuidanceEvent.RoutesCommitted(command.simulated))
                     } else {
                         Log.e(TAG, "Navigator rejected the routes: ${error.message}")
@@ -943,6 +980,7 @@ internal class MapboxNavigationEngine(
                 // and its answer finds no trip to change.
                 startRefresher.end()
                 endTripTally()
+                endLaneEvidence()
                 staleStart.end()
                 tripSessionRunning = false
                 // A seek still waiting for the navigator is given up with the drive.
@@ -1343,6 +1381,11 @@ internal class MapboxNavigationEngine(
                 // The new route in full after a reroute; refreshes only update traffic and times.
                 "primary" to routes.firstOrNull()?.takeIf { reason != RoutesExtra.ROUTES_UPDATE_REASON_REFRESH }?.debugFields(),
             )
+        }
+        // A new primary route of the drive, never a refresh of the same one: where its lane data holds.
+        val primary = routes.firstOrNull()
+        if (primary != null && laneEvidenceRoutes.onRoutesChanged(primary.id, refresh = reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)) {
+            logLaneEvidence(primary)
         }
     }
 
