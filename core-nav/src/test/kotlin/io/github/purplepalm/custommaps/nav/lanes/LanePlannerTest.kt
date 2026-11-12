@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -752,6 +753,52 @@ class LanePlannerTest {
         assertNull(plan.segmentAt(-1.0))
         assertNull(plan.segmentAt(GORE + 1_000.0), "past the run's last point there is no plan")
         assertEquals(a, plan.segments.single { it.from <= GORE - 1_000.0 && GORE - 1_000.0 < it.to })
+    }
+
+    /**
+     * A made-up freeway of [km] kilometres planned at 30 m/s with a lane point of five lanes every 1.5 km, the right
+     * lane leaving by a road on the right at every other one and joining again at the next, so the run gains a lane
+     * every 3 km; a right exit from the right lane at its end.
+     */
+    private fun longRun(km: Int): LaneRoute {
+        val nodes = arrayListOf(node(0.0, maneuver = DEPART, planMps = 30.0))
+        val end = km * 1_000.0
+        var at = 1_500.0
+        while (at < end - 1_000.0) {
+            val leaves = nodes.size % 2 == 1
+            nodes.add(node(at, s(), s(), s(), s(), s(!leaves), roads = if (leaves) LaneScenes.EXIT_RIGHT else LaneScenes.JOIN_RIGHT, planMps = 30.0))
+            at += 1_500.0
+        }
+        nodes.add(node(end, s(false), s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = OFF_RIGHT, planMps = 20.0))
+        nodes.add(node(end + 400.0, road = RoadKind.STREET, maneuver = TURN_LEFT, planMps = 15.0))
+        nodes.add(node(end + 500.0, road = RoadKind.STREET, maneuver = ARRIVE, planMps = 15.0))
+        return route(*nodes.toTypedArray(), id = "long-$km")
+    }
+
+    /** The bytes the plan of [route] takes to make, on this thread. */
+    private fun bytesToPlan(route: LaneRoute, bean: com.sun.management.ThreadMXBean): Long {
+        val topology = LaneTopology.of(LaneEvidence.of(route))
+        val windows = CardWindows.latched(route)
+        val thread = Thread.currentThread().id
+        val before = bean.getThreadAllocatedBytes(thread)
+        val plan = LanePlanner.plan(topology, windows)
+        val bytes = bean.getThreadAllocatedBytes(thread) - before
+        assertEquals(1, plan.topology.runs.size, "one run all the way")
+        assertNotNull(plan.segmentAt(route.nodes.single { it.maneuver == OFF_RIGHT }.station)?.named, "a lane named at the exit")
+        return bytes
+    }
+
+    @Test
+    fun `a long run's plan takes room in step with its length, not with its length times its lanes`() {
+        // Before, every station kept a cost for every lane the run ever had: 600 km of this freeway took about 490 MB
+        // to plan, two tables of about 100 MB at once. Now each lane keeps costs only where it is there.
+        val bean = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
+        assumeTrue(bean.isThreadAllocatedMemorySupported && bean.isThreadAllocatedMemoryEnabled)
+        bytesToPlan(longRun(30), bean)
+        val half = bytesToPlan(longRun(300), bean)
+        val full = bytesToPlan(longRun(600), bean)
+        assertTrue(full < 80_000_000L, "600 km: $full bytes")
+        assertTrue(full < 3 * half, "600 km: $full bytes, 300 km: $half bytes")
     }
 
     @Test

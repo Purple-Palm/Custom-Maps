@@ -392,17 +392,50 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
     /** For each lane, the lanes it feeds along a taper (local indices). */
     private val feeds: Array<IntArray> = Array(size) { l -> (0 until size).filter { f -> lanes[f].fedBy == lanes[l].id && !lanes[f].designated }.toIntArray() }
 
-    /** For each lane, the stations it is there at. */
-    private val exists = Array(size) { l -> BitSet(n).apply { for (i in 0 until n) if (lanes[l].exists(stations[i])) set(i) } }
+    /**
+     * For each lane, the first and the last station it is there at: a lane is there over one stretch of
+     * the grid, from where it opens up to but not at where it closes ([firstThere] past [lastThere] for none).
+     */
+    private val firstThere = IntArray(size) { l -> if (lanes[l].opens.isNaN() || lanes[l].closes.isNaN()) n else atOrPast(lanes[l].opens) }
+    private val lastThere = IntArray(size) { l -> if (lanes[l].opens.isNaN() || lanes[l].closes.isNaN()) -1 else atOrPast(lanes[l].closes) - 1 }
 
-    /** At each station, the lanes there, from the left (shared between stations where they are the same). */
+    /** The first station of the grid at or past [station]; [n] where none is. */
+    private fun atOrPast(station: Double): Int {
+        var lo = 0
+        var hi = n
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (stations[mid] < station) lo = mid + 1 else hi = mid
+        }
+        return lo
+    }
+
+    /** Whether the lane [l] is there at station [i]. */
+    private fun there(l: Int, i: Int): Boolean = i >= firstThere[l] && i <= lastThere[l]
+
+    /** The first station at or after [i] where the lane [l] is not there. */
+    private fun gone(l: Int, i: Int): Int = if (there(l, i)) lastThere[l] + 1 else i
+
+    /** At each station, the lanes there, from the left (one array for stations where they are the same). */
     private val order: Array<IntArray> = run {
         val out = arrayOfNulls<IntArray>(n)
-        var last: IntArray? = null
+        val byFirst = (0 until size).filter { firstThere[it] <= lastThere[it] }.sortedBy { firstThere[it] }
+        val byLast = byFirst.sortedBy { lastThere[it] }
+        var a = 0
+        var b = 0
+        var here = IntArray(0)
         for (i in 0 until n) {
-            val here = (0 until size).filter { exists[it][i] }.sortedBy { lanes[it].slot }.toIntArray()
-            out[i] = if (last != null && last.contentEquals(here)) last else here
-            last = out[i]
+            var changed = false
+            while (a < byFirst.size && firstThere[byFirst[a]] <= i) {
+                a++
+                changed = true
+            }
+            while (b < byLast.size && lastThere[byLast[b]] < i) {
+                b++
+                changed = true
+            }
+            if (changed) here = (0 until size).filter { there(it, i) }.sortedBy { lanes[it].slot }.toIntArray()
+            out[i] = here
         }
         Array(n) { requireNotNull(out[it]) }
     }
@@ -495,13 +528,32 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
     }
 
     /**
+     * The fewest lane changes from each lane to the rules ahead, at each station up to [upTo] where the lane is
+     * there, [INF] elsewhere: one array a lane, over the stations it is there at, so a long run takes room for
+     * the lanes there at each station only, never for every lane of the run at every station.
+     */
+    private inner class Costs(upTo: Int) {
+        private val values: Array<IntArray> = Array(size) { l -> IntArray(max(0, min(lastThere[l], upTo) - firstThere[l] + 1)) { INF } }
+
+        operator fun get(i: Int, l: Int): Int {
+            val k = i - firstThere[l]
+            val lane = values[l]
+            return if (k >= 0 && k < lane.size) lane[k] else INF
+        }
+
+        operator fun set(i: Int, l: Int, value: Int) {
+            values[l][i - firstThere[l]] = value
+        }
+    }
+
+    /**
      * The fewest lane changes from each lane at each station to every rule up to the station [upTo],
      * with changes of [seconds]; [INF] where none works. With [crossDesignated], lanes kept for car pools
      * and the like may be driven through, never used at a rule: what the plan would do if they could be
      * crossed.
      */
-    private fun costs(seconds: Double, allowed: Array<BitSet?>, upTo: Int, crossDesignated: Boolean = false): IntArray {
-        val cost = IntArray(n * size) { INF }
+    private fun costs(seconds: Double, allowed: Array<BitSet?>, upTo: Int, crossDesignated: Boolean = false): Costs {
+        val cost = Costs(upTo)
         val nextRule = IntArray(n + 1).also { next ->
             next[n] = n
             for (i in n - 1 downTo 0) next[i] = if (allowed[i] != null) i else next[i + 1]
@@ -518,57 +570,61 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         }
         for (i in upTo downTo 0) {
             val s = stations[i]
+            // Where a change begun here ends: the same for every lane at the station.
+            val span = speeds[i] * seconds
+            var end = i
+            while (end < upTo && stations[end] < s + span) end++
+            val reachesEnd = !(end == upTo && stations[end] < s + span - 1e-9)
             for (l in order[i]) {
                 if (lanes[l].designated && !crossDesignated) continue
                 val rule = allowed[i]
                 if (rule != null && !rule.get(l)) continue
                 if (i == upTo) {
-                    cost[i * size + l] = 0
+                    cost[i, l] = 0
                     continue
                 }
                 var best = INF
-                if (exists[l].get(i + 1)) best = cost[(i + 1) * size + l]
-                val span = speeds[i] * seconds
-                var end = i
-                while (end < upTo && stations[end] < s + span) end++
-                val reachesEnd = !(end == upTo && stations[end] < s + span - 1e-9)
+                if (there(l, i + 1)) best = cost[i + 1, l]
                 if (reachesEnd) {
                     val k = order[i].indexOf(l)
-                    for (m in intArrayOf(order[i].getOrElse(k - 1) { -1 }, order[i].getOrElse(k + 1) { -1 })) {
+                    for (side in 0..1) {
+                        val m = order[i].getOrElse(if (side == 0) k - 1 else k + 1) { -1 }
                         if (m < 0 || (lanes[m].designated && !crossDesignated)) continue
-                        if (exists[m].nextClearBit(i) <= end) continue
-                        if (exists[l].nextClearBit(i) <= (i + end) / 2) continue
+                        if (gone(m, i) <= end) continue
+                        if (gone(l, i) <= (i + end) / 2) continue
                         if (!clear(l, m, i + 1, end)) continue
-                        val next = cost[end * size + m]
+                        val next = cost[end, m]
                         if (next != INF) best = min(best, next + 1)
                     }
                 }
                 for (f in feeds[l]) {
-                    if (!exists[f].get(i)) continue
+                    if (!there(f, i)) continue
                     var taperEnd = i
                     while (taperEnd < upTo && stations[taperEnd] < s + lanes[f].taperMeters) taperEnd++
                     if (taperEnd == i || !clear(l, f, i + 1, taperEnd)) continue
-                    val next = cost[taperEnd * size + f]
+                    val next = cost[taperEnd, f]
                     if (next != INF) best = min(best, next)
                 }
-                cost[i * size + l] = best
+                cost[i, l] = best
             }
         }
         return cost
     }
 
-    /** The band at each station (local indices), its flag and the costs it was taken from. */
+    /** The band at each station (local indices; one array for stations where it is the same), its flag and the costs it was taken from. */
     private val bands = arrayOfNulls<IntArray>(n)
     private val flags = arrayOfNulls<LanePlan.Flag.Kind>(n)
-    private val costOf = arrayOfNulls<IntArray>(n)
+    private val costOf = arrayOfNulls<Costs>(n)
 
     init {
         val last = n - 1
-        val comfortable = costs(LanePlanner.COMFORTABLE_CHANGE_SECONDS, allowedAt(last), last)
-        val latest = costs(LanePlanner.LATEST_CHANGE_SECONDS, allowedAt(last), last)
+        val everyRule = allowedAt(last)
+        val comfortable = costs(LanePlanner.COMFORTABLE_CHANGE_SECONDS, everyRule, last)
+        // Needed only while the bands are made: dropped with this block.
+        val latest = costs(LanePlanner.LATEST_CHANGE_SECONDS, everyRule, last)
         val maneuvers = rules.filter { it.maneuver }
         // The nearer maneuver's own plan, for a stretch where no lane meets every point ahead.
-        val near = HashMap<Int, Pair<IntArray, IntArray>>()
+        val near = HashMap<Int, Pair<Costs, Costs>>()
         for (i in 0 until n) {
             var band = comfortableBand(i, comfortable, last)
             var source = comfortable
@@ -593,31 +649,40 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
             // F1: close to a freeway exit only the lanes that reach its lanes without a change, where any is left.
             for (floor in floors) {
                 if (i < floor.from || i > floor.to) continue
-                val held = band.filter { floor.lanes.get(it) }.toIntArray()
+                val held = keep(band) { floor.lanes.get(it) }
                 if (held.isNotEmpty()) band = held
             }
             // Between two maneuvers the band only narrows.
             if (i > 0 && maneuvers.none { stations[i - 1] < it.station && it.station <= stations[i] }) {
                 val before = requireNotNull(bands[i - 1])
-                val narrowed = band.filter { it in before || !exists[it].get(i - 1) }.toIntArray()
+                val narrowed = keep(band) { it in before || !there(it, i - 1) }
                 if (narrowed.isNotEmpty()) band = narrowed
             }
-            bands[i] = band
+            val before = if (i > 0) bands[i - 1] else null
+            bands[i] = if (before != null && before.contentEquals(band)) before else band
             costOf[i] = source
         }
     }
 
-    private fun comfortableBand(i: Int, cost: IntArray, upTo: Int): IntArray {
+    private fun comfortableBand(i: Int, cost: Costs, upTo: Int): IntArray {
         val reaction = stations[i] + speeds[i] * LanePlanner.REACTION_SECONDS
         var j = i
         while (j < upTo && stations[j] < reaction) j++
-        return order[i].filter { l ->
-            !lanes[l].designated && cost[j * size + l] != INF && exists[l].nextClearBit(i) > j
-        }.toIntArray()
+        return keep(order[i]) { l -> !lanes[l].designated && cost[j, l] != INF && gone(l, i) > j }
     }
 
-    private fun latestBand(i: Int, cost: IntArray): IntArray =
-        order[i].filter { l -> !lanes[l].designated && cost[i * size + l] != INF }.toIntArray()
+    private fun latestBand(i: Int, cost: Costs): IntArray = keep(order[i]) { l -> !lanes[l].designated && cost[i, l] != INF }
+
+    /** The lanes of [lanes] that [keep] holds for, in their order: [lanes] itself where it holds for all, nothing new made. */
+    private inline fun keep(lanes: IntArray, keep: (Int) -> Boolean): IntArray {
+        var count = 0
+        for (l in lanes) if (keep(l)) count++
+        if (count == lanes.size) return lanes
+        val out = IntArray(count)
+        var k = 0
+        for (l in lanes) if (keep(l)) out[k++] = l
+        return out
+    }
 
     /** The planning speed at [station] on the run. */
     fun speedAt(station: Double): Double = speeds[nearest(station)]
@@ -632,7 +697,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         val start = rules.lastOrNull { it.maneuver && it.index < target.index }?.index?.plus(1) ?: 0
         val conflict = (start..target.index).firstOrNull { flags[it] == LanePlan.Flag.Kind.CONFLICT } ?: return false
         val crossed = costs(LanePlanner.LATEST_CHANGE_SECONDS, allowedAt(target.index), target.index, crossDesignated = true)
-        return order[conflict].any { !lanes[it].designated && crossed[conflict * size + it] != INF }
+        return order[conflict].any { !lanes[it].designated && crossed[conflict, it] != INF }
     }
 
     /**
@@ -653,7 +718,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
             val band = requireNotNull(bands[i])
             if (band.isEmpty()) continue
             val before = if (i > 0) requireNotNull(bands[i - 1]) else order[0].filter { !lanes[it].designated }.toIntArray()
-            if (before.any { it !in band && exists[it].get(i) }) return s
+            if (before.any { it !in band && there(it, i) }) return s
         }
         return null
     }
@@ -729,7 +794,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
                 if (next != null && !next.allowed.get(l)) preferred += Rank.NOT_USABLE_NEXT
                 if (maneuver != null && !maneuver.preferred.get(l)) preferred += Rank.NOT_PREFERRED_AT_MANEUVER
                 if (next != null && !next.preferred.get(l)) preferred += Rank.NOT_PREFERRED_NEXT
-                return Rank(cost[i * size + l], preferred, fromEdge(l, i, edge), lanes[l].id)
+                return Rank(cost[i, l], preferred, fromEdge(l, i, edge), lanes[l].id)
             }
             val choice = if (prev >= 0 && prev in candidates) {
                 // It moves early, and only toward the maneuver's edge: to a lane no farther from it that comes first
@@ -815,19 +880,38 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         val moves = ArrayList<LanePlan.Move>()
         val flagList = ArrayList<LanePlan.Flag>()
         var flagStart = -1
+        // The stretch being built and where it ends so far; stations alike only move its end, so a long run
+        // makes one object a stretch, not one a station.
+        var open: PlanSegment? = null
+        var openTo = 0.0
+        var lastBand: IntArray? = null
+        var lastIds: List<Int> = emptyList()
         for (i in 0 until n) {
             val s = stations[i]
             val to = if (i + 1 < n) stations[i + 1] else run.to
-            val band = if (noLaneAt[i] != null) emptyList() else requireNotNull(bands[i]).map { lanes[it].id }
+            val band = if (noLaneAt[i] != null) {
+                emptyList()
+            } else {
+                val here = requireNotNull(bands[i])
+                if (here !== lastBand) {
+                    lastIds = here.map { lanes[it].id }
+                    lastBand = here
+                }
+                lastIds
+            }
             val id = if (named[i] >= 0) lanes[named[i]].id else null
             val edge = edges[i]
             val count = if (id != null && edge != null) topology.fromEdge(id, s, edge, namedIds) else null
-            val segment = PlanSegment(s, max(to, s), run.index, band, id, count, edge, inWindow[i], flags[i], unknownExitAhead(i), noLaneAt[i])
-            val lastSegment = segments.lastOrNull()
-            if (lastSegment != null && lastSegment.copy(from = segment.from, to = segment.to) == segment) {
-                segments[segments.size - 1] = lastSegment.copy(to = segment.to)
+            val unknownAhead = unknownExitAhead(i)
+            val o = open
+            if (o != null && o.band == band && o.named == id && o.namedFromEdge == count && o.edge == edge && o.inWindow == inWindow[i] &&
+                o.flag == flags[i] && o.unknownExitAhead == unknownAhead && o.noLane == noLaneAt[i]
+            ) {
+                openTo = max(to, s)
             } else {
-                segments.add(segment)
+                if (o != null) segments.add(o.copy(to = openTo))
+                open = PlanSegment(s, max(to, s), run.index, band, id, count, edge, inWindow[i], flags[i], unknownAhead, noLaneAt[i])
+                openTo = max(to, s)
             }
             if (i > 0 && named[i] >= 0 && named[i - 1] >= 0 && named[i] != named[i - 1]) {
                 val before = fromEdge(named[i - 1], i - 1, edge)
@@ -844,6 +928,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
                 flagList.add(LanePlan.Flag(requireNotNull(flags[i]), stations[flagStart], to))
             }
         }
+        open?.let { segments.add(it.copy(to = openTo)) }
         return LanePlan.RunResult(segments, flagList, moves, drops)
     }
 
