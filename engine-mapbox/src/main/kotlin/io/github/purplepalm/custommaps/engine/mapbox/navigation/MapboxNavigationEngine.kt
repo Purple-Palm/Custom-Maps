@@ -229,11 +229,15 @@ internal class MapboxNavigationEngine(
      */
     private val routeLines = Dispatchers.Default.limitedParallelism(1)
 
-    /** Which of the drive's routes get a "lane_evidence" line: each primary route it uses, once. */
-    private val laneEvidenceRoutes = LaneEvidenceLine.Routes()
+    /**
+     * The lane plan of the primary route the drive is on, held with the route's id ([LanePlans]): each
+     * primary route the drive uses gets its "lane_evidence" line and its plan, once. Nothing on the screen
+     * reads it yet. Main thread.
+     */
+    internal val lanePlans = LanePlans()
 
-    /** The "lane_evidence" lines on their way through [routeLines]; the end of a drive drops them. Main thread. */
-    private val laneEvidenceJobs = ArrayList<Job>()
+    /** The routes' "lane_evidence" lines and plans on their way through [routeLines]; the end of a drive drops them. Main thread. */
+    private val lanePlanJobs = ArrayList<Job>()
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
@@ -814,25 +818,34 @@ internal class MapboxNavigationEngine(
         }
 
     /**
-     * Writes the "lane_evidence" line of [route], a primary route of the drive: where the route's own
-     * lane data holds along it and how far, in numbers ([LaneEvidence], [LaneEvidenceLine]). The
-     * route is read once, on the route lines' worker and after the lines before it; the evidence is
-     * forgotten with the line.
+     * Writes the "lane_evidence" line of [route], a primary route of the drive, and makes its lane plan
+     * ([planRoute]): where the route's own lane data holds along it and how far, in numbers ([LaneEvidence],
+     * [LaneEvidenceLine]), then the lanes to take ([LanePlanner]). The route is read once, on the route
+     * lines' worker and after the lines before it, never on the main thread; the plan comes back to the
+     * main thread with [ticket] and is held with its route ([LanePlans]). The evidence is forgotten with the
+     * line.
      */
-    private fun logLaneEvidence(route: NavigationRoute) {
-        laneEvidenceJobs.removeAll { it.isCompleted }
-        laneEvidenceJobs += logRoutes(LaneEvidenceLine.TYPE) {
-            val directions = route.directionsRoute
-            val lanes = laneRoute(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints())
-            LaneEvidenceLine.fields(LaneEvidence.of(lanes))
+    private fun planLanes(route: NavigationRoute, ticket: LanePlans.Ticket) {
+        lanePlanJobs.removeAll { it.isCompleted }
+        lanePlanJobs += scope.launch(routeLines) {
+            val plan = planRoute(
+                read = {
+                    val directions = route.directionsRoute
+                    laneRouteInput(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints())
+                },
+                debugLog = debugLog,
+                active = { isActive },
+            )
+            // Back on the main thread, unless the drive ended meanwhile: then the plan is dropped here.
+            withContext(Dispatchers.Main) { lanePlans.deliver(ticket, plan) }
         }
     }
 
-    /** The drive ended: no "lane_evidence" line of it is written any more, and none still on its way is. */
-    private fun endLaneEvidence() {
-        laneEvidenceRoutes.end()
-        laneEvidenceJobs.forEach { it.cancel() }
-        laneEvidenceJobs.clear()
+    /** The drive ended: no "lane_evidence" line or plan of it is made any more, none still on its way is, and no plan is held. */
+    private fun endLanePlans() {
+        lanePlans.end()
+        lanePlanJobs.forEach { it.cancel() }
+        lanePlanJobs.clear()
     }
 
     /** The "route_request" line of every route request the app sends, before a trip or inside one. */
@@ -929,7 +942,7 @@ internal class MapboxNavigationEngine(
                 // The route the drive starts on, the first of the routes handed over.
                 val primary = _previewRoutes.value.firstOrNull()
                 val routeId = primary?.id
-                laneEvidenceRoutes.begin()
+                lanePlans.begin()
                 // The session starts only once the navigator has the routes; started earlier, it
                 // would begin as a separate free drive session.
                 navigation?.setNavigationRoutes(_previewRoutes.value) { result ->
@@ -940,8 +953,8 @@ internal class MapboxNavigationEngine(
                     val error = result.error
                     if (error == null) {
                         debugLog.log("routes_committed", mapOf("routeId" to routeId, "ignoredAlternatives" to result.value?.ignoredAlternatives?.keys))
-                        // Where the lane data of the route the drive starts on holds, now that the navigator has it.
-                        if (primary != null && laneEvidenceRoutes.onCommitted(primary.id)) logLaneEvidence(primary)
+                        // Where the lane data of the route the drive starts on holds, and its lane plan, now that the navigator has it.
+                        if (primary != null) lanePlans.onCommitted(primary.id)?.let { planLanes(primary, it) }
                         dispatch(GuidanceEvent.RoutesCommitted(command.simulated))
                     } else {
                         Log.e(TAG, "Navigator rejected the routes: ${error.message}")
@@ -989,7 +1002,7 @@ internal class MapboxNavigationEngine(
                 // and its answer finds no trip to change.
                 startRefresher.end()
                 endTripTally()
-                endLaneEvidence()
+                endLanePlans()
                 endMotion()
                 staleStart.end()
                 tripSessionRunning = false
@@ -1428,10 +1441,10 @@ internal class MapboxNavigationEngine(
                 "primary" to routes.firstOrNull()?.takeIf { reason != RoutesExtra.ROUTES_UPDATE_REASON_REFRESH }?.debugFields(),
             )
         }
-        // A new primary route of the drive, never a refresh of the same one: where its lane data holds.
+        // A new primary route of the drive, never a refresh of the same one: where its lane data holds, and its lane plan.
         val primary = routes.firstOrNull()
-        if (primary != null && laneEvidenceRoutes.onRoutesChanged(primary.id, refresh = reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)) {
-            logLaneEvidence(primary)
+        if (primary != null) {
+            lanePlans.onRoutesChanged(primary.id, refresh = reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)?.let { planLanes(primary, it) }
         }
     }
 

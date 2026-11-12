@@ -6,6 +6,7 @@ import com.mapbox.api.directions.v5.models.SpeedLimit
 import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.camera.Polyline
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.NodeManeuver
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
@@ -36,12 +37,25 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  *
  * @param shapes the points of each step of each leg, as the steps' geometry decodes to
  */
-internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<List<Point>>>): LaneRoute {
+internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<List<Point>>>): LaneRoute =
+    laneRouteInput(routeId, legs, shapes).route
+
+/**
+ * The route [routeId] as the app's own lanes read it ([laneRoute]), with what the engine needs to find
+ * its places again: where each step begins, which intersection a lane choice's key names, and where roads
+ * without lane data leave a step on the side of its exit. One pass over the route, for the route lines'
+ * worker; it throws where [laneRoute] does.
+ */
+internal fun laneRouteInput(routeId: String, legs: List<RouteLeg>, shapes: List<List<List<Point>>>): LaneRouteInput {
     val nodes = ArrayList<RouteNode>()
+    val stepStarts = ArrayList<DoubleArray>(legs.size)
+    val nodesByKey = HashMap<String, Int>()
+    val unknownExits = ArrayList<Double>()
     var stepStart = 0.0
     var steps = 0
     for ((l, leg) in legs.withIndex()) {
         val legSteps = leg.steps().orEmpty()
+        val starts = DoubleArray(legSteps.size)
         val maxSpeeds = leg.annotation()?.maxspeed()
         // A ramp step lies next to a freeway where the step before it ends on one, so a freeway leads
         // to its maneuver, or the step after it begins on one, so a freeway leaves the ramp's end.
@@ -49,38 +63,104 @@ internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<
         val beginsOnFreeway = legSteps.map { it.intersections()?.firstOrNull()?.isFreeway() == true }
         for ((k, step) in legSteps.withIndex()) {
             steps++
-            val shape = shapes.getOrNull(l)?.getOrNull(k).orEmpty().map { it.toGeoPoint() ?: offTheGlobe() }
-            val intersections = step.intersections().orEmpty().filterNotNull()
+            starts[k] = stepStart
+            val stepPoints = shapes.getOrNull(l)?.getOrNull(k).orEmpty()
+            val shape = stepPoints.map { it.toGeoPoint() ?: offTheGlobe() }
+            // As the lane choices list them, nulls included, so the keys count as theirs do.
+            val listed = step.intersections().orEmpty()
+            val intersections = listed.filterNotNull()
             val places = intersections.map { it.location().toGeoPoint() ?: offTheGlobe() }
             val meters = Polyline.distancesTo(shape, places)
             val type = step.maneuver().type()
             val stepType = ManeuverMapping.type(type)
             val besideFreewayStep = endsOnFreeway.getOrNull(k - 1) == true || beginsOnFreeway.getOrNull(k + 1) == true
-            for ((j, intersection) in intersections.withIndex()) {
+            var j = 0
+            for ((raw, intersection) in listed.withIndex()) {
+                if (intersection == null) continue
                 val freeway = intersection.isFreeway()
-                nodes.add(
-                    RouteNode(
-                        station = stepStart + meters[j],
-                        lanes = intersection.routeLanes(),
-                        bearings = intersection.bearings().orEmpty(),
-                        entry = intersection.entry().orEmpty(),
-                        inIndex = intersection.`in`(),
-                        outIndex = intersection.out(),
-                        freeway = freeway,
-                        ramp = RoadKind.isRamp(intersection.mapboxStreetsV8()?.roadClass(), stepType, besideFreewayStep, freeway),
-                        maneuver = if (j == 0) {
-                            NodeManeuver(stepType, ManeuverMapping.modifier(step.maneuver().modifier()), LaneChoices.isLaneChoiceManeuver(type))
-                        } else {
-                            null
-                        },
-                        postedMps = intersection.geometryIndex()?.let { maxSpeeds?.getOrNull(it) }?.metersPerSecond(),
-                    ),
+                val node = RouteNode(
+                    station = stepStart + meters[j],
+                    lanes = intersection.routeLanes(),
+                    bearings = intersection.bearings().orEmpty(),
+                    entry = intersection.entry().orEmpty(),
+                    inIndex = intersection.`in`(),
+                    outIndex = intersection.out(),
+                    freeway = freeway,
+                    ramp = RoadKind.isRamp(intersection.mapboxStreetsV8()?.roadClass(), stepType, besideFreewayStep, freeway),
+                    maneuver = if (j == 0) {
+                        NodeManeuver(stepType, ManeuverMapping.modifier(step.maneuver().modifier()), LaneChoices.isLaneChoiceManeuver(type))
+                    } else {
+                        null
+                    },
+                    postedMps = intersection.geometryIndex()?.let { maxSpeeds?.getOrNull(it) }?.metersPerSecond(),
                 )
+                if (node.isLanePoint) {
+                    nodesByKey["$routeId/$l/$k/$raw"] = nodes.size
+                    // The first intersection of a step is the maneuver that ends the step before it.
+                    if (raw == 0 && k > 0) nodesByKey["$routeId/$l/${k - 1}/end"] = nodes.size
+                }
+                nodes.add(node)
+                j++
+            }
+            // The roads without lane data that leave on the side of the step's exit, as the lane choices
+            // read them for the card's words, measured on the same shape as the intersections.
+            val next = legSteps.getOrNull(k + 1)
+            if (next != null) {
+                val exitLanes = next.intersections()?.firstOrNull()?.routeLanes().orEmpty()
+                val edge = RunUpRule.exitEdge(ManeuverMapping.modifier(next.maneuver().modifier()), exitLanes)
+                if (edge != null) {
+                    for (branch in exitSideBranches(listed, stepPoints, edge)) unknownExits.add(stepStart + branch.metersFromStepStart)
+                }
             }
             stepStart += lengthOf(shape)
         }
+        stepStarts.add(starts)
     }
-    return LaneRoute(routeId, steps, stepStart, nodes)
+    return LaneRouteInput(LaneRoute(routeId, steps, stepStart, nodes), stepStarts, nodesByKey, unknownExits)
+}
+
+/**
+ * A route as the app's own lanes read it ([route]) with the engine's index of its places, built once for
+ * the route ([laneRouteInput]); it lives in memory with its route and is never stored.
+ */
+internal class LaneRouteInput(
+    val route: LaneRoute,
+    /** For each leg, where each of its steps begins along the route, in metres, as [route]'s stations are measured. */
+    private val stepStarts: List<DoubleArray>,
+    /**
+     * The intersection, as its index in [route]'s nodes, of each lane point by the key the lane choices give
+     * it (`route/leg/step/intersection`), and of each maneuver with lanes also by the key of the step it ends
+     * (`route/leg/step/end`).
+     */
+    private val nodesByKey: Map<String, Int>,
+    /** Where roads without lane data leave a step on the side of its exit, along the route, in route order. */
+    val unknownExits: List<Double>,
+) {
+    /** Where along the route a car [metersOnStep] into step [step] of leg [leg] is; null for a step the route does not have. */
+    fun station(leg: Int, step: Int, metersOnStep: Double): Double? {
+        val start = stepStarts.getOrNull(leg)?.getOrNull(step) ?: return null
+        return if (metersOnStep.isFinite()) start + metersOnStep.coerceAtLeast(0.0) else null
+    }
+
+    /** The intersection of the lane point the lane choices' [key] names, as its index in [route]'s nodes; null for any other key. */
+    fun nodeOf(key: String?): Int? = if (key == null) null else nodesByKey[key]
+
+    /** The lane choices' key of the lane point at [node], the index of its intersection in [route]'s nodes; null for one without lanes. */
+    fun keyOf(node: Int): String? = keysByNode[node]
+
+    /** Each lane point's key; a maneuver's is that of the step it ends, as the card's rows name it. */
+    private val keysByNode: Map<Int, String> by lazy {
+        val out = HashMap<Int, String>()
+        for ((key, node) in nodesByKey) {
+            val known = out[node]
+            if (known == null || key.endsWith(END_KEY)) out[node] = key
+        }
+        out
+    }
+
+    private companion object {
+        const val END_KEY = "/end"
+    }
 }
 
 /**
