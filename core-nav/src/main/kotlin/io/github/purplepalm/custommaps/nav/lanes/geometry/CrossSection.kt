@@ -398,8 +398,8 @@ class CrossSection private constructor(
                     val there = lanes.filter { it.from <= from && it.to > from }
                     val width = there.sumOf { it.widthAt(from) }
                     val left = if (kind == Carriageway.TWO_WAY) 0.0 else width / 2.0
-                    val opening = lanes.filter { it.from > from && it.from < to && leftSide(it, lanes, it.from) }
-                    val closing = lanes.filter { it.closeFrom >= from && it.closeFrom < to && leftSide(it, lanes, it.closeFrom) }
+                    val opening = lanes.filter { it.from > from && it.from < to && leftSide(it, lanes, it.from, opens = true) }
+                    val closing = lanes.filter { it.closeFrom >= from && it.closeFrom < to && leftSide(it, lanes, it.closeFrom, opens = false) }
                     val zones = if (kind == Carriageway.TWO_WAY) emptyList() else zonesOf(run.index, from, to, road)
                     val layout = Layout(run.index, from, to, road, kind, lanes, left, opening, closing, zones)
                     if (turn != null && previous != null) {
@@ -422,14 +422,18 @@ class CrossSection private constructor(
         }
 
         /**
-         * Whether [d] opens or ends on the left side at [station]: it has no more lanes of [lanes] to its left there than to
-         * its right, so the lanes on its left move and the others stay; at the left edge it is, at the right edge it is not.
-         * A lane of its own slot is not counted: where a lane's kinds change, the lane that ends and the one that takes its
-         * place lie in one place, so both are put on the same side, and the road neither widens nor narrows there. Nor is a
-         * lane that is only possible there ([State.POSSIBLE]): it is not there yet, so a lane at the edge with possible lanes
-         * beyond it still ends at that edge, and the lanes on its other side stay where they are.
+         * Whether [d] opens ([opens]) or ends on the left side at [station]: it has fewer lanes of [lanes] to its left there
+         * than to its right, so the lanes on its left move and the others stay; at the left edge it is, at the right edge it
+         * is not. With as many on each side, the lanes that move are those whose move goes toward the next exit's edge: where
+         * a lane opens, the lanes between it and that edge move out to it; where one ends, the lanes on its far side close up
+         * toward it (the left side where the edge is not known). So a lane the plan names never moves away from the exit's
+         * edge for a lane opening or ending beside it. A lane of its own slot is not counted: where a lane's kinds change,
+         * the lane that ends and the one that takes its place lie in one place, so both are put on the same side (the left
+         * one on a tie), and the road neither widens nor narrows there. Nor is a lane that is only possible there ([State.POSSIBLE]): it is not
+         * there yet, so a lane at the edge with possible lanes beyond it still ends at that edge, and the lanes on its other
+         * side stay where they are.
          */
-        private fun leftSide(d: DrawnLane, lanes: List<DrawnLane>, station: Double): Boolean {
+        private fun leftSide(d: DrawnLane, lanes: List<DrawnLane>, station: Double, opens: Boolean): Boolean {
             var left = 0
             var right = 0
             for (other in lanes) {
@@ -437,8 +441,19 @@ class CrossSection private constructor(
                 if (station < other.possibleTo) continue
                 if (other.lane.slot < d.lane.slot) left++ else right++
             }
-            return left <= right
+            if (left != right) return left < right
+            // A lane whose kinds change and the lane that takes its place stay on one side.
+            if (replaces(d.lane) || replacedAt(d.lane)) return true
+            return when (edgeAfter(d.lane.run, station)) {
+                LaneEdge.RIGHT -> !opens
+                LaneEdge.LEFT -> opens
+                null -> true
+            }
         }
+
+        /** The side of the next exit at [station] on [run]: the edge of the run's first lane point at or after it. */
+        private fun edgeAfter(run: Int, station: Double): LaneEdge? =
+            topology.points.firstOrNull { it.run == run && it.station >= station - 1e-9 }?.edge
 
         /**
          * How the left edge moves over the rule-5 zones on the road from [from] to [to] of [run]: where the topology put

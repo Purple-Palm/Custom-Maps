@@ -462,29 +462,56 @@ class RoutePathTest {
         val built = build(openingSwing())
         val section = built.section
         val path = built.path
-        // The scene: no lane works up to 850 m before the gore, where the plan names a lane that opens next to where the path
-        // is, its middle swinging right at first and left of the path as it widens.
+        // The scene: no lane works up to 850 m before the gore, where the plan names a lane that opens near the path and ends
+        // more than a metre from where the path is.
         val conflict = built.plan.flags.single { it.kind == LanePlan.Flag.Kind.CONFLICT }
         assertEquals(gore - 850.0, conflict.to, 1e-9)
         val start = path.offsetAt(conflict.to)
         val named = requireNotNull(built.plan.segmentAt(conflict.to + 1.0)?.named)
         val at = { station: Double -> requireNotNull(section.place(named, station, path.axisAt(station))) }
         assertEquals(CrossSection.State.OPENING, at(conflict.to + 1.0).state)
-        assertTrue(at(conflict.to + 1.0).centre < at(conflict.to).centre, "the lane's middle swings right where it opens")
         val end = at(conflict.to + 300.0).centre
-        assertTrue(end > start + 1.0, "the lane ends at $end")
-        // The move sets off only left, the way the lane lies where the move ends: the path waits while the lane's middle swings
-        // right, moves only left and never past the lane's middle, and is in the lane 300 m on.
+        assertTrue(abs(end - start) > 1.0, "the lane ends at $end")
+        // The move sets off only the way the lane lies where the move ends: the path moves only that way, never past the
+        // lane's middle, and is in the lane 300 m on.
+        val way = if (end > start) 1.0 else -1.0
         var prev = start
         var station = conflict.to
         while (station < conflict.to + 300.0) {
             station += 1.0
             val now = path.offsetAt(station)
-            assertTrue(now >= prev - 1e-9 && now <= end + 1e-9, "at $station: from $prev to $now, the lane's middle at $end")
+            assertTrue((now - prev) * way >= -1e-9 && (now - end) * way <= 1e-9, "at $station: from $prev to $now, the lane's middle at $end")
             prev = now
         }
         assertEquals(end, path.offsetAt(conflict.to + 300.0), 1e-9)
         checkRules("opening swing", built)
+    }
+
+    @Test
+    fun `where a lane opens with as many lanes on each side the lanes toward the exit's edge make room for it`() {
+        val built = build(openingOnTie())
+        val section = built.section
+        val path = built.path
+        // The scene: the plan names the exit's lane where it opens, 210 m before the gore, between the lane that feeds it and
+        // the lane beyond it, one lane on each side.
+        val named = requireNotNull(built.plan.segmentAt(gore - 205.0)?.named)
+        val feeder = requireNotNull(built.plan.topology.lanes[named].fedBy)
+        val axis = { station: Double -> requireNotNull(path.axisAt(station)) }
+        assertEquals(CrossSection.State.OPENING, section.place(named, gore - 205.0, axis(gore - 205.0))!!.state)
+        // The feeder stays where it is while the lane opens beside it, and the lane beyond moves out toward the exit's edge:
+        // the path, which follows the opening lane's taper from the feeder's middle, moves only right, toward that edge.
+        val before = section.place(feeder, gore - 215.0, axis(gore - 215.0))!!.centre
+        var prev = path.offsetAt(gore - 215.0)
+        var station = gore - 215.0
+        while (station < gore - 140.0) {
+            station += 1.0
+            assertEquals(before, section.place(feeder, station, axis(station))!!.centre, 1e-9, "the feeder at $station")
+            val now = path.offsetAt(station)
+            assertTrue(now <= prev + 1e-9, "at $station: the path moves away from the exit's edge, from $prev to $now")
+            prev = now
+        }
+        assertEquals(section.place(named, gore - 140.0, axis(gore - 140.0))!!.centre, path.offsetAt(gore - 140.0), 1e-9)
+        checkRules("opening on a tie", built)
     }
 
     @Test
@@ -1179,14 +1206,27 @@ class RoutePathTest {
     )
 
     /**
-     * A right exit past a lane that opens with a swing: two lanes 1,600 m before the gore and three 800 m before, the right one
-     * not to take; four at the exit, the right two to take. No lane works up to 850 m before the gore, where two lanes open
-     * left of the lane drawn there and the plan names the right one of them, whose middle swings right at first as it opens.
+     * A right exit past a lane that opens next to the path: two lanes 1,600 m before the gore and three 800 m before, the
+     * right one not to take; four at the exit, the right two to take. No lane works up to 850 m before the gore, where two
+     * lanes open beside the lane drawn there and the plan names the right one of them.
      */
     private fun openingSwing() = LaneScenes.approach(
         listOf(At(1_600.0, listOf(s(), s(false))), At(800.0, listOf(s(), s(), s(false)))),
         exit = listOf(s(false), s(false), sr(), sr()),
         id = "opening-swing",
+    )
+
+    /**
+     * A right exit whose lane opens between two lanes: three lanes 1,800 m before the gore, the left one kept for car pools;
+     * 1,100 m before, two, the kept one leaving by a road on the left; three at the exit, the right two to take, and the
+     * ramp splits 180 m past the gore, where the route keeps left. The exit's right lane lies beyond the two lanes as a
+     * possible lane, and the lane the plan names opens 210 m before the gore between the lane that feeds it and that one.
+     */
+    private fun openingOnTie() = LaneScenes.approach(
+        listOf(At(1_800.0, listOf(hov(), s(), s())), At(1_100.0, listOf(hov(), s()), EXIT_LEFT)),
+        exit = listOf(s(false), sr(), sr()),
+        rampPoints = listOf(180.0 to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT)),
+        id = "opening-on-tie",
     )
 
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
