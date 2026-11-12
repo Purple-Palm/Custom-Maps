@@ -45,8 +45,10 @@ internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<
     for ((l, leg) in legs.withIndex()) {
         val legSteps = leg.steps().orEmpty()
         val maxSpeeds = leg.annotation()?.maxspeed()
-        // A step is a freeway step where its road leaves its maneuver as a freeway.
-        val freewaySteps = legSteps.map { it.intersections()?.firstOrNull()?.isFreeway() == true }
+        // A ramp step lies next to a freeway where the step before it ends on one, so a freeway leads
+        // to its maneuver, or the step after it begins on one, so a freeway leaves the ramp's end.
+        val endsOnFreeway = legSteps.map { it.intersections()?.lastOrNull()?.isFreeway() == true }
+        val beginsOnFreeway = legSteps.map { it.intersections()?.firstOrNull()?.isFreeway() == true }
         for ((k, step) in legSteps.withIndex()) {
             steps++
             val shape = shapes.getOrNull(l)?.getOrNull(k).orEmpty().map { it.toGeoPoint() ?: offTheGlobe() }
@@ -55,7 +57,7 @@ internal fun laneRoute(routeId: String, legs: List<RouteLeg>, shapes: List<List<
             val meters = Polyline.distancesTo(shape, places)
             val type = step.maneuver().type()
             val stepType = ManeuverMapping.type(type)
-            val besideFreewayStep = freewaySteps.getOrNull(k - 1) == true || freewaySteps.getOrNull(k + 1) == true
+            val besideFreewayStep = endsOnFreeway.getOrNull(k - 1) == true || beginsOnFreeway.getOrNull(k + 1) == true
             for ((j, intersection) in intersections.withIndex()) {
                 val freeway = intersection.isFreeway()
                 nodes.add(

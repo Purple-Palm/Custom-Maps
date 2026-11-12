@@ -33,13 +33,13 @@ enum class RoadKind {
          * Whether the road that leaves an intersection is a ramp. Mapbox Streets names a ramp's class
          * a link ([LINK_SUFFIX]: motorway_link, trunk_link and the like), and where the route gives a
          * class it decides. Where it gives none, the road is a ramp in a step that begins with an
-         * off ramp or an on ramp next to a freeway step, or with a fork next to one where the road is
-         * no freeway itself (a fork between two freeways goes on as one).
+         * off ramp or an on ramp next to a freeway, or with a fork next to one where the road is no
+         * freeway itself (a fork between two freeways goes on as one).
          *
          * @param streetsClass the Mapbox Streets class of the road, as the route names it; null where it gives none
          * @param stepType the maneuver that begins the intersection's step
-         * @param besideFreewayStep the step before it or the step after it is a freeway step: its road
-         *   leaves the step's maneuver as a freeway
+         * @param besideFreewayStep the step lies next to a freeway: the step before it ends on a freeway,
+         *   which leads to the step's maneuver, or the step after it begins on one
          * @param freeway the road is a freeway by the route's own reading (`isFreeway`)
          */
         fun isRamp(streetsClass: String?, stepType: ManeuverType?, besideFreewayStep: Boolean, freeway: Boolean): Boolean {

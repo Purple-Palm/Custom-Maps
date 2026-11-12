@@ -194,6 +194,47 @@ class LaneEvidenceInputTest {
         assertEquals(listOf(RoadKind.STREET, RoadKind.RAMP, RoadKind.STREET), nodes.map { it.road })
     }
 
+    /** The roads of a leg of [steps] whose shapes run from each step's first point to the next one's, the last a point. */
+    private fun roadsOf(vararg steps: Pair<Int, LegStep>): List<RoadKind> {
+        val starts = steps.map { it.first }
+        val shapes = starts.mapIndexed { i, from -> if (i + 1 < starts.size) points.subList(from, starts[i + 1] + 1) else listOf(points[from], points[from]) }
+        return laneRoute("route-5#0", listOf(RouteLeg.builder().steps(steps.map { it.second }).build()), listOf(shapes)).nodes.map { it.road }
+    }
+
+    @Test
+    fun `an exit without a class after a step that ends on a freeway is a ramp`() {
+        // The departure's road becomes a freeway at point 2; the exit's road has no class at all.
+        val roads = roadsOf(
+            0 to step("depart", null, 0, listOf(intersection(0, first = true), intersection(2, motorway = true))),
+            4 to step("off ramp", "slight right", 4, listOf(intersection(4))),
+            6 to step("turn", "right", 6, listOf(intersection(6))),
+            8 to step("arrive", "right", 8, listOf(intersection(8))),
+        )
+        assertEquals(listOf(RoadKind.STREET, RoadKind.FREEWAY, RoadKind.RAMP, RoadKind.STREET, RoadKind.STREET), roads)
+    }
+
+    @Test
+    fun `an on ramp without a class before a step that begins on a freeway is a ramp`() {
+        // The merge's road is a freeway where it begins and a street from point 5 on.
+        val roads = roadsOf(
+            0 to step("depart", null, 0, listOf(intersection(0, first = true))),
+            2 to step("on ramp", "right", 2, listOf(intersection(2))),
+            4 to step("merge", "slight left", 4, listOf(intersection(4, motorway = true), intersection(5))),
+            6 to step("arrive", "right", 6, listOf(intersection(6))),
+        )
+        assertEquals(listOf(RoadKind.STREET, RoadKind.RAMP, RoadKind.FREEWAY, RoadKind.STREET, RoadKind.STREET), roads)
+    }
+
+    @Test
+    fun `a fork without a class between streets is no ramp`() {
+        val roads = roadsOf(
+            0 to step("depart", null, 0, listOf(intersection(0, first = true))),
+            2 to step("fork", "slight left", 2, listOf(intersection(2))),
+            4 to step("arrive", "left", 4, listOf(intersection(4))),
+        )
+        assertEquals(listOf(RoadKind.STREET, RoadKind.STREET, RoadKind.STREET), roads)
+    }
+
     @Test
     fun `the posted speed is the maxspeed of the road that leaves the intersection`() {
         val posted = route().nodes.map { it.postedMps }
