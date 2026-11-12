@@ -667,6 +667,7 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `laneDetails` | the switch for lane details on the map | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
+| `routeLine` | only with **Settings → Debug → App's own route line** on ([The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)): `own`, whether the app's own line is drawn; `trims`, how often its trim was set that second; `trimLagM`, the largest distance along the route between its trimmed end and the SDK's vanishing point; `trimMaxMs`, the longest the app's part of a puck update took on the main thread. The last two are left out without a sample | `trims` up to 16 while moving; `trimLagM` 0 but where the SDK skipped its point; `trimMaxMs` under 0.5 |
 | `bendM`, `bendDeg` | with Large, while the SDK frames a maneuver: how far past the maneuver point the road bends, in metres, and by how many degrees off the way in, negative to the left ([The frame reaches the bend](#the-frame-reaches-the-bend)); left out at other times | 0 at an ordinary turn |
 | `extraPts` | how many points of the road to the bend the data source frames besides its own | 0 but where a step begins well before its bend |
 
@@ -802,7 +803,14 @@ Other lines:
   maneuver arrow is drawn above the route line's top layer (null while either is missing), and
   `middle`, the ids of the layers in the style's middle slot, where the route line and the arrow
   are, in the order they are drawn. Ids only. See
-  [The maneuver arrow close in](#the-maneuver-arrow-close-in).
+  [The maneuver arrow close in](#the-maneuver-arrow-close-in). While the app's own route line is
+  in the style, also `ownLine`: true when its casing and line lie right above the SDK's route line
+  and below every layer of the arrow; the line comes again when the Debug switch is turned on or
+  off.
+- A **route_line** line, with **Settings → Debug → App's own route line** on, at each change of who
+  draws the route line; see
+  [The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)
+  and [DRIVES.md](DRIVES.md).
 - The **route_response** and **routes_updated** lines carry, for each step with any, the
   intersections that have lanes (`laneIntersections`): `meters` from the start of the step,
   `lanes`, `usable`, `active`, `designated`, the `classes` of the road that leaves it, and
@@ -1442,7 +1450,8 @@ run-ups and the last 180 m before a street maneuver, the one lane the app would 
 the exit's edge. Its run-ups may begin earlier than the card's, 6 s of driving before its lanes
 first narrow for a point within reach, and may hold through the ramp to a split up to 15 s of
 driving after the gore. Nothing on the screen reads it yet: the card, its words, the camera and the
-route line are as described above. The debug log gets a `lane_plan` line for each route and a
+route line are as described above, but for the route line the app draws itself behind a Debug
+switch ([The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)). The debug log gets a `lane_plan` line for each route and a
 `lane_agree` line for each row the card shows at a point with lane data, which say where the card
 and the plan would differ ([DRIVES.md](DRIVES.md), checks 46 to 48). The plan lights the lane and
 the card reads it only once the app draws the lanes itself.
@@ -1606,6 +1615,72 @@ Large goes, it is what shows the turn's path.
   ([DECISIONS.md](DECISIONS.md), 43). Close in a street is a plain band, since the map's road data
   ends at zoom 16, and a band that stands out from the ground reads as a road: the median of a
   divided road as a median, not as a block of houses.
+
+### The app's own route line, behind a Debug switch
+
+**Settings → Debug → App's own route line** is a switch, stored under `own_route_line` and off
+unless turned on. With it off nothing changes: the route line is the navigation SDK's, with the
+widths, colours, other routes, arrow and layer order described above. With it on, during guidance,
+the app draws the route line itself (`OwnRouteLine`), the first step of the app's own lanes. It is a
+test of the line that will later run in the lanes the app draws; nothing else of those lanes is
+drawn yet. Before Start, in the preview, nothing changes.
+
+- **Where the line runs.** Along the route's path (`RoutePath`), built from the route's lane plan
+  ([The run-up to a freeway exit](#the-run-up-to-a-freeway-exit), the plan in the log): on the
+  road's line where the plan has no lanes to draw, which is most of a route and every street for
+  now; on a freeway with lane data, on the middle of the lanes that work outside the run-ups, and
+  on the run-up in the lane the plan names, moving into it with a gentle S of 6 s of driving per
+  lane (80 to 270 m), only toward the lane the plan heads for and never back, and at the gore along
+  that lane onto the ramp instead of across the gore. The lanes' places are rules (3.66 m lanes,
+  laid out around the road's line), not the paint on the road. Away from lanes the line lies exactly
+  on the SDK's. The car is where it always is: nothing moves its icon sideways
+  ([DECISIONS.md](DECISIONS.md), 39).
+- **How it looks.** Today's line and casing: the SDK's widths up to zoom 16.5 and from there on in
+  the widths of 16.5, about 10.4 and 15.5 dp, as with lane details on (`RouteLineWidths`), never
+  narrower; the route line's colours of the look (`MapPalette.routeLine`), with the traffic of the
+  route's congestion in the SDK's ranges (low 0 to 39, moderate 40 to 59, heavy 60 to 79, severe 80
+  to 100) and closures; emissive strength 1 and not faded behind 3D buildings, as the SDK's. The
+  SDK's other routes and its maneuver arrow are drawn as before. The own layers lie in the style's
+  middle slot right above the SDK's route line and below the arrow, placed above the SDK's top
+  layer each time they are added; the `map_layers` line checks the order. Whether slots inside
+  Standard's middle slot would hold the order by themselves is not known, so they are not used.
+- **The SDK's line under it.** While the own line is drawn, the SDK's primary line is hidden
+  (`hidePrimaryRoute`), and it stays hidden across the SDK's own redraws until it is shown again.
+  The SDK still gets every route and every progress update, as without the switch, so its hidden
+  line is always trimmed to the car and showing it again is right at once.
+- **The trim.** The part behind the car is cut off the line with `line-trim-offset`, set with the
+  same puck update as the SDK's own line, at most every 62.5 ms: the SDK's vanishing point
+  (`getVanishPointOffset`), taken onto the own path through its station table (`StationTable`), and
+  only through the table of the route the SDK's point belongs to. The table is in Web Mercator for a
+  reason: a line's progress, its trims and its colour stops are fractions of its length as measured
+  on the Web Mercator plane, and the SDK measures its vanishing point the same way; a fraction of
+  metres would put the cut tens of metres off on a long north-south route (58 m on 333 km north of
+  the equator). Where the SDK skips its point while the navigator follows the car on the route (the
+  puck more than 10 m from its line around the progress's index, or that index older than 1.5 s),
+  the app's own projection of the puck onto the route's line stands in (`PuckProjection`: within
+  30 m of the line, from 100 m behind the last trim to 1 km ahead of it).
+- **A change of route.** At Start, a reroute, another route taken and a style load (the map made
+  anew, as a token switch does), the SDK's line is shown first, already trimmed, and the own layers
+  hidden. The new path is built off the main thread once the route's lane plan is there or could not
+  be made, and sent to the own GeoJSON source with a data id of its own. Only when the map says that
+  data has loaded are the path's table, colours and trim taken up together, the own layers shown and
+  the SDK's line hidden again. In between the driver sees the SDK's line on the new route, never the
+  old path. At the end of guidance the SDK's line is shown and the own source cleared.
+- **The watchdog.** A loading error of the own source, a call the style refuses or a path that
+  cannot be built, and no line data while guidance runs (the own layers gone from the style, or a
+  path not loaded within 10 s) give the line back to the SDK at once: the own drawing is taken away,
+  one `route_line` line says why, and that route is not tried again; the next route is. A failure
+  costs the own line, never the drive.
+- **Its cost.** The path, its table and its traffic are built once for each route on the map's own
+  worker thread; a traffic refresh changes only the line's colours (no new GeoJSON). A puck update
+  adds one call to the SDK, one lookup in the table and the trim of two layers on the main thread
+  (budget under 0.5 ms, the camera line's `routeLine.trimMaxMs`); nothing runs per display frame.
+  The thread that parses GeoJSON is shared with the SDK's line and arrow, so `route_line` logs how
+  long the own source took from set to loaded.
+- **Not checked on a device:** the frame cost (the camera line's `render` and `renderFps` against a
+  drive with the switch off); whether the SDK's hidden line keeps its hidden state across a style
+  load (so it is shown at every style load until the own line has loaded again); and how long a long
+  route's path takes to load while the SDK's own line loads on the same thread (`loadMs`).
 
 ### Constants of the lane zoom
 
