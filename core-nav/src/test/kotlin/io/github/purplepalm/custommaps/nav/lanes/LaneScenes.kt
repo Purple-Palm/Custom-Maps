@@ -168,4 +168,143 @@ internal object LaneScenes {
             id = "iw31",
         )
     }
+
+    /** S5: a left exit; a car-pool lane on the left, the exit from the leftmost open lane; the two right lanes leave 1,100 m before. */
+    fun s5() = approach(
+        listOf(at(1_100.0, hov(), s(), s(), s(false), sr(false), roads = EXIT_RIGHT)),
+        exit = listOf(hov(), sl(), s(false), s(false), s(false)),
+        maneuver = OFF_LEFT,
+        id = "s5",
+    )
+
+    /** S6: a two-lane exit with an option lane; a split 1,200 m before takes the two left lanes. */
+    fun s6() = approach(
+        listOf(at(1_200.0, sl(false), sl(false), s(), s(), s(), roads = EXIT_LEFT)),
+        exit = listOf(s(false), s(false), s(false), option(), sr()),
+        planMps = 30.0,
+        id = "s6",
+    )
+
+    /** S7: a fork, the route on its left branch, three of five lanes. */
+    fun s7() = approach(
+        listOf(at(800.0, s(), s(), s(), s(), s())),
+        exit = listOf(sl(), sl(), sl(), sr(false), sr(false)),
+        maneuver = FORK_LEFT,
+        planMps = 30.0,
+        id = "s7",
+    )
+
+    /** S8: a lane drop: the right lane ends 500 m before a right exit, with no road there. */
+    fun s8() = approach(
+        listOf(at(500.0, s(), s(), s(), s(false))),
+        exit = listOf(s(false), s(false), s(false), sr()),
+        planMps = 30.0,
+        id = "s8",
+    )
+
+    /** S9: exits close together: exit A's gore 300 m before the route's exit B takes the right lane. */
+    fun s9() = approach(
+        listOf(at(300.0, s(), s(), s(), s(), sr(false), roads = EXIT_RIGHT)),
+        exit = listOf(s(false), s(false), s(false), s(false), sr()),
+        id = "s9",
+    )
+
+    /** S13: a split 3,000 m before the exit takes the two right lanes; nothing between; the exit is IA's. */
+    fun s13() = approach(
+        listOf(at(3_000.0, s(), s(), s(), sr(false), sr(false), roads = EXIT_RIGHT)),
+        exit = iaExit(),
+        id = "s13",
+    )
+
+    /** S15: two points where lanes leave on the right: one at 1,400 m, two at 800 m; the exit takes the right lane of three. */
+    fun s15() = approach(
+        listOf(
+            at(1_400.0, s(), s(), s(), s(), sr(false), roads = EXIT_RIGHT),
+            at(800.0, s(), s(), sr(false), sr(false), roads = EXIT_RIGHT),
+        ),
+        exit = listOf(s(false), s(false), sr()),
+        id = "s15",
+    )
+
+    /** S16: a left exit; the leftmost lane leaves at 1,200 m, then the new leftmost lane is kept for car pools. */
+    fun s16() = approach(
+        listOf(at(1_200.0, sl(false), s(), s(), s(), s(), roads = EXIT_LEFT)),
+        exit = listOf(hov(), sl(), s(false), s(false)),
+        maneuver = OFF_LEFT,
+        id = "s16",
+    )
+
+    /** S17: S9 where exit A's intersection has no lanes: a road without lane data leaves on the right 300 m before the exit. */
+    fun s17() = approach(
+        listOf(bare(300.0, EXIT_RIGHT)),
+        exit = listOf(s(false), s(false), s(false), s(false), sr()),
+        id = "s17",
+    )
+
+    /** S20: the right lane leaves at 1,600 m and at 700 m by roads on the right, four lanes at each; a lane added between. */
+    fun s20() = approach(
+        listOf(at(1_600.0, s(), s(), s(), sr(false), roads = EXIT_RIGHT), at(700.0, s(), s(), s(), sr(false), roads = EXIT_RIGHT)),
+        exit = listOf(s(false), s(false), s(false), sr()),
+        id = "s20",
+    )
+
+    /**
+     * GEOM's S2: a two-lane exit, an option lane the route prefers and a lane dropped to the ramp, whose
+     * ramp splits [splitAfter] m after the gore; the route takes the left branch. 65 mph, 45 on the ramp.
+     */
+    fun geomS2(splitAfter: Double) = approach(
+        emptyList(),
+        exit = listOf(s(false), s(false), option(true, true), sr(true, false)),
+        planMps = 65.0 * PlanningSpeed.MPS_PER_MPH,
+        rampMps = 45.0 * PlanningSpeed.MPS_PER_MPH,
+        rampPoints = listOf(splitAfter to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = FORK_LEFT)),
+        rampMeters = splitAfter + 300.0,
+        id = "geom-s2",
+    )
+
+    /** GEOM's S5: only the car-pool lane can be used at the exit. */
+    fun geomS5() = approach(emptyList(), exit = listOf(hov(true), s(false), s(false)), maneuver = OFF_LEFT, planMps = 65.0 * PlanningSpeed.MPS_PER_MPH, id = "geom-s5")
+
+    /** GEOM's S6: a lane that ends with no exit: three lanes at 1,500 m before, two at 500 m, no road between. */
+    fun geomS6() = approach(
+        listOf(at(1_500.0, s(), s(), s()), at(500.0, s(), s())),
+        exit = listOf(s(false), sr()),
+        planMps = 65.0 * PlanningSpeed.MPS_PER_MPH,
+        id = "geom-s6",
+    )
+
+    /** A street turn: two lanes 200 m before a left turn whose list adds a left pocket. 35 mph planned. */
+    fun streetPocket(): LaneRoute {
+        val street = RoadKind.STREET
+        val mps = 35.0 * PlanningSpeed.MPS_PER_MPH
+        return route(
+            node(0.0, road = street, maneuver = DEPART, planMps = mps),
+            node(GORE - 200.0, s(), s(), road = street, planMps = mps),
+            node(GORE, left(true, true), s(false), s(false), road = street, maneuver = TURN_LEFT, planMps = 25.0 * PlanningSpeed.MPS_PER_MPH),
+            node(GORE + 300.0, road = street, maneuver = ARRIVE, planMps = 25.0 * PlanningSpeed.MPS_PER_MPH),
+            id = "street-pocket",
+        )
+    }
+
+    /** Every scene of the planner's tests, by name. */
+    fun all(): Map<String, LaneRoute> = linkedMapOf(
+        "ia" to ia(),
+        "ia-far" to ia(farSide = true),
+        "iw31" to iw31(),
+        "s5" to s5(),
+        "s6" to s6(),
+        "s7" to s7(),
+        "s8" to s8(),
+        "s9" to s9(),
+        "s13" to s13(),
+        "s15" to s15(),
+        "s16" to s16(),
+        "s17" to s17(),
+        "s20" to s20(),
+        "geom-s2-400" to geomS2(400.0),
+        "geom-s2-150" to geomS2(150.0),
+        "geom-s5" to geomS5(),
+        "geom-s6" to geomS6(),
+        "street-pocket" to streetPocket(),
+    )
 }

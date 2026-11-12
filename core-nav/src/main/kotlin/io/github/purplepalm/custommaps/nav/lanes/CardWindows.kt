@@ -4,8 +4,10 @@ import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * A stretch of the route where the camera is close and the card shows lanes: from [from] to [to]
@@ -65,6 +67,81 @@ object CardWindows {
             stepStart = node.station
         }
         return windows
+    }
+
+    /**
+     * The card windows of [route] as the card and the close view show them, at the planning speeds: a
+     * street window as in [of], and a run-up from where the run-up latch ([RunUpLatch]) begins it for a
+     * car at the approach's planning speed, not from its reach:
+     * - at the reach, or the step's start where that is nearer, when a point of the step ahead of it is
+     *   one where the lane at the exit's side leaves ([RunUpRule.edgeLeaves]), or when the run-up of the
+     *   step before ended at its gore and the step is no longer than the reach plus
+     *   [CameraTuning.runUpResumeSeconds] of driving;
+     * - else from the close view's window ([LaneFocus.windowMeters]) before the farthest point of the step
+     *   that counts as a lane choice, the exit itself at the latest, never before the reach.
+     *
+     * The lane plan names a lane inside these windows only.
+     */
+    fun latched(route: LaneRoute, tuning: CameraTuning = CameraTuning.PHONE): List<CardWindow> {
+        val nodes = route.nodes
+        val windows = ArrayList<CardWindow>()
+        var stepStart = 0.0
+        var stepIndex = 0
+        var runUpBefore = false
+        for (m in nodes.indices) {
+            val node = nodes[m]
+            val maneuver = node.maneuver ?: continue
+            var runUp = false
+            if (m > 0) {
+                val approach = nodes[m - 1]
+                if (runUpCounts(node, approach, tuning)) {
+                    runUp = true
+                    val speed = PlanningSpeed.of(approach)
+                    val reach = RunUpLatch.reachMeters(tuning, speed)
+                    val window = LaneFocus.windowMeters(tuning, speed)
+                    val stepMeters = node.station - stepStart
+                    val first = min(reach, stepMeters)
+                    val edge = RunUpRule.exitEdge(maneuver.modifier, node.lanes)
+                    val onStep = (stepIndex + 1 until m).filter { nodes[it].isLanePoint && node.station - nodes[it].station <= first }
+                    val edgeAhead = onStep.any { RunUpRule.edgeLeaves(nodes[it].lanes, edge) }
+                    val resumes = runUpBefore && stepMeters <= reach + speed * tuning.runUpResumeSeconds
+                    val begin = if (edgeAhead || resumes) {
+                        first
+                    } else {
+                        var farthest = window
+                        for (p in onStep) if (pointCounts(nodes[p], nodes[p - 1], tuning)) farthest = max(farthest, node.station - nodes[p].station + window)
+                        min(first, farthest)
+                    }
+                    if (begin > 0.0) windows.add(CardWindow(node.station - begin, node.station, CardWindow.Kind.RUN_UP, m))
+                } else if (framesStreetManeuver(maneuver, approach)) {
+                    val from = max(stepStart, node.station - tuning.maneuverFramingMeters)
+                    if (node.station > from) windows.add(CardWindow(from, node.station, CardWindow.Kind.STREET, m))
+                }
+            }
+            runUpBefore = runUp
+            stepStart = node.station
+            stepIndex = m
+        }
+        return windows
+    }
+
+    /**
+     * Whether the point [point], reached from [approach], where the route goes straight on, counts as a
+     * lane choice as the lane choices count it ([LaneChoice.counts]).
+     */
+    fun pointCounts(point: RouteNode, approach: RouteNode, tuning: CameraTuning = CameraTuning.PHONE): Boolean {
+        var open = 0
+        var usable = 0
+        var designated = 0
+        for (lane in point.lanes) {
+            if (lane.designated) {
+                designated++
+                continue
+            }
+            open++
+            if (lane.usable) usable++
+        }
+        return LaneChoice("", 0.0, open, usable, designated, onFreeway = approach.freeway, atManeuver = false).counts(tuning)
     }
 
     /**

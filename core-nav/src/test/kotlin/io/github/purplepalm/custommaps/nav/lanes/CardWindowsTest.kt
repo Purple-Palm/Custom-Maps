@@ -158,4 +158,76 @@ class CardWindowsTest {
         assertEquals(0.0, CardWindows.metersInside(emptyList(), 0.0, 900.0))
         assertEquals(0.0, CardWindows.metersInside(listOf(a), 300.0, 200.0), "an empty stretch")
     }
+
+    // ------------------------------------------------------------------ as the run-up latch begins them, for the plan
+
+    @Test
+    fun `a run-up begins at the reach where a point ahead has the lane at the exit's side leave`() {
+        // IA: the right lane leaves at IA1, 1,330 m before the gore; planned at 27 m/s.
+        val window = CardWindows.latched(LaneScenes.ia()).first()
+        assertEquals(CardWindow.Kind.RUN_UP, window.kind)
+        assertEquals(LaneScenes.GORE - reach(27.0), window.from, 1e-9)
+        assertEquals(LaneScenes.GORE, window.to)
+    }
+
+    @Test
+    fun `without such a point it begins at the window of the farthest point that counts, else at the exit's own`() {
+        val window = LaneFocus.windowMeters(tuning, 27.0)
+        assertEquals(LaneScenes.GORE - 1_100.0 - window, CardWindows.latched(LaneScenes.s5()).first().from, 1e-9, "S5's split counts")
+        assertEquals(LaneScenes.GORE - window, CardWindows.latched(LaneScenes.s17()).first().from, 1e-9, "the exit's own")
+        assertEquals(LaneScenes.GORE - window, CardWindows.latched(LaneScenes.s13()).first().from, 1e-9, "S13's split lies beyond the reach")
+    }
+
+    @Test
+    fun `a point that counts within the reach begins it at its window, beyond it at the reach`() {
+        fun begin(before: Double) = LaneScenes.GORE - CardWindows.latched(
+            LaneScenes.approach(listOf(LaneScenes.at(before, LaneScenes.s(false), LaneScenes.s(false), LaneScenes.s(), LaneScenes.s(), LaneScenes.s())), LaneScenes.iaExit()),
+        ).first().from
+        val window = LaneFocus.windowMeters(tuning, 27.0)
+        assertEquals(1_500.0 + window, begin(1_500.0), 1e-9)
+        assertEquals(reach(27.0), begin(2_000.0), 1e-9, "its window would begin before the reach")
+    }
+
+    @Test
+    fun `a run-up begins no earlier than its step and again at once after a run-up at a fork right before`() {
+        val forkLeft = NodeManeuver(ManeuverType.FORK, TurnModifier.SLIGHT_LEFT, viewStaysUp = true)
+        val sl = RouteLane(setOf(TurnModifier.SLIGHT_LEFT), valid = true)
+        val slOff = RouteLane(setOf(TurnModifier.SLIGHT_LEFT), valid = false)
+        fun chain(gap: Double) = route(
+            node(0.0, maneuver = depart, postedMph = 60.0),
+            node(3_000.0, sl, sl, sl, sr(false), sr(false), maneuver = forkLeft, postedMph = 60.0),
+            node(3_000.0 + gap, slOff, s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(3_400.0 + gap, road = RoadKind.RAMP, maneuver = arrive),
+        )
+        val windows = CardWindows.latched(chain(1_500.0))
+        assertEquals(2, windows.size)
+        assertEquals(3_000.0 - LaneFocus.windowMeters(tuning, 65.0 * mph), windows[0].from, 1e-9, "the fork: no point before it, its own window")
+        assertEquals(3_000.0, windows[1].from, "the exit's run-up begins again at the fork's gore, its step's start")
+        // Without the run-up before, it would begin at its own window: the plain exit on a freeway step.
+        val alone = route(
+            node(0.0, maneuver = depart, postedMph = 60.0),
+            node(3_000.0, postedMph = 60.0),
+            node(4_500.0, slOff, s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRamp),
+            node(4_900.0, road = RoadKind.RAMP, maneuver = arrive),
+        )
+        assertEquals(4_500.0 - LaneFocus.windowMeters(tuning, 65.0 * mph), CardWindows.latched(alone).single().from, 1e-9)
+    }
+
+    @Test
+    fun `street windows are the framing's 180 m, as the evidence counts them`() {
+        val streets = CardWindows.latched(LaneScenes.streetPocket())
+        assertEquals(listOf(CardWindow(LaneScenes.GORE - 180.0, LaneScenes.GORE, CardWindow.Kind.STREET, 2)), streets)
+        assertEquals(CardWindows.of(LaneScenes.streetPocket()), streets)
+    }
+
+    @Test
+    fun `a point where the route goes straight on counts as the lane choices count it`() {
+        val approach = node(0.0)
+        assertTrue(CardWindows.pointCounts(node(1.0, s(false), s(false), s(), s(), s()), approach), "five lanes, two leaving")
+        assertFalse(CardWindows.pointCounts(node(1.0, s(), s(), s(), s(), s(false)), approach), "one leaving")
+        assertFalse(CardWindows.pointCounts(node(1.0, s(false), s(false), s(), s(), s()), node(0.0, road = RoadKind.STREET)), "not on a freeway")
+        assertFalse(CardWindows.pointCounts(node(1.0, s(false), s()), approach), "two lanes")
+        assertFalse(CardWindows.pointCounts(node(1.0, hov(), s(false), s()), approach), "the car-pool lane is no choice: two open lanes")
+        assertTrue(CardWindows.pointCounts(node(1.0, hov(), s(false), s(false), s()), approach), "three open lanes, two leaving")
+    }
 }
