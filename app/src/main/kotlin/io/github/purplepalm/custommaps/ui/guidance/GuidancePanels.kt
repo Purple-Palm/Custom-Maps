@@ -391,20 +391,20 @@ internal const val LANE_LABEL_MAX_WIDTH_SHARE = 0.3f
 internal const val LANE_WORDS_MAX_WIDTH_SHARE = 0.45f
 
 /** The smallest a lane choice's distance shrinks to, at the phone's font scale: a number read at a glance. */
-private val LANE_DISTANCE_MIN_SIZE = 12.sp
+internal val LANE_DISTANCE_MIN_SIZE = 12.sp
 
 /**
  * The smallest the lanes to use in words shrink to on the run-up to an exit, at the phone's font
  * scale. Smaller than a distance's: the longest words still fit with the largest font, where at
  * 12 sp they would be left out.
  */
-private val LANE_WORDS_MIN_SIZE = 10.sp
+internal val LANE_WORDS_MIN_SIZE = 10.sp
 
 /** The smallest the time and the distance left in the guidance bar shrink to, at the phone's font scale. */
-private val REMAINING_MIN_SIZE = 12.sp
+internal val REMAINING_MIN_SIZE = 12.sp
 
 /** The smallest the arrival time in the guidance bar shrinks to, at the phone's font scale. */
-private val ARRIVAL_MIN_SIZE = 16.sp
+internal val ARRIVAL_MIN_SIZE = 16.sp
 
 /** Between the guidance bar's numbers and its buttons, between its two buttons, and between its two rows. */
 private val BAR_GAP = 8.dp
