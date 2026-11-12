@@ -1,11 +1,13 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
 import com.mapbox.bindgen.Value
+import com.mapbox.common.Cancelable
 import com.mapbox.geojson.Feature
 import com.mapbox.geojson.FeatureCollection
 import com.mapbox.geojson.LineString
 import com.mapbox.geojson.Point
 import com.mapbox.maps.MapboxMap
+import com.mapbox.maps.SourceDataLoadedType
 import com.mapbox.maps.extension.style.expressions.generated.Expression
 import com.mapbox.maps.extension.style.layers.addLayerAbove
 import com.mapbox.maps.extension.style.layers.generated.lineLayer
@@ -44,7 +46,14 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  * The path, its table and its traffic are built once for a route, off the main thread ([Worker]), as soon as the
  * route's lane plan is there or could not be made; a traffic refresh builds the traffic again and nothing else. Per
  * accepted puck update the main thread does one lookup in the table and sets the trim of the two layers. A failure
- * costs the own line and one error line, never the drive: the SDK's line is shown again. Main thread only.
+ * costs the own line and one error line, never the drive: the SDK's line is shown again.
+ *
+ * At every change of route (Start, a new route, a reroute, another route taken) and at every style load, such as on a
+ * map made anew, the SDK's line is shown first, already trimmed, and the own layers hidden; the new path is built off
+ * the main thread and sent to the source with a data id of its own, and only once the map says that data has loaded
+ * ([onSourceLoaded]) are the path's table, colours and trim taken up together, the own layers shown and the SDK's line
+ * hidden again. In between the driver sees the SDK's line on the new route, never the old path, and no trim of the new
+ * route is applied through the old route's table. Main thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
@@ -64,8 +73,11 @@ internal class OwnRouteLine(
         /** Adds the source, with nothing in it, and [layers] in their order, in [look]'s colours, shown. */
         fun add(layers: List<Layer>, look: Look)
 
-        /** Gives the source the path through [points]. */
-        fun setPath(points: List<GeoPoint>)
+        /** Gives the source the path through [points], as its data [dataId]: the map says when that data has loaded. */
+        fun setPath(points: List<GeoPoint>, dataId: String)
+
+        /** Whether the map is to say when the source's data has loaded ([onSourceLoaded]); asked only while a path waits. */
+        fun watchLoads(watch: Boolean)
 
         /** Gives the source nothing to draw. */
         fun clearPath()
@@ -156,6 +168,12 @@ internal class OwnRouteLine(
     var drawn = false
         private set
 
+    /** The data id of the path sent to the source that has not loaded yet; null while none waits. */
+    private var sentId: String? = null
+
+    /** Counts the paths sent to the source, for their data ids. */
+    private var sent = 0
+
     /** The trim the layers have, and the route station it stands for. */
     private var trim = 0.0
     private var trimStation = 0.0
@@ -175,10 +193,15 @@ internal class OwnRouteLine(
             if (ready()) attempt { layers.add(LAYERS, look) }
             buildPath()
         } else {
+            // The route too is forgotten: with the switch on again the map names the route the drive is on at that time.
+            routeId = null
+            build = null
+            traffic = null
             task?.cancel()
             task = null
             refreshPending = false
             drawing = null
+            forgetSent()
             showSdkLine()
             if (ready()) attempt { layers.remove() }
         }
@@ -189,11 +212,13 @@ internal class OwnRouteLine(
         styleReady = true
         this.look = look
         if (!enabled) return
-        // The SDK's line of the new style is shown until the own line is drawn on it.
+        // The SDK's line of the new style is shown until the own line is drawn on it: whether its layers keep a hidden
+        // state across a style load is not known (the design's JE 1), so it is shown at every one.
         drawn = false
+        sentId = null
         attempt { primary.show() }
         attempt { layers.add(LAYERS, look) }
-        drawing?.let(::draw)
+        drawing?.let(::send)
     }
 
     /**
@@ -222,6 +247,8 @@ internal class OwnRouteLine(
         // The new route's own line is trimmed from its start until the SDK or the puck says where the car is on it.
         trimStation = 0.0
         if (!enabled) return
+        // The old route's path may still be loading: its data is no longer wanted.
+        forgetSent()
         showSdkLine()
         buildPath()
     }
@@ -254,6 +281,19 @@ internal class OwnRouteLine(
         setTrim(drawing, station)
     }
 
+    /**
+     * The map loaded the source's data [dataId]: where it is the path sent last, its table, colours and trim are taken
+     * up together, the own layers shown and the SDK's line hidden. Data sent before it, or by another route, changes
+     * nothing.
+     */
+    fun onSourceLoaded(dataId: String) {
+        if (dataId != sentId) return
+        forgetSent()
+        val drawing = drawing ?: return
+        if (!enabled || !ready()) return
+        show(drawing)
+    }
+
     /** The route line's colours of [look] from now on. */
     fun setLook(look: Look) {
         if (look == this.look) return
@@ -276,15 +316,17 @@ internal class OwnRouteLine(
         sdkRouteId = null
         trimStation = 0.0
         if (!enabled || !had) return
+        forgetSent()
         showSdkLine()
         if (ready()) attempt { layers.clearPath() }
     }
 
     /** The map is going away: nothing is built or set any more. */
     fun release() {
-        released = true
         task?.cancel()
         task = null
+        forgetSent()
+        released = true
     }
 
     private fun ready() = styleReady && !released && layers.usable
@@ -303,7 +345,7 @@ internal class OwnRouteLine(
                     // A path of a route the drive has left, or built after the switch went off, is dropped.
                     if (enabled && built.routeId == routeId && routeId == this.routeId) {
                         drawing = built
-                        draw(built)
+                        send(built)
                         if (refreshPending) {
                             refreshPending = false
                             refreshTraffic()
@@ -341,11 +383,30 @@ internal class OwnRouteLine(
         }
     }
 
-    /** Draws [drawing] on the style: its path, colours and trim, the own layers shown and the SDK's line hidden. */
-    private fun draw(drawing: OwnLineDrawing) {
+    /**
+     * Sends [drawing]'s path to the source as data of its own: it is drawn once the map says that data has loaded
+     * ([onSourceLoaded]). Until it has, the own layers stay hidden and the SDK's line shown.
+     */
+    private fun send(drawing: OwnLineDrawing) {
         if (!ready()) return
+        val dataId = "$DATA_ID${++sent}"
+        sentId = dataId
         attempt {
-            layers.setPath(drawing.points)
+            layers.watchLoads(true)
+            layers.setPath(drawing.points, dataId)
+        }
+    }
+
+    /** No data sent waits any more: a load that comes after is not drawn, and the map is not asked about loads. */
+    private fun forgetSent() {
+        val waited = sentId != null
+        sentId = null
+        if (waited && !released) attempt { layers.watchLoads(false) }
+    }
+
+    /** Shows [drawing], whose path the source has loaded: its colours and trim, the own layers, and the SDK's line hidden. */
+    private fun show(drawing: OwnLineDrawing) {
+        attempt {
             layers.setColours(colourStops(drawing.runs, look), casingColour(look))
             val station = trimStation(drawing, accepted = sdkRouteId == drawing.routeId) ?: 0.0
             trim = drawing.table.pathFraction(station)
@@ -405,6 +466,9 @@ internal class OwnRouteLine(
     companion object {
         /** Where an error line says the own route line failed. */
         const val WHERE = "ownRouteLine"
+
+        /** What the data ids of the own source's paths begin with. */
+        private const val DATA_ID = "own-"
 
         const val SOURCE = "custommaps-own-route"
         const val CASING = "custommaps-own-route-casing"
@@ -474,10 +538,13 @@ internal class OwnRouteLine(
             },
         )
 
-        /** The own line's source and layers on [mapboxMap]. */
-        fun layersOn(mapboxMap: MapboxMap): Layers = object : Layers {
+        /** The own line's source and layers on [mapboxMap]; [onLoaded] hears each data id of the source that loaded. */
+        fun layersOn(mapboxMap: MapboxMap, onLoaded: (dataId: String) -> Unit): Layers = object : Layers {
             /** The source in the style now; its data is set through it. */
             private var source: GeoJsonSource? = null
+
+            /** The map's word on loaded data, while a path waits; the SDK's own route line waits for its data the same way. */
+            private var loads: Cancelable? = null
 
             override val usable: Boolean get() = mapboxMap.isValid()
 
@@ -512,10 +579,21 @@ internal class OwnRouteLine(
                 }
             }
 
-            override fun setPath(points: List<GeoPoint>) {
+            override fun setPath(points: List<GeoPoint>, dataId: String) {
                 val source = checkNotNull(source) { "No source" }
-                // The source hands its data to the map on a thread of its own.
-                source.geometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude, it.latitude) }))
+                // The source hands its data to the map on a thread of its own, the one every GeoJSON source shares.
+                source.geometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude, it.latitude) }), dataId)
+            }
+
+            override fun watchLoads(watch: Boolean) {
+                if (!watch) {
+                    loads?.cancel()
+                    loads = null
+                } else if (loads == null) {
+                    loads = mapboxMap.subscribeSourceDataLoaded { loaded ->
+                        if (loaded.sourceId == SOURCE && loaded.type == SourceDataLoadedType.METADATA) loaded.dataId?.let(onLoaded)
+                    }
+                }
             }
 
             override fun clearPath() {

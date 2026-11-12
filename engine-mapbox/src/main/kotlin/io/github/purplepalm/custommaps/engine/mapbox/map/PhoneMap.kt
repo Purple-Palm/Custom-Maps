@@ -202,8 +202,9 @@ class PhoneMap internal constructor(
      * The route line drawn by the app itself, behind the Debug switch; with the switch off it touches
      * nothing. The SDK's route line is fed as always either way.
      */
-    private val ownLine = OwnRouteLine(
-        OwnRouteLine.layersOn(mapboxMap),
+    private val ownLine: OwnRouteLine = OwnRouteLine(
+        // The map's word that the own source's data loaded, for the swap from the SDK's line to the own one.
+        OwnRouteLine.layersOn(mapboxMap) { dataId -> ownLine.onSourceLoaded(dataId) },
         primary = object : OwnRouteLine.Primary {
             override fun show() {
                 style?.let(routeLineView::showPrimaryRoute)

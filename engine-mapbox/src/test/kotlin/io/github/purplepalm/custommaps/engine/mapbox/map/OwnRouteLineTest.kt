@@ -31,7 +31,15 @@ class OwnRouteLineTest {
 
         var added: List<OwnRouteLine.Layer>? = null
         var addedLook: Look? = null
-        var pathShown: List<GeoPoint>? = null
+
+        /** The path the source holds, as the map has parsed it; null for none. */
+        var sourceData: List<GeoPoint>? = null
+
+        /** Paths sent to the source and not parsed yet, by their data ids, oldest first. */
+        val sent = LinkedHashMap<String, List<GeoPoint>>()
+
+        /** Whether the map is asked to say when the source's data has loaded. */
+        var watching = false
         var stops: List<OwnRouteLine.ColourStop>? = null
         var casing: Int? = null
         var trim: Double? = null
@@ -44,18 +52,25 @@ class OwnRouteLineTest {
             record("add")
             added = layers
             addedLook = look
-            pathShown = null
+            sourceData = null
+            sent.clear()
             layersVisible = true
         }
 
-        override fun setPath(points: List<GeoPoint>) {
+        override fun setPath(points: List<GeoPoint>, dataId: String) {
             record("setPath")
-            pathShown = points
+            sent[dataId] = points
+        }
+
+        override fun watchLoads(watch: Boolean) {
+            record("watchLoads")
+            watching = watch
         }
 
         override fun clearPath() {
             record("clearPath")
-            pathShown = null
+            sent.clear()
+            sourceData = null
         }
 
         override fun setColours(stops: List<OwnRouteLine.ColourStop>, casing: Int) {
@@ -77,7 +92,8 @@ class OwnRouteLineTest {
         override fun remove() {
             record("remove")
             added = null
-            pathShown = null
+            sourceData = null
+            sent.clear()
         }
 
         override fun show() {
@@ -98,13 +114,25 @@ class OwnRouteLineTest {
         /** What a style load does: the new style has none of the own layers, and the SDK's line made anew, shown. */
         fun reload() {
             added = null
-            pathShown = null
+            sourceData = null
+            sent.clear()
             layersVisible = false
             primaryShown = true
         }
 
+        /**
+         * The map parses the data sent as [dataId]: the source holds that path from now on, and a path sent before it,
+         * which the newer one replaced before it was parsed, never loads.
+         */
+        fun parse(dataId: String) {
+            val keys = sent.keys.toList()
+            val k = keys.indexOf(dataId)
+            sourceData = sent.getValue(dataId)
+            for (older in keys.subList(0, k + 1)) sent.remove(older)
+        }
+
         /** Whether the driver sees the own line: its layers in the style, with a path, shown. */
-        val ownShown: Boolean get() = added != null && pathShown != null && layersVisible
+        val ownShown: Boolean get() = added != null && sourceData != null && layersVisible
     }
 
     /** A worker whose jobs run when the test says, on the test's own thread. */
@@ -179,12 +207,21 @@ class OwnRouteLineTest {
 
     private val noTraffic = OwnRouteLine.Traffic { it.runs }
 
+    /** The map parses the path sent last and, while it is asked to, says so: as the source's own worker thread does. */
+    private fun load(): String {
+        val dataId = style.sent.keys.last()
+        style.parse(dataId)
+        if (style.watching) line.onSourceLoaded(dataId)
+        return dataId
+    }
+
     /** The switch on, the style loaded, and [id]'s path drawn. */
     private fun drawn(id: String = "route-a#0"): OwnLineDrawing {
         line.setEnabled(true)
         line.onStyleLoaded(Look.NIGHT)
         line.onRoute(id, refresh = false, build(id), noTraffic)
         jobs.runAll()
+        load()
         assertTrue(line.drawn)
         return built.last()
     }
@@ -213,12 +250,12 @@ class OwnRouteLineTest {
         line.onStyleLoaded(Look.NIGHT)
         assertEquals(OwnRouteLine.LAYERS, style.added)
         assertEquals(Look.NIGHT, style.addedLook)
-        assertNull(style.pathShown, "nothing drawn without a route")
+        assertNull(style.sourceData, "nothing drawn without a route")
         style.reload()
         line.onStyleLoaded(Look.DAY)
         assertEquals(OwnRouteLine.LAYERS, style.added, "again in the new style")
         assertEquals(Look.DAY, style.addedLook)
-        assertNull(style.pathShown)
+        assertNull(style.sourceData)
         assertEquals(listOf("show", "add", "show", "add"), style.calls)
     }
 
@@ -262,11 +299,21 @@ class OwnRouteLineTest {
         assertEquals(1, jobs.pending)
         jobs.runAll()
         val drawing = built.single()
-        assertEquals(drawing.points, style.pathShown)
+        assertEquals(listOf(drawing.points), style.sent.values.toList(), "sent, with a data id of its own")
+        assertTrue(style.watching)
+        assertFalse(style.ownShown, "not drawn before the map has loaded it")
+        assertTrue(style.primaryShown)
+        assertFalse(line.drawn)
+        load()
+        assertEquals(drawing.points, style.sourceData)
         assertTrue(style.ownShown)
         assertFalse(style.primaryShown)
         assertTrue(line.drawn)
-        assertEquals(listOf("show", "setVisible", "setPath", "setColours", "setTrim", "setVisible", "hide"), style.calls)
+        assertFalse(style.watching, "nothing waits any more")
+        assertEquals(
+            listOf("show", "setVisible", "watchLoads", "setPath", "watchLoads", "setColours", "setTrim", "setVisible", "hide"),
+            style.calls,
+        )
         assertEquals(0.0, style.trim)
     }
 
@@ -280,6 +327,7 @@ class OwnRouteLineTest {
         assertEquals(0, jobs.pending, "another route's plan")
         line.onPlan("route-a#0", build("route-a#0"))
         jobs.runAll()
+        load()
         assertEquals("route-a#0", built.single().routeId)
         assertTrue(style.ownShown)
         line.onPlan("route-a#0", build("route-a#0"))
@@ -293,8 +341,9 @@ class OwnRouteLineTest {
         line.onRoute("route-a#0", refresh = false, build("route-a#0"), noTraffic)
         line.onRoute("route-b#0", refresh = false, build("route-b#0"), noTraffic)
         jobs.runAll()
+        load()
         assertEquals(listOf("route-b#0"), built.map { it.routeId }, "the first route's job was cancelled")
-        assertEquals(built.single().points, style.pathShown)
+        assertEquals(built.single().points, style.sourceData)
     }
 
     @Test
@@ -317,6 +366,7 @@ class OwnRouteLineTest {
         style.refuse = "setColours"
         line.onRoute("route-a#0", refresh = false, build("route-a#0"), noTraffic)
         jobs.runAll()
+        load()
         assertTrue(style.primaryShown)
         assertFalse(style.layersVisible)
         assertFalse(line.drawn)
@@ -324,15 +374,139 @@ class OwnRouteLineTest {
     }
 
     @Test
-    fun `a style load draws the path again on the new style`() {
+    fun `a style load shows the SDK's line until the path has loaded again on the new style`() {
         val drawing = drawn()
         style.reload()
-        style.calls.clear()
         line.onStyleLoaded(Look.NIGHT)
-        assertEquals(drawing.points, style.pathShown)
+        assertTrue(style.primaryShown, "the SDK's line at once, whatever the reload did to its layers")
+        assertFalse(style.ownShown)
+        assertFalse(line.drawn)
+        assertEquals(listOf(drawing.points), style.sent.values.toList())
+        load()
+        assertEquals(drawing.points, style.sourceData)
         assertTrue(style.ownShown)
         assertFalse(style.primaryShown)
         assertEquals(1, built.size, "the path is not built again")
+    }
+
+    // ------------------------------------------------------------------ the swap at a change of route
+
+    @Test
+    fun `a reroute shows the SDK's line until the new path has loaded, never the old path`() {
+        val first = drawn("route-a#0")
+        line.onPuck(at(300.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = first.table.routeFraction(300.0), tracking = true)
+        val trimOnA = style.trim
+        line.onRoute("route-b#0", refresh = false, build("route-b#0"), noTraffic)
+        assertTrue(style.primaryShown, "the SDK's line at once, trimmed, as it was fed all along")
+        assertFalse(style.layersVisible)
+        assertFalse(line.drawn)
+        // The SDK has the new route: its points are never taken through the old route's table.
+        line.onPuck(at(20.0).latitude, 0.0, accepted = true, sdkRouteId = "route-b#0", offset = 0.02, tracking = true)
+        assertEquals(trimOnA, style.trim)
+        // Built and sent, but not loaded: the source still holds the old path, and it stays hidden.
+        jobs.runAll()
+        val second = built.last()
+        assertEquals("route-b#0", second.routeId)
+        assertEquals(first.points, style.sourceData)
+        assertFalse(style.layersVisible)
+        assertTrue(style.primaryShown)
+        line.onPuck(at(30.0).latitude, 0.0, accepted = true, sdkRouteId = "route-b#0", offset = 0.03, tracking = true)
+        assertEquals(trimOnA, style.trim)
+        // Loaded: the new path, its table and its trim together, and the SDK's line hidden again.
+        load()
+        assertEquals(second.points, style.sourceData)
+        assertTrue(style.ownShown)
+        assertFalse(style.primaryShown)
+        assertEquals(second.table.pathFraction(second.table.stationAt(0.03)), style.trim!!, 1e-12)
+        // A point of the old route from now on goes through no table.
+        val trimOnB = style.trim
+        line.onPuck(at(500.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = 0.5, tracking = false)
+        assertEquals(trimOnB, style.trim)
+    }
+
+    @Test
+    fun `a path whose data loads after a newer one was sent is never drawn`() {
+        drawn("route-a#0")
+        line.onRoute("route-b#0", refresh = false, build("route-b#0"), noTraffic)
+        jobs.runAll()
+        val forB = style.sent.keys.single()
+        line.onRoute("route-c#0", refresh = false, build("route-c#0"), noTraffic)
+        jobs.runAll()
+        assertEquals(2, style.sent.size, "both sent, neither parsed yet")
+        // The map parsed the second route's path late, after the third route's was sent.
+        style.parse(forB)
+        line.onSourceLoaded(forB)
+        assertFalse(style.layersVisible, "the second route's path is not drawn")
+        assertTrue(style.primaryShown)
+        load()
+        assertEquals(built.last().points, style.sourceData)
+        assertEquals("route-c#0", built.last().routeId)
+        assertTrue(style.ownShown)
+        assertFalse(style.primaryShown)
+    }
+
+    @Test
+    fun `a style load while a path waits sends it again, and only the new style's data is drawn`() {
+        line.setEnabled(true)
+        line.onStyleLoaded(Look.NIGHT)
+        line.onRoute("route-a#0", refresh = false, build("route-a#0"), noTraffic)
+        jobs.runAll()
+        val beforeReload = style.sent.keys.single()
+        style.reload()
+        line.onStyleLoaded(Look.NIGHT)
+        val afterReload = style.sent.keys.single()
+        assertNotEquals(beforeReload, afterReload)
+        line.onSourceLoaded(beforeReload)
+        assertFalse(line.drawn, "the old style's data")
+        load()
+        assertTrue(line.drawn)
+        assertTrue(style.ownShown)
+    }
+
+    @Test
+    fun `data that loads after guidance ended draws nothing, and the source is cleared`() {
+        line.setEnabled(true)
+        line.onStyleLoaded(Look.NIGHT)
+        line.onRoute("route-a#0", refresh = false, build("route-a#0"), noTraffic)
+        jobs.runAll()
+        val waiting = style.sent.keys.single()
+        assertTrue(style.watching)
+        line.onGuidanceEnded()
+        assertFalse(style.watching, "the map is no longer asked about loads")
+        assertNull(style.sourceData)
+        assertTrue(style.sent.isEmpty(), "the source cleared")
+        assertTrue(style.primaryShown)
+        line.onSourceLoaded(waiting)
+        assertFalse(line.drawn)
+        assertFalse(style.layersVisible)
+        assertTrue(style.primaryShown)
+    }
+
+    @Test
+    fun `data the own line never sent changes nothing`() {
+        line.setEnabled(true)
+        line.onStyleLoaded(Look.NIGHT)
+        line.onRoute("route-a#0", refresh = false, build("route-a#0"), noTraffic)
+        jobs.runAll()
+        line.onSourceLoaded("own-99")
+        line.onSourceLoaded("")
+        assertFalse(line.drawn)
+        assertTrue(style.watching, "still waiting for its own")
+    }
+
+    @Test
+    fun `the switch off forgets the route, and on again draws the route the drive is on at that time`() {
+        drawn("route-a#0")
+        line.setEnabled(false)
+        // The map tells the own line nothing while it is off; a reroute meanwhile is told when it is on again.
+        line.setEnabled(true)
+        assertEquals(0, jobs.pending, "the old route is not built again")
+        line.onRoute("route-b#0", refresh = false, build("route-b#0"), noTraffic)
+        jobs.runAll()
+        load()
+        assertEquals(listOf("route-a#0", "route-b#0"), built.map { it.routeId })
+        assertEquals(built.last().points, style.sourceData)
+        assertTrue(style.ownShown)
     }
 
     // ------------------------------------------------------------------ the trim
@@ -378,6 +552,7 @@ class OwnRouteLineTest {
         line.onPuck(at(400.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = 0.4, tracking = true)
         assertNull(style.trim, "nothing drawn yet")
         jobs.runAll()
+        load()
         val table = built.single().table
         assertEquals(table.pathFraction(table.stationAt(0.4)), style.trim!!, 1e-12)
     }
@@ -443,6 +618,7 @@ class OwnRouteLineTest {
         val severe = OwnRouteLine.Traffic { listOf(TrafficRun(0.0, 1.0, TrafficLevel.SEVERE)) }
         line.onRoute("route-a#0", refresh = true, null, severe)
         jobs.runAll()
+        load()
         assertEquals(listOf(OwnRouteLine.ColourStop(0.0, MapPalette.TRAFFIC_SEVERE_NIGHT)), style.stops)
     }
 
@@ -453,13 +629,13 @@ class OwnRouteLineTest {
         drawn()
         line.onGuidanceEnded()
         assertTrue(style.primaryShown)
-        assertNull(style.pathShown)
+        assertNull(style.sourceData)
         assertFalse(style.layersVisible)
         assertFalse(line.drawn)
         assertEquals(OwnRouteLine.LAYERS, style.added, "the layers stay, empty, for the next drive")
         // A late puck draws nothing.
         line.onPuck(at(500.0).latitude, 0.0, accepted = true, sdkRouteId = "route-a#0", offset = 0.5, tracking = true)
-        assertNull(style.pathShown)
+        assertNull(style.sourceData)
     }
 
     @Test
@@ -483,9 +659,10 @@ class OwnRouteLineTest {
         assertEquals(0, jobs.pending)
         line.setEnabled(true)
         jobs.runAll()
+        load()
         assertTrue(style.ownShown)
         assertFalse(style.primaryShown)
-        assertEquals(built.single().points, style.pathShown)
+        assertEquals(built.single().points, style.sourceData)
     }
 
     @Test
