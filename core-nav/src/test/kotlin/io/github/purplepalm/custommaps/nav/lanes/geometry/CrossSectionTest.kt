@@ -4,7 +4,11 @@ import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.at
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.bus
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.hov
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.option
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sl
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
@@ -13,6 +17,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.random.Random
 
 /** The made-up routes of [LaneScenes] laid out across the road; stations are metres from each route's start. */
 class CrossSectionTest {
@@ -264,6 +269,109 @@ class CrossSectionTest {
         assertEquals(-2.0 * w, section.place(4, leaves + taper)!!.centre, 1e-12)
     }
 
+    /** Where a lane of [section] ends and another of its slot begins, its kinds changed: the old lane, the new one, the station. */
+    private fun changesOfKind(section: CrossSection): List<Triple<Int, Int, Double>> {
+        val lanes = section.topology.lanes
+        return lanes.flatMap { old ->
+            lanes.filter { it.run == old.run && it.id != old.id && it.slot == old.slot && Math.abs(it.opens - old.closes) < 1e-9 }
+                .map { Triple(old.id, it.id, old.closes) }
+        }
+    }
+
+    /** Where [old] ends at [station] and [new] takes its place: the edges stay, [new] lies where [old] did, and so does every other lane. */
+    private fun assertChangeMovesNothing(name: String, section: CrossSection, old: Int, new: Int, station: Double) {
+        val before = station - 1e-6
+        val edgesBefore = section.edges(before)!!
+        val edgesAfter = section.edges(station)!!
+        assertEquals(edgesBefore.left, edgesAfter.left, 1e-6, "$name: the left edge at $station")
+        assertEquals(edgesBefore.right, edgesAfter.right, 1e-6, "$name: the right edge at $station")
+        assertNull(section.place(old, station), name)
+        assertEquals(section.place(old, before)!!.centre, section.place(new, station)!!.centre, 1e-6, "$name: lane $new at $station")
+        for (p in section.lanes(before).filter { it.lane != old }) {
+            assertEquals(p.centre, section.place(p.lane, station)!!.centre, 1e-6, "$name: lane ${p.lane} at $station")
+        }
+    }
+
+    @Test
+    fun `a lane that changes kinds keeps its place, and the road its width`() {
+        for ((name, route) in listOf("right lane for buses" to LaneScenes.rightLaneForBuses(), "third lane for car pools" to LaneScenes.thirdLaneForCarPools())) {
+            val section = section(route)
+            val changes = changesOfKind(section)
+            assertTrue(changes.isNotEmpty(), name)
+            for ((old, new, station) in changes) assertChangeMovesNothing(name, section, old, new, station)
+        }
+        // The right lane of two is kept for buses 50 m past the first point and open to every car again where the exit's
+        // late taper would end: two lanes centred on the road's line all along.
+        val two = section(LaneScenes.rightLaneForBuses())
+        assertEquals(
+            listOf(gore - 2_700.0 + LaneTopology.KINDS_EARLY_METERS, gore - 15.0 * w),
+            changesOfKind(two).map { it.third }.sorted(),
+        )
+        for (station in listOf(gore - 2_660.0, gore - 2_640.0, gore - 1_000.0, gore - 60.0, gore - 50.0)) {
+            assertEquals(CrossSection.Edges(w, -w, w + 1.2, -w - 1.2), two.edges(station), "at $station")
+        }
+        // The third lane of four: the four lanes centred before and after it changed.
+        val four = section(LaneScenes.thirdLaneForCarPools())
+        val changed = changesOfKind(four).single().third
+        assertEquals(gore - 2_600.0 + LaneTopology.KINDS_EARLY_METERS, changed, 1e-9)
+        assertBounds(listOf(2.0 * w, w, 0.0, -w, -2.0 * w), four.lanes(changed - 1.0))
+        assertBounds(listOf(2.0 * w, w, 0.0, -w, -2.0 * w), four.lanes(changed + 1.0))
+    }
+
+    @Test
+    fun `a change of kinds moves no lane, on seeded random roads`() {
+        val rng = Random(20261113)
+        var changes = 0
+        repeat(RANDOM_ROADS) { k ->
+            val section = section(randomChangeOfKind(rng, "kinds-$k"))
+            for ((old, new, station) in changesOfKind(section)) {
+                assertChangeMovesNothing("kinds-$k", section, old, new, station)
+                changes++
+            }
+        }
+        assertTrue(changes >= RANDOM_ROADS / 2, "$changes changes")
+    }
+
+    /**
+     * A made-up approach of 2 to 6 lanes to an exit on either side: up to three lane points, edge lanes leaving by roads,
+     * and one lane, any of them, kept for car pools or buses from one of the points on, open to every car again at the
+     * exit or not.
+     */
+    private fun randomChangeOfKind(rng: Random, id: String): LaneRoute {
+        val right = rng.nextBoolean()
+        val kept = if (rng.nextBoolean()) hov() else bus()
+        val keptFrom = rng.nextInt(0, 3)
+        var count = rng.nextInt(2, 7)
+        var lane = -1
+        val points = ArrayList<LaneScenes.At>()
+        var before = rng.nextDouble(2_400.0, 3_400.0)
+        while (points.size < 3) {
+            before -= rng.nextDouble(300.0, 1_100.0)
+            if (before < 250.0) break
+            count = (count + rng.nextInt(-1, 2)).coerceIn(2, 6)
+            if (lane < 0 && points.size >= keptFrom) lane = rng.nextInt(count)
+            lane = minOf(lane, count - 1)
+            val lanes = MutableList(count) { if (it == lane) kept else s() }
+            val roads = when (rng.nextInt(4)) {
+                0 -> {
+                    if (lane != 0) lanes[0] = s(false)
+                    LaneScenes.EXIT_LEFT
+                }
+                1 -> {
+                    if (lane != count - 1) lanes[count - 1] = s(false)
+                    LaneScenes.EXIT_RIGHT
+                }
+                else -> LaneScenes.THROUGH
+            }
+            points.add(LaneScenes.At(before, lanes, roads))
+        }
+        val exit = MutableList(count) { if (it == lane && rng.nextBoolean()) kept else s(false) }
+        exit[if (right) count - 1 else 0] = if (right) sr() else sl()
+        if (rng.nextBoolean()) exit.add(if (right) exit.size else 0, if (right) sr() else sl())
+        val maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT
+        return LaneScenes.approach(points, exit, maneuver, planMps = rng.nextDouble(22.0, 34.0), id = id)
+    }
+
     @Test
     fun `lanes lie side by side in order, never over each other, on every scene`() {
         for ((name, route) in LaneScenes.all()) {
@@ -283,5 +391,10 @@ class CrossSectionTest {
                 station += 5.0
             }
         }
+    }
+
+    private companion object {
+        /** How many seeded random roads a change of kinds is checked on. */
+        const val RANDOM_ROADS = 120
     }
 }

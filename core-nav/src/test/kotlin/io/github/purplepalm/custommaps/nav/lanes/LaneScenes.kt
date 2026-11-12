@@ -412,6 +412,27 @@ internal object LaneScenes {
     )
 
     /**
+     * Two lanes before a left exit, the right one kept for buses from the lane point 1,200 m before the gore and open
+     * to every car again at the exit: a lane whose kinds change twice. For the geometry's tests, not among [all].
+     */
+    fun rightLaneForBuses() = approach(
+        listOf(at(2_700.0, s(), s()), at(1_200.0, s(), bus()), at(450.0, sl(), bus())),
+        exit = listOf(sl(), s(false)),
+        maneuver = OFF_LEFT,
+        id = "right-lane-for-buses",
+    )
+
+    /**
+     * Four lanes before a right exit, the third kept for car pools from the lane point 1,400 m before the gore on: a
+     * lane between others whose kinds change. For the geometry's tests, not among [all].
+     */
+    fun thirdLaneForCarPools() = approach(
+        listOf(at(2_600.0, s(), s(), s(), s()), at(1_400.0, s(), s(), hov(), s()), at(700.0, s(false), s(false), hov(), option())),
+        exit = listOf(s(false), s(false), hov(), option(), sr()),
+        id = "third-lane-for-car-pools",
+    )
+
+    /**
      * A street into a roundabout: two lanes 150 m before it, both of which the route can be followed from; the
      * route leaves the roundabout 60 m on. 35 mph planned. With [turnInstead] a plain right turn takes its place.
      */

@@ -37,9 +37,10 @@ import kotlin.math.min
  *   15:1 from 50); a lane on the exit's side that the plan does not name is drawn from where it may begin
  *   ([LaneTopology.Lane.possibleFrom]), [State.POSSIBLE] until it is known; a lane that ends with nothing to take
  *   it narrows over [LaneTopology.endingTaperMeters] (W S from 45 mph, W S^2 / 60 below, at least 30 m), and so does one
- *   that leaves by a road between other lanes of its road. A lane that leaves by a road at an edge, or is followed in
- *   its place by another, ends where it leaves. Where a lane opens or ends between others, the fewer lanes on one side
- *   of it move and the rest stay.
+ *   that leaves by a road between other lanes of its road. A lane that leaves by a road at an edge ends where it
+ *   leaves; one followed in its place by another (its kinds changed: a lane kept for car pools or buses from there, or
+ *   open to every car again) ends where the other begins, and no lane moves there. Where a lane opens or ends between
+ *   others, the fewer lanes on one side of it move and the rest stay.
  * - **A ramp's start** ([RampStart]): where the route turns off its road and lanes go on, they keep their place,
  *   straight on along the old road, until the new road's line lies farther out, and then blend onto the new
  *   road's carriageway over [RAMP_BLEND_METERS]: the route geometry's diagonal across the lanes at a gore is
@@ -413,12 +414,14 @@ class CrossSection private constructor(
         /**
          * Whether [d] opens or ends on the left side at [station]: it has no more lanes of [lanes] to its left there than to
          * its right, so the lanes on its left move and the others stay; at the left edge it is, at the right edge it is not.
+         * A lane of its own slot is not counted: where a lane's kinds change, the lane that ends and the one that takes its
+         * place lie in one place, so both are put on the same side, and the road neither widens nor narrows there.
          */
         private fun leftSide(d: DrawnLane, lanes: List<DrawnLane>, station: Double): Boolean {
             var left = 0
             var right = 0
             for (other in lanes) {
-                if (other === d || station < other.from || station >= other.to) continue
+                if (other === d || other.lane.slot == d.lane.slot || station < other.from || station >= other.to) continue
                 if (other.lane.slot < d.lane.slot) left++ else right++
             }
             return left <= right

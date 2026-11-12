@@ -188,6 +188,21 @@ class RoutePathTest {
     }
 
     @Test
+    fun `where a lane between others changes kinds the path stays in its lane`() {
+        // The third lane of four is kept for car pools from 50 m past the first lane point on; the plan names the fourth,
+        // the option lane, through the card window: nothing moves where the third lane's kinds change.
+        val built = build(LaneScenes.thirdLaneForCarPools())
+        val changed = gore - 2_600.0 + LaneTopology.KINDS_EARLY_METERS
+        val segment = built.plan.segmentAt(changed)!!
+        assertTrue(segment.inWindow)
+        assertEquals(3, segment.named)
+        for (station in listOf(changed - 1.0, changed - 1e-6, changed, changed + 1.0, gore - 1_000.0)) {
+            assertEquals(-1.5 * w, built.path.offsetAt(station), 1e-9, "at $station")
+        }
+        assertEquals(1, built.path.moves.count { it.kind == RoutePath.Move.Kind.LANE })
+    }
+
+    @Test
     fun `the path is the route's own line away from the drawings and meets it at every drawing end`() {
         for ((name, route) in LaneScenes.all()) {
             val built = build(route)
