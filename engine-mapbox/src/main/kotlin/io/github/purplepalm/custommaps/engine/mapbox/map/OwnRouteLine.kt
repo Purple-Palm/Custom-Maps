@@ -357,7 +357,10 @@ internal class OwnRouteLine(
         show(drawing, loadedAt)
     }
 
-    /** The route line's colours of [look] from now on. */
+    /**
+     * The route line's colours of [look] from now on. Given with the switch off too: the look is only kept while it is
+     * off, and the own layers are added and drawn in it once the switch is turned on.
+     */
     fun setLook(look: Look) {
         if (look == this.look) return
         this.look = look

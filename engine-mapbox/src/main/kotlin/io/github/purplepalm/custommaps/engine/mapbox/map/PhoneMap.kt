@@ -811,7 +811,9 @@ class PhoneMap internal constructor(
     private fun applyRouteLineLook(style: Style, look: Look) {
         routeLineView.updateDynamicOptions(style) { routeLineColorResources(MapPalette.routeLineColorResources(look)) }
         if (framedRoute != null) routeLineApi.getRouteDrawData { value -> routeLineView.renderRouteDrawData(style, value) }
-        if (ownLine.enabled) ownLine.setLook(look)
+        // Every look, the own line's switch on or off: with it off the own line only keeps the look, for when it is
+        // turned on, and touches nothing.
+        ownLine.setLook(look)
     }
 
     /**

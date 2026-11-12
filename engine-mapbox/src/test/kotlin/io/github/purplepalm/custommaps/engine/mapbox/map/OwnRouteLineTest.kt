@@ -408,6 +408,25 @@ class OwnRouteLineTest {
     }
 
     @Test
+    fun `a look that came while the switch was off is the one the line is added and drawn in`() {
+        // As the map tells it: the style loads at night with the switch off, the day comes, and the switch goes on.
+        line.onStyleLoaded(Look.NIGHT)
+        line.setLook(Look.DAY)
+        assertEquals(emptyList<String>(), style.calls, "nothing touched while the switch is off")
+        line.setEnabled(true)
+        assertEquals(Look.DAY, style.addedLook)
+        line.onRoute("route-a#0", refresh = false, build("route-a#0"), noTraffic)
+        jobs.runAll()
+        load()
+        assertTrue(line.drawn)
+        assertEquals(MapPalette.CASING_DAY, style.casing)
+        assertEquals(OwnRouteLine.colourStops(built.single().runs, Look.DAY), style.stops)
+        // And back to night while it is drawn.
+        line.setLook(Look.NIGHT)
+        assertEquals(MapPalette.CASING_NIGHT, style.casing)
+    }
+
+    @Test
     fun `a refresh gives the line its new traffic and draws nothing else`() {
         drawn()
         style.calls.clear()
