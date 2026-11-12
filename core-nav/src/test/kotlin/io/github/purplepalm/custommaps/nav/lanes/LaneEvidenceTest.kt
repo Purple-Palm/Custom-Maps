@@ -42,6 +42,7 @@ class LaneEvidenceTest {
     private val exitLeft = Roads(330 to true)
     private val bothSides = Roads(30 to true, 330 to true)
     private val joinRight = Roads(160 to false)
+    private val joinLeft = Roads(200 to false)
 
     private fun node(
         at: Double,
@@ -161,6 +162,28 @@ class LaneEvidenceTest {
         assertTrue(evidence.gaps.isEmpty())
         assertTrue(evidence.changes.isEmpty())
         assertTrue(evidence.unknownExits.isEmpty())
+    }
+
+    @Test
+    fun `a road that joins inside a bridge is no unknown exit, on whichever side the exit lies`() {
+        val exitOnTheRight = node(4_500.0, s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRampRight)
+        val exitOnTheLeft = node(4_500.0, sl(), s(false), s(false), s(false), road = RoadKind.RAMP, maneuver = offRampLeft)
+        // The road joins on the exit's side, where a road that leaves would be an unknown exit.
+        for ((joining, exit) in listOf(joinRight to exitOnTheRight, joinLeft to exitOnTheLeft)) {
+            val route = route(
+                start(),
+                node(1_000.0, s(), s(), s(), s()),
+                node(2_000.0, roads = joining),
+                node(3_500.0, s(), s(), s(), s()),
+                exit,
+                node(4_900.0, road = RoadKind.RAMP, maneuver = arrive),
+            )
+            val evidence = evidence(route)
+            val side = exit.maneuver?.modifier
+            assertTrue(LaneEvidence.joins(route.nodes[2]), "$side")
+            assertEquals(1_500.0, evidence.meters(BRIDGED), 1e-9, "$side")
+            assertTrue(evidence.unknownExits.isEmpty(), "$side: a road that joins takes no lane away")
+        }
     }
 
     @Test
