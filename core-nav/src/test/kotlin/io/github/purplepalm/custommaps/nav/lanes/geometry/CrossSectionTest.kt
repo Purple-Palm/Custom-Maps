@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
+import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.at
@@ -13,6 +14,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -148,6 +150,34 @@ class CrossSectionTest {
         assertEquals(CrossSection.Edges(1.5 * w, -1.5 * w, 1.5 * w + 1.2, -1.5 * w - 1.2), s6.edges(gore - 2_000.0))
         assertEquals(w, s6.edges(gore - 500.0)!!.left, 1e-9)
         assertEquals(-w, s6.edges(gore - 500.0)!!.right, 1e-9)
+    }
+
+    @Test
+    fun `where a gain nothing explains lies on the exit's side the lanes stay and the road widens on that side`() {
+        val route = LaneScenes.exitSideGain()
+        val plan = SceneLines.planOf(route)
+        val section = CrossSection.of(plan)
+        // The scene: three lanes go on past the left lane's road and five are listed 1,000 m before the gore; the topology
+        // puts both added lanes on the right, the exit's side, and reads the side only carefully: a rule-5 zone.
+        val alignment = plan.topology.alignments.single { it.lanesBefore == 3 && it.lanesAfter == 5 }
+        assertEquals(LaneEdge.RIGHT, alignment.side)
+        assertEquals(LaneTopology.Alignment.Reason.CAREFUL, alignment.by)
+        val zone = plan.evidence().zones.single { it.cause == LaneEvidence.Zone.Cause.CHANGE }
+        val point = gore - 1_000.0
+        assertEquals(point, zone.to, 1e-9)
+        // The three lanes keep their places through the zone and past it, the left edge with them; the two added lanes open
+        // on the right, so the road widens on the exit's side only. A zone that widened both sides would move every lane
+        // half the gain, a lane, away from the exit's edge.
+        val before = section.lanes(zone.from - 1.0)
+        assertEquals(listOf(1, 2, 3), before.map { it.lane })
+        var station = zone.from - 1.0
+        while (station <= point + 100.0) {
+            val here = section.lanes(station)
+            for (lane in before) assertEquals(lane.centre, here.first { it.lane == lane.lane }.centre, 1e-9, "lane ${lane.lane} at $station")
+            assertEquals(before.first().left, section.edges(station)!!.left, 1e-9, "at $station")
+            station += 1.0
+        }
+        assertEquals(before.last().right - 2.0 * w, section.edges(point)!!.right, 1e-9)
     }
 
     @Test

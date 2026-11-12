@@ -433,6 +433,19 @@ internal object LaneScenes {
     )
 
     /**
+     * A right exit where a gain nothing explains has to lie on the exit's side: four lanes 2,350 m before the gore, the left
+     * one leaving by a road on the left 1,750 m before, and five lanes 1,000 m before, the right one kept for car pools.
+     * The careful reading would add the lanes on the far side, which would put the car-pool lane on a lane open to every
+     * car, so both lie on the right. The exit takes the right lane open to every car. For the geometry's tests, not among
+     * [all].
+     */
+    fun exitSideGain() = approach(
+        listOf(at(2_350.0, s(), s(), s(), s()), at(1_750.0, s(false), s(), s(), s(), roads = EXIT_LEFT), at(1_000.0, s(), s(), s(), s(), hov())),
+        exit = listOf(s(false), s(false), s(false), sr(), hov()),
+        id = "exit-side-gain",
+    )
+
+    /**
      * A street into a roundabout: two lanes 150 m before it, both of which the route can be followed from; the
      * route leaves the roundabout 60 m on. 35 mph planned. With [turnInstead] a plain right turn takes its place.
      */

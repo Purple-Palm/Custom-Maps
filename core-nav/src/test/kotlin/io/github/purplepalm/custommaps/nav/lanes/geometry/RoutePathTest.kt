@@ -284,6 +284,37 @@ class RoutePathTest {
     }
 
     @Test
+    fun `where a gain nothing explains lies on the exit's side the path never moves away from the exit's edge`() {
+        val built = build(LaneScenes.exitSideGain())
+        val plan = built.plan
+        val path = built.path
+        // The scene: the run-up's window holds the rule-5 zone of the gain; the plan names the right lane open to every car
+        // and, from where it opens, the lane added beside it, which it feeds along its taper.
+        val zone = plan.evidence().zones.single { it.cause == LaneEvidence.Zone.Cause.CHANGE }
+        val window = plan.windows.single { it.kind == CardWindow.Kind.RUN_UP }
+        assertTrue(window.from < zone.from)
+        val move = plan.moves.single()
+        assertEquals(3, move.from)
+        assertEquals(4, move.to)
+        assertEquals(3, plan.topology.lanes[4].fedBy)
+        // In the window the path keeps to the right lane through the zone and follows the added lane's taper toward the
+        // exit's edge: it never moves to the left, away from the edge, and never back.
+        val turn = path.moves.last()
+        assertEquals(RoutePath.Move.Kind.TURN, turn.kind)
+        var last = path.offsetAt(window.from)
+        var station = window.from
+        while (station < turn.from) {
+            val now = path.offsetAt(station)
+            assertTrue(now <= last + 1e-9, "away from the exit's edge at $station: $last to $now")
+            if (station >= zone.from && station < move.station) assertEquals(built.section.place(3, station)!!.centre, now, 1e-9)
+            last = now
+            station += 1.0
+        }
+        assertEquals(built.section.place(4, gore - 100.0)!!.centre, path.offsetAt(gore - 100.0), 1e-9)
+        checkRules("exit-side gain", built)
+    }
+
+    @Test
     fun `the path is the route's own line away from the drawings and meets it at every drawing end`() {
         for ((name, route) in LaneScenes.all()) {
             val built = build(route)

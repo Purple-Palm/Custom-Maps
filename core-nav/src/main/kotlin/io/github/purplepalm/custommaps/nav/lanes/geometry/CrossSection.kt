@@ -28,7 +28,11 @@ import kotlin.math.min
  *   and wherever the route goes on onto another road with lanes (a ramp, a split's branch). From there a lane that
  *   opens or ends at an edge does so on its side and the other lanes stay where they are; where the topology read
  *   the side of a change only carefully (nothing explains it: the evidence's rule-5 zone), the road widens or
- *   narrows on both sides by half a lane over the zone. On a two-way street the route's lanes lie from the road's
+ *   narrows on both sides by half a lane over the zone, which moves its lanes toward the exit's edge. Where the
+ *   topology had to put such a change on the other side (a gain on the exit's side or a loss on the far side, where a
+ *   lane kept for car pools or buses rules the careful side out), the road widens or narrows on that side only and
+ *   the other edge stays, as where the side is known: moving every lane, the named one too, away from the exit's edge
+ *   and back would move the route's path back with it. On a two-way street the route's lanes lie from the road's
  *   line to the right and the oncoming half, as wide as those lanes, has no lines ([Carriageway.TWO_WAY]; first
  *   drawn with the streets).
  * - **Tapers** (4.3), each a half-cosine from the lane's inner edge: a lane that is added opens along the
@@ -430,7 +434,9 @@ class CrossSection private constructor(
         /**
          * How the left edge moves over the rule-5 zones on the road from [from] to [to] of [run]: where the topology put
          * a change nothing explains on one side, the edge moves back by half of it, so the road widens or narrows by
-         * half a lane on each side.
+         * half a lane on each side, moving every lane toward the exit's edge. Not where that move would take every lane
+         * away from the exit's edge (the change put on the side the careful reading would not choose): there the other
+         * edge stays.
          */
         private fun zonesOf(run: Int, from: Double, to: Double, road: RoadKind): List<Triple<Double, Double, Double>> {
             val out = ArrayList<Triple<Double, Double, Double>>()
@@ -444,7 +450,14 @@ class CrossSection private constructor(
                 val zTo = zone?.to ?: after.station
                 if (zTo <= from || zFrom >= to) continue
                 val change = alignment.change * laneMeters(road)
-                out.add(Triple(zFrom, zTo, if (side == LaneEdge.LEFT) -change / 2.0 else change / 2.0))
+                val by = if (side == LaneEdge.LEFT) -change / 2.0 else change / 2.0
+                // Every lane moves with the left edge: toward the exit's edge, or not at all.
+                val toward = when (after.edge) {
+                    LaneEdge.LEFT -> by >= 0.0
+                    LaneEdge.RIGHT -> by <= 0.0
+                    null -> true
+                }
+                if (toward) out.add(Triple(zFrom, zTo, by))
             }
             return out
         }
