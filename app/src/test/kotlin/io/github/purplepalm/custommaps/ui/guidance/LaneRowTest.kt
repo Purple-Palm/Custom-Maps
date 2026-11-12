@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
+import androidx.compose.ui.unit.IntRect
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -94,5 +95,62 @@ class LaneRowTest {
         assertTrue(plan.start + plan.slot * 6 <= 304)
         // Short words leave the lanes at full size where there is room.
         assertEquals(44, planLaneRow(width = 304, lanes = 4, fullSlot = 44, reserved = 60).slot)
+    }
+
+    @Test
+    fun `the row is one lane plus the band high, with and without a label`() {
+        // A band of 5 for the bars, as 5 dp is at one pixel a dp.
+        assertEquals(49, laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 0, band = 5).height)
+        assertEquals(49, laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 98, band = 5).height)
+        for (width in listOf(200, 304, 355, 720)) {
+            for (lanes in 1..12) {
+                val lane = laneRowHeight(width, lanes, fullSlot = 44)
+                for (reserved in listOf(0, 40, 90, width / 3)) {
+                    val row = laneRowGeometry(width, lanes, fullSlot = 44, reserved = reserved, band = 5)
+                    assertEquals(lane + 5, row.height, "$width $lanes $reserved")
+                    assertEquals(lane, row.lanesHeight, "$width $lanes $reserved")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a bar lies under a lane to take, in the middle of its lane and inside the row`() {
+        for (width in listOf(200, 304, 355, 720)) {
+            for (lanes in 1..12) {
+                for (reserved in listOf(0, 40, 90, width / 3)) {
+                    val row = laneRowGeometry(width, lanes, fullSlot = 44, reserved = reserved, band = 5)
+                    val slot = row.plan.slot
+                    for (index in 0 until lanes) {
+                        val bar = laneBarBounds(row, index, gap = 2, thickness = 3)
+                        val laneLeft = row.plan.start + index * slot
+                        val at = "$width $lanes $reserved lane $index: $bar"
+                        assertTrue(bar.left >= laneLeft && bar.right <= laneLeft + slot, at)
+                        assertEquals(Math.round(slot * LANE_BAR_SHARE), bar.width, at)
+                        assertTrue(bar.left - laneLeft - (laneLeft + slot - bar.right) in -1..1, at)
+                        assertEquals(row.lanesTop + slot + 2, bar.top, at)
+                        assertEquals(3, bar.height, at)
+                        assertTrue(bar.bottom <= row.height, at)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `under lanes at full size the bar fills the band to the bottom of the row`() {
+        val row = laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 0, band = 5)
+        // Lanes from 64, 44 wide; the third one's bar is 26 wide, 9 in from each side of it.
+        assertEquals(IntRect(left = 161, top = 46, right = 187, bottom = 49), laneBarBounds(row, index = 2, gap = 2, thickness = 3))
+    }
+
+    @Test
+    fun `beside the run-up's words the bars stay right under their narrower lanes`() {
+        val row = laneRowGeometry(width = 304, lanes = 6, fullSlot = 44, reserved = 144, band = 5)
+        // Six lanes 26 wide from 144, in the middle of the lanes' 44: from 9 to 35, the bars 2 under them.
+        assertEquals(LaneRowPlan(slot = 26, start = 144), row.plan)
+        assertEquals(9, row.lanesTop)
+        assertEquals(IntRect(left = 149, top = 37, right = 165, bottom = 40), laneBarBounds(row, index = 0, gap = 2, thickness = 3))
+        assertEquals(49, row.height)
     }
 }
