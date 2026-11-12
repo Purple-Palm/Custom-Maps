@@ -1,0 +1,287 @@
+package io.github.purplepalm.custommaps.nav.lanes
+
+import io.github.purplepalm.custommaps.nav.guidance.CardLanes
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.GORE
+import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+/**
+ * The card's lane row, as the interim card makes it ([CardDrive]), against the lane plan, on made-up routes
+ * only ([LaneScenes]: stations in metres from the route's start, the gore at 6,000 m). The expected rows were
+ * worked out with a copy of FINAL's prototype (`f_plan.check_interim` with `f_plan_v2.name_lanes_v2`) on the
+ * same invented scenes: at every point the card shows, the plan names the card's lane, with no move back and
+ * no lane named before the run-up; offsets count the lanes open to every car from the exit's edge.
+ */
+class CardPlanAgreementTest {
+
+    private fun plan(route: LaneRoute): LanePlan =
+        LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), LaneScenes.sideBranches(route))
+
+    /** A row the card shows: where it comes from, its point in metres before the gore, the lanes it lights and the plan's, by offsets from the exit's edge. */
+    private data class Expected(val source: CardLanes.Source, val before: Double, val lit: List<Int>, val planLit: Int?, val amber: List<Int>)
+
+    private val maneuver = CardLanes.Source.MANEUVER
+    private val runUp = CardLanes.Source.RUN_UP
+    private val choice = CardLanes.Source.CHOICE
+
+    private fun row(source: CardLanes.Source, before: Double, lit: List<Int>, planLit: Int?, amber: List<Int> = lit) = Expected(source, before, lit, planLit, amber)
+
+    /**
+     * The freeway scenes of the design's agreement check (IA and its far side in place of the brief-shaped ones,
+     * S5 to S9, S13 to S17 and S20 with S9, S14 and S17 at 300 m, IW31; S14 is S9 for the card and the plan):
+     * each row the card shows in order, the exit's own row (the navigation SDK's) first, as before the run-up.
+     */
+    private val scenes = linkedMapOf(
+        "ia" to listOf(row(maneuver, 0.0, listOf(0, 1), 1), row(runUp, 1_330.0, listOf(1), 1, listOf(1, 2, 3, 4)), row(runUp, 0.0, listOf(0, 1), 1)),
+        "ia-far" to listOf(row(maneuver, 0.0, listOf(0, 1), 1), row(runUp, 2_180.0, listOf(1), 1, listOf(1, 2, 3, 4)), row(runUp, 0.0, listOf(0, 1), 1)),
+        "iw31" to listOf(row(maneuver, 0.0, listOf(0, 1), 1), row(runUp, 0.0, listOf(1), 1, listOf(0, 1)), row(maneuver, -260.0, listOf(0), 0)),
+        "s5" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 0.0, listOf(0), 0)),
+        "s6" to listOf(row(maneuver, 0.0, listOf(0, 1), 0), row(runUp, 0.0, listOf(0, 1), 0)),
+        "s7" to listOf(row(maneuver, 0.0, listOf(0, 1, 2), 0), row(runUp, 0.0, listOf(0, 1, 2), 0)),
+        "s8" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 500.0, listOf(1), 1), row(runUp, 0.0, listOf(0), 0)),
+        "s9" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 300.0, listOf(1), 1), row(runUp, 0.0, listOf(0), 0)),
+        "s13" to listOf(
+            row(maneuver, 0.0, listOf(0, 1), 0),
+            row(choice, 3_000.0, listOf(2, 3, 4), null),
+            row(maneuver, 0.0, listOf(0, 1), 0),
+            row(runUp, 0.0, listOf(0, 1), 0),
+        ),
+        "s15" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 1_400.0, listOf(3), 3, listOf(1, 2, 3, 4)), row(runUp, 800.0, listOf(2), 2), row(runUp, 0.0, listOf(0), 0)),
+        "s16" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 1_200.0, listOf(2), 2, listOf(2, 3, 4)), row(runUp, 0.0, listOf(0), 0)),
+        "s17" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 0.0, listOf(0), 0), row(runUp, 0.0, listOf(0), 0)),
+        "s20" to listOf(row(maneuver, 0.0, listOf(0), 0), row(runUp, 1_600.0, listOf(2), 2, listOf(1, 2, 3)), row(runUp, 700.0, listOf(1), 1), row(runUp, 0.0, listOf(0), 0)),
+    )
+
+    /** The plan's comparison of every row [route]'s card shows, with the row. */
+    private fun compared(route: LaneRoute, plan: LanePlan = plan(route)): List<Pair<CardDrive.Shown, CardPlanAgreement.Result>> =
+        CardDrive(route).drive().map { shown ->
+            val point = requireNotNull(plan.topology.points.firstOrNull { it.node == shown.node }) { "no lane point at ${shown.node}" }
+            shown to CardPlanAgreement.of(shown.row, plan, point, shown.station)
+        }
+
+    private fun edgeOf(plan: LanePlan, node: Int): LaneEdge =
+        requireNotNull(plan.segmentAt(plan.topology.evidence.route.nodes[node].station)?.edge)
+
+    @Test
+    fun `at every lane point the card shows, the plan lights the card's lane or its lit set`() {
+        for ((name, want) in scenes) {
+            val route = requireNotNull(LaneScenes.all()[name])
+            val plan = plan(route)
+            val rows = compared(route, plan)
+            assertEquals(want.size, rows.size, "$name: ${rows.map { it.first.row.source }}")
+            for ((k, pair) in rows.withIndex()) {
+                val (shown, result) = pair
+                val expected = want[k]
+                val node = route.nodes[shown.node]
+                val edge = edgeOf(plan, shown.node)
+                val lanes = shown.row.lanes
+                assertEquals(expected.source, shown.row.source, "$name row $k")
+                assertEquals(expected.before, GORE - node.station, 1e-6, "$name row $k: its point")
+                assertEquals(expected.lit, CardDrive.offsets(lanes, result.lit, edge), "$name row $k: the card's lit lanes")
+                assertEquals(expected.planLit, result.planLit?.let { CardDrive.offsets(lanes, listOf(it), edge).single() }, "$name row $k: the plan's lane")
+                assertEquals(expected.amber, CardDrive.offsets(lanes, result.amber, edge), "$name row $k: the plan's amber set")
+                assertTrue(result.why == null || result.why == CardPlanAgreement.Why.WORDS, "$name row $k: ${result.why}")
+            }
+        }
+    }
+
+    @Test
+    fun `no lane is named before the run-up, never moves back, and the plan's run-up begins no later than the card's`() {
+        for (name in scenes.keys) {
+            val route = requireNotNull(LaneScenes.all()[name])
+            val plan = plan(route)
+            assertTrue(plan.moves.none { it.back }, "$name: ${plan.moves}")
+            val runUp = plan.windows.first { it.kind == CardWindow.Kind.RUN_UP }
+            val first = requireNotNull(plan.segments.firstOrNull { it.named != null }) { name }
+            assertTrue(first.from >= runUp.from - 1e-9, "$name: first named at ${first.from}, the run-up from ${runUp.from}")
+            for (segment in plan.segments) {
+                if (segment.named == null) continue
+                assertTrue(plan.windows.any { segment.from >= it.from - 1e-9 && segment.from <= it.to + 1e-9 }, "$name: named outside a window at ${segment.from}")
+            }
+            val cardRunUp = CardDrive(route).drive().first { it.row.source == CardLanes.Source.RUN_UP }.station
+            assertTrue(runUp.from <= cardRunUp + 1e-9, "$name: the plan's run-up ${runUp.from}, the card's $cardRunUp")
+        }
+    }
+
+    @Test
+    fun `the words agree except where an exit-only lane the plan does not name still opens ahead`() {
+        for ((name, _) in scenes) {
+            val route = requireNotNull(LaneScenes.all()[name])
+            for ((shown, result) in compared(route)) {
+                val waits = shown.row.source == CardLanes.Source.RUN_UP && shown.row.words && result.opensAhead
+                if (waits) {
+                    assertEquals(CardPlanAgreement.Why.WORDS, result.why, name)
+                    assertTrue(name in setOf("ia", "ia-far", "iw31"), "$name: words waiting at ${shown.station}")
+                } else {
+                    assertTrue(result.agree, "$name at ${shown.station}: ${result.why}")
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ the words (3)
+
+    /** IW31's exit row as the card shows it: the option lane lit, "2nd from right". */
+    private fun iw31() = LaneScenes.iw31().let { route ->
+        val plan = plan(route)
+        val shown = CardDrive(route).drive().first { it.row.source == CardLanes.Source.RUN_UP }
+        Triple(plan, shown, requireNotNull(plan.topology.points.firstOrNull { it.node == shown.node }))
+    }
+
+    @Test
+    fun `on the W31 scene the words wait until the exit-only lane is known`() {
+        val (plan, shown, gore) = iw31()
+        assertTrue(shown.row.words)
+        val a5 = plan.topology.lanes.single { it.possibleFrom != null && it.id !in plan.named }
+        // Known (open) where its taper ends late at P2, 620 m before the gore.
+        for (before in listOf(1_346.0, 1_000.0, 700.0)) {
+            val result = CardPlanAgreement.of(shown.row, plan, gore, GORE - before)
+            assertTrue(result.opensAhead, "at $before m: the exit-only lane opens ahead")
+            assertFalse(result.agree)
+            assertEquals(CardPlanAgreement.Why.WORDS, result.why)
+        }
+        val known = CardPlanAgreement.of(shown.row, plan, gore, a5.opens + 1.0)
+        assertFalse(known.opensAhead, "from its known start")
+        assertTrue(known.agree)
+        assertTrue(CardPlanAgreement.of(shown.row, plan, gore, a5.opens - 1.0).opensAhead)
+    }
+
+    @Test
+    fun `the words wait for a road without lane data until it is passed, by the road's own station`() {
+        val route = LaneScenes.s17()
+        val plan = plan(route)
+        val road = plan.unknownExits.single().station
+        val exitRow = CardDrive(route).drive().last()
+        val gore = requireNotNull(plan.topology.points.firstOrNull { it.node == exitRow.node })
+        assertTrue(exitRow.row.words, "the card shows words once the road is passed")
+        assertTrue(CardPlanAgreement.of(exitRow.row, plan, gore, road - 1.0).unknownAhead)
+        assertTrue(CardPlanAgreement.of(exitRow.row, plan, gore, road).unknownAhead, "at the road itself")
+        val past = CardPlanAgreement.of(exitRow.row, plan, gore, road + 1.0)
+        assertFalse(past.unknownAhead, "1 m past it, though the plan's 5 m stretch there still says ahead")
+        assertTrue(plan.segmentAt(road + 1.0)!!.unknownExitAhead)
+        assertTrue(past.agree)
+    }
+
+    @Test
+    fun `the lane that left at the point just passed does not change the count, a planned move does`() {
+        val route = LaneScenes.s9()
+        val plan = plan(route)
+        val exitRow = CardDrive(route).drive().last()
+        val gore = requireNotNull(plan.topology.points.firstOrNull { it.node == exitRow.node })
+        // A's right lane leaves 300 m before the gore and is there 5 m more; the plan moves along the exit lane's taper.
+        val justPast = CardPlanAgreement.of(exitRow.row, plan, gore, GORE - 299.0)
+        assertFalse(justPast.opensAhead)
+        assertTrue(justPast.agree)
+        // In S17 the plan holds the lane next to the edge until 320 m before the gore: its count changes ahead.
+        val s17 = LaneScenes.s17()
+        val held = plan(s17)
+        val row = CardDrive(s17).drive().last()
+        val point = requireNotNull(held.topology.points.firstOrNull { it.node == row.node })
+        assertTrue(CardPlanAgreement.of(row.row, held, point, GORE - 400.0).opensAhead)
+        assertFalse(CardPlanAgreement.of(row.row, held, point, GORE - 310.0).opensAhead)
+    }
+
+    @Test
+    fun `words the card's own reading leaves in doubt are none, wherever the plan agrees`() {
+        val (plan, shown, gore) = iw31()
+        val inexact = shown.row.copy(exact = false)
+        val result = CardPlanAgreement.of(inexact, plan, gore, GORE - 300.0)
+        assertFalse(result.exact)
+        assertEquals(CardPlanAgreement.Why.WORDS, result.why)
+        assertTrue(CardPlanAgreement.of(inexact.copy(words = false), plan, gore, GORE - 300.0).agree, "no words, nothing to doubt")
+    }
+
+    // ------------------------------------------------------------------ outline lanes (4)
+
+    @Test
+    fun `a lane of the row's point the map does not draw at the car yet is an outline`() {
+        val (plan, shown, gore) = iw31()
+        val a5 = plan.topology.lanes.single { it.possibleFrom != null && it.id !in plan.named }
+        val index = gore.lanes.indexOf(a5.id)
+        assertEquals(listOf(index), CardPlanAgreement.of(shown.row, plan, gore, requireNotNull(a5.possibleFrom) - 1.0).outline, "before the previous lane point")
+        assertTrue(CardPlanAgreement.of(shown.row, plan, gore, requireNotNull(a5.possibleFrom) + 1.0).outline.isEmpty(), "possible from there")
+        assertTrue(CardPlanAgreement.of(shown.row, plan, gore, GORE - 100.0).outline.isEmpty())
+    }
+
+    // ------------------------------------------------------------------ the other outcomes
+
+    @Test
+    fun `where no lane can be named the plan names none and tints none, and says why`() {
+        for (route in listOf(LaneScenes.geomS5(), LaneScenes.carpoolBeyond())) {
+            val plan = plan(route)
+            for ((_, result) in compared(route, plan)) {
+                assertFalse(result.agree)
+                assertEquals(CardPlanAgreement.Why.NO_LANE, result.why, route.routeId)
+                assertNull(result.planLit)
+                assertTrue(result.amber.isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun `outside its windows the plan's lanes that work stand for its lit lanes`() {
+        // S13's split 3,000 m before the exit, a lane choice the card shows before the run-up: the plan names none there.
+        val route = LaneScenes.s13()
+        val (shown, result) = compared(route).single { it.first.row.source == CardLanes.Source.CHOICE }
+        assertNull(result.planLit)
+        assertEquals(result.lit, result.amber)
+        assertTrue(result.agree)
+        // One lit lane where the plan names none and more lanes work: they differ.
+        val one = shown.row.copy(lanes = shown.row.lanes.mapIndexed { i, lane -> lane.copy(isRecommended = i == result.lit.first(), activeIndication = if (i == result.lit.first()) TurnModifier.STRAIGHT else null) })
+        val point = plan(route).topology.points.first { it.node == shown.node }
+        assertEquals(CardPlanAgreement.Why.NOT_NAMED, CardPlanAgreement.of(one, plan(route), point, shown.station).why)
+    }
+
+    @Test
+    fun `the navigation SDK's own row lighting a lane the plan drops before a near split differs`() {
+        // GEOM's S2 with the split 150 m after the gore: only the option lane leads to the route's branch.
+        val route = LaneScenes.geomS2(150.0)
+        val (_, result) = compared(route).first()
+        assertEquals(CardPlanAgreement.Why.AMBER, result.why)
+        assertEquals(2, result.lit.size)
+        assertEquals(1, result.amber.size)
+    }
+
+    @Test
+    fun `one lit lane other than the plan's is a lit lane disagreement`() {
+        val (plan, shown, gore) = iw31()
+        val other = shown.row.copy(
+            lanes = shown.row.lanes.mapIndexed { i, lane ->
+                val on = i == shown.row.lanes.size - 1
+                Lane(lane.indications, isRecommended = on, activeIndication = if (on) lane.indications.first() else null, designated = lane.designated)
+            },
+        )
+        val result = CardPlanAgreement.of(other, plan, gore, GORE - 100.0)
+        assertEquals(CardPlanAgreement.Why.LIT, result.why)
+        assertFalse(result.agree)
+    }
+
+    @Test
+    fun `a row of another count, or of no lane point, is said so and never throws`() {
+        val (plan, shown, gore) = iw31()
+        val short = shown.row.copy(lanes = shown.row.lanes.drop(1))
+        assertEquals(CardPlanAgreement.Why.ROW, CardPlanAgreement.of(short, plan, gore, GORE - 100.0).why)
+        val empty = CardPlanAgreement.of(shown.row.copy(lanes = emptyList()), plan, gore, Double.NaN)
+        assertEquals(CardPlanAgreement.Why.ROW, empty.why)
+        val none = CardPlanAgreement.noPoint(shown.row)
+        assertEquals(CardPlanAgreement.Why.NO_POINT, none.why)
+        assertEquals(listOf(3), none.lit)
+        // A car past the point, or whose station is no number: nothing opens ahead of it.
+        assertFalse(CardPlanAgreement.of(shown.row, plan, gore, GORE + 10.0).opensAhead)
+        assertFalse(CardPlanAgreement.of(shown.row, plan, gore, Double.NaN).opensAhead)
+    }
+
+    @Test
+    fun `the log names the reasons in short words`() {
+        assertEquals(
+            listOf("lit", "amber", "not_named", "no_lane", "row", "no_point", "words"),
+            CardPlanAgreement.Why.entries.map { it.logName },
+        )
+    }
+}
