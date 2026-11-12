@@ -364,6 +364,20 @@ internal object LaneScenes {
         )
     }
 
+    // ------------------------------------------------------------------ a ramp beside a freeway (D8)
+
+    /**
+     * A route that begins on a one-lane ramp running beside a freeway, as one does after a moment matched onto
+     * it: a lane point 100 m on, a right turn with its lane 300 m on, the arrival 100 m after it. 20 m/s planned.
+     */
+    fun besideRamp() = route(
+        node(0.0, road = RoadKind.RAMP, maneuver = DEPART, planMps = 20.0),
+        node(100.0, s(), road = RoadKind.RAMP, planMps = 20.0),
+        node(300.0, sr(), road = RoadKind.RAMP, maneuver = TURN_RIGHT, planMps = 20.0),
+        node(400.0, road = RoadKind.STREET, maneuver = ARRIVE, planMps = 15.0),
+        id = "beside-ramp",
+    )
+
     /** A street turn: two lanes 200 m before a left turn whose list adds a left pocket. 35 mph planned. */
     fun streetPocket(): LaneRoute {
         val street = RoadKind.STREET
