@@ -198,6 +198,13 @@ class LaneDrawing private constructor(
     /** The route stations the drawing covers: every drawn stretch from where its asphalt begins to where it ends, in route order. */
     val spans: List<ClosedFloatingPointRange<Double>> get() = builder.spans
 
+    /**
+     * The route stations where a lane is lit, each stretch from where the lit lane begins to where it ends, in route
+     * order: where the map's route line of the lit stretches lies over it. Empty where the plan names no lane in a card
+     * window.
+     */
+    fun litStretches(): List<ClosedFloatingPointRange<Double>> = builder.litStretches()
+
     /** The lanes drawn on the route's carriageway at [station], from the left: none outside the drawn stretches. */
     internal fun lanesAt(station: Double): List<CrossSection.Place> = builder.lanesAt(station)
 
@@ -628,6 +635,22 @@ class LaneDrawing private constructor(
         }
 
         fun noses(): List<Pair<Double, Double>> = gores.filter { it.stub.isNotEmpty() }.map { it.stubNose to it.routeNose }
+
+        /** Each run of the lit lane, from its edges, which run where it does; runs that meet are one. */
+        fun litStretches(): List<ClosedFloatingPointRange<Double>> {
+            val out = ArrayList<Feature>()
+            lit(Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, out)
+            val runs = ArrayList<ClosedFloatingPointRange<Double>>()
+            for (edge in out.filter { it.kind == Kind.LIT_EDGE }.sortedBy { it.from }) {
+                val last = runs.lastOrNull()
+                if (last != null && edge.from <= last.endInclusive + SAME_STATION) {
+                    runs[runs.size - 1] = last.start..max(last.endInclusive, edge.to)
+                } else {
+                    runs.add(edge.from..edge.to)
+                }
+            }
+            return runs
+        }
 
         // ------------------------------------------------------------------ the route's carriageway
 

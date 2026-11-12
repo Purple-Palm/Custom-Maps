@@ -700,6 +700,33 @@ class LaneDrawingTest {
     private val ClosedFloatingPointRange<Double>.to get() = endInclusive
 
     @Test
+    fun `the lit stretches are where the lit lane lies, one for each run of it`() {
+        var lit = 0
+        for ((name, route) in LaneScenes.all()) {
+            val d = draw(route)
+            val stretches = d.drawing.litStretches()
+            val pieces = d.of(Kind.LIT)
+            // In route order, apart from each other.
+            for ((a, b) in stretches.zipWithNext()) assertTrue(a.to < b.from, "$name: $a before $b")
+            // Each piece begins and ends in a stretch, and each stretch is covered by pieces every metre along it.
+            for (f in pieces) {
+                assertTrue(stretches.any { f.from >= it.from - UM && f.from <= it.to + UM }, "$name: piece ${f.from}..${f.to}")
+                assertTrue(stretches.any { f.to >= it.from - UM && f.to <= it.to + UM }, "$name: piece ${f.from}..${f.to}")
+            }
+            for (s in stretches) {
+                var x = s.from
+                while (x <= s.to) {
+                    assertTrue(pieces.any { covers(it, x) }, "$name: no lit piece at $x in $s")
+                    x += 1.0
+                }
+            }
+            assertEquals(pieces.isEmpty(), stretches.isEmpty(), name)
+            if (stretches.isNotEmpty()) lit++
+        }
+        assertTrue(lit >= 20, "scenes with a lit lane: $lit")
+    }
+
+    @Test
     fun `the same route gives the same features`() {
         val one = draw(LaneScenes.iw31()).features
         val two = draw(LaneScenes.iw31()).features
