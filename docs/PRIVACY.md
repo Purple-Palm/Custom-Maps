@@ -30,13 +30,14 @@ Last updated: 2026-11-12. It describes the app as it is today; see [Changes](#ch
   are stored only in the app's private storage, never in backups or device transfers, and never in
   the debug log, which names the token in use only by its place in the list and its name.
 - **Settings:** day and night, camera style, lane zoom, lane details, and the switches for the
-  simulated drive and for the app's own route line under Debug.
+  simulated drive, for the app's own route line and for drawing the app's own lanes under Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads with the lanes the app would
-  take on them and how it drew the route line, the position, speed and road
+  take on them and how it drew the route line and its own lanes (counts, sizes and times only: the
+  drawing itself stays in memory with its route and is never stored), the position, speed and road
   every second of guidance (on freeways also the phone's turn rate and acceleration from its motion
   sensors, summarised as a few numbers each second; the sensors are read only then, and no reading
   itself is kept), a summary of each drive (how it ended, its length and time, and the data and

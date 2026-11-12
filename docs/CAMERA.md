@@ -667,7 +667,7 @@ only while its map view is shown; the `activity` and `screen` lines show when it
 | `laneDetails` | the switch for lane details on the map | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
-| `routeLine` | only with **Settings → Debug → App's own route line** on ([The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)): `own`, whether the app's own line is drawn; `trims`, how often its trim was set that second; `trimLagM`, the largest distance along the route between its trimmed end and the SDK's vanishing point; `trimMaxMs`, the longest the app's part of a puck update took on the main thread. The last two are left out without a sample | `trims` up to 16 while moving; `trimLagM` 0 but where the SDK skipped its point; `trimMaxMs` under 0.5 |
+| `routeLine` | only with **Settings → Debug → App's own route line** or **Draw the app's lanes** on ([The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)): `own`, whether the app's own line is drawn; `trims`, how often its trim was set that second; `trimLagM`, the largest distance along the route between its trimmed end and the SDK's vanishing point; `trimMaxMs`, the longest the app's part of a puck update took on the main thread. The last two are left out without a sample. With the lanes also `swapped`, whether the lit lane shows in the route line's place ([The app's own lanes, behind a Debug switch](#the-apps-own-lanes-behind-a-debug-switch)), and `swaps`, how often that changed in the second | `trims` up to 16 while moving; `trimLagM` 0 but where the SDK skipped its point; `trimMaxMs` under 0.5; `swaps` 0, and 1 in the second of a swap in or out |
 | `bendM`, `bendDeg` | with Large, while the SDK frames a maneuver: how far past the maneuver point the road bends, in metres, and by how many degrees off the way in, negative to the left ([The frame reaches the bend](#the-frame-reaches-the-bend)); left out at other times | 0 at an ordinary turn |
 | `extraPts` | how many points of the road to the bend the data source frames besides its own | 0 but where a step begins well before its bend |
 
@@ -806,9 +806,12 @@ Other lines:
   [The maneuver arrow close in](#the-maneuver-arrow-close-in). While the app's own route line is
   in the style, also `ownLine`: true when its casing and line lie right above the SDK's route line
   and below every layer of the arrow; the line comes again when the Debug switch is turned on or
-  off.
-- A **route_line** line, with **Settings → Debug → App's own route line** on, at each change of who
-  draws the route line; see
+  off. While the app's own lanes are in the style, also `lanes`: true when the drawing's layers lie
+  in their order below the SDK's route line and the lane arrows above the app's route line and
+  below the maneuver arrow.
+- A **route_line** line, with **Settings → Debug → App's own route line** or **Draw the app's
+  lanes** on, at each change of who draws the route line, and a **lane_drawing** line for each
+  window of the app's own lanes that loaded; see
   [The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)
   and [DRIVES.md](DRIVES.md).
 - The **route_response** and **routes_updated** lines carry, for each step with any, the
@@ -1687,6 +1690,70 @@ drawn yet. Before Start, in the preview, nothing changes.
   drive with the switch off); whether the SDK's hidden line keeps its hidden state across a style
   load (so it is shown at every style load until the own line has loaded again); and how long a long
   route's path takes to load while the SDK's own line loads on the same thread (`loadMs`).
+
+### The app's own lanes, behind a Debug switch
+
+**Settings → Debug → Draw the app's lanes** is a switch, stored under `draw_own_lanes` and off
+unless turned on. With it off nothing changes. With it on, during guidance, the app draws freeway
+lanes itself under the route line, from the route's lane plan, and the app's own route line with
+them, whatever that line's own switch says. Before Start nothing changes, and streets wait (OL6).
+
+- **What is drawn** (`LaneDrawing`, `LaneLayers`): asphalt with an apron, white broken and solid lane
+  lines, edge lines (yellow on the left), dotted lines beside exit-only lanes, car-pool lanes with
+  their wide line and diamonds, lane arrows before lane points, and at a gore the old road's lanes
+  going on for a stub and tapering away, with the gore's two channelizing lines to the nose; in the
+  run-up to an exit, the lane the plan names lit in amber with edges in the route's casing colour,
+  and the lanes that still work beside it tinted. Widths are the ground's, so the drawing grows with
+  the zoom: asphalt and lines from zoom 15.5, arrows and diamonds from 16.5, the lit lane and tints
+  from 16.85 (at latitude 0; a little lower farther from the equator). Both looks have their own
+  colours (`MapPalette.lanes`), all with emissive strength 1; nothing of the drawing is faded behind
+  3D buildings, and nothing is drawn over the Mapbox logo or the attribution.
+- **Layer order** in the style's middle slot, from the bottom: Standard's roads; the asphalt, tints,
+  lit lane and its edges, the eraser, the lane lines and the diamonds; the SDK's route line (its
+  primary hidden) and the app's route line in two pairs (one over the lit stretches, one over the
+  rest, each transparent where the other draws); the lane arrows and their edge; the SDK's maneuver
+  arrow. Each layer is placed against its neighbour when it is added (`LaneLayers.PLACEMENT`, chained
+  positions; slots inside the middle slot are built but not used until seen to work on a phone); the
+  `map_layers` line checks the order.
+- **Windows** (`DrawingWindows`): the map holds a window of the drawing around the car, from 50 m
+  behind it to 300 m past the next card window (the run-up to a maneuver), at most 3 km unless a card
+  window has to be taken whole. The first window is built with the route's path and sent with it, and
+  the line is drawn once both have loaded; the next is built off the main thread and sent 1 km before
+  the held one ends, or as soon as it can take the next card window whole, never inside a card window
+  and never while a new route loads. A 3 km window is about 4 to 90 KB of GeoJSON and up to about
+  3,000 coordinates (design budget 600 KB and 20,000).
+- **The lit lane and the eraser.** The lit lane runs along the route's path, a lane wide, from the
+  run-up's start to the gore and on onto the ramp where the ramp has lanes. A line of the road's
+  colour on the route line's own path, trimmed with the route line's own trim, covers it behind the
+  car, so the amber ends at the car. The tint pieces the car has passed are hidden one station at a
+  time by feature state; a lit piece takes its stretch's traffic colour the same way.
+- **The swap** (`LaneSwap`): over the lit stretches the route line is drawn whole or not at all.
+  While the camera's close view for the lanes or its junction view holds (`CloseView`'s latched
+  rules: Smooth follow once the view has reached its goal and no longer moves; Mapbox tuned while
+  its close view is on) and a drawn lane is at least 10.4 dp wide, the pair over the lit stretches
+  gets opacity 0 and the amber lane is the route there; it gets 1 again when the view lets go or the
+  lane is under 9.6 dp. Between the two widths nothing changes, and the opacity is written only when
+  that state flips, as a step with no transition. At the swap the amber is 9.8 dp against the held
+  line's 10.38, and wider at every closer zoom. With Large in Smooth follow the swap comes at peak
+  speeds up to about 33 m/s; above, in Mapbox tuned (lanes of about 7 to 9.2 dp) and with Default
+  (about 4 dp) the line stays, opaque, in the named lane.
+- **The maneuver arrow** (`GoreArrow`): where the next maneuver leaves at a gore of the drawing, the
+  SDK's arrow is given the path's points from 12 m before the gore to 30 m past it, as the U-turn
+  arrow is, so it runs along the lit lane onto the ramp rather than across the lanes. It is set
+  again when the app's line comes or goes; without it, and with the switch off, the arrow is the
+  SDK's.
+- **A change of route, a style load, a look switch.** At a new route the SDK's line shows and the lit
+  layers are hidden until the new path and its first window have loaded; a style load sends the held
+  window again with the path; a look switch colours the lanes and both pairs of the line in place.
+  At guidance end the drawing's source is cleared. The watchdog of the app's route line also counts
+  the lanes' layers, and a window that does not load in the time a path has.
+- **Its cost.** The drawing, its windows' features and the arrows are built off the main thread. A
+  progress update looks up the swap's state, the arrow and the next window, and sets at most a few
+  feature states; a camera change computes the drawn lane's width and writes the opacity only on a
+  flip. The `lane_drawing` line gives each window's size, build and load times.
+- **Not checked on a device:** the frame cost against a drive with the switch off; whether the
+  chained order holds on a phone (the `map_layers` line says); how the drawing reads at speed by day
+  and at night.
 
 ### Constants of the lane zoom
 
