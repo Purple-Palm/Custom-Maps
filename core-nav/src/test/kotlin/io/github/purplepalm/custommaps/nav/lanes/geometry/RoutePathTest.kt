@@ -181,7 +181,9 @@ class RoutePathTest {
         assertTrue(abs(path.offsetAt(end + 59.0)) > 1e-6)
         assertEquals(0.0, path.offsetAt(end + RoutePath.RETURN_METERS), 1e-12)
         assertEquals(end + RoutePath.RETURN_METERS, first.back, 1e-9)
-        assertEquals(first.back + RoutePath.ASPHALT_TAPER_METERS, first.asphaltTo, 1e-12)
+        // The asphalt tapers over 40 m into the map's own road past the return, and over 40 m before the drawing.
+        assertEquals(40.0, first.asphaltTo - first.back, 1e-12)
+        assertEquals(40.0, first.from - first.asphaltFrom, 1e-12)
         // The return lies outside every card window.
         assertFalse(built.plan.segmentAt(back.from)?.inWindow ?: false)
         assertEquals(2, path.drawings.size)
@@ -228,12 +230,46 @@ class RoutePathTest {
         val drawing = path.drawings.single()
         assertTrue(drawing.to - drawing.from > 2.0 * RoutePath.WINDOW_METERS)
         assertTrue(path.windowCount >= 3)
+        // Each window at most 3 km, give or take the half segments of the line its cuts move to.
+        val axes = generateSequence(drawing.from) { it + 1.0 }.takeWhile { it < drawing.back }.mapNotNull { path.axisAt(it) }.distinct().toList()
+        assertEquals(path.windowCount, axes.size)
+        for (axis in axes) assertTrue(axis.to - axis.from <= 3_000.0 + SceneLines.STEP, "a window from ${axis.from} to ${axis.to}")
         assertContinuous("long", path)
         // Where windows meet the path has no step: consecutive points stay close and turn little.
         for (i in 1 until path.points.size) {
             val step = Geo.meters(path.points[i - 1], path.points[i])
             val along = path.stations[i] - path.stations[i - 1]
             assertTrue(step <= along + 0.5, "step $step over $along m at ${path.stations[i]}")
+        }
+    }
+
+    @Test
+    fun `a drawing just under 3 km is one window and one just over it two`() {
+        // Four lanes at three lane points on a straight freeway, the last one with no lane data after it: one drawing
+        // from the first point's reach to the last point, and its return; the exit has no lane data.
+        for ((spacing, windows) in listOf(969.75 to 1, 970.25 to 2)) {
+            val first = 1_500.0
+            val last = first + 2.0 * spacing
+            val exitAt = last + 1_500.0
+            val route = LaneScenes.route(
+                LaneScenes.node(0.0, maneuver = LaneScenes.DEPART, planMps = 27.0),
+                LaneScenes.node(first, s(), s(), s(), s(), planMps = 27.0),
+                LaneScenes.node(first + spacing, s(), s(), s(), s(), planMps = 27.0),
+                LaneScenes.node(last, s(), s(), s(), s(), planMps = 27.0),
+                LaneScenes.node(exitAt, road = RoadKind.RAMP, maneuver = LaneScenes.OFF_RIGHT, planMps = 20.0),
+                LaneScenes.node(exitAt + 400.0, road = RoadKind.STREET, maneuver = LaneScenes.TURN_LEFT, planMps = 15.0),
+                LaneScenes.node(exitAt + 500.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0),
+                id = "straight-$spacing",
+            )
+            val path = build(route, SceneLines.line(route.lengthMeters)).path
+            val drawing = path.drawings.single()
+            assertEquals(first - 1_000.0, drawing.from, 1e-9)
+            assertEquals(last, drawing.to, 1e-9)
+            assertFalse(drawing.turnsAtEnd)
+            // The stretch cut into windows: the drawing and its return, 2,999.5 m and 3,000.5 m.
+            val stretch = drawing.to + RoutePath.RETURN_METERS - drawing.from
+            assertEquals(if (windows == 1) 2_999.5 else 3_000.5, stretch, 1e-9)
+            assertEquals(windows, path.windowCount, "over $stretch m")
         }
     }
 

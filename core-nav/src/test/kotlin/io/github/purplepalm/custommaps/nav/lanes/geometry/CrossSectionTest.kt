@@ -198,8 +198,8 @@ class CrossSectionTest {
         // There the ramp's line lies on the old carriageway's middle (the two lanes' line, 2 lanes east).
         assertEquals(2.0 * w, axis.at(crossing).point.x, 0.05)
         // Then the blend onto the ramp's own carriageway, centred on its line: over 25 m, and nothing after.
-        assertTrue(Math.abs(section.place(3, crossing + 24.0, axis)!!.centre - 0.5 * w) > 1e-6)
-        assertEquals(0.5 * w, section.place(3, crossing + CrossSection.RAMP_BLEND_METERS, axis)!!.centre, 1e-12)
+        assertTrue(Math.abs(section.place(3, crossing + 24.9, axis)!!.centre - 0.5 * w) > 1e-6)
+        assertEquals(0.5 * w, section.place(3, crossing + 25.0, axis)!!.centre, 1e-12)
         assertEquals(0.5 * w, section.place(3, crossing + 100.0, axis)!!.centre, 1e-12)
         assertEquals(-0.5 * w, section.place(4, crossing + 100.0, axis)!!.centre, 1e-12)
         // On the way the two lanes stay two lanes wide on the ground: across the turning axis' normal, wider by its turn.
