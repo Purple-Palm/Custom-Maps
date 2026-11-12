@@ -49,10 +49,10 @@ internal class OwnLanes(
 
     /**
      * The features of [window] as the drawing's source takes them, with the traffic of each lit piece from [runs] along
-     * [table]'s path.
+     * [table]'s path. The tint pieces of the lanes that end at one station are one feature ([mergeTints]).
      */
     fun window(window: DrawingWindows.Window, table: StationTable, runs: List<TrafficRun>): LaneWindow {
-        val features = drawing.features(window.from, window.to)
+        val features = mergeTints(drawing.features(window.from, window.to))
         val out = ArrayList<Feature>(features.size)
         val tints = ArrayList<LaneWindow.Piece>()
         val levels = ArrayList<Pair<String, String>>()
@@ -145,6 +145,40 @@ internal class OwnLanes(
             }
             return out
         }
+
+        /**
+         * [features] with the tint pieces that end at one station, one for each lane tinted there, merged into one
+         * feature each, in the place of the first and with the smallest of their ids: as the car passes that station one
+         * feature state hides the tints of every lane there, so a progress update makes a few calls at most, however many
+         * lanes are tinted.
+         */
+        fun mergeTints(features: List<LaneDrawing.Feature>): List<LaneDrawing.Feature> {
+            val groups = LinkedHashMap<Long, MutableList<LaneDrawing.Feature>>()
+            for (f in features) if (f.kind == LaneDrawing.Kind.TINT && f.id != null) groups.getOrPut(stationKey(f.to)) { ArrayList() }.add(f)
+            if (groups.values.all { it.size == 1 }) return features
+            val out = ArrayList<LaneDrawing.Feature>(features.size)
+            for (f in features) {
+                if (f.kind != LaneDrawing.Kind.TINT || f.id == null) {
+                    out.add(f)
+                    continue
+                }
+                val group = groups.getValue(stationKey(f.to))
+                if (group.first() !== f) continue
+                out.add(
+                    if (group.size == 1) {
+                        f
+                    } else {
+                        f.copy(from = group.minOf { it.from }, parts = group.flatMap { it.parts }, lane = null, id = group.minOf { requireNotNull(it.id) })
+                    },
+                )
+            }
+            return out
+        }
+
+        /** A route station to the millimetre: the pieces that end at one station end there to the millimetre. */
+        private fun stationKey(station: Double): Long = Math.round(station * MILLIMETRES)
+
+        private const val MILLIMETRES = 1_000.0
 
         /** The traffic level of the run of [runs] at [fraction] of the path; unknown outside them. */
         fun levelAt(runs: List<TrafficRun>, fraction: Double): TrafficLevel =

@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.map
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneSwap
 import io.github.purplepalm.custommaps.nav.look.Look
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.log2
+import kotlin.math.max
 
 /**
  * The own line with the app's lanes on a fake style ([OwnLineScene]), along a made-up freeway exit ([FreewayExit]): the
@@ -150,10 +152,51 @@ class OwnRouteLineLanesTest {
             line.onProgress()
             scene.jobs.runAll()
             assertEquals(window.tints.filter { it.to <= car }.map { it.id }.toSet(), behind(), "at $car")
-            assertTrue(lanes.states.size - before <= 4, "${lanes.states.size - before} calls at $car")
+            // A few feature states a progress update at most: the tints of every lane that end together are one.
+            assertTrue(lanes.states.size - before <= 3, "${lanes.states.size - before} calls at $car")
         }
         // Inside the card window nothing more was sent.
         assertTrue(lanes.sent.isEmpty())
+    }
+
+    @Test
+    fun `on a wider exit a progress update hides the passed tints of every lane with a feature state or two`() {
+        val (wideLegs, wideShapes) = FreewayExit.route(75, listOf(54, 62, 70), lanes = 5)
+        val widePlan = requireNotNull(FreewayExit.plan(id, wideLegs, wideShapes))
+        val wideReference = ownLineDrawing(id, wideLegs, wideShapes, widePlan, 0, lanes = true)
+        val card = requireNotNull(wideReference.lanes).windows.cards.first()
+        val wide = OwnLineScene()
+        fun wideCar(station: Double) {
+            val place = wide.at(station)
+            wide.line.onPuck(place.latitude, place.longitude, accepted = true, sdkRouteId = id, offset = wideReference.table.routeFraction(station), tracking = true)
+        }
+        wide.line.setLanes(true)
+        wide.line.setEnabled(true)
+        wide.line.onStyleLoaded(Look.NIGHT)
+        var car = card.start + 20.0
+        wideCar(car)
+        wide.line.onRoute(id, refresh = false, OwnRouteLine.Build { version, withLanes -> ownLineDrawing(id, wideLegs, wideShapes, widePlan, version, withLanes) }, traffic)
+        wide.jobs.runAll()
+        wide.load()
+        wide.loadWindow()
+        assertTrue(wide.line.drawn)
+        val pieces = requireNotNull(wideReference.lanes).drawing.features().filter { it.kind == LaneDrawing.Kind.TINT }
+        var most = 0
+        var mostPieces = 0
+        // A progress update every 27 m, as at 27 m/s.
+        while (car + 27.0 <= card.endInclusive) {
+            val before = wide.lanes.states.size
+            val from = car
+            car += 27.0
+            wideCar(car)
+            wide.line.onProgress()
+            wide.jobs.runAll()
+            most = max(most, wide.lanes.states.size - before)
+            mostPieces = max(mostPieces, pieces.count { it.to > from && it.to <= car })
+        }
+        // Pieces of three lanes or more ended within one update, and the map hid them with a call or two.
+        assertTrue(mostPieces >= 3, "$mostPieces pieces")
+        assertTrue(most in 1..2, "$most calls")
     }
 
     @Test

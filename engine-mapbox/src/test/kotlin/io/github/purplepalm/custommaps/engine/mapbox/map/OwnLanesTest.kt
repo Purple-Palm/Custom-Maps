@@ -52,7 +52,8 @@ class OwnLanesTest {
     fun `a window's features carry what the layers read, pieces with their ids`() {
         val window = own.windows.windowAt(inRunUp)
         val built = own.window(window, drawing.table, drawing.runs)
-        val features = own.drawing.features(window.from, window.to)
+        // As the map gets them: the tint pieces that end at one station are one feature.
+        val features = OwnLanes.mergeTints(own.drawing.features(window.from, window.to))
         val json = requireNotNull(built.collection.features())
         assertEquals(features.size, json.size)
         assertEquals(json.size, built.features)
@@ -199,5 +200,40 @@ class OwnLanesTest {
         val line = shapes.flatten().flatten().map { GeoPoint(it.latitude(), it.longitude()) }
         val section = CrossSection.of(plan.plan, plan.evidence)
         return RoutePath.of(plan.plan, line, 1, plan.evidence, section)
+    }
+
+    @Test
+    fun `the tints of every lane that end at one station are one feature, so passing it takes one feature state`() {
+        // A wider exit: five lanes, only the right one leaving, four of them tinted where they still work.
+        val (wideLegs, wideShapes) = FreewayExit.route(75, listOf(54, 62, 70), lanes = 5)
+        val widePlan = requireNotNull(FreewayExit.plan(id, wideLegs, wideShapes))
+        val wideDrawing = ownLineDrawing(id, wideLegs, wideShapes, widePlan, 1, lanes = true)
+        val wide = requireNotNull(wideDrawing.lanes)
+        val window = wide.windows.windowAt(wide.windows.cards.first().start + 80.0)
+        val pieces = wide.drawing.features(window.from, window.to).filter { it.kind == LaneDrawing.Kind.TINT }
+        val built = wide.window(window, wideDrawing.table, emptyList())
+        // Pieces of several lanes end together.
+        val ends = pieces.groupBy { Math.round(it.to * 1_000.0) }
+        assertTrue(ends.values.any { it.size >= 3 }, "${ends.values.map { it.size }}")
+        // One feature for each station where pieces end, with the smallest of their ids and all of their rings.
+        assertEquals(ends.size, built.tints.size)
+        assertEquals(ends.values.map { group -> group.minOf { requireNotNull(it.id) }.toString() }.toSet(), built.tints.map { it.id }.toSet())
+        val json = requireNotNull(built.collection.features()).filter { it.getStringProperty(LaneLayers.Key.KIND) == LaneDrawing.Kind.TINT.logName }
+        assertEquals(ends.size, json.size)
+        for (g in json) {
+            val group = ends.values.single { group -> group.minOf { requireNotNull(it.id) }.toString() == g.id() }
+            val rings = when (val geometry = g.geometry()) {
+                is Polygon -> 1
+                is MultiPolygon -> geometry.coordinates().size
+                else -> error("a tint is a polygon")
+            }
+            assertEquals(group.sumOf { it.parts.size }, rings)
+        }
+        // The other features as the drawing has them, the same coordinates in all.
+        assertEquals(wide.drawing.features(window.from, window.to).sumOf { it.coordinates }, built.coordinates)
+        assertEquals(OwnLanes.mergeTints(pieces).size, ends.size)
+        // Pieces that end at different stations stay apart, and a list without tints is the same list.
+        val lines = wide.drawing.features(window.from, window.to).filter { it.kind == LaneDrawing.Kind.LANE_LINE }
+        assertEquals(lines, OwnLanes.mergeTints(lines))
     }
 }
