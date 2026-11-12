@@ -11,6 +11,7 @@ import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraState
 import com.mapbox.maps.EdgeInsets
+import com.mapbox.maps.ImageHolder
 import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.MapboxExperimental
@@ -51,6 +52,7 @@ import com.mapbox.navigation.ui.maps.route.line.api.MapboxRouteLineView
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
+import io.github.purplepalm.custommaps.engine.mapbox.R
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.JunctionPoints
@@ -210,6 +212,12 @@ class PhoneMap internal constructor(
 
     /** What the style's data wrote, for the "map_style_loaded" line. */
     private var styleWritten = MapLook.Written.NONE
+
+    /** The (i) dialog, in the variant of the look; the SDK's own dialog. */
+    private val attributionDialogs = LookAttribution(context, lookOnMap.look)
+
+    /** The look of the compass and of the (i) dialog. */
+    private var ornamentLook = lookOnMap.look
 
     // The one wait for the map to settle after a write of the theme ([watchLookSettled]).
     private var lookIdle: Cancelable? = null
@@ -439,6 +447,10 @@ class PhoneMap internal constructor(
 
         mapView.alpha = 0f
         mapView.scalebar.enabled = false
+        // The compass and the (i) dialog in the look's own variants. The logo and the (i) button
+        // stay as they are.
+        showCompass(lookOnMap.look)
+        mapView.attribution.setCustomAttributionDialogManager(attributionDialogs)
         // The look is written when the style's data is parsed, before any tile draws, so no frame
         // of the other look appears.
         mapboxMap.subscribeStyleDataLoaded { event ->
@@ -479,7 +491,10 @@ class PhoneMap internal constructor(
         mapView.location.setLocationProvider(platformPuck)
         mapView.location.updateSettings {
             enabled = true
-            locationPuck = createDefault2DPuck(withBearing = true)
+            // Mapbox's own dot and bearing arrow on its white disc, with a graphite edge around the
+            // disc so it shows on the light day map too; the same in both looks. The edge is the
+            // puck's shadow image, which with a bearing is the white disc alone.
+            locationPuck = createDefault2DPuck(withBearing = true).copy(shadowImage = ImageHolder.from(R.drawable.puck_ring))
             puckBearingEnabled = true
             puckBearing = PuckBearing.COURSE
         }
@@ -584,6 +599,11 @@ class PhoneMap internal constructor(
         val startedNanos = SystemClock.elapsedRealtimeNanos()
         val writes = lookApplier.setLook(request)
         val written = applyLook(writes)
+        if (request.look != ornamentLook) {
+            ornamentLook = request.look
+            showCompass(request.look)
+            attributionDialogs.setLook(request.look)
+        }
         val writeMs = Motion.round((SystemClock.elapsedRealtimeNanos() - startedNanos) / NANOS_PER_MILLI.toDouble(), 1)
         if (writes.theme != null) watchLookSettled(SystemClock.elapsedRealtime(), onSettled)
         return LookApplied(
@@ -625,6 +645,12 @@ class PhoneMap internal constructor(
      */
     fun setCompassTopInset(topInset: Int) {
         mapView.compass.updateSettings { marginTop = topInset + ORNAMENT_MARGIN_DP * density }
+    }
+
+    /** The compass of [look]: a white disc by day, a graphite one at night, each with its ring and needle. */
+    private fun showCompass(look: Look) {
+        val drawable = if (look == Look.DAY) R.drawable.compass_day else R.drawable.compass_night
+        mapView.compass.updateSettings { image = ImageHolder.from(drawable) }
     }
 
     /**

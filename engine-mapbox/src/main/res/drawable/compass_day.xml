@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The compass by day: a white disc in a dark grey ring, its north half red, its south half dark grey. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#4A5059"
+        android:pathData="M24,3a21,21 0,1 1,0 42a21,21 0,1 1,0 -42z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,5a19,19 0,1 1,0 38a19,19 0,1 1,0 -38z" />
+    <path
+        android:fillColor="#B42318"
+        android:pathData="M24,8L28.5,24L19.5,24z" />
+    <path
+        android:fillColor="#4A5059"
+        android:pathData="M24,40L28.5,24L19.5,24z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,22a2,2 0,1 1,0 4a2,2 0,1 1,0 -4z" />
+</vector>
