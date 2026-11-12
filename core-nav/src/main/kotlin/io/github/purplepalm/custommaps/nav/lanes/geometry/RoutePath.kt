@@ -36,12 +36,13 @@ import kotlin.math.min
  *   the approach on the line with no move back to it.
  * - **Turns.** Where the route turns onto another road with lanes, the path goes on with its lane straight along the
  *   old road until the new road's line lies farther out, then blends onto it ([CrossSection.RampStart]): the route
- *   geometry's diagonal at a gore is never drawn. Where the drawing ends at such a turn, the path goes on straight in
- *   its lane the same way and blends onto the new road's line.
+ *   geometry's diagonal at a gore is never drawn. Where the drawing ends at such a turn, the path goes on straight from
+ *   where it is the same way and blends onto the new road's line.
  * - **The drawing's ends.** The path returns to the road's line only where the drawing ends, over [RETURN_METERS] on
  *   asphalt without lane lines (the asphalt then tapers over [ASPHALT_TAPER_METERS]); a drawing ends only outside
  *   card windows (inside them gaps are zones). At every end the path meets the route's own line, so the line the
- *   app draws is the navigation SDK's away from lanes.
+ *   app draws is the navigation SDK's away from lanes. The turn or the return at a drawing's end takes over a move still
+ *   under way there, so no move runs on past the drawing.
  * - **Folds.** Where the path's offset would fold over itself on a curve too sharp for it (1 - kappa t <= 0, [RoadAxis]),
  *   it goes to the road's line there, over [RETURN_METERS] on each side ([folds]).
  *
@@ -513,26 +514,32 @@ class RoutePath private constructor(
                         out[k][j] = out[k - 1].last()
                         continue
                     }
-                    val next = pieceAt(region, station, axis, hold, piece)
+                    // A turn goes straight on from where the path is: its piece and the moves still under way.
+                    val next = pieceAt(region, station, axis, piece) { valueOf(piece, station, axis, hold) + residuals.sumOf { it.at(station) } }
                     // At a change, the old piece's value here; the band's middle never steps back behind it either.
                     val old = if (next != piece) valueOf(piece, station, axis, hold) else 0.0
                     val value = valueOf(next, station, axis, if (next != piece && next is Piece.Band) old else hold)
                     if (next != piece) {
-                        val jump = value - old
-                        if (abs(jump) > SAME_OFFSET_METERS) {
+                        val drawn = old + residuals.sumOf { it.at(station) }
+                        // Where a drawing ends, its turn or its return takes over the moves still under way, so none runs on
+                        // past the drawing: the turn from where the path is, the return from there to the road's line.
+                        val turns = next is Piece.Turn && piece !is Piece.Turn
+                        val returns = next == Piece.Middle && region.drawings.any { abs(it.to - station) < 1e-6 && !it.turnsAtEnd }
+                        if (turns || returns) residuals.clear()
+                        val jump = value - if (turns || returns) drawn else old
+                        if (!turns && abs(jump) > SAME_OFFSET_METERS) {
                             val kind = when {
-                                piece == Piece.Middle && next !is Piece.Turn -> Move.Kind.ENTER
-                                next == Piece.Middle && region.drawings.any { abs(it.to - station) < 1e-6 && !it.turnsAtEnd } -> Move.Kind.RETURN
+                                piece == Piece.Middle -> Move.Kind.ENTER
+                                returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
                             val length = if (kind == Move.Kind.RETURN) RETURN_METERS else moveLength(station, jump)
-                            val before = old + residuals.sumOf { it.at(station) }
                             residuals.add(Residual(station, station + length, -jump))
-                            moves.add(Move(station, station + length, before, value, kind))
+                            moves.add(Move(station, station + length, drawn, value, kind))
                         }
-                        if (next is Piece.Turn && piece !is Piece.Turn) {
-                            val end = continuationEnd(axis, next)
-                            moves.add(Move(station, end, next.offset, 0.0, Move.Kind.TURN))
+                        if (turns) {
+                            val turn = next as Piece.Turn
+                            moves.add(Move(station, continuationEnd(axis, turn), turn.offset, 0.0, Move.Kind.TURN))
                         }
                     }
                     piece = next
@@ -552,14 +559,14 @@ class RoutePath private constructor(
             return max(turn.turn, CrossSection.crossing(axis, begin, turn.turn, turn.offset)) + CrossSection.RAMP_BLEND_METERS
         }
 
-        /** The piece the path follows at [station]. */
-        private fun pieceAt(region: Region, station: Double, axis: RoadAxis, hold: Double, current: Piece): Piece {
+        /** The piece the path follows at [station]; a turn that begins there goes straight on from where the path is, [drawn]. */
+        private fun pieceAt(region: Region, station: Double, axis: RoadAxis, current: Piece, drawn: () -> Double): Piece {
             // At a drawing's end where the route turns: straight on from where the turn's arc begins.
             for (d in region.drawings) {
                 if (!d.turnsAtEnd) continue
                 val begin = CrossSection.beginOf(axis, d.to)
                 if (station >= begin && station <= d.back) {
-                    return if (current is Piece.Turn && current.turn == d.to) current else Piece.Turn(d.to, hold)
+                    return if (current is Piece.Turn && current.turn == d.to) current else Piece.Turn(d.to, drawn())
                 }
             }
             val drawing = region.drawings.firstOrNull { station >= it.from && station < it.to } ?: return Piece.Middle

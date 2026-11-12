@@ -284,6 +284,61 @@ class RoutePathTest {
     }
 
     @Test
+    fun `where a drawing ends at a turn with a move under way the turn takes the move over from where the path is`() {
+        val built = build(lateMove())
+        val path = built.path
+        val drawing = path.drawings.single()
+        assertTrue(drawing.turnsAtEnd)
+        // The scene: the plan names the exit's lane only 50 m before the gore, two and a half lanes right of the road's line,
+        // and the move there runs on past the reach of the turn at the gore.
+        val lane = path.moves.single { it.kind == RoutePath.Move.Kind.LANE }
+        assertEquals(gore - 50.0, lane.from, 1e-9)
+        assertEquals(-2.5 * w, lane.offsetTo, 1e-9)
+        assertTrue(lane.to > drawing.to + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS)
+        // The turn goes straight on from where the path is when its arc begins, a little way into the move, and blends onto
+        // the ramp's line: back on it for good where the blend ends, and nothing moves it past the drawing.
+        val turn = path.moves.last()
+        assertEquals(RoutePath.Move.Kind.TURN, turn.kind)
+        assertEquals(path.offsetAt(turn.from), turn.offsetFrom, 1e-9)
+        assertTrue(turn.offsetFrom < 0.0 && turn.offsetFrom > -w, "the turn begins at ${turn.offsetFrom}")
+        assertEquals(turn.to, drawing.back, 1.0)
+        assertEquals(0.0, path.offsetAt(drawing.back), 1e-12)
+        assertEquals(2, path.moves.size)
+        checkRules("late move", built)
+    }
+
+    @Test
+    fun `where a drawing ends at a gap with a move under way its return takes the move over from where the path is`() {
+        val built = build(moveBeforeGap())
+        val path = built.path
+        val first = path.drawings.first()
+        assertFalse(first.turnsAtEnd)
+        assertEquals(gore - 1_650.0, first.to, 1e-9)
+        // The scene: just before the last point ahead of the gap, the band jumps to the lane beyond the lane kept for car
+        // pools, two and a half lanes right of the road's line, and the move there runs on past the drawing's return.
+        val lane = path.moves.first { it.kind == RoutePath.Move.Kind.LANE }
+        assertEquals(-2.5 * w, lane.offsetTo, 1e-9)
+        assertTrue(lane.from < first.to && lane.to > first.back)
+        // The return begins where the path is, a little way into the move, and goes only toward the road's line, onto it
+        // 60 m on.
+        val back = path.moves.single { it.kind == RoutePath.Move.Kind.RETURN }
+        assertEquals(first.to, back.from, 1e-9)
+        assertEquals(path.offsetAt(first.to), back.offsetFrom, 1e-9)
+        assertTrue(back.offsetFrom < 0.0 && back.offsetFrom > -w, "the return begins at ${back.offsetFrom}")
+        assertEquals(first.to + RoutePath.RETURN_METERS, first.back, 1e-9)
+        var prev = back.offsetFrom
+        var station = first.to
+        while (station < first.back) {
+            station += 1.0
+            val now = path.offsetAt(station)
+            assertTrue(now <= 0.0 && now >= prev - 1e-12, "at $station: $prev to $now")
+            prev = now
+        }
+        assertEquals(0.0, path.offsetAt(first.back), 1e-12)
+        checkRules("move before a gap", built)
+    }
+
+    @Test
     fun `where a gain nothing explains lies on the exit's side the path never moves away from the exit's edge`() {
         val built = build(LaneScenes.exitSideGain())
         val plan = built.plan
@@ -498,6 +553,7 @@ class RoutePathTest {
         var beyond = 0
         var pastNamed = 0
         var atBend = 0
+        var underWay = 0
         repeat(KEPT_LANE_ROUTES) { k ->
             val name = "kept-$k"
             val route = randomKeptLane(rng, name)
@@ -512,6 +568,9 @@ class RoutePathTest {
             if (route.nodes.any { node -> node.lanes.withIndex().any { (i, lane) -> lane.designated && i > 0 && i < node.lanes.size - 1 } }) inside++
             if (plan.noLane.any { it.cause == LanePlan.NoLane.Cause.DESIGNATED_BETWEEN }) beyond++
             if (plan.windows.any { leadsPastNamed(built, it) }) pastNamed++
+            // A drawing that ends at a turn while a move into the drawing or across lanes is still under way.
+            val across = built.path.moves.filter { it.kind == RoutePath.Move.Kind.ENTER || it.kind == RoutePath.Move.Kind.LANE }
+            if (built.path.drawings.any { d -> d.turnsAtEnd && across.any { it.from < d.to && it.to > d.to } }) underWay++
             val start = built.path.drawings.firstOrNull()?.from ?: return@repeat
             val bent = build(route, SceneLines.line(route.lengthMeters, (all + (start + 0.25 + 0.5 * (k % 15) to if (k % 2 == 0) 2.5 else -3.5)).sortedBy { it.first }))
             assertEquals(start, bent.path.drawings.first().from, 1e-9, name)
@@ -522,6 +581,7 @@ class RoutePathTest {
         assertTrue(beyond >= 30, "$beyond routes with an exit lane beyond a kept lane")
         assertTrue(pastNamed >= 8, "$pastNamed routes with a window off the grid and the band past its lane")
         assertTrue(atBend >= 140, "$atBend routes whose drawing begins on a bend's arc")
+        assertTrue(underWay >= 9, "$underWay routes whose drawing ends at a turn with a move under way")
     }
 
     /**
@@ -547,7 +607,8 @@ class RoutePathTest {
      * path is in the named lane except inside a move and never moves away from the exit's edge; inside the drawings it
      * moves only toward the plan's lane, then never back; it is back on the road's line only where a drawing ends outside
      * card windows; it is on the road's line on an approach where no lane is named (C1); it meets the route's line at every
-     * drawing end; it never steps sideways inside a drawing.
+     * drawing end; it never steps sideways inside a drawing; where a drawing ends, its turn or its return takes over a move
+     * still under way.
      */
     private fun checkRules(name: String, built: Built): Int {
         val path = built.path
@@ -652,6 +713,34 @@ class RoutePathTest {
                     assertEquals(0.0, path.offsetAt(station), 1e-9, "$name at $station: off the road's line on an approach where no lane is named")
                 }
                 station += 1.0
+            }
+        }
+        // At a drawing's end its turn or its return takes over a move still under way: past the turn the path is the turn's
+        // straight-on line from where the path was when the turn began; past the return it moves only toward the road's line.
+        for ((i, drawing) in path.drawings.withIndex()) {
+            // Where the path keeps to the road's line around a fold, the fold's blends move it there.
+            fun folded(from: Double) = path.folds.any { it.to > from - RoutePath.RETURN_METERS && it.from < drawing.back + RoutePath.RETURN_METERS }
+            if (drawing.turnsAtEnd) {
+                val turn = path.moves.lastOrNull { it.kind == RoutePath.Move.Kind.TURN && it.from <= drawing.to + 1e-6 && it.from >= drawing.to - CrossSection.RAMP_START_MAX_METERS } ?: continue
+                if (folded(turn.from)) continue
+                val axis = requireNotNull(path.axisAt(turn.from + 1e-6))
+                assertEquals(path.offsetAt(turn.from), turn.offsetFrom, 1e-9, "$name: the turn at ${drawing.to} begins where the path is")
+                for (station in axis.stations()) {
+                    if (station < turn.from || station > drawing.back) continue
+                    val straight = CrossSection.continuation(axis, drawing.to, turn.offsetFrom, station)
+                    assertEquals(straight, path.offsetAt(station), END_SAME_METERS, "$name at $station: off the turn's straight-on line")
+                }
+            } else if (!folded(drawing.to)) {
+                val until = minOf(drawing.back, path.drawings.getOrNull(i + 1)?.from ?: drawing.back)
+                var prev = path.offsetAt(drawing.to)
+                var station = drawing.to
+                while (station < until) {
+                    station = minOf(until, station + 1.0)
+                    val now = path.offsetAt(station)
+                    assertTrue(abs(now) <= abs(prev) + 1e-9 && now * prev >= 0.0, "$name at $station: the return moves away from the road's line ($prev to $now)")
+                    prev = now
+                }
+                if (until == drawing.back) assertEquals(0.0, path.offsetAt(drawing.back), 1e-9, "$name: off the road's line where the return ends")
             }
         }
         // 8: the returns to the road's line lie outside card windows.
@@ -792,6 +881,32 @@ class RoutePathTest {
         id = "beyond-bus-lane",
     )
 
+    /**
+     * A right exit that takes the lane kept for car pools: six lanes 2,400 and 1,200 m before the gore, the right one kept
+     * for car pools; the exit lists it open to every car, the only lane to take, so the plan names it only where it opens,
+     * late, and the move to it begins on the road's line.
+     */
+    private fun lateMove() = LaneScenes.approach(
+        listOf(At(2_400.0, listOf(s(), s(), s(), s(), s(), hov())), At(1_200.0, listOf(s(), s(), s(), s(), s(), hov()))),
+        exit = listOf(s(false), s(false), s(false), s(false), s(false), sr()),
+        id = "late-move",
+    )
+
+    /**
+     * A right exit beyond a gap in the lane data: five lanes 2,400 m before the gore; 2,000 m before, the left one leaves by
+     * a road on the left and the right one is kept for car pools; 1,650 m before, a lane beyond it, and no lane point from
+     * there to the exit. The exit's lanes lie beyond the kept one.
+     */
+    private fun moveBeforeGap() = LaneScenes.approach(
+        listOf(
+            At(2_400.0, listOf(s(), s(), s(), s(), s())),
+            At(2_000.0, listOf(s(false), s(), s(), hov()), EXIT_LEFT),
+            At(1_650.0, listOf(s(), s(), s(), hov(), s())),
+        ),
+        exit = listOf(s(false), s(false), s(false), hov(), sr(), sr()),
+        id = "move-before-gap",
+    )
+
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
     private fun randomApproach(rng: Random, id: String): LaneRoute {
         val right = rng.nextBoolean()
@@ -913,6 +1028,9 @@ class RoutePathTest {
 
         /** ...with its heading within this many degrees of the line's. */
         const val END_DEGREES = 1.0
+
+        /** Past a turn at a drawing's end the path is the turn's straight-on line within this distance. */
+        const val END_SAME_METERS = 1e-3
 
         /** Where a drawing begins, the path's heading is taken from the slope of its offset over this distance. */
         const val END_SLOPE_METERS = 0.1
