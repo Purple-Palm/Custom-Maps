@@ -239,10 +239,17 @@ class RoutePath private constructor(
         }
         private val length = if (line.isEmpty()) 0.0 else lineStations.last()
 
-        /** The first named lane of each card window, with where the window begins, in route order. */
+        /**
+         * The first lane each card window names, with where the plan first names it, in route order. A window may begin
+         * between the plan's grid stations (the seam begins a run-up a few seconds of driving before a narrowing), where
+         * the plan names no lane until the first grid station inside it: the lane is the first one any stretch inside the
+         * window names, from where that stretch begins.
+         */
         private val refs: List<Pair<Double, Int>> = plan.windows.mapNotNull { w ->
-            plan.segmentAt(w.from)?.named?.let { w.from to it }
-        }
+            val first = plan.segmentAt(w.from)?.takeIf { it.named != null }
+                ?: plan.segments.firstOrNull { it.named != null && it.from > w.from && it.from < w.to }
+            first?.let { max(w.from, it.from) to requireNotNull(it.named) }
+        }.sortedBy { it.first }
 
         private val moves = ArrayList<Move>()
         private val folds = ArrayList<Fold>()

@@ -1,8 +1,10 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.At
@@ -202,6 +204,44 @@ class RoutePathTest {
             assertEquals(-1.5 * w, built.path.offsetAt(station), 1e-9, "at $station")
         }
         assertEquals(1, built.path.moves.count { it.kind == RoutePath.Move.Kind.LANE })
+    }
+
+    @Test
+    fun `a card window that begins between the plan's grid stations leads the band to the lane it names`() {
+        val built = build(offGridWindow())
+        val plan = built.plan
+        val path = built.path
+        // The scene: the run-up begins between two grid stations, where the plan names no lane yet; it names the second
+        // lane from the next station on. Just before it the band is the two left lanes, whose middle lies past that lane
+        // toward the exit's edge.
+        val window = plan.windows.single { it.kind == CardWindow.Kind.RUN_UP }
+        val run = plan.topology.runs[requireNotNull(plan.segmentAt(window.from)).run]
+        val offGrid = (window.from - run.from) % LanePlanner.GRID_METERS
+        assertTrue(offGrid > 0.5 && offGrid < LanePlanner.GRID_METERS - 0.5, "off the grid by $offGrid m")
+        assertEquals(null, plan.segmentAt(window.from)?.named)
+        val named = plan.segments.first { it.named != null }
+        assertEquals(1, named.named)
+        assertTrue(named.from > window.from && named.from - window.from < LanePlanner.GRID_METERS)
+        val before = plan.segmentAt(window.from - 1.0)!!
+        assertEquals(listOf(0, 1), before.band)
+        assertEquals(1.5 * w, built.section.middle(before.band, window.from - 1.0)!!, 1e-9)
+        // The path heads for the named lane outside the window and never past it: in it where the window begins, and from
+        // there on it moves only toward the exit's edge, the left one, until the turn at the gore.
+        assertEquals(w, path.offsetAt(window.from), 1e-9)
+        val turn = path.moves.last()
+        assertEquals(RoutePath.Move.Kind.TURN, turn.kind)
+        var last = path.offsetAt(path.drawings.single().from)
+        var station = path.drawings.single().from
+        while (station < turn.from) {
+            val now = path.offsetAt(station)
+            assertTrue(now >= last - 1e-9, "back at $station: $last to $now")
+            if (station >= window.from) assertEquals(w, now, 1e-9, "in the named lane at $station")
+            last = now
+            station += 1.0
+        }
+        assertEquals(listOf(RoutePath.Move.Kind.ENTER, RoutePath.Move.Kind.LANE, RoutePath.Move.Kind.TURN), path.moves.map { it.kind })
+        assertTrue(path.moves[1].to < window.from)
+        checkRules("off-grid window", built)
     }
 
     @Test
@@ -482,6 +522,22 @@ class RoutePathTest {
         val b = SceneLines.local(points[i + 1])
         return Math.toDegrees(atan2(b.x - a.x, b.y - a.y))
     }
+
+    /**
+     * A left exit, four lanes and a car-pool lane on the right. At a lane point 2,950 m before the gore the third and fourth
+     * lanes cannot be used (no road leaves there, they go on); 2,000 m before, the left lane leaves by a road on the left.
+     * The exit takes the leftmost lane left. At 27 m/s the seam begins the run-up 162 m before the band drops the left lane,
+     * between two of the plan's grid stations.
+     */
+    private fun offGridWindow() = LaneScenes.approach(
+        listOf(
+            At(2_950.0, listOf(s(), s(), s(false), s(false), hov())),
+            At(2_000.0, listOf(s(false), s(), s(false), s(false), hov()), EXIT_LEFT),
+        ),
+        exit = listOf(sl(), s(false), s(false), hov()),
+        maneuver = LaneScenes.OFF_LEFT,
+        id = "off-grid-window",
+    )
 
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
     private fun randomApproach(rng: Random, id: String): LaneRoute {
