@@ -121,8 +121,17 @@ class LookControllerTest {
             return onScreen().also { test.runCurrent() }
         }
 
-        /** Guidance, [meters] before the next maneuver on [step], at [speed] meters a second. */
-        fun drive(meters: Double, step: String = "route-a/0/1", speed: Double? = 13.0, tunnel: Boolean = false) {
+        /**
+         * Guidance, [meters] and [seconds] before the next maneuver on [step], at [speed] meters a
+         * second; the seconds at the route's 13 meters a second unless given.
+         */
+        fun drive(
+            meters: Double,
+            step: String = "route-a/0/1",
+            speed: Double? = 13.0,
+            tunnel: Boolean = false,
+            seconds: Double = meters / 13.0,
+        ) {
             guidance.value = GuidanceState.ACTIVE
             progress.value = RouteProgressSnapshot(
                 nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Oak Street"),
@@ -130,7 +139,7 @@ class LookControllerTest {
                 lanes = null,
                 distanceRemaining = Distance.meters(meters + 4_000.0),
                 durationRemaining = ((meters + 4_000.0) / 13.0).seconds,
-                durationToNextManeuver = (meters / 13.0).seconds,
+                durationToNextManeuver = seconds.seconds,
                 stepKey = step,
                 inTunnel = tunnel,
                 speedMps = speed,
@@ -451,6 +460,81 @@ class LookControllerTest {
         assertEquals(Look.NIGHT, rig.controller.look.value)
         assertEquals(LookHold.CLOSE_VIEW, rig.looks().last()["heldBy"])
         assertEquals(25L, rig.looks().last()["heldS"])
+    }
+
+    @Test
+    fun `a tunnel far from any turn holds a due switch until the tunnel ends`() = runTest {
+        val rig = Rig(this)
+        rig.startAndShow()
+        // 5 km before the next maneuver, in a tunnel.
+        rig.drive(5_000.0, tunnel = true)
+        rig.elevation = -4.0
+        rig.at(60)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookHold.TUNNEL, rig.controller.switchState.waitingFor)
+        for (second in 61L..70L) {
+            rig.at(second)
+            rig.drive(5_000.0 - (second - 60) * 13.0, tunnel = true)
+            assertEquals(Look.DAY, rig.controller.look.value, "in the tunnel")
+        }
+        // Out of it, the turn still far ahead.
+        rig.at(71)
+        rig.drive(4_857.0)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        val line = rig.looks().last()
+        assertEquals(LookCause.SUN, line["cause"])
+        assertEquals(LookHold.TUNNEL, line["heldBy"])
+        assertEquals(11L, line["heldS"])
+    }
+
+    @Test
+    fun `15 seconds before an exit at freeway speed hold a due switch, though the exit is 450 m away`() = runTest {
+        val rig = Rig(this)
+        rig.startAndShow()
+        rig.drive(2_220.0, speed = 30.0, seconds = 74.0)
+        rig.elevation = -4.0
+        rig.at(59)
+        // Past the window's 300 m, but within its 20 s.
+        rig.drive(450.0, speed = 30.0, seconds = 15.0)
+        rig.at(60)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(Look.NIGHT, rig.controller.switchState.waiting)
+        assertEquals(LookHold.MANEUVER, rig.controller.switchState.waitingFor)
+    }
+
+    @Test
+    fun `a car standing 100 m before a turn takes a due switch at once`() = runTest {
+        val rig = Rig(this)
+        rig.startAndShow()
+        // At a red light, 100 m before the turn.
+        rig.drive(100.0, speed = 0.2)
+        rig.elevation = -4.0
+        rig.at(60)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        val line = rig.looks().last()
+        assertEquals(LookCause.SUN, line["cause"])
+        assertEquals(true, line["guidance"])
+        assertFalse("heldS" in line, "a switch that went at once")
+    }
+
+    @Test
+    fun `a switch waiting at a turn goes as soon as guidance ends, before the next tick`() = runTest {
+        val rig = Rig(this)
+        rig.startAndShow()
+        rig.drive(2_000.0)
+        rig.elevation = -4.0
+        rig.at(59)
+        rig.drive(100.0)
+        rig.at(60)
+        assertEquals(Look.NIGHT, rig.controller.switchState.waiting)
+        // The driver ends guidance there, a second later.
+        rig.at(61)
+        rig.guidance.value = GuidanceState.IDLE
+        runCurrent()
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(LookOnMap(Look.NIGHT), rig.controller.lookOnMap.value)
+        // The sun's switch outside guidance: its time is written nowhere.
+        assertEquals(listOf("look"), rig.types())
     }
 
     @Test
