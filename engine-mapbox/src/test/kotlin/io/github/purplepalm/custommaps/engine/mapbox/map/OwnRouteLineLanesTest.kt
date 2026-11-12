@@ -1,17 +1,22 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
+import io.github.purplepalm.custommaps.nav.camera.MapScale
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneSwap
 import io.github.purplepalm.custommaps.nav.look.Look
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.log2
 
 /**
  * The own line with the app's lanes on a fake style ([OwnLineScene]), along a made-up freeway exit ([FreewayExit]): the
  * first window goes with the path, the next ones while the car drives and never inside a card window or while a new
- * route loads, the feature states, a style load, a look switch, guidance end, and the watchdog.
+ * route loads, the feature states, a style load, a look switch, guidance end, the watchdog, and the swap of the route
+ * line and the lit lane on the camera's state.
  */
 class OwnRouteLineLanesTest {
 
@@ -293,9 +298,113 @@ class OwnRouteLineLanesTest {
         assertTrue(line.drawn)
         puck(3_000.0)
         line.onProgress()
+        // A close view latched close in: the line is the line, and the camera line has no swap in it.
+        line.onLatched(true)
+        line.onCameraZoom(zoomOf(13.0), 0.0)
         assertTrue(style.calls.none { it.startsWith("lanes.") }, "${style.calls}")
         assertTrue("setColours" in style.calls && "setGradients" !in style.calls)
+        assertTrue("setLitShown" !in style.calls)
+        assertEquals(setOf("own", "trims"), routeLine().keys.intersect(setOf("own", "trims", "swapped", "swaps")))
         assertNull(built.last().lanes)
         assertEquals(OwnRouteLine.LAYERS.map { it.id }, line.layerIds)
+    }
+
+    /** The zoom at latitude 0 where a drawn freeway lane is [dp] wide. */
+    private fun zoomOf(dp: Double) = log2(MapScale.metersPerDp(0.0, 0.0) * dp / LaneTopology.FREEWAY_LANE_METERS)
+
+    @Suppress("UNCHECKED_CAST")
+    private fun routeLine() = line.diagnostics().getValue("routeLine") as Map<String, Any?>
+
+    @Test
+    fun `the route line and the lit lane swap on the camera's latched view and zoom, written only where the state flips`() {
+        drawn()
+        // Drawn with the pair over the lit stretches whole: the state a drive starts with.
+        assertEquals(listOf(true), style.litPairWrites)
+        routeLine()
+        style.litPairWrites.clear()
+        // Close in with no view latched, or latched with small lanes: the line stays.
+        line.onCameraZoom(zoomOf(13.0), 0.0)
+        line.onLatched(false)
+        line.onCameraZoom(zoomOf(4.0), 0.0)
+        line.onLatched(true)
+        assertTrue(style.litPairWrites.isEmpty())
+        // The close view goes in, a camera change a frame and a progress update every few: the lit lane from the first
+        // change where a drawn lane is 10.4 dp wide, one write.
+        var dp = 4.0
+        var frame = 0
+        while (dp < 13.0) {
+            line.onCameraZoom(zoomOf(dp), 0.0)
+            if (frame++ % 3 == 0) line.onLatched(true)
+            dp += 0.05
+        }
+        assertEquals(listOf(false), style.litPairWrites)
+        assertEquals(mapOf("swapped" to true, "swaps" to 1), routeLine().filterKeys { it == "swapped" || it == "swaps" })
+        // A view resting between the two widths, progress after progress: nothing written.
+        repeat(300) { i ->
+            line.onCameraZoom(zoomOf(LaneSwap.SWAP_OUT_DP + 0.05 + (i % 7) * 0.1), 0.0)
+            line.onLatched(true)
+        }
+        assertEquals(listOf(false), style.litPairWrites)
+        // Under 9.6 dp the line again; in again; and the view letting go brings the line back at once, at any zoom.
+        line.onCameraZoom(zoomOf(9.5), 0.0)
+        line.onCameraZoom(zoomOf(12.0), 0.0)
+        line.onLatched(false)
+        assertEquals(listOf(false, true, false, true), style.litPairWrites)
+        assertEquals(mapOf("swapped" to false, "swaps" to 3), routeLine().filterKeys { it == "swapped" || it == "swaps" })
+        // Only the swap's own calls: no colour, gradient, trim or lanes call came with it.
+        assertTrue(style.calls.takeLast(4).all { it == "setLitShown" }, "${style.calls.takeLast(4)}")
+    }
+
+    @Test
+    fun `nothing is written before the line is drawn, and each drawing takes the swap's state, after a style load or a reroute too`() {
+        start()
+        line.onLatched(true)
+        line.onCameraZoom(zoomOf(13.0), 0.0)
+        assertTrue(style.litPairWrites.isEmpty())
+        scene.load()
+        scene.loadWindow()
+        assertTrue(line.drawn)
+        assertEquals(listOf(false), style.litPairWrites)
+        // A style load: the new style's pair is whole, and hidden again once the line is drawn on it.
+        scene.reload()
+        line.onStyleLoaded(Look.DAY)
+        assertEquals(true, style.litPair)
+        scene.load()
+        scene.loadWindow()
+        assertEquals(false, style.litPair)
+        // A reroute in the run-up with the view still latched: the new route's line is drawn swapped too.
+        val other = "route-y#0"
+        val otherPlan = requireNotNull(FreewayExit.plan(other, legs, shapes))
+        line.onRoute(other, refresh = false, OwnRouteLine.Build { version, withLanes -> ownLineDrawing(other, legs, shapes, otherPlan, version, withLanes) }, traffic)
+        style.litPairWrites.clear()
+        scene.jobs.runAll()
+        scene.load()
+        scene.loadWindow()
+        assertTrue(line.drawn)
+        assertEquals(listOf(false), style.litPairWrites)
+        // Guidance end: the next drive starts with the line over the lit stretches, until a view latches.
+        line.onGuidanceEnded()
+        style.litPairWrites.clear()
+        puck(0.0)
+        line.onRoute(id, refresh = false, build(), traffic)
+        scene.jobs.runAll()
+        scene.load()
+        scene.loadWindow()
+        assertEquals(listOf(true), style.litPairWrites)
+    }
+
+    @Test
+    fun `at the swap the lit lane's amber is nearly as wide as the held route line it takes the place of, and wider closer in`() {
+        // The own line, both pairs, holds its width from 16.5 on: 10.38 dp.
+        val held = RouteLineWidths.widthAt(RouteLineWidths.LINE, RouteLineWidths.HOLD_ZOOM)
+        assertEquals(10.38, held, 0.005)
+        for (layer in OwnRouteLine.LAYERS + OwnRouteLine.LIT_LAYERS) {
+            assertEquals(RouteLineWidths.widthAt(layer.widths, 19.5), RouteLineWidths.widthAt(layer.widths, RouteLineWidths.HOLD_ZOOM), 1e-9)
+        }
+        val atSwap = LaneSwap.amberDp(zoomOf(LaneSwap.SWAP_IN_DP), 0.0)
+        assertTrue(atSwap / held >= 0.94, "the amber $atSwap dp at the swap, the line $held dp")
+        assertTrue(atSwap < held)
+        // With lanes of 12 dp the amber is wider than the line was.
+        assertTrue(LaneSwap.amberDp(zoomOf(12.0), 0.0) > held)
     }
 }

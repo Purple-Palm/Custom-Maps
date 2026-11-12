@@ -36,4 +36,19 @@ object CloseView {
      */
     fun mapboxTuned(framesManeuver: Boolean, laneWindow: Boolean, large: Boolean): Boolean =
         large && (framesManeuver || laneWindow)
+
+    /**
+     * Smooth follow: whether a close view is latched, which the swap of the route line and the lit lane waits for (the
+     * own lanes' design 8): the view down onto a junction, or with Large the lanes' close view, has reached its goal 1
+     * and no longer moves. [smoothFollow] also counts the moves in and out; a latched view is one that holds.
+     */
+    fun smoothFollowLatched(maneuverGoal: Double, maneuverMoving: Boolean, laneGoal: Double, laneMoving: Boolean, large: Boolean): Boolean =
+        (maneuverGoal >= 1.0 && !maneuverMoving) || (large && laneGoal >= 1.0 && !laneMoving)
+
+    /**
+     * Mapbox tuned: whether a close view is latched. Its frames are the navigation SDK's own, eased by its camera, with no
+     * move of this app's to wait for: latched while [mapboxTuned] says the close view is on.
+     */
+    fun mapboxTunedLatched(framesManeuver: Boolean, laneWindow: Boolean, large: Boolean): Boolean =
+        mapboxTuned(framesManeuver, laneWindow, large)
 }

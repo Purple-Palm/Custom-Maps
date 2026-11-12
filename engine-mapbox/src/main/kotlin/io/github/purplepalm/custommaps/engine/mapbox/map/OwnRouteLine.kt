@@ -21,6 +21,7 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneSwap
 import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.StationTable
 import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficLevel
@@ -77,7 +78,9 @@ import kotlin.math.max
  * the lanes the route line lies in two pairs of layers, one over the stretches where a lane is lit ([LIT_LAYERS]) and
  * one over the rest, each with a gradient that is transparent where the other draws, so together they are the one line
  * it was. A tint's piece the car has passed is hidden, and a lit piece takes its stretch's traffic colour, by feature
- * state, set again after each window's load. At guidance end the drawing's source is cleared. Main thread only.
+ * state, set again after each window's load. At guidance end the drawing's source is cleared. Over the lit stretches the
+ * route line and the lit lane swap on the camera's state ([LaneSwap]): the pair over them is drawn whole or not at all,
+ * written only when the state flips ([onLatched], [onCameraZoom]). Main thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
@@ -124,6 +127,12 @@ internal class OwnRouteLine(
 
         /** Shows or hides every layer added. */
         fun setVisible(visible: Boolean)
+
+        /**
+         * With the app's lanes: the pair over the lit stretches ([LIT_LAYERS]) at full opacity, or none, as a step with no
+         * transition: the swap of the route line and the lit lane ([LaneSwap]).
+         */
+        fun setLitShown(shown: Boolean)
 
         /** Takes the layers and the source out of the style, whichever of them is there. */
         fun remove()
@@ -259,6 +268,9 @@ internal class OwnRouteLine(
     /** When the path sent with a first window loaded while that window had not; null while no path waits for one. */
     private var pathLoadedAt: Long? = null
 
+    /** The swap of the route line over the lit stretches and the lit lane, on the camera's state. */
+    private val swap = LaneSwap()
+
     /** The data id of the path sent to the source that has not loaded yet; null while none waits. */
     private var sentId: String? = null
 
@@ -316,6 +328,7 @@ internal class OwnRouteLine(
             drawing = null
             forgetSent()
             forgetWindow()
+            swap.reset()
             showSdkLine()
             if (ready()) attempt { removeLayers() }
         }
@@ -329,6 +342,8 @@ internal class OwnRouteLine(
     fun setLanes(on: Boolean) {
         if (on == lanes) return
         lanes = on
+        // The swap starts afresh: the camera's next word and zoom say where it stands.
+        swap.reset()
         if (!enabled) return
         val had = routeId != null && !failed()
         task?.cancel()
@@ -476,6 +491,30 @@ internal class OwnRouteLine(
     }
 
     /**
+     * The camera's word, once per progress update, whether a close view or the junction view is latched: with the lanes,
+     * the swap's state, the line's opacity written where it flips.
+     */
+    fun onLatched(latched: Boolean) {
+        if (!enabled || !lanes) return
+        if (swap.onLatched(latched)) applySwap()
+    }
+
+    /**
+     * The camera's zoom at a change of the camera, its center at [latitude]: with the lanes, how wide a drawn lane is for
+     * the swap; the line's opacity written only where its state flips, at most twice an approach.
+     */
+    fun onCameraZoom(zoom: Double, latitude: Double) {
+        if (!enabled || !lanes) return
+        if (swap.onZoom(zoom, latitude)) applySwap()
+    }
+
+    /** The swap's state on the drawn line; a line not drawn takes it when it is ([show]). */
+    private fun applySwap() {
+        if (!drawn || !ready()) return
+        attempt { layers.setLitShown(!swap.swapped) }
+    }
+
+    /**
      * Once per progress update, with the app's lanes drawn: the tint pieces the car has passed are hidden, and where the
      * next window is due ([DrawingWindows.due]) it is built off the main thread and sent, unless the car has meanwhile
      * entered a card window.
@@ -559,6 +598,7 @@ internal class OwnRouteLine(
         trimStation = 0.0
         windowsLoaded = 0
         forgetWindow()
+        swap.reset()
         if (!enabled || !had) return
         forgetSent()
         showSdkLine()
@@ -581,6 +621,9 @@ internal class OwnRouteLine(
             "trims" to trims,
             "trimLagM" to trimLagMeters.takeUnless { it.isNaN() }?.let { Motion.round(it, 1) },
             "trimMaxMs" to trimMaxNanos.takeIf { it > 0L }?.let { Motion.round(it / NANOS_PER_MILLI, 2) },
+            // With the lanes: whether the lit lane shows in the line's place, and how often that flipped this second.
+            "swapped" to swap.swapped.takeIf { lanes },
+            "swaps" to swap.takeFlips().takeIf { lanes },
         ).filterValues { it != null }
         trims = 0
         trimLagMeters = Double.NaN
@@ -853,6 +896,7 @@ internal class OwnRouteLine(
             if (lanes) lanePort?.setEraserTrim(trim)
             layers.setVisible(true)
             if (lanes) {
+                layers.setLitShown(!swap.swapped)
                 lanePort?.setLitVisible(true)
                 window?.let(::applyStates)
             }
@@ -1225,8 +1269,15 @@ internal class OwnRouteLine(
                             // Not faded behind 3D buildings, as the SDK's line is not.
                             lineDepthOcclusionFactor(0.0)
                             lineColor(if (layer.casing) casingColour(look) else colourStops(emptyList(), look).first().colour)
-                            // The pair of the lit stretches draws nothing until the path's gradients are set.
-                            if (layer.lit) lineGradient(stepGradient(listOf(ColourStop(0.0, TRANSPARENT))))
+                            // The pair of the lit stretches draws nothing until the path's gradients are set, and its
+                            // opacity, 1 or 0, changes as a step.
+                            if (layer.lit) {
+                                lineGradient(stepGradient(listOf(ColourStop(0.0, TRANSPARENT))))
+                                lineOpacityTransition {
+                                    duration(0L)
+                                    delay(0L)
+                                }
+                            }
                         },
                         layer.above,
                     )
@@ -1280,6 +1331,11 @@ internal class OwnRouteLine(
             override fun setVisible(visible: Boolean) {
                 val visibility = Value.valueOf(if (visible) "visible" else "none")
                 for (layer in added) set(layer.id, "visibility", visibility)
+            }
+
+            override fun setLitShown(shown: Boolean) {
+                val opacity = Value.valueOf(if (shown) 1.0 else 0.0)
+                for (layer in added) if (layer.lit) set(layer.id, "line-opacity", opacity)
             }
 
             override fun remove() {

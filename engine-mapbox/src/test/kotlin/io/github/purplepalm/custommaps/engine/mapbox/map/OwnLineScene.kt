@@ -46,6 +46,12 @@ internal class OwnLineScene {
         var layersVisible = false
         var primaryShown = true
 
+        /** Whether the pair over the lit stretches is drawn (opacity 1) or not (0): a new pair is; null without layers. */
+        var litPair: Boolean? = null
+
+        /** Each opacity written to the lit pair, in order. */
+        val litPairWrites = ArrayList<Boolean>()
+
         override fun exist(): Boolean = added != null
 
         override fun add(layers: List<OwnRouteLine.Layer>, look: Look) {
@@ -55,6 +61,7 @@ internal class OwnLineScene {
             sourceData = null
             sent.clear()
             layersVisible = true
+            litPair = true
         }
 
         override fun setPath(points: List<GeoPoint>, dataId: String) {
@@ -94,11 +101,18 @@ internal class OwnLineScene {
             layersVisible = visible
         }
 
+        override fun setLitShown(shown: Boolean) {
+            record("setLitShown")
+            litPair = shown
+            litPairWrites += shown
+        }
+
         override fun remove() {
             record("remove")
             added = null
             sourceData = null
             sent.clear()
+            litPair = null
         }
 
         override fun show() {
@@ -123,6 +137,7 @@ internal class OwnLineScene {
             sent.clear()
             layersVisible = false
             primaryShown = true
+            litPair = null
         }
 
         /**

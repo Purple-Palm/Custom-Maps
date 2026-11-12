@@ -45,6 +45,32 @@ class CloseViewTest {
         }
     }
 
+    @Test
+    fun `a close view is latched once it has reached its goal and holds, a junction's with either lane zoom`() {
+        for (large in listOf(false, true)) {
+            assertTrue(CloseView.smoothFollowLatched(1.0, false, 0.0, false, large), "held down, large $large")
+            // On its way down, or back up, it is no latched view.
+            assertFalse(CloseView.smoothFollowLatched(1.0, true, 0.0, false, large), "going down, large $large")
+            assertFalse(CloseView.smoothFollowLatched(0.0, true, 0.0, false, large), "coming back, large $large")
+            assertFalse(CloseView.smoothFollowLatched(0.0, false, 0.0, false, large))
+        }
+        // The lanes' close view only with Large, and only held.
+        assertTrue(CloseView.smoothFollowLatched(0.0, false, 1.0, false, large = true))
+        assertFalse(CloseView.smoothFollowLatched(0.0, false, 1.0, true, large = true))
+        assertFalse(CloseView.smoothFollowLatched(0.0, false, 1.0, false, large = false))
+        // Where CloseView counts a view that moves, the latched state does not.
+        assertTrue(CloseView.smoothFollow(0.0, false, 0.0, true, large = true))
+        assertFalse(CloseView.smoothFollowLatched(0.0, false, 0.0, true, large = true))
+        // Mapbox tuned has no move of its own: latched while its close view is on, with Large only.
+        for (frame in listOf(false, true)) {
+            for (window in listOf(false, true)) {
+                for (large in listOf(false, true)) {
+                    assertEquals(CloseView.mapboxTuned(frame, window, large), CloseView.mapboxTunedLatched(frame, window, large))
+                }
+            }
+        }
+    }
+
     /** Smooth follow's answer from the maneuver focus alone, as the camera reads it after a progress update. */
     private fun maneuverOnly(focus: ManeuverFocus, now: Double, large: Boolean) =
         CloseView.smoothFollow(focus.goal, focus.isAnimating(now), 0.0, false, large)

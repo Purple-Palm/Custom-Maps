@@ -956,8 +956,12 @@ class PhoneMap internal constructor(
         camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), engine.runUpKey(progress))
         // Once per update, and published only when it changes.
         _closeView.value = camera.closeView
-        // The app's own lanes, with their switch on: the tints the car has passed, and the next window where it is due.
-        if (ownLine.enabled) ownLine.onProgress()
+        // The app's own lanes, with their switch on: whether the camera's close view holds, for the swap of the route line
+        // and the lit lane; the tints the car has passed, and the next window where it is due.
+        if (ownLine.enabled) {
+            ownLine.onLatched(camera.swapLatched)
+            ownLine.onProgress()
+        }
     }
 
     private fun onPuckMoved(point: Point) {
@@ -1278,6 +1282,8 @@ class PhoneMap internal constructor(
             cameraCadence.tick(SystemClock.elapsedRealtimeNanos())
             val shown = event.cameraState
             cameraSteps.onCamera(shown.center.latitude(), shown.center.longitude(), shown.zoom, shown.bearing, shown.pitch)
+            // How wide a drawn lane shows now, for the swap of the route line and the app's lit lane: written on a flip only.
+            if (ownLine.enabled) ownLine.onCameraZoom(shown.zoom, shown.center.latitude())
         }
         cameraSampling = scope.launch {
             while (true) {

@@ -301,6 +301,9 @@ internal class SmoothNavigationCamera(
     override var closeView = false
         private set
 
+    override var swapLatched = false
+        private set
+
     override fun requestFollowing() = beginTransition(Mode.FOLLOWING)
 
     override fun requestOverview() = beginTransition(Mode.OVERVIEW)
@@ -424,6 +427,14 @@ internal class SmoothNavigationCamera(
             laneMoving = laneFocus.isAnimating(now),
             large = laneZoom == LaneZoom.LARGE,
         )
+        // And whether that view holds: the app's own lit lane may take the route line's place only then.
+        swapLatched = CloseView.smoothFollowLatched(
+            maneuverGoal = maneuverFocus.goal,
+            maneuverMoving = maneuverFocus.isAnimating(now),
+            laneGoal = laneFocus.goal,
+            laneMoving = laneFocus.isAnimating(now),
+            large = laneZoom == LaneZoom.LARGE,
+        )
         // The tilt may have begun to move, also when the frame of the data source is the same.
         requestFrame()
     }
@@ -455,6 +466,7 @@ internal class SmoothNavigationCamera(
         zoomPlanner.reset()
         forgetSpeeds()
         closeView = false
+        swapLatched = false
         laneChoices = emptyList()
         speedMps = null
         teleportUntil = 0.0

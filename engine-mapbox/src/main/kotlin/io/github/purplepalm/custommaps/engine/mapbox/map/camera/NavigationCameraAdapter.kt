@@ -178,6 +178,9 @@ internal class NavigationCameraAdapter(
     override var closeView = false
         private set
 
+    override var swapLatched = false
+        private set
+
     override fun requestFollowing() {
         stopIdleFollow()
         if (tuned) {
@@ -281,11 +284,9 @@ internal class NavigationCameraAdapter(
             )
             // Once for this update, from the limits just set: in close for a maneuver or for lanes, with Large.
             val large = laneZoom == LaneZoom.LARGE
-            closeView = CloseView.mapboxTuned(
-                framesManeuver = large && LaneZoomFrames.framesManeuver(progress, options),
-                laneWindow = laneFocus.goal > 0.0,
-                large = large,
-            )
+            val framesManeuver = large && LaneZoomFrames.framesManeuver(progress, options)
+            closeView = CloseView.mapboxTuned(framesManeuver = framesManeuver, laneWindow = laneFocus.goal > 0.0, large = large)
+            swapLatched = CloseView.mapboxTunedLatched(framesManeuver = framesManeuver, laneWindow = laneFocus.goal > 0.0, large = large)
         }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
@@ -311,6 +312,7 @@ internal class NavigationCameraAdapter(
     override fun onGuidanceEnded() {
         jumpFrame.reset()
         closeView = false
+        swapLatched = false
         // Mapbox standard keeps nothing else for a drive.
         if (!tuned) return
         laneFocus.reset(nowSeconds())
