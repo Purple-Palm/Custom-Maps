@@ -17,11 +17,13 @@ import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.look.LastKnownPosition
 import io.github.purplepalm.custommaps.look.LookController
+import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.look.SunPlaces
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.nav.debug.JsonLines
 import io.github.purplepalm.custommaps.nav.debug.StateSummary
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.network.NetworkMonitor
@@ -48,7 +50,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -113,22 +114,23 @@ class AppGraph(private val application: Application) {
     val engine: MapboxEngine =
         MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { tokenHandOver.appliedTokenId }, debugLog, network.status)
 
+    /** Where the sun is computed for: the newest position the app has, which never leaves memory. */
+    private val sunPlaces = SunPlaces(
+        fix = { engine.navigation.lastPosition },
+        lastKnown = LastKnownPosition(application),
+        zone = { ZoneId.systemDefault().rules },
+        now = Instant::now,
+    )
+
     /**
      * The day look or the night look, for the whole process: an activity created again shows the
-     * look this one decided. The sun is computed for the newest position the app has, which never
-     * leaves memory.
+     * look this one decided. It follows the choice in Settings, Auto by the sun at first.
      */
     val lookController = LookController(
         guidance = engine.navigation.guidanceState,
         progress = engine.navigation.routeProgress,
-        places = SunPlaces(
-            fix = { engine.navigation.lastPosition },
-            lastKnown = LastKnownPosition(application),
-            zone = { ZoneId.systemDefault().rules },
-            now = Instant::now,
-        )::current,
-        // Auto until Settings offers the choice.
-        choices = flowOf(LookChoice.AUTO),
+        places = sunPlaces::current,
+        choices = settings.dayNight,
         debugLog = debugLog,
         scope = applicationScope,
         now = Instant::now,
@@ -136,6 +138,14 @@ class AppGraph(private val application: Application) {
         // Behind the progress update, once the map's camera has taken it too.
         driveContext = Dispatchers.Main,
     )
+
+    /**
+     * When Auto would change [shown] next, for the note in Settings, which shows it on screen only;
+     * none for a [choice] by hand. Read on the main thread when Settings opens or the look or the
+     * choice changes.
+     */
+    fun nextLook(choice: LookChoice, shown: Look): NextLook? =
+        NextLook.of(choice, shown, sunPlaces.current(), Instant.now(), ZoneId.systemDefault())
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import java.io.IOException
@@ -35,6 +36,11 @@ interface AppSettings {
     val laneDetails: Flow<Boolean>
 
     suspend fun setLaneDetails(enabled: Boolean)
+
+    /** The look of the app and its map: by the sun (Auto), or always the day or the night look. */
+    val dayNight: Flow<LookChoice>
+
+    suspend fun setDayNight(choice: LookChoice)
 }
 
 /**
@@ -81,6 +87,14 @@ class DataStoreAppSettings(
         onChanged(LANE_DETAILS.name, enabled)
     }
 
+    override val dayNight: Flow<LookChoice> = preferences.map { lookChoiceOf(it[DAY_NIGHT]) }.distinctUntilChanged()
+
+    override suspend fun setDayNight(choice: LookChoice) {
+        val stored = choice.stored()
+        dataStore.edit { it[DAY_NIGHT] = stored }
+        onChanged(DAY_NIGHT.name, stored)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -90,6 +104,7 @@ class DataStoreAppSettings(
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
         private val LANE_ZOOM = stringPreferencesKey("lane_zoom")
         private val LANE_DETAILS = booleanPreferencesKey("lane_details")
+        private val DAY_NIGHT = stringPreferencesKey("day_night")
 
         private fun CameraStyle.stored(): String = when (this) {
             CameraStyle.MAPBOX_STANDARD -> "mapbox_standard"
@@ -107,5 +122,14 @@ class DataStoreAppSettings(
 
         private fun laneZoomOf(stored: String?): LaneZoom =
             LaneZoom.entries.firstOrNull { it.stored() == stored } ?: LaneZoom.DEFAULT
+
+        private fun LookChoice.stored(): String = when (this) {
+            LookChoice.AUTO -> "auto"
+            LookChoice.DAY -> "day"
+            LookChoice.NIGHT -> "night"
+        }
+
+        private fun lookChoiceOf(stored: String?): LookChoice =
+            LookChoice.entries.firstOrNull { it.stored() == stored } ?: LookChoice.DEFAULT
     }
 }

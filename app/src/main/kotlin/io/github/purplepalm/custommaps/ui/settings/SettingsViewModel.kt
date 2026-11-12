@@ -2,8 +2,11 @@ package io.github.purplepalm.custommaps.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.trip.MonthCount
@@ -35,6 +38,13 @@ data class GuidanceSettings(
     val laneDetails: Boolean = false,
 )
 
+/** The look section: Auto, Day or Night, and under Auto when the look changes next. */
+data class LookSettings(
+    val choice: LookChoice = LookChoice.DEFAULT,
+    /** Null with Day or Night, under the time zone's guess, and when the sun does not cross within a day. */
+    val next: NextLook? = null,
+)
+
 /** A recent trip session, and whose token it ran on. */
 data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
@@ -60,6 +70,10 @@ class SettingsViewModel(
     private val installedAt: () -> Instant = { Instant.EPOCH },
     /** The saved tokens, for the names the trip sessions are counted under. Only names leave here, never a token. */
     tokens: Flow<TokenList> = flowOf(TokenList.EMPTY),
+    /** The look on screen now. */
+    shownLook: Flow<Look> = flowOf(Look.NIGHT),
+    /** When Auto would change the shown look next ([NextLook.of]); worked out here, never in composition. */
+    private val nextLook: (choice: LookChoice, shown: Look) -> NextLook? = { _, _ -> null },
 ) : ViewModel() {
 
     private val logBytes = MutableStateFlow<Long?>(null)
@@ -68,6 +82,14 @@ class SettingsViewModel(
         combine(settings.cameraStyle, settings.laneZoom, settings.laneDetails) { style, laneZoom, laneDetails ->
             GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, laneDetails = laneDetails)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
+
+    /**
+     * The choice and its next change, worked out again whenever Settings opens, the choice changes
+     * or the look on screen does. The time is shown on the screen only, never logged or stored.
+     */
+    val look: StateFlow<LookSettings> =
+        combine(settings.dayNight, shownLook) { choice, shown -> LookSettings(choice, nextLook(choice, shown)) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
     val debug: StateFlow<DebugState> =
         combine(tripLog.entries, settings.simulateDrive, logBytes, tokens) { entries, simulate, bytes, list ->
@@ -80,6 +102,18 @@ class SettingsViewModel(
                 logBytes = bytes,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
+
+    /** Applies at once, also during a drive: the screen and the map take the look in the same moment. */
+    fun setDayNight(choice: LookChoice) {
+        viewModelScope.launch {
+            try {
+                settings.setDayNight(choice)
+            } catch (e: IOException) {
+                // Not stored, so the choice keeps showing the stored value, which the look keeps too.
+                debugLog.error("settings.setDayNight", e)
+            }
+        }
+    }
 
     fun setSimulateDrive(enabled: Boolean) {
         viewModelScope.launch {

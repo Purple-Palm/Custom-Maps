@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import java.io.File
@@ -35,6 +36,7 @@ class DataStoreAppSettingsTest {
     /** The key as the file holds it, to read and write what the settings do not go through. */
     private val storedCameraStyle = stringPreferencesKey("camera_style")
     private val storedLaneZoom = stringPreferencesKey("lane_zoom")
+    private val storedDayNight = stringPreferencesKey("day_night")
 
     @BeforeEach
     fun createSettings() {
@@ -121,6 +123,29 @@ class DataStoreAppSettingsTest {
     }
 
     @Test
+    fun `stores each day and night choice under its own word, Auto at first`() = runBlocking {
+        assertEquals(LookChoice.AUTO, settings.dayNight.first())
+        val words = mapOf(LookChoice.AUTO to "auto", LookChoice.DAY to "day", LookChoice.NIGHT to "night")
+        assertEquals(LookChoice.entries.toSet(), words.keys)
+        // Auto last: it is also what an empty file reads as.
+        for (choice in listOf(LookChoice.DAY, LookChoice.NIGHT, LookChoice.AUTO)) {
+            settings.setDayNight(choice)
+            assertEquals(choice, settings.dayNight.first())
+            assertEquals(words[choice], dataStore.data.first()[storedDayNight])
+        }
+    }
+
+    @Test
+    fun `a day and night word it does not know reads as Auto`() = runBlocking {
+        settings.setDayNight(LookChoice.NIGHT)
+        // As a file from a build with other choices would hold it, and one that named them otherwise.
+        for (word in listOf("dusk", "system", "NIGHT", "")) {
+            dataStore.edit { it[storedDayNight] = word }
+            assertEquals(LookChoice.AUTO, settings.dayNight.first(), word)
+        }
+    }
+
+    @Test
     fun `one setting does not change the other`() = runBlocking {
         settings.setCameraStyle(CameraStyle.MAPBOX_STANDARD)
         settings.setSimulateDrive(true)
@@ -134,6 +159,11 @@ class DataStoreAppSettingsTest {
         settings.setLaneDetails(true)
         assertEquals(LaneZoom.LARGE, settings.laneZoom.first())
         assertTrue(settings.simulateDrive.first())
+        settings.setDayNight(LookChoice.DAY)
+        assertEquals(CameraStyle.MAPBOX_TUNED, settings.cameraStyle.first())
+        assertTrue(settings.laneDetails.first())
+        settings.setLaneZoom(LaneZoom.DEFAULT)
+        assertEquals(LookChoice.DAY, settings.dayNight.first())
     }
 
     @Test
@@ -142,12 +172,16 @@ class DataStoreAppSettingsTest {
         settings.setCameraStyle(CameraStyle.MAPBOX_TUNED)
         settings.setLaneZoom(LaneZoom.LARGE)
         settings.setLaneDetails(true)
+        settings.setDayNight(LookChoice.NIGHT)
+        settings.setDayNight(LookChoice.AUTO)
         assertEquals(
             listOf<Pair<String, Any>>(
                 "simulate_drive" to true,
                 "camera_style" to "mapbox_tuned",
                 "lane_zoom" to "large",
                 "lane_details" to true,
+                "day_night" to "night",
+                "day_night" to "auto",
             ),
             changes,
         )

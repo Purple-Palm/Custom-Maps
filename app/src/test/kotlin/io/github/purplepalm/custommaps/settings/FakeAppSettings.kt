@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.settings
 
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import java.io.IOException
@@ -14,6 +15,7 @@ class FakeAppSettings(
     cameraStyle: CameraStyle = CameraStyle.DEFAULT,
     laneZoom: LaneZoom = LaneZoom.DEFAULT,
     laneDetails: Boolean = false,
+    dayNight: LookChoice = LookChoice.DEFAULT,
 ) : AppSettings {
 
     /** While true every change fails as it does on a full disk, and the stored value stays. */
@@ -34,6 +36,10 @@ class FakeAppSettings(
     override val laneDetails = MutableStateFlow(laneDetails)
 
     override suspend fun setLaneDetails(enabled: Boolean) = store { laneDetails.value = enabled }
+
+    override val dayNight = MutableStateFlow(dayNight)
+
+    override suspend fun setDayNight(choice: LookChoice) = store { dayNight.value = choice }
 
     private fun store(change: () -> Unit) {
         if (storageFull) throw IOException("No space left on device")

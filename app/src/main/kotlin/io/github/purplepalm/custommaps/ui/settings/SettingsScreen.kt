@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.settings
 import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,11 +15,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
@@ -34,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
@@ -42,9 +46,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
@@ -63,6 +70,7 @@ import io.github.purplepalm.custommaps.ui.token.TokenRow
 import io.github.purplepalm.custommaps.ui.token.TokenState
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -74,6 +82,9 @@ private val TRIP_TIME = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.US)
 
 /** The day since which the month's trip count runs, when the log began after the month did. */
 private val TRIPS_SINCE_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.US)
+
+/** When the look changes next under Auto, written as the guidance bar writes the arrival time. */
+private val NEXT_LOOK_TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
 
 /**
  * The words for a month's trip count that does not cover the whole month: since the installation,
@@ -88,12 +99,14 @@ internal fun tripsSinceRes(began: LogBegan?): Int = when (began) {
 @Composable
 fun SettingsScreen(
     tokens: TokenState,
+    look: LookSettings,
     guidance: GuidanceSettings,
     debug: DebugState,
     onAddToken: (name: String?, token: String) -> TokenProblem?,
     onRenameToken: (id: String, name: String) -> TokenProblem?,
     onUseToken: (id: String) -> Unit,
     onDeleteToken: (id: String) -> Unit,
+    onDayNightChange: (LookChoice) -> Unit,
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
     onLaneDetailsChange: (Boolean) -> Unit,
@@ -138,6 +151,8 @@ fun SettingsScreen(
             SectionTitle(R.string.token_title)
             TokenListSection(tokens, onAddToken, onRenameToken, onUseToken, onDeleteToken)
             SectionDivider()
+            DayNightSection(look, onDayNightChange)
+            SectionDivider()
             GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
             SectionDivider()
             DebugSection(debug, onSimulateDriveChange, onShareLog, onClearLog, onCrashNow, temporaryDebugKey)
@@ -178,6 +193,72 @@ private fun PrivacyPolicyButton() {
         Text(stringResource(R.string.about_privacy_policy))
     }
 }
+
+/**
+ * The day look, the night look, or by the sun. A choice applies at once, to the screen and the map
+ * together; under Auto the note says when the look changes next.
+ */
+@Composable
+private fun DayNightSection(look: LookSettings, onDayNightChange: (LookChoice) -> Unit) {
+    SectionTitle(R.string.day_night_title)
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+    ) {
+        val choices = LookChoice.entries
+        choices.forEachIndexed { index, choice ->
+            SegmentedButton(
+                selected = choice == look.choice,
+                onClick = { onDayNightChange(choice) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = choices.size),
+                contentPadding = THREE_SEGMENT_PADDING,
+            ) {
+                SegmentLabel(stringResource(choice.titleRes()))
+            }
+        }
+    }
+    if (look.choice == LookChoice.AUTO) {
+        Text(
+            text = stringResource(R.string.day_night_auto_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = LookTheme.tokens.onCardMuted,
+        )
+        look.next?.let { next ->
+            Text(
+                text = stringResource(next.look.nextRes(), NEXT_LOOK_TIME.format(next.at)),
+                style = MaterialTheme.typography.bodyMedium,
+                color = LookTheme.tokens.onCard,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A segment's word on one line, smaller only when a large font leaves it no room, never below
+ * 12 sp. Material measures the word as wide as the segment and sets the selected segment's check
+ * mark beside it, so every segment keeps room for the mark and its words stay one size.
+ */
+@Composable
+private fun SegmentLabel(text: String) {
+    Text(
+        text = text,
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = LocalTextStyle.current.fontSize),
+        modifier = Modifier.layout { measurable, constraints ->
+            val room = if (constraints.hasBoundedWidth) (constraints.maxWidth - CHECK_MARK_ROOM.roundToPx()).coerceAtLeast(0) else constraints.maxWidth
+            val label = measurable.measure(constraints.copy(minWidth = 0, maxWidth = room))
+            layout(label.width, label.height) { label.place(0, 0) }
+        },
+    )
+}
+
+/** The selected segment's check mark and the space before its word, as Material 3 1.4.0 lays them out. */
+private val CHECK_MARK_ROOM = SegmentedButtonDefaults.IconSize + 8.dp
+
+/** Three segments on a narrow phone: less padding than Material's 12 dp a side, so a large font still fits. */
+private val THREE_SEGMENT_PADDING = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
 
 /** How the app guides. Every choice here applies at once, also during a drive. */
 @Composable
@@ -502,6 +583,20 @@ private fun CameraStyle.noteRes(): Int = when (this) {
 }
 
 @StringRes
+private fun LookChoice.titleRes(): Int = when (this) {
+    LookChoice.AUTO -> R.string.day_night_auto
+    LookChoice.DAY -> R.string.day_night_day
+    LookChoice.NIGHT -> R.string.day_night_night
+}
+
+/** The line that says when Auto brings [this] look next. */
+@StringRes
+private fun Look.nextRes(): Int = when (this) {
+    Look.NIGHT -> R.string.day_night_next_night
+    Look.DAY -> R.string.day_night_next_day
+}
+
+@StringRes
 private fun LaneZoom.titleRes(): Int = when (this) {
     LaneZoom.DEFAULT -> R.string.lane_zoom_default
     LaneZoom.LARGE -> R.string.lane_zoom_large
@@ -543,6 +638,8 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
                 full = false,
                 defaultName = "Token 2",
             ),
+            // An invented time.
+            look = LookSettings(LookChoice.AUTO, NextLook(Look.NIGHT, LocalTime.of(18, 5))),
             guidance = GuidanceSettings(),
             debug = DebugState(
                 trips = MonthCount(3, partialSince = LocalDate.of(2000, 1, 15), began = LogBegan.INSTALLATION),
@@ -563,6 +660,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onRenameToken = { _, _ -> null },
             onUseToken = {},
             onDeleteToken = {},
+            onDayNightChange = {},
             onCameraStyleChange = {},
             onLaneZoomChange = {},
             onLaneDetailsChange = {},
@@ -573,5 +671,27 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onCrashNow = {},
             temporaryDebugKey = true,
         )
+    }
+}
+
+/**
+ * The Day and night group on a narrow phone with every font size: Auto by day and at night, each
+ * with the time it changes next (invented times), and Night by hand, its segment the widest.
+ */
+@Preview(name = "day and night", widthDp = 360)
+@Preview(name = "day and night, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "day and night, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun DayNightSectionPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
+        Surface(color = LookTheme.tokens.screen) {
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                DayNightSection(LookSettings(LookChoice.AUTO, NextLook(Look.NIGHT, LocalTime.of(18, 5))), onDayNightChange = {})
+                SectionDivider()
+                DayNightSection(LookSettings(LookChoice.AUTO, NextLook(Look.DAY, LocalTime.of(6, 20))), onDayNightChange = {})
+                SectionDivider()
+                DayNightSection(LookSettings(LookChoice.NIGHT), onDayNightChange = {})
+            }
+        }
     }
 }

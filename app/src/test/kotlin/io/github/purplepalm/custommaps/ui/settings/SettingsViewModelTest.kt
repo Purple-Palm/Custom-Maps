@@ -1,7 +1,10 @@
 package io.github.purplepalm.custommaps.ui.settings
 
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
+import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
@@ -13,6 +16,7 @@ import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
 import java.io.File
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
@@ -326,5 +330,52 @@ class SettingsViewModelTest {
         runCurrent()
         assertTrue(settings.simulateDrive.value)
         assertTrue(viewModel.debug.value.simulateDrive)
+    }
+
+    /** The look on screen, and what the next change is asked with. */
+    private val shown = MutableStateFlow(Look.DAY)
+    private val asked = mutableListOf<Pair<LookChoice, Look>>()
+
+    /** Invented times: the evening's for the day look, the morning's for the night look, none by hand. */
+    private val nextLook: (LookChoice, Look) -> NextLook? = { choice, look ->
+        asked += choice to look
+        when {
+            choice != LookChoice.AUTO -> null
+            look == Look.DAY -> NextLook(Look.NIGHT, LocalTime.of(18, 5))
+            else -> NextLook(Look.DAY, LocalTime.of(6, 20))
+        }
+    }
+
+    private fun TestScope.viewModelWithLook() =
+        SettingsViewModel(tripLog, settings, archive, now = { now }, installedAt = { installedAt }, shownLook = shown, nextLook = nextLook).also {
+            it.look.launchIn(backgroundScope)
+            runCurrent()
+        }
+
+    @Test
+    fun `under Auto the look section says when the look changes next, and by hand it says nothing`() = runTest(dispatcher) {
+        val viewModel = viewModelWithLook()
+        assertEquals(LookSettings(LookChoice.AUTO, NextLook(Look.NIGHT, LocalTime.of(18, 5))), viewModel.look.value)
+        // The look changes on screen: the next change is the morning's.
+        shown.value = Look.NIGHT
+        runCurrent()
+        assertEquals(NextLook(Look.DAY, LocalTime.of(6, 20)), viewModel.look.value.next)
+        // Day by hand: no next change.
+        viewModel.setDayNight(LookChoice.DAY)
+        runCurrent()
+        assertEquals(LookChoice.DAY, settings.dayNight.value)
+        assertEquals(LookSettings(LookChoice.DAY, null), viewModel.look.value)
+        assertEquals(listOf(LookChoice.AUTO to Look.DAY, LookChoice.AUTO to Look.NIGHT, LookChoice.DAY to Look.NIGHT), asked)
+    }
+
+    @Test
+    fun `a day and night choice that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModelWithLook()
+        viewModel.setDayNight(LookChoice.NIGHT)
+        runCurrent()
+        assertEquals(LookChoice.AUTO, settings.dayNight.value)
+        assertEquals(LookChoice.AUTO, viewModel.look.value.choice)
+        assertEquals(listOf("error"), archive.logged)
     }
 }

@@ -75,16 +75,26 @@ fun CustomMapsApp(graph: AppGraph) {
         if (showSettings) {
             BackHandler { showSettings = false }
             val settingsViewModel = viewModel {
-                SettingsViewModel(graph.tripLogStore, graph.settings, graph.debugLog, installedAt = graph::installedAt, tokens = graph.tokenStore.list)
+                SettingsViewModel(
+                    graph.tripLogStore,
+                    graph.settings,
+                    graph.debugLog,
+                    installedAt = graph::installedAt,
+                    tokens = graph.tokenStore.list,
+                    shownLook = graph.lookController.look,
+                    nextLook = graph::nextLook,
+                )
             }
             LaunchedEffect(Unit) { settingsViewModel.refreshLogSize() }
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()
+            val lookSettings by settingsViewModel.look.collectAsStateWithLifecycle()
             val guidanceSettings by settingsViewModel.guidance.collectAsStateWithLifecycle()
             val debug by settingsViewModel.debug.collectAsStateWithLifecycle()
             // Debug builds only: read once from the app's own signing certificate.
             val temporaryDebugKey = remember { context.isDebuggable() && context.signedWithDefaultDebugKey() }
             SettingsScreen(
                 tokens = tokenState,
+                look = lookSettings,
                 guidance = guidanceSettings,
                 debug = debug,
                 // Each checks again that no trip runs: the active token stays as it is during guidance.
@@ -92,6 +102,7 @@ fun CustomMapsApp(graph: AppGraph) {
                 onRenameToken = tokenViewModel::rename,
                 onUseToken = tokenViewModel::use,
                 onDeleteToken = tokenViewModel::delete,
+                onDayNightChange = settingsViewModel::setDayNight,
                 onCameraStyleChange = settingsViewModel::setCameraStyle,
                 onLaneZoomChange = settingsViewModel::setLaneZoom,
                 onLaneDetailsChange = settingsViewModel::setLaneDetails,
