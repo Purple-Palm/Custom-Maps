@@ -4,10 +4,16 @@ import com.mapbox.geojson.LineString
 import com.mapbox.geojson.MultiLineString
 import com.mapbox.geojson.MultiPolygon
 import com.mapbox.geojson.Polygon
+import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
+import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
+import io.github.purplepalm.custommaps.nav.lanes.geometry.GoreArrow
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
+import io.github.purplepalm.custommaps.nav.lanes.geometry.RoutePath
 import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficLevel
 import io.github.purplepalm.custommaps.nav.lanes.geometry.TrafficRun
 import io.github.purplepalm.custommaps.nav.look.Look
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -16,7 +22,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * The app's own lanes of a made-up freeway exit as the map gets them ([FreewayExit]): the windows' features as GeoJSON,
- * what is set on them by feature state, and the route line's two pairs of gradients.
+ * what is set on them by feature state, the route line's two pairs of gradients, and the maneuver arrow at the gore.
  */
 class OwnLanesTest {
 
@@ -155,5 +161,43 @@ class OwnLanesTest {
         assertEquals(listOf(OwnRouteLine.ColourStop(0.0, OwnRouteLine.TRANSPARENT)), none.getValue(OwnRouteLine.LIT_LINE))
         assertEquals(OwnRouteLine.colourStops(runs, Look.NIGHT), none.getValue(OwnRouteLine.LINE))
         assertNotNull(none[OwnRouteLine.LIT_CASING])
+    }
+
+    /** How far north of the equator [p] lies, and how far east of the route's own line (longitude 0), in metres. */
+    private fun north(p: GeoPoint) = Geo.meters(GeoPoint(0.0, 0.0), GeoPoint(p.latitude, 0.0))
+
+    private fun east(p: GeoPoint) = Geo.meters(GeoPoint(p.latitude, 0.0), p) * if (p.longitude < 0.0) -1.0 else 1.0
+
+    @Test
+    fun `the maneuver at the gore gets its arrow along the path, from 12 m before the gore to 30 m past it, and no other one does`() {
+        // The off ramp begins the leg's second step, at the drawing's gore; the turn and the arrival get none.
+        val gore = requireNotNull(plan.station(0, 1, 0.0))
+        assertEquals(gore, own.drawing.gores().first(), GoreArrow.SAME_PLACE_METERS)
+        assertEquals(setOf(OwnLanes.StepAt(0, 1)), own.arrows.keys)
+        val arrow = own.arrows.getValue(OwnLanes.StepAt(0, 1))
+        // Along the line due north: it begins 12 m before the gore in the right lane, the lit one, a lane east of the
+        // route's own line, where the navigation SDK's arrow would begin, and ends 30 m past the gore.
+        assertEquals(gore - GoreArrow.BEFORE_METERS, north(arrow.first()), 0.01)
+        assertEquals(LaneTopology.FREEWAY_LANE_METERS, east(arrow.first()), 0.01)
+        assertEquals(gore + GoreArrow.AFTER_METERS, north(arrow.last()), 0.01)
+        // The points between are the drawn path's own, in order.
+        val inner = arrow.subList(1, arrow.size - 1)
+        assertTrue(inner.isNotEmpty())
+        assertTrue(inner.all { it in drawing.points })
+        assertEquals(inner.map { drawing.points.indexOf(it) }.sorted(), inner.map { drawing.points.indexOf(it) })
+        assertTrue(arrow.zipWithNext().all { (a, b) -> north(b) > north(a) })
+        // Without the lanes, no arrow of theirs: the drawing has none.
+        assertNull(ownLineDrawing(id, legs, shapes, plan, 1, lanes = false).lanes?.arrows)
+        // A leg's steps that begin at no gore get none, and a gore that begins no step gives none.
+        assertTrue(OwnLanes.arrowsOf(own.drawing.gores(), listOf(doubleArrayOf(0.0, gore + 2.0 * GoreArrow.SAME_PLACE_METERS)), routePath()).isEmpty())
+        assertTrue(OwnLanes.arrowsOf(emptyList(), listOf(doubleArrayOf(0.0, gore)), routePath()).isEmpty())
+        assertEquals(setOf(OwnLanes.StepAt(1, 2)), OwnLanes.arrowsOf(own.drawing.gores(), listOf(doubleArrayOf(0.0), doubleArrayOf(0.0, 1.0, gore)), routePath()).keys)
+    }
+
+    /** The path of the made-up exit, as the own line builds it. */
+    private fun routePath(): RoutePath {
+        val line = shapes.flatten().flatten().map { GeoPoint(it.latitude(), it.longitude()) }
+        val section = CrossSection.of(plan.plan, plan.evidence)
+        return RoutePath.of(plan.plan, line, 1, plan.evidence, section)
     }
 }

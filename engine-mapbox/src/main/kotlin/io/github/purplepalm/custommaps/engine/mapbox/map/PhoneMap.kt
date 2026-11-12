@@ -252,8 +252,11 @@ class PhoneMap internal constructor(
     /** The step whose maneuver arrow was worked out last: route, leg and step; null before any. */
     private var arrowStep: String? = null
 
-    /** The arrow of that step when it is a U-turn drawn as one curve; null while the SDK's own arrow is shown. */
-    private var uTurnArrow: ManeuverArrow? = null
+    /**
+     * The arrow of that step where the app draws it, a U-turn as one curve or a maneuver at a gore of the app's lanes
+     * along its lit lane; null while the SDK's own arrow is shown.
+     */
+    private var shapedArrow: ManeuverArrow? = null
 
     /** Lane markings on the map where Mapbox has them; off until Settings says otherwise. */
     private val laneDetails = LaneDetails.on(mapboxMap, debugLog)
@@ -1093,7 +1096,7 @@ class PhoneMap internal constructor(
     private fun clearArrows() {
         val style = style ?: return
         arrowStep = null
-        uTurnArrow = null
+        shapedArrow = null
         routeArrowView.render(style, routeArrowApi.clearArrows())
     }
 
@@ -1102,24 +1105,37 @@ class PhoneMap internal constructor(
      * update: the last 30 m of the step and the first 30 m of the next one, which is the same
      * shape for the whole step. A U-turn across a median opening is drawn as one curve instead
      * ([UTurnArrow]), worked out once for its step and then left on the map until the step
-     * changes. It is kept in memory only, like everything else of the route.
+     * changes. Where the app's own lanes are drawn and the maneuver leaves at a gore of theirs,
+     * the arrow is laid along the lit lane instead ([OwnRouteLine.goreArrow]), from the drawn
+     * line's own points, and set again when the own line comes or goes. It is kept in memory
+     * only, like everything else of the route.
      */
     private fun renderManeuverArrow(style: Style, progress: RouteProgress) {
         val leg = progress.currentLegProgress
-        val step = leg?.let { "${progress.navigationRoute.id}/${it.legIndex}/${it.currentStepProgress?.stepIndex}" }
+        val stepIndex = leg?.currentStepProgress?.stepIndex
+        val alongLanes = if (ownLine.enabled && leg != null && stepIndex != null) {
+            ownLine.goreArrow(progress.navigationRoute.id, leg.legIndex, stepIndex + 1)
+        } else {
+            null
+        }
+        val step = leg?.let { "${progress.navigationRoute.id}/${it.legIndex}/$stepIndex" + if (alongLanes != null) LANES_ARROW else "" }
         if (step != arrowStep) {
             arrowStep = step
-            val shaped = if (isUTurn(progress)) uTurnArrowOf(progress) else null
+            val shaped = when {
+                alongLanes != null -> ManeuverArrow(alongLanes.map { Point.fromLngLat(it.longitude, it.latitude) })
+                isUTurn(progress) -> uTurnArrowOf(progress)
+                else -> null
+            }
             // The arrow of the step before goes first, whichever kind it was: an update of the
             // SDK's arrow draws only the first arrow the arrow API holds.
-            if (shaped != null || uTurnArrow != null) routeArrowApi.clearArrows()
-            uTurnArrow = shaped
+            if (shaped != null || shapedArrow != null) routeArrowApi.clearArrows()
+            shapedArrow = shaped
             if (shaped != null) {
                 routeArrowView.render(style, routeArrowApi.showManeuverArrow())
                 routeArrowView.render(style, routeArrowApi.addArrow(shaped))
             }
         }
-        if (uTurnArrow == null) routeArrowView.renderManeuverUpdate(style, routeArrowApi.addUpcomingManeuverArrow(progress))
+        if (shapedArrow == null) routeArrowView.renderManeuverUpdate(style, routeArrowApi.addUpcomingManeuverArrow(progress))
     }
 
     /** Whether the next maneuver is a U-turn, as its banner says, or the route's step where there is no banner yet. */
@@ -1484,6 +1500,9 @@ class PhoneMap internal constructor(
 
         /** The slots the "map_layers" line lists: the route's, and the own lanes' slots inside it where they are used. */
         private val ROUTE_SLOTS = setOf(ROUTE_SLOT, LaneLayers.UNDER_SLOT, LaneLayers.OVER_SLOT)
+
+        /** Marks a step's arrow laid along the app's lanes, so the arrow is set again when the own line comes or goes. */
+        private const val LANES_ARROW = "/lanes"
         private const val ROUTE_TAP_RADIUS_DP = 30f
         private const val FADE_IN_MS = 250L
         private const val CAMERA_SAMPLE_MS = 1_000L

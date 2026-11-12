@@ -515,6 +515,19 @@ internal class OwnRouteLine(
     }
 
     /**
+     * The arrow of the maneuver that begins step [step] of leg [leg] of the route [routeId], laid along the path where
+     * that maneuver lies at a gore of the app's lanes ([OwnLanes.arrows]); null unless the own line is drawn with its
+     * lanes for that route, and for a maneuver at no gore of theirs, where the navigation SDK's own arrow is the right
+     * one. A lookup, once per progress update.
+     */
+    fun goreArrow(routeId: String, leg: Int, step: Int): List<GeoPoint>? {
+        if (!enabled || !lanes || !drawn) return null
+        val drawing = drawing ?: return null
+        if (drawing.routeId != routeId) return null
+        return drawing.lanes?.arrows?.get(OwnLanes.StepAt(leg, step))
+    }
+
+    /**
      * Once per progress update, with the app's lanes drawn: the tint pieces the car has passed are hidden, and where the
      * next window is due ([DrawingWindows.due]) it is built off the main thread and sent, unless the car has meanwhile
      * entered a card window.

@@ -13,6 +13,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
+import io.github.purplepalm.custommaps.nav.lanes.geometry.GoreArrow
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 import io.github.purplepalm.custommaps.nav.lanes.geometry.RoutePath
 import io.github.purplepalm.custommaps.nav.lanes.geometry.StationTable
@@ -22,9 +23,10 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
 
 /**
  * The app's own lanes along one path of a route, as the map draws them ([LaneLayers]): the drawing ([LaneDrawing]), the
- * windows of it the map holds around the car ([DrawingWindows]), and where along the path a lane is lit ([lit]), so the
- * route line lies in two pairs of layers, one over the lit stretches and one over the rest. Built once with the path, off
- * the main thread, and kept in memory with it, never stored; [window] makes a window's features off the main thread too.
+ * windows of it the map holds around the car ([DrawingWindows]), where along the path a lane is lit ([lit]), so the
+ * route line lies in two pairs of layers, one over the lit stretches and one over the rest, and the maneuver arrows laid
+ * along the path at its gores ([arrows]). Built once with the path, off the main thread, and kept in memory with it,
+ * never stored; [window] makes a window's features off the main thread too.
  */
 internal class OwnLanes(
     /** The features in metres. */
@@ -35,7 +37,15 @@ internal class OwnLanes(
     val litStations: List<ClosedFloatingPointRange<Double>>,
     /** The same stretches as fractions of the path's projected length, as the route line's gradients take them. */
     val lit: List<ClosedFloatingPointRange<Double>>,
+    /**
+     * The arrow of each maneuver that lies at a gore of the drawing, by its leg and the step it begins ([StepAt]): the
+     * path's points around the gore ([GoreArrow]), for the navigation SDK's arrow API in place of its own arrow.
+     */
+    val arrows: Map<StepAt, List<GeoPoint>> = emptyMap(),
 ) {
+
+    /** The step [step] of the leg [leg] of a route, both counted from 0 as the navigation SDK counts them. */
+    data class StepAt(val leg: Int, val step: Int)
 
     /**
      * The features of [window] as the drawing's source takes them, with the traffic of each lit piece from [runs] along
@@ -96,10 +106,18 @@ internal class OwnLanes(
         const val BUDGET_COORDINATES = 20_000
 
         /**
-         * The lanes along [path] ([plan]'s, laid out by [section] from [evidence]), whose station table is [table]. Throws
-         * where the drawing cannot be made: the route costs its own line with it.
+         * The lanes along [path] ([plan]'s, laid out by [section] from [evidence]), whose station table is [table], with an
+         * arrow for each maneuver at a gore of theirs, where the steps of each leg begin at the route stations of [steps]
+         * (a list per leg, a station per step). Throws where the drawing cannot be made: the route costs its own line.
          */
-        fun of(plan: LanePlan, path: RoutePath, evidence: LaneEvidence, section: CrossSection, table: StationTable): OwnLanes {
+        fun of(
+            plan: LanePlan,
+            path: RoutePath,
+            evidence: LaneEvidence,
+            section: CrossSection,
+            table: StationTable,
+            steps: List<DoubleArray> = emptyList(),
+        ): OwnLanes {
             val drawing = LaneDrawing.of(plan, path, evidence, section)
             val litStations = drawing.litStretches()
             return OwnLanes(
@@ -107,7 +125,25 @@ internal class OwnLanes(
                 windows = DrawingWindows(plan.windows.map { it.from..it.to }, path.routeStations.last()),
                 litStations = litStations,
                 lit = litStations.map { table.pathFraction(it.start)..table.pathFraction(it.endInclusive) },
+                arrows = arrowsOf(drawing.gores(), steps, path),
             )
+        }
+
+        /**
+         * The arrows along [path] of the steps that begin at one of [gores], where the steps of each leg begin at the route
+         * stations of [steps]; a leg's first step begins no maneuver an arrow shows.
+         */
+        fun arrowsOf(gores: List<Double>, steps: List<DoubleArray>, path: RoutePath): Map<StepAt, List<GeoPoint>> {
+            if (gores.isEmpty()) return emptyMap()
+            val out = HashMap<StepAt, List<GeoPoint>>()
+            for ((leg, starts) in steps.withIndex()) {
+                for (step in 1 until starts.size) {
+                    val gore = GoreArrow.goreAt(gores, starts[step]) ?: continue
+                    val points = GoreArrow.along(path.points, path.stations, gore)
+                    if (points.size >= 2) out[StepAt(leg, step)] = points
+                }
+            }
+            return out
         }
 
         /** The traffic level of the run of [runs] at [fraction] of the path; unknown outside them. */

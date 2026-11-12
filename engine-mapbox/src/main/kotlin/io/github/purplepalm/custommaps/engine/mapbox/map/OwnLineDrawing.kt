@@ -89,7 +89,13 @@ internal fun ownLineDrawing(
     check(path == null || path.routeId == routeId) { "The plan is another route's" }
     val table = if (path != null) StationTable.of(path) else StationTable.of(routeId, version, line, stations, line, stations)
     val legStations = pointStations.map(::legPointStations)
-    val ownLanes = if (lanes && plan != null && path != null && section != null) OwnLanes.of(plan.plan, path, plan.evidence, section, table) else null
+    val ownLanes = if (lanes && plan != null && path != null && section != null) {
+        // Where each step begins, as the plan measures its stations: a maneuver at a gore gets its arrow along the path.
+        val steps = legs.mapIndexed { l, leg -> DoubleArray(leg.steps().orEmpty().size) { k -> plan.station(l, k, 0.0) ?: Double.NaN } }
+        OwnLanes.of(plan.plan, path, plan.evidence, section, table, steps)
+    } else {
+        null
+    }
     return OwnLineDrawing(
         routeId = routeId,
         version = version,

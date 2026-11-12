@@ -15,8 +15,8 @@ import kotlin.math.log2
 /**
  * The own line with the app's lanes on a fake style ([OwnLineScene]), along a made-up freeway exit ([FreewayExit]): the
  * first window goes with the path, the next ones while the car drives and never inside a card window or while a new
- * route loads, the feature states, a style load, a look switch, guidance end, the watchdog, and the swap of the route
- * line and the lit lane on the camera's state.
+ * route loads, the feature states, a style load, a look switch, guidance end, the watchdog, the swap of the route
+ * line and the lit lane on the camera's state, and the maneuver arrow along the lit lane.
  */
 class OwnRouteLineLanesTest {
 
@@ -406,5 +406,64 @@ class OwnRouteLineLanesTest {
         assertTrue(atSwap < held)
         // With lanes of 12 dp the amber is wider than the line was.
         assertTrue(LaneSwap.amberDp(zoomOf(12.0), 0.0) > held)
+    }
+
+    @Test
+    fun `the arrow along the lit lane is there only while the own line is drawn with its lanes for that route`() {
+        val offRamp = OwnLanes.StepAt(0, 1)
+        val arrow = own.arrows.getValue(offRamp)
+        assertNull(line.goreArrow(id, 0, 1))
+        start()
+        // Built, not drawn yet: the SDK's line, and its arrow.
+        assertNull(line.goreArrow(id, 0, 1))
+        scene.load()
+        scene.loadWindow()
+        assertEquals(arrow, line.goreArrow(id, 0, 1))
+        // Only the off ramp's, and only for the route drawn.
+        assertNull(line.goreArrow(id, 0, 2))
+        assertNull(line.goreArrow(id, 0, 0))
+        assertNull(line.goreArrow("route-y#0", 0, 1))
+        // A style load: none until the line is drawn on the new style.
+        scene.reload()
+        line.onStyleLoaded(Look.DAY)
+        assertNull(line.goreArrow(id, 0, 1))
+        scene.load()
+        scene.loadWindow()
+        assertEquals(arrow, line.goreArrow(id, 0, 1))
+        // A reroute: none while the new route's path loads; once it is drawn, the new route's own.
+        val other = "route-y#0"
+        val otherPlan = requireNotNull(FreewayExit.plan(other, legs, shapes))
+        line.onRoute(other, refresh = false, OwnRouteLine.Build { version, withLanes -> ownLineDrawing(other, legs, shapes, otherPlan, version, withLanes) }, traffic)
+        assertNull(line.goreArrow(id, 0, 1))
+        assertNull(line.goreArrow(other, 0, 1))
+        scene.jobs.runAll()
+        scene.load()
+        scene.loadWindow()
+        assertEquals(arrow, line.goreArrow(other, 0, 1))
+        assertNull(line.goreArrow(id, 0, 1))
+        // The lanes switched off: the own line is drawn again without them, and has no such arrow.
+        line.setLanes(false)
+        scene.jobs.runAll()
+        scene.load()
+        assertTrue(line.drawn)
+        assertNull(line.goreArrow(other, 0, 1))
+        // Guidance end: none.
+        line.setLanes(true)
+        scene.jobs.runAll()
+        scene.load()
+        scene.loadWindow()
+        assertEquals(arrow, line.goreArrow(other, 0, 1))
+        line.onGuidanceEnded()
+        assertNull(line.goreArrow(other, 0, 1))
+    }
+
+    @Test
+    fun `a style that refuses the own line gives the navigation SDK's arrow back with its line`() {
+        drawn()
+        assertTrue(line.goreArrow(id, 0, 1) != null)
+        lanes.positions = null
+        line.check()
+        assertTrue(style.primaryShown)
+        assertNull(line.goreArrow(id, 0, 1))
     }
 }

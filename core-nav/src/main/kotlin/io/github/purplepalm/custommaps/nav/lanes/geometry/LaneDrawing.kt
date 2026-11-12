@@ -205,6 +205,12 @@ class LaneDrawing private constructor(
      */
     fun litStretches(): List<ClosedFloatingPointRange<Double>> = builder.litStretches()
 
+    /**
+     * The route stations of the drawing's gores, in route order: where the route leaves its road and lanes of that road go
+     * on beside it, drawn with a gore. The map lays the arrow of a maneuver there along the path ([GoreArrow]).
+     */
+    fun gores(): List<Double> = builder.goreStations()
+
     /** The lanes drawn on the route's carriageway at [station], from the left: none outside the drawn stretches. */
     internal fun lanesAt(station: Double): List<CrossSection.Place> = builder.lanesAt(station)
 
@@ -635,6 +641,8 @@ class LaneDrawing private constructor(
         }
 
         fun noses(): List<Pair<Double, Double>> = gores.filter { it.stub.isNotEmpty() }.map { it.stubNose to it.routeNose }
+
+        fun goreStations(): List<Double> = gores.filter { it.stub.isNotEmpty() }.map { it.station }
 
         /** Each run of the lit lane, from its edges, which run where it does; runs that meet are one. */
         fun litStretches(): List<ClosedFloatingPointRange<Double>> {
