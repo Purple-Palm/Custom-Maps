@@ -1435,6 +1435,18 @@ lanes at each point, an exit that takes the two right lanes of six, and 25 risin
   exit within about 1 km and are local farther out; how often lanes are added between two edge
   points, and so how often a row has no words, the `lane_row` lines count.
 
+**The lane plan, in the log only.** For every route a drive uses, once, the engine also works out a
+lane plan, off the main thread together with the route's `lane_evidence` line, and keeps it in
+memory with the route, never stored: the lanes that work at each point of the route and, on the
+run-ups and the last 180 m before a street maneuver, the one lane the app would light, counted from
+the exit's edge. Its run-ups may begin earlier than the card's, 6 s of driving before its lanes
+first narrow for a point within reach, and may hold through the ramp to a split up to 15 s of
+driving after the gore. Nothing on the screen reads it yet: the card, its words, the camera and the
+route line are as described above. The debug log gets a `lane_plan` line for each route and a
+`lane_agree` line for each row the card shows at a point with lane data, which say where the card
+and the plan would differ ([DRIVES.md](DRIVES.md), checks 46 to 48). The plan lights the lane and
+the card reads it only once the app draws the lanes itself.
+
 ### The centre at close zoom
 
 The centre trails the drawn car by 2τ × speed: 5.4 m at 50 km/h. At zoom 16.35 that is about 7 dp.

@@ -34,7 +34,8 @@ Last updated: 2026-11-12. It describes the app as it is today; see [Changes](#ch
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
-  request with its start and destination, the routes and their roads, the position, speed and road
+  request with its start and destination, the routes and their roads with the lanes the app would
+  take on them, the position, speed and road
   every second of guidance (on freeways also the phone's turn rate and acceleration from its motion
   sensors, summarised as a few numbers each second; the sensors are read only then, and no reading
   itself is kept), a summary of each drive (how it ended, its length and time, and the data and
