@@ -47,6 +47,7 @@ import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.LaneRowLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.debug.PhoneMotion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.CardContinuity
 import io.github.purplepalm.custommaps.nav.guidance.CardUpdate
@@ -245,6 +246,12 @@ internal class MapboxNavigationEngine(
 
     /** What the maneuver card's lane row drew at the last "lane_row" line; every drive starts it over. */
     private val laneRowLog = LaneRowLog()
+
+    /** The phone's motion sensors, listened to only while guidance runs on a freeway ([motionField]). */
+    private val motionSensors = MotionSensors(appContext, debugLog)
+
+    /** When [motionSensors] listen: from a drive's first progress update on a freeway to its first one off it. Main thread. */
+    private val motionListening = PhoneMotion.Listening()
 
     /**
      * Whether the car went the route's way where the road divides ("diverge_taken") or left the
@@ -446,6 +453,8 @@ internal class MapboxNavigationEngine(
         giveUpSeek()
         reroutesHeldOn = null
         rerouting = false
+        // No progress comes without a navigator, so none would stop the motion sensors.
+        endMotion()
         navigation = null
         lastMatch = null
         lastRawFix = null
@@ -981,6 +990,7 @@ internal class MapboxNavigationEngine(
                 startRefresher.end()
                 endTripTally()
                 endLaneEvidence()
+                endMotion()
                 staleStart.end()
                 tripSessionRunning = false
                 // A seek still waiting for the navigator is given up with the drive.
@@ -1104,20 +1114,56 @@ internal class MapboxNavigationEngine(
         tripTally.onMapError(kind)
     }
 
+    /**
+     * "motion" for a "progress" line: while guidance runs and the car is on a freeway ([onFreeway]),
+     * the phone's motion since the line before that had one ([PhoneMotion.take]); research into lane
+     * changes, which nothing on the screen uses. The sensors start at the first such update of a
+     * drive and stop at the first one off the freeway ([PhoneMotion.Listening]), so the line of the
+     * start has an empty window. The one place the engine puts the motion object together. A
+     * failure costs one error line and the motion of the rest of the drive, never the drive.
+     */
+    private fun motionField(progress: RouteProgress, active: Boolean): Map<String, Any?> = try {
+        val stepProgress = progress.currentLegProgress?.currentStepProgress
+        val freeway = active && stepProgress != null && onFreeway(stepProgress.step, stepProgress.intersectionIndex)
+        when (motionListening.onProgress(freeway)) {
+            PhoneMotion.Listening.Step.START -> motionListening.started(motionSensors.start())
+            PhoneMotion.Listening.Step.STOP -> {
+                motionSensors.stop()
+                motionListening.stopped()
+            }
+            PhoneMotion.Listening.Step.NONE -> Unit
+        }
+        val window = if (motionListening.listening) motionSensors.take() else null
+        if (window == null) emptyMap() else mapOf("motion" to window)
+    } catch (e: RuntimeException) {
+        debugLog.error("motionSensors", e)
+        motionListening.fail()
+        motionSensors.stop()
+        emptyMap()
+    }
+
+    /** The drive ended, or its navigator went: the motion sensors stop, and the next drive may start them again. */
+    private fun endMotion() {
+        motionListening.end()
+        motionSensors.stop()
+    }
+
     private val routeProgressObserver = RouteProgressObserver { progress ->
         val active = _guidanceState.value == GuidanceState.ACTIVE
+        // On a freeway, the phone's motion since the line before: on every progress line, held or not.
+        val motion = motionField(progress, active)
         val fix = if (active) lastMatch?.enhancedLocation?.fixTime() else null
         // An update that still carries where the trip before left the car: logged, and otherwise
         // left alone, by the card, the Then chip, the lane choices and the start plan alike.
         if (active && staleStart.isStale(fix)) {
             staleStart.countStaleUpdate()
-            debugLog.log("progress", progress.debugFields() + mapOf("match" to matchFields(), "staleStart" to true))
+            debugLog.log("progress", progress.debugFields() + mapOf("match" to matchFields(), "staleStart" to true) + motion)
             return@RouteProgressObserver
         }
         // The same for one from before a seek of a simulated drive, or from while the navigator
         // knew no place for the car: the screen goes on with the new place.
         if (active && seekHold.isHeld(fix)) {
-            debugLog.log("progress", progress.debugFields() + mapOf("match" to matchFields(), "replaySeek" to true))
+            debugLog.log("progress", progress.debugFields() + mapOf("match" to matchFields(), "replaySeek" to true) + motion)
             return@RouteProgressObserver
         }
         if (active) onTripProgress()
@@ -1140,7 +1186,7 @@ internal class MapboxNavigationEngine(
                 "match" to matchFields(),
                 "thenShown" to snapshot?.showThen,
                 "card" to card?.logName,
-            ) + speedLimitChange(active),
+            ) + speedLimitChange(active) + motion,
         )
         if (active) logLaneChoices(progress)
         if (snapshot != null) {
