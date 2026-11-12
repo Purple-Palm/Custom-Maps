@@ -373,10 +373,10 @@ private const val LANE_GAP_SHARE = 4f / 44f
 private val LANE_LABEL_GAP = 8.dp
 
 /** Between a lane to take and the bar under it. */
-private val LANE_BAR_GAP = 2.dp
+internal val LANE_BAR_GAP = 2.dp
 
 /** How high the bar under a lane to take is. With [LANE_BAR_GAP] it makes the band under the lanes, 5 dp. */
-private val LANE_BAR_THICKNESS = 3.dp
+internal val LANE_BAR_THICKNESS = 3.dp
 
 /** How much of its lane's width the bar takes, in the middle of it. */
 internal const val LANE_BAR_SHARE = 0.6f
