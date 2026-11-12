@@ -170,7 +170,7 @@ class CrossSectionTest {
     }
 
     @Test
-    fun `at a ramp's start the lanes go on straight until the ramp's line lies farther out, then blend onto it over 25 m`() {
+    fun `at a ramp's start the lanes go on straight until the ramp's line lies farther out and blend onto it over 25 m`() {
         val route = LaneScenes.iw31()
         val section = section(route)
         val start = section.rampStarts.single()

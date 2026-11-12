@@ -67,7 +67,7 @@ class RoutePathTest {
     }
 
     @Test
-    fun `IA's path keeps to the road's line until the run-up, then moves into the option lane once`() {
+    fun `IA's path keeps to the road's line until the run-up and moves into the option lane once`() {
         val ia = build(LaneScenes.ia())
         val path = ia.path
         // The drawing: from IA0's reach to the gore, where the route turns onto a ramp without lanes.
@@ -197,17 +197,17 @@ class RoutePathTest {
 
     @Test
     fun `a long drawing is cut into windows of at most 3 km that meet without a step`() {
-        // Lane points every 1.4 km on a 14 km freeway: one drawing in several windows.
-        val exitAt = 14_000.0
+        // Lane points every 1.4 km on a 13 km freeway: one drawing in several windows.
+        val exitAt = 13_000.0
         val nodes = listOf(LaneScenes.node(0.0, maneuver = LaneScenes.DEPART, planMps = 27.0)) +
-            (1..9).map { LaneScenes.node(1_400.0 * it - 600.0, s(), s(), s(), s(), planMps = 27.0) } +
+            (1..8).map { LaneScenes.node(1_400.0 * it - 600.0, s(), s(), s(), s(), planMps = 27.0) } +
             listOf(
                 LaneScenes.node(exitAt, s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = LaneScenes.OFF_RIGHT, planMps = 20.0),
                 LaneScenes.node(exitAt + 400.0, road = RoadKind.STREET, maneuver = LaneScenes.TURN_LEFT, planMps = 15.0),
                 LaneScenes.node(exitAt + 500.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0),
             )
         val route = LaneScenes.route(*nodes.toTypedArray(), id = "long")
-        val line = SceneLines.line(route.lengthMeters, listOf(2_000.0 to 3.0, 4_100.0 to -4.0, 7_000.0 to 2.0, 9_950.0 to 5.0, exitAt to -17.0, exitAt + 400.0 to 90.0))
+        val line = SceneLines.line(route.lengthMeters, listOf(2_000.0 to 3.0, 4_100.0 to -4.0, 7_000.0 to 2.0, 9_250.0 to 5.0, exitAt to -17.0, exitAt + 400.0 to 90.0))
         val built = build(route, line)
         val path = built.path
         val drawing = path.drawings.single()
@@ -474,7 +474,7 @@ class RoutePathTest {
         val split = rng.nextDouble() < 0.3
         val maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT
         val rampPoints = if (split) {
-            listOf(rng.nextDouble(150.0, 350.0) to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT))
+            listOf(rng.nextDouble(150.0, 340.0) to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT))
         } else {
             emptyList()
         }

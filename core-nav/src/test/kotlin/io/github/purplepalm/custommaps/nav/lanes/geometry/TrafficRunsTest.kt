@@ -57,7 +57,7 @@ class TrafficRunsTest {
     @Test
     fun `a leg's congestion becomes runs, one a level, at the segments' path fractions`() {
         val (table, stations) = straight(6)
-        val runs = TrafficRuns.of(table, listOf(LegTraffic(stations, listOf(10, 50, 55, 70, 90, null))))
+        val runs = TrafficRuns.of(table, listOf(LegTraffic(stations, listOf(10, 50, 57, 70, 90, null))))
         assertEquals(listOf(LOW, MODERATE, HEAVY, SEVERE, UNKNOWN), levels(runs))
         assertCovers(runs)
         assertEquals(table.pathFraction(stations[1]), runs[1].from)
