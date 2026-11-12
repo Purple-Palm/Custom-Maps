@@ -468,6 +468,59 @@ class RoutePathTest {
         assertTrue(checked > RANDOM_ROUTES)
     }
 
+    @Test
+    fun `the path keeps the design's rules where lanes are kept for car pools or buses, on seeded random routes`() {
+        // Every route of randomKeptLane with its line bent as the routes above, and once more with its line bent by a few
+        // degrees a few metres after its first drawing begins, so the axis' first arc begins with the drawing.
+        val rng = Random(KEPT_LANE_SEED)
+        var inside = 0
+        var beyond = 0
+        var pastNamed = 0
+        var atBend = 0
+        repeat(KEPT_LANE_ROUTES) { k ->
+            val name = "kept-$k"
+            val route = randomKeptLane(rng, name)
+            val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
+            val all = (bends + SceneLines.bendsOf(route)).sortedBy { it.first }
+            val built = build(route, SceneLines.line(route.lengthMeters, all))
+            checkRules(name, built)
+            val plan = built.plan
+            // What the route builds: a kept lane with lanes open to every car on both sides; an exit whose lane lies beyond
+            // a kept lane, where no lane is named (C1); a run-up that begins off the plan's grid, with the band's middle
+            // just before it past the lane it names, toward the exit's edge.
+            if (route.nodes.any { node -> node.lanes.withIndex().any { (i, lane) -> lane.designated && i > 0 && i < node.lanes.size - 1 } }) inside++
+            if (plan.noLane.any { it.cause == LanePlan.NoLane.Cause.DESIGNATED_BETWEEN }) beyond++
+            if (plan.windows.any { leadsPastNamed(built, it) }) pastNamed++
+            val start = built.path.drawings.firstOrNull()?.from ?: return@repeat
+            val bent = build(route, SceneLines.line(route.lengthMeters, (all + (start + 0.25 + 0.5 * (k % 15) to if (k % 2 == 0) 2.5 else -3.5)).sortedBy { it.first }))
+            assertEquals(start, bent.path.drawings.first().from, 1e-9, name)
+            checkRules("$name, bent where its drawing begins", bent)
+            if (abs(requireNotNull(bent.path.axisAt(start + 1e-6)).fillets.first().from - start) < 1e-9) atBend++
+        }
+        assertTrue(inside >= 70, "$inside routes with a kept lane between lanes open to every car")
+        assertTrue(beyond >= 30, "$beyond routes with an exit lane beyond a kept lane")
+        assertTrue(pastNamed >= 8, "$pastNamed routes with a window off the grid and the band past its lane")
+        assertTrue(atBend >= 140, "$atBend routes whose drawing begins on a bend's arc")
+    }
+
+    /**
+     * Whether [window] begins between the plan's grid stations, where no lane is named yet, and the band's middle just
+     * before it lies past the lane it names first, toward the exit's edge: the shape that left a window without a lane to
+     * lead the band to.
+     */
+    private fun leadsPastNamed(built: Built, window: CardWindow): Boolean {
+        val plan = built.plan
+        val at = plan.segmentAt(window.from) ?: return false
+        if (at.named != null) return false
+        val offGrid = (window.from - plan.topology.runs[at.run].from) % LanePlanner.GRID_METERS
+        if (offGrid < 1e-6 || offGrid > LanePlanner.GRID_METERS - 1e-6) return false
+        val first = plan.segments.firstOrNull { it.named != null && it.from > window.from && it.from < window.to } ?: return false
+        val named = built.section.place(requireNotNull(first.named), first.from)?.centre ?: return false
+        val middle = built.section.middle(at.band, window.from) ?: return false
+        val sign = if (at.edge == LaneEdge.RIGHT) -1.0 else if (at.edge == LaneEdge.LEFT) 1.0 else return false
+        return (middle - named) * sign > 1e-6
+    }
+
     /**
      * Checks [built] against the design's rules and returns how many card windows it checked: inside a card window the
      * path is in the named lane except inside a move and never moves away from the exit's edge; inside the drawings it
@@ -756,9 +809,72 @@ class RoutePathTest {
         return LaneScenes.approach(points, exit, maneuver, planMps = rng.nextDouble(22.0, 34.0), rampPoints = rampPoints, rampMeters = 600.0, id = id)
     }
 
+    /**
+     * A made-up approach to an exit with a lane kept for car pools or buses: two to six lanes at up to three random lane
+     * points, one lane at a random index (either side or between others) kept for car pools or buses from a random point on,
+     * edge lanes leaving by roads, an exit on either side whose lanes may keep that lane or open it to every car again, one
+     * or two lanes to take, an added exit lane that may lie beyond the kept one, and a split after the gore in 30 %.
+     */
+    private fun randomKeptLane(rng: Random, id: String): LaneRoute {
+        val right = rng.nextBoolean()
+        val bus = rng.nextBoolean()
+        var count = rng.nextInt(2, 6)
+        val points = ArrayList<At>()
+        var before = rng.nextDouble(2_400.0, 3_400.0)
+        var lane = -1
+        val from = rng.nextInt(0, 3)
+        while (true) {
+            before -= rng.nextDouble(300.0, 1_100.0)
+            if (before < 250.0 || points.size >= 3) break
+            count = (count + rng.nextInt(-1, 2)).coerceIn(2, 6)
+            if (lane < 0 && points.size >= from) lane = rng.nextInt(count)
+            if (lane >= count) lane = count - 1
+            val lanes = ArrayList<RouteLane>()
+            repeat(count) { i -> lanes.add(if (i == lane) (if (bus) LaneScenes.bus() else hov()) else s()) }
+            val roads = when (rng.nextInt(5)) {
+                0 -> {
+                    if (lane != 0) lanes[0] = s(false)
+                    EXIT_LEFT
+                }
+                1 -> {
+                    if (lane != lanes.size - 1) lanes[lanes.size - 1] = s(false)
+                    EXIT_RIGHT
+                }
+                2 -> JOIN_RIGHT
+                else -> THROUGH
+            }
+            points.add(At(before, lanes, roads))
+        }
+        val exit = ArrayList<RouteLane>()
+        val keep = rng.nextBoolean()
+        repeat(count) { i -> exit.add(if (i == lane && keep) (if (bus) LaneScenes.bus() else hov()) else s(false)) }
+        val usable = rng.nextInt(1, 3)
+        val edge = if (right) exit.size - 1 else 0
+        exit[edge] = if (right) sr() else sl()
+        if (usable == 2) {
+            val inner = if (right) edge - 1 else edge + 1
+            if (inner in exit.indices && !exit[inner].designated) exit[inner] = option()
+        }
+        if (rng.nextBoolean()) exit.add(if (right) exit.size else 0, if (right) sr() else sl())
+        val split = rng.nextDouble() < 0.3
+        val maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT
+        val rampPoints = if (split) {
+            listOf(rng.nextDouble(150.0, 340.0) to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT))
+        } else {
+            emptyList()
+        }
+        return LaneScenes.approach(points, exit, maneuver, planMps = rng.nextDouble(22.0, 34.0), rampPoints = rampPoints, rampMeters = 600.0, id = id)
+    }
+
     private companion object {
         /** How many seeded random routes the rules are checked on. */
         const val RANDOM_ROUTES = 60
+
+        /** How many seeded random routes with a lane kept for car pools or buses the rules are checked on... */
+        const val KEPT_LANE_ROUTES = 200
+
+        /** ...and their seed. */
+        const val KEPT_LANE_SEED = 7
 
         /** At a drawing end the path meets the road's line within this distance (design 10.1, RoutePath)... */
         const val END_METERS = 0.01
