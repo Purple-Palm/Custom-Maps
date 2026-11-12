@@ -35,9 +35,11 @@ Last updated: 2026-11-12. It describes the app as it is today; see [Changes](#ch
   most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads, the position, speed and road
-  every second of guidance, a summary of each drive (how it ended, its length and time, and the data
-  and battery it used), what was searched and found, settings changes, the phone's state (model,
-  Android version, battery, heat, memory, network) and crashes. It never holds a token. Days that
+  every second of guidance (on freeways also the phone's turn rate and acceleration from its motion
+  sensors, summarised as a few numbers each second; the sensors are read only then, and no reading
+  itself is kept), a summary of each drive (how it ended, its length and time, and the data and
+  battery it used), what was searched and found, settings changes, the phone's state (model, Android
+  version, battery, heat, memory, network) and crashes. It never holds a token. Days that
   are over are kept compressed on the phone, and when the log grows past 50 MB the oldest days are
   deleted. It leaves the phone only when you tap **Share debug log** in Settings and pick an app,
   which gets it as plain text; from then on that app's own terms apply.

@@ -610,6 +610,17 @@ Answered on 2026-11-11, after the drive with the missed freeway exit:
 - **The close view's tilt before an exit:** yes to the stronger tilt, 55° with Smooth follow and
   Large, with at least 12 s of road ahead.
 
+Asked on 2026-11-11, with the answers about the app's own lanes:
+
+- **The lane the car is in:** the owner would like to see which lane he is in and when he changes
+  lanes. The phone's positions alone cannot tell lanes, so for now this is research and logging
+  only: on freeways the log has the phone's own motion next to `match.raw` (checks 44 and 45). The
+  question is whether lane changes can be counted from a lane the car is known to be in, such as the
+  one it merges into from an on-ramp, by the turn rate less the road's own turn and by the sideways
+  pull, checked against how far the phone's positions lay to the side. Nothing on the screen shows or
+  claims a lane, and the car is never drawn in one ([DECISIONS.md](DECISIONS.md), 39) until the logs
+  show that this works.
+
 ### Checking a turn at home
 
 The simulated drive and its replay slider show a turn again and again without driving it:
@@ -899,6 +910,32 @@ The guidance bar with a large font, at home:
     **Recenter**. With a smaller font size they stand beside the two buttons, the time left alone
     where both do not fit; at no size is a number cut off.
 
+The lane data of each route and the phone's motion on freeways, read in the log after a drive.
+Nothing on the screen changes for them:
+
+43. **How much of each route has lane data.** One `lane_evidence` line right after
+    `routes_committed`, and one after each `routes_updated` that brings a new route, such as a
+    reroute; none after a refresh. From it: how many of the route's exits and turns had lane data
+    (`lanePoints`, `streetTurns`), how far along the route that data holds (`known` and `bridged`
+    against `none` in `freewayM`, `rampM` and `streetM`), how many gaps in it fall where the card
+    names a lane (`gaps`: `inWindow`, `inWindowM`), and which kinds of designated lanes occur
+    (`designated`). There should be no `error` line with `where` `lane_evidence`, and Start and a
+    reroute should feel as before.
+44. **The phone's motion and lane changes.** With the phone in its usual mount, its back to the road
+    ahead: on a freeway every `progress` line has a `motion` object, with `ref` `back` and `tilt` about
+    the mount's lean, and each time the drive comes onto a freeway a `motion_sensors` line says
+    `started` true. Where it is safe and the traffic allows, change lanes a few times on a straight
+    stretch, for example once or twice to the left after the merge from an on-ramp, and remember
+    roughly where. After the drive, in the seconds of each change, `yaw` less the road's own turn (the
+    change of `match.location.bearing` from line to line) should swing one way and back, `side` pull
+    to that side and back, and `match.raw`'s `sideM` move by about a lane's width. Whether a change
+    can be told from the road's own curves this way is what these lines are for.
+45. **The motion with the screen off, at home.** In a simulated drive on a route with a freeway, turn
+    the screen off for a minute while the car is on the freeway, then on again. The `motion` objects of
+    that minute should keep `n` at about 25 and `ms` at about 1,000, with the phone at rest: `yaw`,
+    `fwd` and `side` near 0, and `replayed` true in `match`. Far fewer samples would mean that Android
+    held the sensors back while the screen was off.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -953,6 +990,9 @@ Then share the debug log. What to read in it:
 | `look_theme`, `look_settled` | When a theme left for a quiet moment went (`themeHeldS`, `heldBy`, `writeMs`), and how long the map took to draw every tile after a theme was written (`idleMs`, null after 10 s) |
 | `map_style_loaded`: `look`, `keys`, `errors` | The look the map showed as its style loaded, with 16 settings written and 0 refused |
 | `settings` with `day_night` | Each change of Day and night in Settings |
+| `lane_evidence` | One for each route a drive uses: right after `routes_committed`, and after each `routes_updated` that brings a new route (a reroute, another route taken, the start's replan), never after a refresh. Numbers only, about 600 to 700 bytes: `routeId`; `lengthM`, along the steps' shapes; `steps`; `lanePoints`, the intersections with lane data by the road that leads to them (`freeway`, `ramp`, `street`); `freewayM`, `rampM` and `streetM`, the whole metres of each kind of road whose lanes are `known` (from a point with lane data back to the intersection before it, at most 1,000 m on freeways and ramps and 250 m on streets), `bridged` (between two points of one carriageway with the same lanes, across roads that join or leave on the exit's side; on streets only up to 400 m apart) or `none`; `gaps` without lane data between two points of one carriageway that are not bridged: `count`, `m`, `inWindow` and `inWindowM` (those reaching into a card window, a freeway exit's run-up or the 180 m before a street maneuver, and their metres inside it), `shortOutside` (at most 600 m and outside every window); `unexplained`, changes of the lane count between two points that nothing on the way explains; `exitSideAdded`, the lanes a point lists that the point before it does not (`count`), and of them `sideUnknown`, those whose arrows do not tell their side; `unknownExits`, roads without lane data that leave on the exit's side inside a bridge; `windows`, the run-ups (`runUps`) and street maneuvers (`street`); `streetTurns`, the turns at junctions off freeways, `withLanes` and `withoutLanes`; `designated`, the lanes the points list for each kind (`hov` for car pools, `bus`, `taxi`, `motorcycle`, `moped`, `bicycle`, `other`); `noLanes`, true for a route without any lane data. Together: how much of a route the app's own lanes could draw, and how often a gap falls where the card names a lane |
+| `progress`: `motion` | Only while guidance runs on a freeway (the intersection the car passed last leads onto a motorway or a trunk road, as for the lane choices), on every `progress` line, held ones too; off freeways the field is left out. The phone's motion since the line before, in numbers only: `n`, the gyroscope's samples (about 25 a second), and `ms`, from the first of them to the last by their own times; `yaw`, the mean turn rate about the vertical in degrees a second, a right turn positive (the way a bearing grows), and `yawSd`, its standard deviation over the samples; `fwd` and `side`, the mean acceleration in the level plane with gravity taken out, in m/s², along the reference direction and 90° clockwise of it, to the right positive like `match.raw`'s `sideM`; `ref`, the reference direction: `back`, the level direction of the phone's back (its camera side) while the back points at most 45° above or below the level, as in a windshield or vent mount upright or turned sideways, else `top`, that of its top edge, for a phone lying about flat; `tilt`, how far that axis points above the level, in whole degrees, negative below (a phone leaning back 30° in its mount: `back`, `tilt` -30). With the back facing the road ahead, `fwd` is the car's acceleration along its way and `side` its sideways acceleration, within the mount's own small angle. A field is null when a sensor it needs gave nothing in the window: the first line on a freeway has `n` 0 and nulls. In a simulated drive the phone is at rest. About 100 bytes a line, 0.36 MB an hour on freeways. For research only (the owner's answers above, the lane the car is in): nothing on the screen uses it |
+| `motion_sensors` | One each time the sensors are asked to start, as a drive comes onto a freeway: whether the phone has a gyroscope (`gyroscope`), a gravity sensor (`gravity`) and a linear acceleration sensor (`linearAcceleration`), the period asked for (`periodUs`, 40000: 25 samples a second, each delivered at once) and whether listening `started`. They stop at the first update off the freeway and when the drive ends. Without a gyroscope or a gravity sensor nothing is registered: one line a drive with `started` false, and no `motion`. Without linear acceleration, `fwd` and `side` stay null |
 
 Reading the connectivity lines:
 
