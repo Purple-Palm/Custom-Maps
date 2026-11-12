@@ -13,6 +13,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sign
 
 /**
  * Where every lane of a route lies across its road (the design's 4.2 and 4.3): one cross-section gives every
@@ -287,6 +288,12 @@ class CrossSection private constructor(
         /** The straight-on line is followed this finely while looking for where the new road's line passes it. */
         private const val CROSSING_STEP_METERS = 1.0
 
+        /** A path at a turn closer than this to the new road's line is on it. */
+        private const val SETTLED_METERS = 1e-6
+
+        /** How far on the straight-on line's slope is read where a path settles onto the new road's line. */
+        private const val SLOPE_STEP_METERS = 0.5
+
         /** A lane's full width on a road of [road] for the kinds of vehicle [kinds]. */
         fun laneMeters(road: RoadKind, kinds: Set<DesignatedKind> = emptySet()): Double = when {
             kinds.isNotEmpty() && kinds.all { it == DesignatedKind.BICYCLE } -> BICYCLE_LANE_METERS
@@ -327,6 +334,57 @@ class CrossSection private constructor(
                 at < crossing + RAMP_BLEND_METERS -> line * (1.0 - ramp(at, crossing, crossing + RAMP_BLEND_METERS))
                 else -> 0.0
             }
+        }
+
+        /**
+         * Where a path that lay [shift] metres to the left of a new road's line lies at [at], the route having turned onto that
+         * road at [station] along [axis] where no lanes are drawn past the turn: until the arc at the turn begins, [shift];
+         * from there straight on along the old road's way, and from halfway to where that straight-on line would cross the
+         * new road's line it settles onto it as its offset there times (1 - u) cubed for u from 0 to 1, starting as fast as
+         * the straight-on line closes in and ending on the line with neither slope nor curvature, so it never swings past the
+         * line and meets it without a kink ([turnOffEnd] says where). Where the straight-on line does not close in on the
+         * new road's line (it lies outside the turn, or the turn is too sharp to read the old road's way across it), the
+         * path keeps to the new road's line at an offset that shrinks from [shift] to 0 over [RAMP_BLEND_METERS] from the
+         * arc's start along a half-cosine, with no slope at either end; on the line already ([shift] 0), it stays on it.
+         */
+        fun turnOff(axis: RoadAxis, station: Double, shift: Double, at: Double): Double {
+            val begin = beginOf(axis, station)
+            if (at < begin) return shift
+            if (abs(shift) <= SETTLED_METERS) return 0.0
+            val settle = settling(axis, begin, station, shift)
+                ?: return shift * (1.0 - ramp(at, begin, begin + RAMP_BLEND_METERS))
+            if (at < settle.from) return lineOffset(axis, begin, shift, at) ?: 0.0
+            if (at >= settle.to) return 0.0
+            val u = 1.0 - (at - settle.from) / (settle.to - settle.from)
+            return settle.offset * u * u * u
+        }
+
+        /** Where [turnOff] lies on the new road's line for good. */
+        fun turnOffEnd(axis: RoadAxis, station: Double, shift: Double): Double {
+            val begin = beginOf(axis, station)
+            if (abs(shift) <= SETTLED_METERS) return begin
+            return settling(axis, begin, station, shift)?.to ?: (begin + RAMP_BLEND_METERS)
+        }
+
+        /** Where [turnOff] settles onto the new road's line: from [from], where the path lies [offset] off it, to [to]. */
+        private class Settling(val from: Double, val to: Double, val offset: Double)
+
+        /**
+         * How [turnOff] settles at the turn at [station], the arc beginning at [begin]: halfway from the arc's start to where
+         * the straight-on line would cross the new road's line, along a cubic whose slope there is the straight-on line's own;
+         * null where that line does not cross it within [RAMP_START_MAX_METERS] or does not close in on it there.
+         */
+        private fun settling(axis: RoadAxis, begin: Double, station: Double, shift: Double): Settling? {
+            val crossing = crossing(axis, begin, station, shift)
+            val before = lineOffset(axis, begin, shift, crossing - SLOPE_STEP_METERS) ?: return null
+            val after = lineOffset(axis, begin, shift, crossing + SLOPE_STEP_METERS) ?: return null
+            if (before * shift <= 0.0 || after * shift > 0.0) return null
+            val from = (begin + crossing) * 0.5
+            val offset = lineOffset(axis, begin, shift, from) ?: return null
+            val ahead = lineOffset(axis, begin, shift, from + SLOPE_STEP_METERS) ?: return null
+            val closing = (offset - ahead) / SLOPE_STEP_METERS * sign(offset)
+            if (offset * shift <= 0.0 || closing <= 0.0) return null
+            return Settling(from, min(station + RAMP_START_MAX_METERS, from + 3.0 * abs(offset) / closing), offset)
         }
 
         /** Where the arc at the turn at [station] begins along [axis]: the turn itself where the road does not bend there. */

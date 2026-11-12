@@ -350,13 +350,13 @@ class RoutePathTest {
         assertEquals(gore - 50.0, lane.from, 1e-9)
         assertEquals(-2.5 * w, lane.offsetTo, 1e-9)
         assertTrue(lane.to > drawing.to + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS)
-        // The turn goes straight on from where the path is when its arc begins, a little way into the move, and blends onto
-        // the ramp's line: back on it for good where the blend ends, and nothing moves it past the drawing.
+        // The turn goes straight on from where the path is when its arc begins, a little way into the move, and settles onto
+        // the ramp's line: back on it for good where the settling ends, and nothing moves it past the drawing.
         val turn = path.moves.last()
         assertEquals(RoutePath.Move.Kind.TURN, turn.kind)
         assertEquals(path.offsetAt(turn.from), turn.offsetFrom, 1e-9)
         assertTrue(turn.offsetFrom < 0.0 && turn.offsetFrom > -w, "the turn begins at ${turn.offsetFrom}")
-        assertEquals(turn.to, drawing.back, 1.0)
+        assertTrue(drawing.back >= turn.to - 1e-9 && drawing.back < turn.to + 1.5 * RoadAxis.SAMPLE_METERS, "the turn settles at ${turn.to}, the drawing is back at ${drawing.back}")
         assertEquals(0.0, path.offsetAt(drawing.back), 1e-12)
         assertEquals(2, path.moves.size)
         checkRules("late move", built)
@@ -974,7 +974,8 @@ class RoutePathTest {
             }
         }
         // At a drawing's end its turn or its return takes over a move still under way: past the turn the path is the turn's
-        // straight-on line from where the path was when the turn began; past the return it moves only toward the road's line.
+        // line from where the path was when the turn began, straight on and settling onto the new road's line
+        // ([CrossSection.turnOff]); past the return it moves only toward the road's line.
         for ((i, drawing) in path.drawings.withIndex()) {
             // Where the path keeps to the road's line around a fold, the fold's blends move it there.
             fun folded(from: Double) = path.folds.any { it.to > from - RoutePath.RETURN_METERS && it.from < drawing.back + RoutePath.RETURN_METERS }
@@ -985,8 +986,22 @@ class RoutePathTest {
                 assertEquals(path.offsetAt(turn.from), turn.offsetFrom, 1e-9, "$name: the turn at ${drawing.to} begins where the path is")
                 for (station in axis.stations()) {
                     if (station < turn.from || station > drawing.back) continue
-                    val straight = CrossSection.continuation(axis, drawing.to, turn.offsetFrom, station)
+                    val straight = CrossSection.turnOff(axis, drawing.to, turn.offsetFrom, station)
                     assertEquals(straight, path.offsetAt(station), END_SAME_METERS, "$name at $station: off the turn's straight-on line")
+                    // It settles onto the new road's line from the side it came from, never swinging past it.
+                    val past = if (turn.offsetFrom > 0.0) -path.offsetAt(station) else if (turn.offsetFrom < 0.0) path.offsetAt(station) else 0.0
+                    assertTrue(past <= END_METERS, "$name at $station: ${path.offsetAt(station)} past the new road's line")
+                }
+                // Where it is back on the route's own line its last chord turns from that line by less than [END_DEGREES]: no kink
+                // where the settling ends (unless the path was on the line already, or another drawing begins within the reach).
+                val k = path.stations.indexOfFirst { abs(it - drawing.back) < 1e-6 }
+                val alone = path.drawings.none { it !== drawing && it.from > drawing.to && it.from <= drawing.back + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS + RoutePath.RETURN_METERS }
+                val off = (0..20).maxOf { abs(path.offsetAt(drawing.back - it * 0.25)) }
+                if (alone && off > END_METERS && k > 0 && k < path.points.size - 1) {
+                    val a = SceneLines.local(path.points[k - 1])
+                    val b = SceneLines.local(path.points[k])
+                    val kink = turnBetween(Math.toDegrees(atan2(b.x - a.x, b.y - a.y)), headingAt(path.route, path.routeStations, drawing.back))
+                    assertTrue(kink < END_DEGREES, "$name: the path joins the route's line at ${drawing.back} with a kink of $kink degrees")
                 }
             } else if (!folded(drawing.to)) {
                 val until = minOf(drawing.back, path.drawings.getOrNull(i + 1)?.from ?: drawing.back)

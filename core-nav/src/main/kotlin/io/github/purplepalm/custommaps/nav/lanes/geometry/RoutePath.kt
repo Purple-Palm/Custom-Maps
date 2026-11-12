@@ -45,12 +45,15 @@ import kotlin.math.min
  *   old road until the new road's line lies farther out, then blends onto it ([CrossSection.RampStart]): the route
  *   geometry's diagonal at a gore is never drawn. Only the lanes that go on are drawn past the turn, so a move toward a
  *   lane the plan names late ends there, in its lane ([lengthBeforeRampStart]). Where the drawing ends at such a turn,
- *   the path goes on straight from where it is the same way and blends onto the new road's line.
+ *   the path goes on straight from where it is the same way and, from halfway to where that line would cross the new
+ *   road's line, settles onto it, never past it and with no kink where it meets it ([CrossSection.turnOff]); the turn is
+ *   over there, and a drawing that begins within the turn's reach takes over from it.
  * - **The drawing's ends.** The path returns to the road's line only where the drawing ends, over [RETURN_METERS] on
  *   asphalt without lane lines (the asphalt then tapers over [ASPHALT_TAPER_METERS]); a drawing ends only outside
  *   card windows (inside them gaps are zones). At every end the path meets the route's own line, so the line the
- *   app draws is the navigation SDK's away from lanes. The turn or the return at a drawing's end takes over a move still
- *   under way there, so no move runs on past the drawing.
+ *   app draws is the navigation SDK's away from lanes, and the last [BACK_SAMPLED_METERS] before it keep every sample, so
+ *   it joins that line without a kink. The turn or the return at a drawing's end takes over a move still under way there,
+ *   so no move runs on past the drawing.
  * - **Folds.** Where the path's offset would fold over itself on a curve too sharp for it (1 - kappa t <= 0, [RoadAxis]),
  *   it goes to the road's line there, over [RETURN_METERS] on each side ([folds]).
  *
@@ -175,8 +178,11 @@ class RoutePath private constructor(
         /** A drawing window is at most this long, one origin for its local metres. */
         const val WINDOW_METERS = 3_000.0
 
-        /** The path's points leave out what lies within this of the line between their neighbours. */
+        /** The path's points leave out what lies within this of the line between their neighbours... */
         const val TOLERANCE_METERS = 0.05
+
+        /** ...but keep every sample of this many metres before the path is back on the route's own line, so it joins it without a kink. */
+        const val BACK_SAMPLED_METERS = 12.0
 
         /** Offsets that differ by less than this are the same: no move. */
         private const val SAME_OFFSET_METERS = 1e-6
@@ -424,7 +430,9 @@ class RoutePath private constructor(
                 val of = DoubleArray(keep.size) { off[keep[it]] }
                 windows.add(Window(axis, st, of))
                 val local = st.indices.map { axis.offset(st[it], of[it]) }
-                for (i in simplify(local)) out.add(axis.toGeo(local[i]) to st[i])
+                // Every sample of the last metres before the path is back on the route's own line: one chord over them would
+                // turn at the join.
+                for (i in simplify(local) { st[it] >= back - BACK_SAMPLED_METERS }) out.add(axis.toGeo(local[i]) to st[i])
             }
             // Each drawing is back on the road's line where its return or its turn ends (at its end where nothing was left);
             // the region's last where the path is the route's own line again.
@@ -480,7 +488,8 @@ class RoutePath private constructor(
             out.add(region.from)
             for (k in 1 until n) {
                 val nominal = region.from + len * k / n
-                out.add(safeCut(nominal, out.last()))
+                val cut = safeCut(nominal, out.last())
+                if (cut < region.to - 1.0) out.add(cut)
             }
             out.add(region.to)
             return out.distinct()
@@ -488,18 +497,16 @@ class RoutePath private constructor(
 
         /** A cut near [nominal]: the middle of the line's segment there, moved past any turn's reach; never before [after]. */
         private fun safeCut(nominal: Double, after: Double): Double {
-            var s = nominal
-            repeat(20) {
+            // The middle of a segment of the line, the first one from [nominal] on whose middle lies past every turn's reach: a
+            // segment's middle may lie up to half a segment back, inside the reach that moved the cut on.
+            var i = indexAtOrBefore(lineStations, nominal).coerceIn(0, line.lastIndex - 1)
+            repeat(line.size) {
+                val s = ((lineStations[i] + lineStations[i + 1]) * 0.5).coerceAtLeast(after + 1.0)
                 val turn = nodes.firstOrNull { LaneEvidence.planTurns(it) && s >= it.station - 60.0 && s <= it.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS + 10.0 }
-                if (turn == null) return midOfSegment(s).coerceAtLeast(after + 1.0)
-                s = turn.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS + 20.0
+                if (turn == null || i >= line.lastIndex - 1) return s
+                i = max(i + 1, indexAtOrBefore(lineStations, turn.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS + 20.0).coerceIn(0, line.lastIndex - 1))
             }
-            return midOfSegment(s).coerceAtLeast(after + 1.0)
-        }
-
-        private fun midOfSegment(s: Double): Double {
-            val i = indexAtOrBefore(lineStations, s).coerceIn(0, line.size - 2)
-            return (lineStations[i] + lineStations[i + 1]) / 2.0
+            return ((lineStations[i] + lineStations[i + 1]) * 0.5).coerceAtLeast(after + 1.0)
         }
 
         /** The axis of the line from [from] to [to], in the frame of its first point. */
@@ -556,6 +563,7 @@ class RoutePath private constructor(
             // The piece the path followed before the moves under way, and one layer for each move; the last one's piece is the one
             // the path follows now.
             val layers = arrayListOf(Layer(Piece.Middle, 0.0, 0.0, 0.0, 0, false))
+            val settled = HashSet<Double>()
             var last = region.from
             for ((k, axis) in axes.withIndex()) {
                 val s = samples[k]
@@ -569,15 +577,15 @@ class RoutePath private constructor(
                     val piece = layers.last().piece
                     val hold = layers.last().hold
                     // A turn goes straight on from where the path is: its piece and the moves still under way.
-                    val next = pieceAt(region, station, axis, piece) { pathOf(layers, station) }
+                    val next = pieceAt(region, station, axis, piece, settled) { pathOf(layers, station) }
                     if (next != piece) {
                         // The old piece's value here; the band's middle never steps back behind it either. Between two bands,
                         // where the path was: a lane that ends at its edge with no taper takes the old band's middle with it.
                         val bands = piece is Piece.Band && next is Piece.Band
                         val old = if (bands) hold else layers.last().value
                         // A band the path leaves is held where it was: its middle steps where one of its lanes is no longer
-                        // drawn (at a ramp's start, or where a lane leaves at the edge with no taper).
-                        if (piece is Piece.Band) {
+                        // drawn (at a ramp's start, or where a lane leaves at the edge with no taper); so is a turn, which is over.
+                        if (piece is Piece.Band || piece is Piece.Turn) {
                             layers.last().let {
                                 it.piece = Piece.Held(old)
                                 it.value = old
@@ -601,7 +609,7 @@ class RoutePath private constructor(
                             section.place(next.lane, station, axis)?.state == CrossSection.State.OPENING
                         if (!turns && (abs(jump) > SAME_OFFSET_METERS || opening && !returns)) {
                             val kind = when {
-                                piece == Piece.Middle -> Move.Kind.ENTER
+                                piece == Piece.Middle || piece is Piece.Turn -> Move.Kind.ENTER
                                 returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
@@ -662,19 +670,22 @@ class RoutePath private constructor(
         }
 
         /** Where a turn's straight-on line has blended onto the new road's line. */
-        private fun continuationEnd(axis: RoadAxis, turn: Piece.Turn): Double {
-            val begin = CrossSection.beginOf(axis, turn.turn)
-            return max(turn.turn, CrossSection.crossing(axis, begin, turn.turn, turn.offset)) + CrossSection.RAMP_BLEND_METERS
-        }
+        private fun continuationEnd(axis: RoadAxis, turn: Piece.Turn): Double = max(turn.turn, CrossSection.turnOffEnd(axis, turn.turn, turn.offset))
 
-        /** The piece the path follows at [station]; a turn that begins there goes straight on from where the path is, [drawn]. */
-        private fun pieceAt(region: Region, station: Double, axis: RoadAxis, current: Piece, drawn: () -> Double): Piece {
-            // At a drawing's end where the route turns: straight on from where the turn's arc begins.
+        /**
+         * The piece the path follows at [station]; a turn that begins there goes straight on from where the path is, [drawn].
+         * A turn is over once the path has settled onto the new road's line: [settled] keeps the stations of those turns.
+         */
+        private fun pieceAt(region: Region, station: Double, axis: RoadAxis, current: Piece, settled: MutableSet<Double>, drawn: () -> Double): Piece {
+            // At a drawing's end where the route turns: straight on from where the turn's arc begins, until the path is on the
+            // new road's line, where a drawing that begins within the turn's reach takes over.
             for (d in region.drawings) {
-                if (!d.turnsAtEnd) continue
+                if (!d.turnsAtEnd || d.to in settled) continue
                 val begin = CrossSection.beginOf(axis, d.to)
                 if (station >= begin && station <= d.back) {
-                    return if (current is Piece.Turn && current.turn == d.to) current else Piece.Turn(d.to, drawn())
+                    if (current !is Piece.Turn || current.turn != d.to) return Piece.Turn(d.to, drawn())
+                    if (station <= continuationEnd(axis, current)) return current
+                    settled.add(d.to)
                 }
             }
             val drawing = region.drawings.firstOrNull { station >= it.from && station < it.to } ?: return Piece.Middle
@@ -717,7 +728,7 @@ class RoutePath private constructor(
                 val middle = section.middle(piece.band, station, axis) ?: hold
                 toward(middle, hold, piece.ref, piece.begins, piece.edge)
             }
-            is Piece.Turn -> CrossSection.continuation(axis, piece.turn, piece.offset, station)
+            is Piece.Turn -> CrossSection.turnOff(axis, piece.turn, piece.offset, station)
             is Piece.Held -> piece.offset
         }
 
@@ -804,14 +815,20 @@ class RoutePath private constructor(
             }
         }
 
-        /** The indices of [points] to keep: the ends, and every point that lies farther than [TOLERANCE_METERS] from its simplified line. */
-        private fun simplify(points: List<LocalPoint>): List<Int> {
+        /**
+         * The indices of [points] to keep: the ends, those [fixed] says, and every point that lies farther than
+         * [TOLERANCE_METERS] from its simplified line.
+         */
+        private fun simplify(points: List<LocalPoint>, fixed: (Int) -> Boolean): List<Int> {
             if (points.size <= 2) return points.indices.toList()
-            val keep = BooleanArray(points.size)
-            keep[0] = true
-            keep[points.size - 1] = true
+            val keep = BooleanArray(points.size) { it == 0 || it == points.size - 1 || fixed(it) }
             val stack = ArrayDeque<Pair<Int, Int>>()
-            stack.addLast(0 to points.size - 1)
+            var from = 0
+            for (i in 1 until points.size) {
+                if (!keep[i]) continue
+                stack.addLast(from to i)
+                from = i
+            }
             while (stack.isNotEmpty()) {
                 val (a, b) = stack.removeLast()
                 if (b - a < 2) continue

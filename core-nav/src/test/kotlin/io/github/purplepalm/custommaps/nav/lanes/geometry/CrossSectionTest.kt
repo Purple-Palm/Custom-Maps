@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.abs
 import kotlin.random.Random
 
 /** The made-up routes of [LaneScenes] laid out across the road; stations are metres from each route's start. */
@@ -282,6 +283,55 @@ class CrossSectionTest {
         assertEquals(gore, CrossSection.crossing(axis, fillet.from, gore, -2.0 * w), 1e-9)
         assertEquals(0.0, CrossSection.continuation(axis, gore, -2.0 * w, gore + CrossSection.RAMP_BLEND_METERS), 1e-12)
         assertEquals(-2.0 * w, CrossSection.continuation(axis, gore, -2.0 * w, fillet.from - 1.0), 1e-12)
+    }
+
+    @Test
+    fun `past a turn with no lanes drawn on, the path settles onto the new road's line, never past it, with no kink`() {
+        // IW31's line turns right at the gore; a path a lane and a half right of it goes on straight along the freeway's way.
+        val line = SceneLines.of(LaneScenes.iw31())
+        val stations = DoubleArray(line.size)
+        for (i in 1 until line.size) stations[i] = stations[i - 1] + io.github.purplepalm.custommaps.nav.geo.Geo.meters(line[i - 1], line[i])
+        val axis = RoadAxis.of(line, stations, line.first())
+        val fillet = axis.fillets.first { Math.abs(it.station - gore) < 1e-6 }
+        val shift = -1.5 * w
+        val crossing = CrossSection.crossing(axis, fillet.from, gore, shift)
+        val from = (fillet.from + crossing) * 0.5
+        val end = CrossSection.turnOffEnd(axis, gore, shift)
+        assertTrue(end > crossing && end <= gore + CrossSection.RAMP_START_MAX_METERS, "settled at $end, the crossing at $crossing")
+        // Until halfway to where that straight-on line would cross the ramp's line, the straight-on line itself.
+        assertEquals(shift, CrossSection.turnOff(axis, gore, shift, fillet.from - 1.0), 1e-12)
+        for (station in listOf(fillet.from, (fillet.from + from) * 0.5, from)) {
+            assertEquals(CrossSection.continuation(axis, gore, shift, station), CrossSection.turnOff(axis, gore, shift, station), 1e-9, "at $station")
+        }
+        // From there it closes in on the ramp's line from its own side and never past it, on it for good from where it settles.
+        var prev = CrossSection.turnOff(axis, gore, shift, from)
+        var station = from
+        while (station < end + 50.0) {
+            station += 1.0
+            val now = CrossSection.turnOff(axis, gore, shift, station)
+            assertTrue(now <= 0.0 && now >= prev - 1e-12, "at $station: from $prev to $now")
+            prev = now
+        }
+        assertEquals(0.0, CrossSection.turnOff(axis, gore, shift, end), 0.0)
+        assertTrue(CrossSection.turnOff(axis, gore, shift, end - 1.0) < 0.0)
+        // With neither slope nor curvature where it settles: a metre before, under a ten-thousandth of where it began settling.
+        assertTrue(abs(CrossSection.turnOff(axis, gore, shift, end - 1.0)) * 1e4 < abs(CrossSection.turnOff(axis, gore, shift, from)))
+        // A path on the line already stays on it.
+        assertEquals(0.0, CrossSection.turnOff(axis, gore, 0.0, crossing), 0.0)
+        assertEquals(fillet.from, CrossSection.turnOffEnd(axis, gore, 0.0), 1e-12)
+    }
+
+    @Test
+    fun `where the straight-on line never closes in, the path settles from the turn's arc over the blend's length`() {
+        // A line that turns left at the gore while the path lies to the right: no crossing.
+        val axis = RoadAxis.of(SceneLines.line(gore + 400.0, listOf(gore to 17.0)), null, SceneLines.geo(io.github.purplepalm.custommaps.nav.geo.LocalPoint(0.0, 0.0)))
+        val fillet = axis.fillets.single()
+        val shift = -1.5 * w
+        assertEquals(fillet.from + CrossSection.RAMP_BLEND_METERS, CrossSection.turnOffEnd(axis, gore, shift), 1e-9)
+        assertEquals(shift, CrossSection.turnOff(axis, gore, shift, fillet.from), 1e-12)
+        assertEquals(shift * 0.5, CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS * 0.5), 1e-12)
+        assertTrue(CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS - 0.1) < 0.0)
+        assertEquals(0.0, CrossSection.turnOff(axis, gore, shift, fillet.from + CrossSection.RAMP_BLEND_METERS), 0.0)
     }
 
     @Test
