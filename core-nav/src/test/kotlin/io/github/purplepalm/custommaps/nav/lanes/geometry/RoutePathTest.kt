@@ -515,6 +515,27 @@ class RoutePathTest {
     }
 
     @Test
+    fun `a drawing that begins within a turn's reach takes over where the turn has settled`() {
+        val built = build(forkAndExit())
+        val path = built.path
+        // The scene: a fork to the left, and just past it the drawing of the next exit's run-up begins, whose card window
+        // begins right at the fork, well within the turn's reach.
+        val first = path.drawings[0]
+        val second = path.drawings[1]
+        assertTrue(first.turnsAtEnd)
+        assertTrue(second.from < first.to + CrossSection.RAMP_START_MAX_METERS, "the second drawing begins at ${second.from}")
+        val turn = path.moves.single { it.kind == RoutePath.Move.Kind.TURN && it.from < second.from }
+        assertTrue(turn.to <= second.from, "the turn settles at ${turn.to}")
+        // The move into the lane the plan names begins where the second drawing begins, the turn having settled before it,
+        // not where the turn's reach ends; one S on, the path is in that lane.
+        val enter = path.moves.first { it.from >= second.from - 1e-6 && it.kind != RoutePath.Move.Kind.TURN }
+        assertEquals(second.from, enter.from, 1e-9)
+        val named = requireNotNull(built.plan.segmentAt(enter.to + 1.0)?.named)
+        assertEquals(built.section.place(named, enter.to + 1.0, path.axisAt(enter.to + 1.0))!!.centre, path.offsetAt(enter.to + 1.0), 1e-9)
+        checkRules("fork and exit", built)
+    }
+
+    @Test
     fun `where a gain nothing explains lies on the exit's side the path never moves away from the exit's edge`() {
         val built = build(LaneScenes.exitSideGain())
         val plan = built.plan
@@ -803,7 +824,7 @@ class RoutePathTest {
                 prev = now
             }
         }
-        val excluded = path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(built) + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+        val excluded = path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(built) + path.folds.map { it.from - FOLD_MARGIN_METERS to it.to + FOLD_MARGIN_METERS }
         fun free(station: Double) = excluded.none { station >= it.first && station <= it.second }
         var windows = 0
         for (window in plan.windows) {
@@ -818,7 +839,7 @@ class RoutePathTest {
                 val named = seg?.named
                 // On the drawn asphalt or on the road's line wherever the plan names a lane, inside moves and at a ramp's
                 // start too; the blends around a fold aside.
-                val folded = path.folds.any { station >= it.from - RoutePath.RETURN_METERS && station <= it.to + RoutePath.RETURN_METERS }
+                val folded = path.folds.any { station >= it.from - FOLD_MARGIN_METERS && station <= it.to + FOLD_MARGIN_METERS }
                 if (seg != null && seg.inWindow && named != null && seg.noLane == null && drawn && !folded) {
                     val offset = path.offsetAt(station)
                     val edges = built.section.edges(station, requireNotNull(path.axisAt(station)))
@@ -864,14 +885,15 @@ class RoutePathTest {
             var prev = path.offsetAt(station)
             var approach = approachOf(built, station)
             while (station < drawing.to) {
-                station += 1.0
+                // Up to the drawing's end and no farther: past it the turn or the return moves the path toward the new road's line.
+                station = minOf(drawing.to, station + 1.0)
                 val now = path.offsetAt(station)
                 val here = approachOf(built, station)
                 val inTurn = turns(built).any { station >= it.first && station <= it.second }
                 if (here != approach) {
                     approach = here
                     first = 0.0
-                } else if (!inTurn && path.folds.none { station >= it.from - RoutePath.RETURN_METERS && station <= it.to + RoutePath.RETURN_METERS } &&
+                } else if (!inTurn && path.folds.none { station >= it.from - FOLD_MARGIN_METERS && station <= it.to + FOLD_MARGIN_METERS } &&
                     !plan.moves.any { it.back }
                 ) {
                     val d = now - prev
@@ -1244,6 +1266,24 @@ class RoutePathTest {
         id = "opening-on-tie",
     )
 
+    /**
+     * A fork to the left and an exit to the right 2,300 m past it: four lanes before the fork, the left two going on; past it
+     * three lanes from 1,100 m on, the exit's lane the right one. The exit's card window begins right at the fork, and its
+     * drawing just past it, within the turn's reach.
+     */
+    private fun forkAndExit() = LaneScenes.route(
+        LaneScenes.node(0.0, maneuver = LaneScenes.DEPART, planMps = 27.0),
+        LaneScenes.node(1_400.0, s(), s(), s(), s(), planMps = 27.0),
+        LaneScenes.node(2_200.0, s(), s(), s(), s(), planMps = 27.0),
+        LaneScenes.node(3_000.0, sl(), sl(), sr(false), sr(false), roads = EXIT_RIGHT, maneuver = LaneScenes.FORK_LEFT, planMps = 27.0),
+        LaneScenes.node(4_100.0, s(), s(), s(), planMps = 27.0),
+        LaneScenes.node(4_700.0, s(), s(), s(), planMps = 27.0),
+        LaneScenes.node(5_300.0, s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = LaneScenes.OFF_RIGHT, planMps = 20.0),
+        LaneScenes.node(5_800.0, road = RoadKind.STREET, maneuver = LaneScenes.TURN_LEFT, planMps = 15.0),
+        LaneScenes.node(5_900.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0),
+        id = "fork-and-exit",
+    )
+
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
     private fun randomApproach(rng: Random, id: String): LaneRoute {
         val right = rng.nextBoolean()
@@ -1388,5 +1428,12 @@ class RoutePathTest {
          * the path holds where it is rather than move back.
          */
         const val CONFLICT_SLACK_METERS = 0.3
+
+        /**
+         * Around a fold the path's blends to and from the road's line are left out of the rules over this much: their
+         * [RoutePath.RETURN_METERS] and the axis sample on each side, as the path's offset between samples is read along the
+         * straight line between them, into the blend.
+         */
+        const val FOLD_MARGIN_METERS = RoutePath.RETURN_METERS + RoadAxis.SAMPLE_METERS
     }
 }
