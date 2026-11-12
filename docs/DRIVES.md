@@ -979,7 +979,12 @@ never from the driver). With the switch off everything is as before:
     white maneuver arrow on top should look exactly as with the switch off, by day and at night, and
     switch with the look. On a freeway exit with lane data the line may lie a lane or two to the side
     of the road's middle on the run-up, moving there in one gentle S and never back, and at the gore
-    it should follow its lane onto the ramp, not cut across the gore. The car's icon stays where it
+    it should follow its lane onto the ramp, not cut across the gore. Before an exit whose lanes lie
+    beyond a lane kept for car pools or buses (no lane lit on the card), the line stays on the road's
+    middle to the gore and, onto a ramp with lane data, until the ramp's lanes have joined it, never
+    beside the ramp; where the exit's lane is named only shortly before the gore, the line goes on
+    straight from where it is at the gore onto the ramp, with no swing over the gore and no jump
+    where the app's drawing ends. The car's icon stays where it
     always is. The log: one `route_line` line with `drawer` `sdk` and `reason` `start` after Start,
     and after it one with `drawer` `own` and `reason` `loaded`, with `swapMs` (how long Mapbox's line showed
     first), `loadMs` and `buildMs`.

@@ -1631,8 +1631,14 @@ drawn yet. Before Start, in the preview, nothing changes.
   now; on a freeway with lane data, on the middle of the lanes that work outside the run-ups, and
   on the run-up in the lane the plan names, moving into it with a gentle S of 6 s of driving per
   lane (80 to 270 m), only toward the lane the plan heads for and never back, and at the gore along
-  that lane onto the ramp instead of across the gore. The lanes' places are rules (3.66 m lanes,
-  laid out around the road's line), not the paint on the road. Away from lanes the line lies exactly
+  that lane onto the ramp instead of across the gore. Where no lane can be named before an exit (its
+  lanes lie beyond a lane kept for car pools or buses), the line keeps to the road's line to the gore
+  and, onto a ramp with lane data, until the ramp's lanes lie on the ramp, and moves into the ramp's
+  lane only from there. A move still under way where the drawn lanes end, as when the plan names the
+  exit's lane only shortly before the gore, ends with them: at the gore the line goes on straight
+  from where it is onto the ramp's line, and where the lane data stops it goes back to the road's
+  line from where it is. The lanes' places are rules (3.66 m lanes, laid out around the road's
+  line), not the paint on the road. Away from lanes the line lies exactly
   on the SDK's. The car is where it always is: nothing moves its icon sideways
   ([DECISIONS.md](DECISIONS.md), 39).
 - **How it looks.** Today's line and casing: the SDK's widths up to zoom 16.5 and from there on in
