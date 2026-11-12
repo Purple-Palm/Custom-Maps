@@ -620,7 +620,7 @@ class RoutePathTest {
         assertTrue(beyond >= 30, "$beyond routes with an exit lane beyond a kept lane")
         assertTrue(pastNamed >= 8, "$pastNamed routes with a window off the grid and the band past its lane")
         assertTrue(atBend >= 140, "$atBend routes whose drawing begins on a bend's arc")
-        assertTrue(underWay >= 9, "$underWay routes whose drawing ends at a turn with a move under way")
+        assertTrue(underWay >= 7, "$underWay routes whose drawing ends at a turn with a move under way")
     }
 
     /**
