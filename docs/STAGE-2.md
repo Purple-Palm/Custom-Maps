@@ -395,14 +395,14 @@ Other notes:
   by default and must switch to dark when the host says so (quality guideline MR-1).
 - At night: today's map (DECISIONS 15). By day: a bright, colourful map, Mapbox Standard with the
   `day` light preset and its default theme, not a faded one (DECISIONS 36). The route stays amber;
-  `MapPalette.routeLineColors(dark)` gives the route line its colours for each mode. The phone keeps
-  the night map.
+  `MapPalette.routeLine(look)` gives the route line its colours for each look. The phone keeps the
+  night map.
 - `CarSession` passes the mode to the car map and the image renderers, then invalidates the screen,
   so the template gets images in the right mode.
 - The switch needs no style reload:
-  - every basemap key is set on its own with `setStyleImportConfigProperty`, as
-    `MapPalette.applyNight` does today. The day and the night configs name the same keys, so
-    nothing from one mode stays in the other;
+  - every basemap key is set on its own with `setStyleImportConfigProperty`, as `MapLook.write`
+    does today with the columns of `MapPalette.keys`. The day and the night configs name the same
+    keys, so nothing from one mode stays in the other;
   - the route line gets the mode's colours through `MapboxRouteLineView.updateDynamicOptions` and is
     drawn again from `MapboxRouteLineApi.getRouteDrawData`;
   - the attribution bitmap is redrawn.
