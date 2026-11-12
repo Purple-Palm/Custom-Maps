@@ -402,16 +402,18 @@ class RoutePathTest {
         assertFalse(first.turnsAtEnd)
         assertEquals(gore - 1_650.0, first.to, 1e-9)
         // The scene: just before the last point ahead of the gap, the band jumps to the lane beyond the lane kept for car
-        // pools, two and a half lanes right of the road's line, and the move there runs on past the drawing's return.
-        val lane = path.moves.first { it.kind == RoutePath.Move.Kind.LANE }
-        assertEquals(-2.5 * w, lane.offsetTo, 1e-9)
+        // pools, two and a half lanes right of the road's line, and the move there runs on past the drawing's return. Before
+        // it no lane works, and the path keeps to the middle of the lanes drawn there, right of the road's line once the
+        // left lane has left.
+        val lane = path.moves.single { it.kind == RoutePath.Move.Kind.LANE && abs(it.offsetTo + 2.5 * w) < 1e-9 }
+        assertTrue(lane.offsetFrom < 0.0, "the move begins at ${lane.offsetFrom}")
         assertTrue(lane.from < first.to && lane.to > first.back)
         // The return begins where the path is, a little way into the move, and goes only toward the road's line, onto it
         // 60 m on.
         val back = path.moves.single { it.kind == RoutePath.Move.Kind.RETURN }
         assertEquals(first.to, back.from, 1e-9)
         assertEquals(path.offsetAt(first.to), back.offsetFrom, 1e-9)
-        assertTrue(back.offsetFrom < 0.0 && back.offsetFrom > -w, "the return begins at ${back.offsetFrom}")
+        assertTrue(back.offsetFrom < lane.offsetFrom && back.offsetFrom > lane.offsetTo, "the return begins at ${back.offsetFrom}")
         assertEquals(first.to + RoutePath.RETURN_METERS, first.back, 1e-9)
         var prev = back.offsetFrom
         var station = first.to
@@ -423,6 +425,36 @@ class RoutePathTest {
         }
         assertEquals(0.0, path.offsetAt(first.back), 1e-12)
         checkRules("move before a gap", built)
+    }
+
+    @Test
+    fun `where no lane works the path keeps to the drawn carriageway and goes on from there into the lane named after`() {
+        val built = build(conflictDrift())
+        val section = built.section
+        val path = built.path
+        // The scene: no lane works up to 900 m before the gore, and before that the drawn carriageway moves off the road's
+        // line to its right.
+        val conflict = built.plan.flags.single { it.kind == LanePlan.Flag.Kind.CONFLICT }
+        assertEquals(gore - 900.0, conflict.to, 1e-9)
+        val drawing = path.drawings.single()
+        assertTrue(drawing.from < gore - 1_250.0 && abs(drawing.to - gore) < 1e-9)
+        val end = requireNotNull(section.edges(conflict.to, requireNotNull(path.axisAt(conflict.to))))
+        assertTrue(end.asphaltLeft < -w, "the drawn asphalt ends ${end.asphaltLeft} m right of the road's line")
+        // From where the drawing begins to well past the conflict's end the path lies on the drawn asphalt, moving only right,
+        // toward the exit's edge, and it is in the lane the plan names 50 m past the conflict's end.
+        var prev = path.offsetAt(drawing.from)
+        var station = drawing.from
+        while (station < conflict.to + 200.0) {
+            station += 1.0
+            val offset = path.offsetAt(station)
+            val edges = requireNotNull(section.edges(station, requireNotNull(path.axisAt(station))))
+            assertTrue(offset <= edges.asphaltLeft + 1e-6 && offset >= edges.asphaltRight - 1e-6, "at $station: $offset off the drawn asphalt ${edges.asphaltRight}..${edges.asphaltLeft}")
+            assertTrue(offset <= prev + 1e-9, "at $station: the path moves left, from $prev to $offset")
+            prev = offset
+        }
+        val named = requireNotNull(built.plan.segmentAt(conflict.to + 50.0)?.named)
+        assertEquals(section.place(named, conflict.to + 50.0, path.axisAt(conflict.to + 50.0))!!.centre, path.offsetAt(conflict.to + 50.0), 1e-6)
+        checkRules("conflict drift", built)
     }
 
     @Test
@@ -695,7 +727,9 @@ class RoutePathTest {
      * moves only toward the plan's lane, then never back; it is back on the road's line only where a drawing ends outside
      * card windows; it is on the road's line on an approach where no lane is named (C1); it meets the route's line at every
      * drawing end; it never steps sideways inside a drawing; at a ramp's start inside a drawing it lies on the asphalt of the
-     * lanes that go on; where a drawing ends, its turn or its return takes over a move still under way.
+     * lanes that go on; where no lane works it keeps to the drawn carriageway, on its asphalt where that stretch ends inside a
+     * drawing and through the moves under way there; where a drawing ends, its turn or its return takes over a move still
+     * under way.
      */
     private fun checkRules(name: String, built: Built): Int {
         val path = built.path
@@ -828,6 +862,29 @@ class RoutePathTest {
                 offset <= edges.asphaltLeft + 1e-6 && offset >= edges.asphaltRight - 1e-6,
                 "$name: at the ramp's start at ${start.station} the path at $offset lies beside the lanes that go on, ${edges.asphaltRight}..${edges.asphaltLeft}",
             )
+        }
+        // Where no lane works (a conflict the plan flags) the path keeps to the middle of the lanes drawn there, so where that
+        // stretch ends inside a drawing, it lies on the drawn asphalt or on the road's line, and so it does through the moves
+        // under way there, within [CONFLICT_SLACK_METERS]; the turns and the blends around a fold aside, and an approach where
+        // no lane is named, which keeps to the road's line.
+        for (conflict in plan.flags) {
+            if (conflict.kind != LanePlan.Flag.Kind.CONFLICT) continue
+            val drawing = path.drawings.firstOrNull { conflict.to > it.from && conflict.to < it.to } ?: continue
+            val moving = path.moves.filter { (it.kind == RoutePath.Move.Kind.ENTER || it.kind == RoutePath.Move.Kind.LANE) && it.from <= conflict.to + 1.0 && it.to >= conflict.to }
+            val until = minOf(drawing.to, moving.maxOfOrNull { it.to } ?: conflict.to)
+            val skip = turns(built) + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+            var station = conflict.to
+            while (station <= until) {
+                val offset = path.offsetAt(station)
+                if (abs(offset) > 1e-9 && plan.segmentAt(station)?.noLane == null && skip.none { station >= it.first && station <= it.second }) {
+                    val edges = requireNotNull(built.section.edges(station, requireNotNull(path.axisAt(station))))
+                    assertTrue(
+                        offset <= edges.asphaltLeft + CONFLICT_SLACK_METERS && offset >= edges.asphaltRight - CONFLICT_SLACK_METERS,
+                        "$name at $station: where no lane works up to ${conflict.to}, $offset off the drawn asphalt ${edges.asphaltRight}..${edges.asphaltLeft}",
+                    )
+                }
+                station += 1.0
+            }
         }
         // At a drawing's end its turn or its return takes over a move still under way: past the turn the path is the turn's
         // straight-on line from where the path was when the turn began; past the return it moves only toward the road's line.
@@ -1045,6 +1102,22 @@ class RoutePathTest {
         id = "move-before-gap",
     )
 
+    /**
+     * A right exit past a stretch where no lane works: three lanes 1,900 m before the gore, the middle one kept for car pools;
+     * 1,250 m before, the left one leaves by a road on the left; 850 m before, four lanes, and five at the exit, the right
+     * two to take. No lane works up to 900 m before the gore, where lanes open left of the right lane and the plan names
+     * one; before that, as the left lanes leave and those open, the drawn carriageway moves off the road's line to its right.
+     */
+    private fun conflictDrift() = LaneScenes.approach(
+        listOf(
+            At(1_900.0, listOf(s(), hov(), s())),
+            At(1_250.0, listOf(s(false), hov(), s()), EXIT_LEFT),
+            At(850.0, listOf(s(), hov(), s(), s(false))),
+        ),
+        exit = listOf(s(false), s(false), s(false), sr(), sr()),
+        id = "conflict-drift",
+    )
+
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
     private fun randomApproach(rng: Random, id: String): LaneRoute {
         val right = rng.nextBoolean()
@@ -1182,5 +1255,12 @@ class RoutePathTest {
 
         /** ...measured this often along the drawing. */
         const val STEP_SAMPLE_METERS = 0.25
+
+        /**
+         * How far beside the drawn asphalt the path may lie where a stretch where no lane works ends: where the asphalt steps
+         * in past it (a lane at the edge ending with no taper) or the lane the plan heads for opens beside the lanes drawn,
+         * the path holds where it is rather than move back.
+         */
+        const val CONFLICT_SLACK_METERS = 0.3
     }
 }

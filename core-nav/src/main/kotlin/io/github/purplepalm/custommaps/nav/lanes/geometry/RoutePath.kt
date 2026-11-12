@@ -21,15 +21,17 @@ import kotlin.math.min
  *
  * - **Where it runs.** On the road's line where the app draws no lanes, which is the route's own line, point for
  *   point; on the middle of the lanes that work (the plan's band) outside card windows; on the named lane's middle
- *   inside card windows, through zones too. On a C1 approach, where the plan names no lane, on the road's line. The
- *   app draws lanes on freeways and ramps where the evidence has them (known, bridged or a zone); streets wait for a
- *   one-way or two-way source.
+ *   inside card windows, through zones too. Where no lane works (a conflict the plan flags), on the middle of the lanes
+ *   drawn there, so the path stays on the drawn carriageway where it moves off the road's line. On a C1 approach, where
+ *   the plan names no lane, on the road's line. The app draws lanes on freeways and ramps where the evidence has them
+ *   (known, bridged or a zone); streets wait for a one-way or two-way source.
  * - **Moves.** Inside drawn lanes and zones the path moves only toward the lane the plan heads for, the first named
  *   lane of the card window ahead, and never past it: the first move may go either way, then never back. A move
  *   between lanes is a half-cosine S of [moveMeters] per lane crossed (clamp(v x [MOVE_SECONDS_FREEWAY], 80, 270 m) on
  *   freeways, clamp(v x [MOVE_SECONDS_STREET], 25, 80 m) on streets, at the planning speed), starting at the plan's
  *   station, ahead of the car. Into a lane its neighbour feeds (a deceleration lane) it moves along that lane's own
- *   taper, with no S.
+ *   taper, with no S. The lane it heads for lies where it runs at its full width, and while that lane is still opening
+ *   the path goes no farther toward it than where it begins.
  * - **No lane named (C1).** Ahead of an approach where no lane can be named (only a lane kept for car pools or buses
  *   can be used, or the lanes to use lie beyond one), the plan heads for the road's line, where the path runs on that
  *   approach: the band's middle before it leads the path toward the road's line and never past it, so the path reaches
@@ -234,8 +236,12 @@ class RoutePath private constructor(
 
         data class Named(val lane: Int) : Piece()
 
-        /** The middle of [band], moving only toward [ref] (the plan's next lane) or, without one, toward the [edge] side. */
-        data class Band(val band: List<Int>, val ref: Double?, val edge: Int) : Piece()
+        /**
+         * The middle of [band], moving only toward [ref] (where the plan's next lane lies at its full width, or the road's
+         * line) and never past [begins] (where that lane begins, if it is still opening); without one, only toward the
+         * [edge] side.
+         */
+        data class Band(val band: List<Int>, val ref: Double?, val begins: Double?, val edge: Int) : Piece()
 
         /** Straight on from [offset] at the turn at [turn] (its station), then onto the new road's line. */
         data class Turn(val turn: Double, val offset: Double) : Piece()
@@ -536,8 +542,13 @@ class RoutePath private constructor(
                     }
                     // A turn goes straight on from where the path is: its piece and the moves still under way.
                     val next = pieceAt(region, station, axis, piece) { valueOf(piece, station, axis, hold) + residuals.sumOf { it.at(station) } }
-                    // At a change, the old piece's value here; the band's middle never steps back behind it either.
-                    val old = if (next != piece) valueOf(piece, station, axis, hold) else 0.0
+                    // At a change, the old piece's value here; the band's middle never steps back behind it either. Between two
+                    // bands, where the path was: a lane that ends at its edge with no taper takes the old band's middle with it.
+                    val old = when {
+                        next == piece -> 0.0
+                        piece is Piece.Band && next is Piece.Band -> hold
+                        else -> valueOf(piece, station, axis, hold)
+                    }
                     val value = valueOf(next, station, axis, if (next != piece && next is Piece.Band) old else hold)
                     if (next != piece) {
                         val drawn = old + residuals.sumOf { it.at(station) }
@@ -603,9 +614,12 @@ class RoutePath private constructor(
                 LaneEdge.LEFT -> 1
                 null -> 0
             }
-            val ref = refs.firstOrNull { it.station > station && it.station < drawing.to + 1e-6 && it.run == seg.run }
-                ?.let { r -> if (r.lane == null) 0.0 else section.place(r.lane, r.station)?.centre }
-            return Piece.Band(seg.band, ref, edge)
+            val next = refs.firstOrNull { it.station > station && it.station < drawing.to + 1e-6 && it.run == seg.run }
+            val begins = next?.let { r -> if (r.lane == null) 0.0 else section.place(r.lane, r.station)?.centre }
+            val ref = next?.let { r -> if (r.lane == null) 0.0 else section.place(r.lane, section.fullFrom(r.lane, r.station))?.centre }
+            // Where no lane works (a conflict), the middle of the lanes drawn there: the path keeps to the drawn carriageway.
+            val band = seg.band.ifEmpty { section.lanes(station, axis).filter { it.width > 0.0 }.map { it.lane } }
+            return Piece.Band(band, ref ?: begins, begins ?: ref, edge)
         }
 
         /**
@@ -624,7 +638,7 @@ class RoutePath private constructor(
             is Piece.Named -> namedCentre(piece.lane, station, axis) ?: hold
             is Piece.Band -> {
                 val middle = section.middle(piece.band, station, axis) ?: hold
-                toward(middle, hold, piece.ref, piece.edge)
+                toward(middle, hold, piece.ref, piece.begins, piece.edge)
             }
             is Piece.Turn -> CrossSection.continuation(axis, piece.turn, piece.offset, station)
         }
@@ -640,10 +654,14 @@ class RoutePath private constructor(
             return feeder.centre * (1.0 - f) + place.centre * f
         }
 
-        /** [middle], moving from [hold] only toward [ref] and never past it; without a reference, only toward the [edge] side. */
-        private fun toward(middle: Double, hold: Double, ref: Double?, edge: Int): Double = when {
-            ref != null && ref >= hold -> min(max(middle, hold), ref)
-            ref != null -> max(min(middle, hold), ref)
+        /**
+         * [middle], moving from [hold] only toward [ref] and never past it, nor past [begins] where the lane the plan names
+         * next begins while it opens (a lane opening around the path draws it in where it is); without a reference, only toward
+         * the [edge] side.
+         */
+        private fun toward(middle: Double, hold: Double, ref: Double?, begins: Double?, edge: Int): Double = when {
+            ref != null && ref >= hold -> min(max(middle, hold), max(hold, min(ref, begins ?: ref)))
+            ref != null -> max(min(middle, hold), min(hold, max(ref, begins ?: ref)))
             edge == 0 -> middle
             (middle - hold) * edge >= 0.0 -> middle
             else -> hold

@@ -211,6 +211,12 @@ class CrossSection private constructor(
     /** The lane [lane] at [station], where it is drawn; null elsewhere. */
     fun place(lane: Int, station: Double, axis: RoadAxis? = null): Place? = lanes(station, axis).firstOrNull { it.lane == lane }
 
+    /** The first station at or after [station] where [lane] is drawn at its full width: past its taper where it opens. */
+    fun fullFrom(lane: Int, station: Double): Double {
+        val drawn = layouts.firstNotNullOfOrNull { layout -> layout.lanes.firstOrNull { it.lane.id == lane } } ?: return station
+        return max(station, drawn.openTo)
+    }
+
     /** The middle across the road of [lanes] at [station]: halfway between the outer edges of those drawn there. */
     fun middle(lanes: Collection<Int>, station: Double, axis: RoadAxis? = null): Double? {
         val places = lanes(station, axis).filter { it.lane in lanes && it.width > 0.0 }
