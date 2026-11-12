@@ -423,9 +423,11 @@ internal class OwnRouteLine(
         trimStation = 0.0
         windowsLoaded = 0
         if (!enabled) return
-        // The old route's path may still be loading: its data is no longer wanted, nor its lanes' window.
+        // The old route's path may still be loading: its data is no longer wanted, nor its lanes' window, and its pieces'
+        // feature states go with it: the new route's pieces may have the same ids.
         forgetSent()
         forgetWindow()
+        if (lanes && ready()) quietly { lanePort?.resetStates() }
         showSdkLine()
         swapFrom = nanos()
         logLine(DRAWER_SDK, if (first) REASON_START else REASON_ROUTE_CHANGE)

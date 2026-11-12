@@ -235,8 +235,14 @@ internal object LaneLayers {
         /** Whether the map is to say when the source's data has loaded; asked only while a window waits. */
         fun watchLoads(watch: Boolean)
 
-        /** Gives the source nothing to draw. */
+        /** Gives the source nothing to draw, and forgets its feature states ([resetStates]). */
         fun clear()
+
+        /**
+         * Forgets every feature state of the source. The map keeps them by feature id across new data, and a route's ids
+         * are its own: a new route's pieces may have the ids of the old route's, and must not take their states.
+         */
+        fun resetStates()
 
         /**
          * Feature states: each of [behind], a tint's piece the car has passed, is no longer drawn; each of [levels] is a lit
@@ -321,6 +327,12 @@ internal object LaneLayers {
 
         override fun clear() {
             source?.featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+            resetStates()
+        }
+
+        override fun resetStates() {
+            // The answer is not waited for: the states set after it, for the next route's window, come after it.
+            if (source != null) mapboxMap.resetFeatureStates(SOURCE) {}
         }
 
         override fun setStates(behind: List<String>, levels: List<Pair<String, String?>>) {

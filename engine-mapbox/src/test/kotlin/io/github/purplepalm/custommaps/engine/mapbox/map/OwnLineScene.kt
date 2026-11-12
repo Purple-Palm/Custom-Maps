@@ -177,6 +177,9 @@ internal class OwnLineScene {
         /** The feature states set: each piece's id with its state's key and value, in the order they were set. */
         val states = ArrayList<Triple<String, String, Any?>>()
 
+        /** The states the map holds now, by piece id: kept across new data, as the map keeps them, until reset. */
+        val live = LinkedHashMap<String, MutableMap<String, Any?>>()
+
         /** Whether what is lit for the route is shown. */
         var litShown = true
 
@@ -217,12 +220,24 @@ internal class OwnLineScene {
             record("clear")
             sent.clear()
             held = null
+            live.clear()
+        }
+
+        override fun resetStates() {
+            record("resetStates")
+            live.clear()
         }
 
         override fun setStates(behind: List<String>, levels: List<Pair<String, String?>>) {
             record("setStates")
-            for (id in behind) states += Triple(id, LaneLayers.Key.STATE_BEHIND, true)
-            for ((id, level) in levels) states += Triple(id, LaneLayers.Key.STATE_LEVEL, level)
+            for (id in behind) {
+                states += Triple(id, LaneLayers.Key.STATE_BEHIND, true)
+                live.getOrPut(id) { LinkedHashMap() }[LaneLayers.Key.STATE_BEHIND] = true
+            }
+            for ((id, level) in levels) {
+                states += Triple(id, LaneLayers.Key.STATE_LEVEL, level)
+                live.getOrPut(id) { LinkedHashMap() }[LaneLayers.Key.STATE_LEVEL] = level
+            }
         }
 
         override fun setLitVisible(visible: Boolean) {
@@ -245,13 +260,15 @@ internal class OwnLineScene {
             positions = null
             held = null
             sent.clear()
+            live.clear()
         }
 
-        /** What a style load does: the new style has none of the lanes' layers, nor their source's data. */
+        /** What a style load does: the new style has none of the lanes' layers, nor their source's data or states. */
         fun reload() {
             positions = null
             held = null
             sent.clear()
+            live.clear()
         }
 
         /** The map parses the window sent as [dataId]: the source holds it, and windows sent before it never load. */

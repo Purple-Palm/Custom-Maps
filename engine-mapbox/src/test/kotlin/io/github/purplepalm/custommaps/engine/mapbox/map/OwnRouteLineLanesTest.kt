@@ -200,6 +200,35 @@ class OwnRouteLineLanesTest {
     }
 
     @Test
+    fun `a new route's pieces never take the feature states the old route's pieces had`() {
+        val card = own.windows.cards.first()
+        // On the first route, past the end of a tint piece in the run-up: that piece is hidden.
+        val tints = own.window(own.windows.windowAt(card.start + 20.0), reference.table, reference.runs).tints
+        val far = tints[tints.size / 2].to + 1.0
+        drawn(car = far)
+        val hidden = { lanes.live.filterValues { it[LaneLayers.Key.STATE_BEHIND] == true }.keys }
+        assertTrue(hidden().isNotEmpty(), "hidden at $far: ${lanes.live}")
+        // A new route on the same road, whose pieces have the same ids, and on it the car near the run-up's start.
+        val other = "route-y#0"
+        val otherPlan = requireNotNull(FreewayExit.plan(other, legs, shapes))
+        val near = card.start + 20.0
+        val place = scene.at(near)
+        line.onPuck(place.latitude, place.longitude, accepted = true, sdkRouteId = other, offset = reference.table.routeFraction(near), tracking = true)
+        line.onRoute(other, refresh = false, OwnRouteLine.Build { version, withLanes -> ownLineDrawing(other, legs, shapes, otherPlan, version, withLanes) }, traffic)
+        // The old route's states are forgotten with it.
+        assertTrue(lanes.live.isEmpty(), "${lanes.live.keys}")
+        assertTrue("lanes.resetStates" in style.calls, "${style.calls}")
+        scene.jobs.runAll()
+        scene.load()
+        scene.loadWindow()
+        assertTrue(line.drawn, "not drawn")
+        // Only the pieces the car has passed on the new route are hidden: the ones from there to where it was are shown.
+        val window = own.window(own.windows.windowAt(near), reference.table, reference.runs)
+        assertEquals(window.tints.filter { it.to <= near }.map { it.id }.toSet(), hidden())
+        assertTrue(window.tints.any { it.to > near && it.to <= far }, "tints between the two places")
+    }
+
+    @Test
     fun `nothing is sent while a new route loads, and the old route's window is no longer wanted`() {
         drawn()
         // The car on and a reroute onto the same road under a new id: the SDK's line until the new path has loaded.
@@ -222,11 +251,14 @@ class OwnRouteLineLanesTest {
 
     @Test
     fun `guidance end clears the drawing's source and forgets its windows`() {
-        drawn()
+        drawn(car = own.windows.cards.first().start + 200.0)
+        assertTrue(lanes.live.isNotEmpty())
         style.calls.clear()
         line.onGuidanceEnded()
         assertTrue("lanes.clear" in style.calls, "${style.calls}")
         assertNull(lanes.held)
+        // And its feature states: the next drive's pieces may have the same ids.
+        assertTrue(lanes.live.isEmpty())
         assertTrue(style.primaryShown)
         puck(2_500.0)
         line.onProgress()
