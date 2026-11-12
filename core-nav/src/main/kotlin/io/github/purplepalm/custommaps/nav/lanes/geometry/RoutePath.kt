@@ -38,8 +38,9 @@ import kotlin.math.min
  *   lane from there.
  * - **Turns.** Where the route turns onto another road with lanes, the path goes on with its lane straight along the
  *   old road until the new road's line lies farther out, then blends onto it ([CrossSection.RampStart]): the route
- *   geometry's diagonal at a gore is never drawn. Where the drawing ends at such a turn, the path goes on straight from
- *   where it is the same way and blends onto the new road's line.
+ *   geometry's diagonal at a gore is never drawn. Only the lanes that go on are drawn past the turn, so a move toward a
+ *   lane the plan names late ends there, in its lane ([lengthBeforeRampStart]). Where the drawing ends at such a turn,
+ *   the path goes on straight from where it is the same way and blends onto the new road's line.
  * - **The drawing's ends.** The path returns to the road's line only where the drawing ends, over [RETURN_METERS] on
  *   asphalt without lane lines (the asphalt then tapers over [ASPHALT_TAPER_METERS]); a drawing ends only outside
  *   card windows (inside them gaps are zones). At every end the path meets the route's own line, so the line the
@@ -154,6 +155,12 @@ class RoutePath private constructor(
         /** ...and at most this far. */
         const val MOVE_MAX_STREET_METERS = 80.0
 
+        /**
+         * A move cut short to end at a ramp's start, where the plan names its lane late, still runs this far per lane
+         * crossed: its S then never turns more than about 21 degrees from the road.
+         */
+        const val RAMP_MOVE_MIN_METERS = 15.0
+
         /** Where the drawing ends the path returns to the road's line over this distance, on asphalt without lane lines. */
         const val RETURN_METERS = 60.0
 
@@ -191,6 +198,17 @@ class RoutePath private constructor(
             evidence: LaneEvidence = plan.evidence(),
             section: CrossSection = CrossSection.of(plan, evidence),
         ): RoutePath = Builder(plan, line, version, evidence, section).build()
+
+        /**
+         * How far a move by [jump] metres across a road of [road], [length] long, runs where a ramp's start lies [toStart]
+         * metres ahead of where it begins: to the ramp's start, where only the lanes that go on onto the new road are drawn,
+         * but at least [RAMP_MOVE_MIN_METERS] per lane crossed (at least one); [length] where it ends before.
+         */
+        fun lengthBeforeRampStart(length: Double, toStart: Double, jump: Double, road: RoadKind): Double {
+            if (toStart >= length) return length
+            val shortest = RAMP_MOVE_MIN_METERS * max(1.0, abs(jump) / LaneTopology.laneMeters(road))
+            return min(length, max(toStart, shortest))
+        }
 
         /** The index of the last of the ascending [values] at or before [value]; -1 before the first. */
         internal fun indexAtOrBefore(values: DoubleArray, value: Double): Int {
@@ -535,7 +553,7 @@ class RoutePath private constructor(
                                 returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
-                            val length = if (kind == Move.Kind.RETURN) RETURN_METERS else moveLength(station, jump)
+                            val length = if (kind == Move.Kind.RETURN) RETURN_METERS else beforeRampStart(region, station, jump, moveLength(station, jump))
                             residuals.add(Residual(station, station + length, -jump))
                             moves.add(Move(station, station + length, drawn, value, kind))
                         }
@@ -638,6 +656,19 @@ class RoutePath private constructor(
             val speed = node?.let { PlanningSpeed.of(it) } ?: PlanningSpeed.mps(null, road)
             val lanes = abs(jump) / LaneTopology.laneMeters(road)
             return moveMeters(speed, road) * max(1.0, lanes)
+        }
+
+        /**
+         * How far a move by [jump] from [station] of [length] runs where a ramp's start inside a drawing of [region] (the
+         * route turns onto a road whose lanes go on) lies ahead of it: only those lanes are drawn past the turn, so the
+         * move ends there ([lengthBeforeRampStart]).
+         */
+        private fun beforeRampStart(region: Region, station: Double, jump: Double, length: Double): Double {
+            val start = section.rampStarts.firstOrNull { rs ->
+                rs.station > station + 1e-6 && rs.station < station + length &&
+                    region.drawings.any { rs.station > it.from && rs.station < it.to }
+            } ?: return length
+            return lengthBeforeRampStart(length, start.station - station, jump, section.roadAt(station) ?: RoadKind.FREEWAY)
         }
 
         /** Where the offsets fold, the path keeps to the road's line, blended in and out over [RETURN_METERS]. */

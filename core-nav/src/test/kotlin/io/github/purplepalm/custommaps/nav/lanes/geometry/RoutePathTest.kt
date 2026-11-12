@@ -72,6 +72,22 @@ class RoutePathTest {
     }
 
     @Test
+    fun `a move under way at a ramp's start ends there, but runs at least 15 m a lane`() {
+        val freeway = RoadKind.FREEWAY
+        // Two and a half lanes: at least 37.5 m.
+        assertEquals(50.0, RoutePath.lengthBeforeRampStart(405.0, 50.0, -2.5 * w, freeway), 1e-12)
+        assertEquals(37.6, RoutePath.lengthBeforeRampStart(405.0, 37.6, -2.5 * w, freeway), 1e-12)
+        assertEquals(37.5, RoutePath.lengthBeforeRampStart(405.0, 37.4, -2.5 * w, freeway), 1e-12)
+        // One lane, and less than one counted as one: at least 15 m.
+        assertEquals(15.2, RoutePath.lengthBeforeRampStart(162.0, 15.2, w, freeway), 1e-12)
+        assertEquals(15.0, RoutePath.lengthBeforeRampStart(162.0, 14.9, w, freeway), 1e-12)
+        assertEquals(15.0, RoutePath.lengthBeforeRampStart(162.0, 12.0, 0.5 * w, freeway), 1e-12)
+        // Never longer than the move itself, which ends before a ramp's start farther on.
+        assertEquals(20.0, RoutePath.lengthBeforeRampStart(20.0, 12.0, -2.5 * w, freeway), 1e-12)
+        assertEquals(162.0, RoutePath.lengthBeforeRampStart(162.0, 300.0, w, freeway), 1e-12)
+    }
+
+    @Test
     fun `IA's path keeps to the road's line until the run-up and moves into the option lane once`() {
         val ia = build(LaneScenes.ia())
         val path = ia.path
@@ -344,6 +360,38 @@ class RoutePathTest {
         assertEquals(0.0, path.offsetAt(drawing.back), 1e-12)
         assertEquals(2, path.moves.size)
         checkRules("late move", built)
+    }
+
+    @Test
+    fun `a move toward a lane named late ends at the ramp's start, in its lane, on the drawn asphalt`() {
+        for ((mps, end) in listOf(27.0 to gore, 20.0 to gore + 12.5)) {
+            val name = "late move onto a ramp's lanes at $mps m/s"
+            val built = build(lateMoveOntoRampLanes(mps))
+            val section = built.section
+            val path = built.path
+            // The scene: the plan names the exit's lane only where it opens to every car, two and a half lanes right of the
+            // road's line, late (later at 20 m/s, where the lane opens along a shorter taper); the drawing goes on past the
+            // gore onto the ramp's lanes, and only the lanes onto the ramp are drawn past the turn.
+            val start = section.rampStarts.single()
+            assertEquals(gore, start.station, 1e-9)
+            assertTrue(path.drawings.single().let { gore > it.from && gore < it.to }, name)
+            val move = path.moves.first { it.kind == RoutePath.Move.Kind.LANE }
+            val named = requireNotNull(built.plan.segmentAt(move.from)?.named)
+            assertEquals(-2.5 * w, move.offsetTo, 1e-9, name)
+            assertTrue(move.from + RoutePath.moveMeters(mps, RoadKind.FREEWAY) * 2.5 > gore + 50.0, name)
+            // The move ends at the gore, or 15 m a lane past where it began where that lies farther: the path is in its lane at
+            // the gore at 27 m/s, on the drawn asphalt at 20 m/s, and on the drawn asphalt at every metre up to the split.
+            assertEquals(end, move.to, 1e-9, name)
+            if (end == gore) assertEquals(section.place(named, gore, requireNotNull(path.axisAt(gore)))!!.centre, path.offsetAt(gore), 1e-9, name)
+            var station = gore
+            while (station < gore + 180.0) {
+                val offset = path.offsetAt(station)
+                val edges = requireNotNull(section.edges(station, requireNotNull(path.axisAt(station))))
+                assertTrue(offset <= edges.asphaltLeft + 1e-6 && offset >= edges.asphaltRight - 1e-6, "$name at $station: $offset off the ramp's asphalt")
+                station += 1.0
+            }
+            checkRules(name, built)
+        }
     }
 
     @Test
@@ -646,8 +694,8 @@ class RoutePathTest {
      * path is in the named lane except inside a move and never moves away from the exit's edge; inside the drawings it
      * moves only toward the plan's lane, then never back; it is back on the road's line only where a drawing ends outside
      * card windows; it is on the road's line on an approach where no lane is named (C1); it meets the route's line at every
-     * drawing end; it never steps sideways inside a drawing; where a drawing ends, its turn or its return takes over a move
-     * still under way.
+     * drawing end; it never steps sideways inside a drawing; at a ramp's start inside a drawing it lies on the asphalt of the
+     * lanes that go on; where a drawing ends, its turn or its return takes over a move still under way.
      */
     private fun checkRules(name: String, built: Built): Int {
         val path = built.path
@@ -766,6 +814,20 @@ class RoutePathTest {
                 }
                 station += 1.0
             }
+        }
+        // At a ramp's start inside a drawing only the lanes that go on onto the new road are drawn past the turn: the path
+        // lies on their asphalt there (or on the road's line, past an approach where no lane is named), so a move toward a
+        // lane named late has ended, not left the path beside the drawn ramp.
+        for (start in built.section.rampStarts) {
+            if (path.drawings.none { start.station > it.from && start.station < it.to }) continue
+            if (path.folds.any { start.station >= it.from - RoutePath.RETURN_METERS && start.station <= it.to + RoutePath.RETURN_METERS }) continue
+            val offset = path.offsetAt(start.station)
+            if (abs(offset) < 1e-9) continue
+            val edges = requireNotNull(built.section.edges(start.station, requireNotNull(path.axisAt(start.station))))
+            assertTrue(
+                offset <= edges.asphaltLeft + 1e-6 && offset >= edges.asphaltRight - 1e-6,
+                "$name: at the ramp's start at ${start.station} the path at $offset lies beside the lanes that go on, ${edges.asphaltRight}..${edges.asphaltLeft}",
+            )
         }
         // At a drawing's end its turn or its return takes over a move still under way: past the turn the path is the turn's
         // straight-on line from where the path was when the turn began; past the return it moves only toward the road's line.
@@ -954,6 +1016,18 @@ class RoutePathTest {
         listOf(At(2_400.0, listOf(s(), s(), s(), s(), s(), hov())), At(1_200.0, listOf(s(), s(), s(), s(), s(), hov()))),
         exit = listOf(s(false), s(false), s(false), s(false), s(false), sr()),
         id = "late-move",
+    )
+
+    /**
+     * [lateMove]'s right exit planned at [mps], with lane data on its ramp: the ramp splits 180 m past the gore, where the
+     * route keeps left, so the drawing goes on past the gore onto the ramp's lanes.
+     */
+    private fun lateMoveOntoRampLanes(mps: Double) = LaneScenes.approach(
+        listOf(At(2_400.0, listOf(s(), s(), s(), s(), s(), hov())), At(1_200.0, listOf(s(), s(), s(), s(), s(), hov()))),
+        exit = listOf(s(false), s(false), s(false), s(false), s(false), sr()),
+        planMps = mps,
+        rampPoints = listOf(180.0 to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT)),
+        id = "late-move-onto-ramp-lanes",
     )
 
     /**
