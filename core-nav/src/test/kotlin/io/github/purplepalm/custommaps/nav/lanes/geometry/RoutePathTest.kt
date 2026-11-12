@@ -245,6 +245,42 @@ class RoutePathTest {
     }
 
     @Test
+    fun `ahead of an approach where no lane is named the path keeps to the road's line`() {
+        val scenes = listOf(
+            "car-pool lane, right exit" to beyondKeptLane(hov(), LaneEdge.RIGHT),
+            "bus lane, right exit" to beyondKeptLane(LaneScenes.bus(), LaneEdge.RIGHT),
+            "car-pool lane, left exit" to beyondKeptLane(hov(), LaneEdge.LEFT),
+            "lane turned into a bus lane, no run-up" to beyondBusLane(),
+        )
+        for ((name, route) in scenes) {
+            val built = build(route)
+            val plan = built.plan
+            val path = built.path
+            // The scene: no lane can be named on the exit's approach (C1), whose lane lies beyond a lane kept for car pools
+            // or buses at the exit's edge. The approach begins between the plan's grid stations; before it the band is the
+            // lane beyond the kept one alone, well off the road's line.
+            val approach = plan.noLane.single()
+            assertEquals(LanePlan.NoLane.Cause.DESIGNATED_BETWEEN, approach.cause, name)
+            val run = plan.topology.runs[requireNotNull(plan.segmentAt(approach.from)).run]
+            val offGrid = (approach.from - run.from) % LanePlanner.GRID_METERS
+            assertTrue(offGrid > 0.5 && offGrid < LanePlanner.GRID_METERS - 0.5, "$name: off the grid by $offGrid m")
+            val band = plan.segmentAt(approach.from - 1.0)!!.band
+            assertEquals(1, band.size, name)
+            val beyond = built.section.place(band.single(), approach.from - 1.0)!!
+            assertTrue(abs(beyond.centre) > w, "$name: the band's lane at ${beyond.centre}")
+            // The path heads for the road's line, where it runs on the approach: it never leaves it before the turn at the gore.
+            assertEquals(listOf(RoutePath.Move.Kind.TURN), path.moves.map { it.kind }, name)
+            val turn = path.moves.single()
+            var station = path.drawings.single().from
+            while (station < turn.from) {
+                assertEquals(0.0, path.offsetAt(station), 1e-12, "$name at $station")
+                station += 1.0
+            }
+            checkRules(name, built)
+        }
+    }
+
+    @Test
     fun `the path is the route's own line away from the drawings and meets it at every drawing end`() {
         for ((name, route) in LaneScenes.all()) {
             val built = build(route)
@@ -374,7 +410,8 @@ class RoutePathTest {
      * Checks [built] against the design's rules and returns how many card windows it checked: inside a card window the
      * path is in the named lane except inside a move and never moves away from the exit's edge; inside the drawings it
      * moves only toward the plan's lane, then never back; it is back on the road's line only where a drawing ends outside
-     * card windows; it meets the route's line at every drawing end.
+     * card windows; it is on the road's line on an approach where no lane is named (C1); it meets the route's line at every
+     * drawing end.
      */
     private fun checkRules(name: String, built: Built): Int {
         val path = built.path
@@ -454,6 +491,20 @@ class RoutePathTest {
                     }
                 }
                 prev = now
+            }
+        }
+        // C1: on an approach where no lane is named the path is on the road's line, but at a turn or a fold and while a move
+        // begun before the approach is still under way.
+        for (approach in plan.noLane) {
+            val begun = path.moves.filter { it.from < approach.from - 1e-6 }.map { it.from to it.to + 1e-6 }
+            val skip = turns(built) + begun + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+            var station = approach.from
+            while (station < approach.to) {
+                val drawn = path.drawings.any { station >= it.from && station < it.to }
+                if (drawn && skip.none { station >= it.first && station <= it.second }) {
+                    assertEquals(0.0, path.offsetAt(station), 1e-9, "$name at $station: off the road's line on an approach where no lane is named")
+                }
+                station += 1.0
             }
         }
         // 8: the returns to the road's line lie outside card windows.
@@ -537,6 +588,35 @@ class RoutePathTest {
         exit = listOf(sl(), s(false), s(false), hov()),
         maneuver = LaneScenes.OFF_LEFT,
         id = "off-grid-window",
+    )
+
+    /**
+     * An exit on the [edge] side whose lane lies beyond the lane [kept] (kept for car pools or buses) at that edge: three lanes
+     * open to every car and the kept lane 2,200 m before the gore; 1,100 m before, a lane beyond the kept one, the only lane
+     * the exit can be taken from. Planned at 26.5 m/s, so the exit's run-up begins between the plan's grid stations.
+     */
+    private fun beyondKeptLane(kept: RouteLane, edge: LaneEdge): LaneRoute {
+        val right = edge == LaneEdge.RIGHT
+        fun side(vararg lanes: RouteLane) = if (right) lanes.toList() else lanes.reversed()
+        return LaneScenes.approach(
+            listOf(At(2_200.0, side(s(), s(), s(), kept)), At(1_100.0, side(s(), s(), s(), kept, s()))),
+            exit = side(s(false), s(false), s(false), kept, if (right) sr() else sl()),
+            maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT,
+            planMps = 26.5,
+            id = "beyond-kept-lane",
+        )
+    }
+
+    /**
+     * A right exit with too few lanes open to every car for a run-up: two lanes 2,000 m before the gore, the right one kept for
+     * buses from a point 1,300 m before, a lane beyond it from a point 800 m before, the only one the exit can be taken from.
+     * Planned at 26.5 m/s.
+     */
+    private fun beyondBusLane() = LaneScenes.approach(
+        listOf(At(2_000.0, listOf(s(), s())), At(1_300.0, listOf(s(), LaneScenes.bus())), At(800.0, listOf(s(), LaneScenes.bus(), s()))),
+        exit = listOf(s(false), LaneScenes.bus(), sr()),
+        planMps = 26.5,
+        id = "beyond-bus-lane",
     )
 
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */

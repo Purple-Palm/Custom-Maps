@@ -30,6 +30,10 @@ import kotlin.math.min
  *   freeways, clamp(v x [MOVE_SECONDS_STREET], 25, 80 m) on streets, at the planning speed), starting at the plan's
  *   station, ahead of the car. Into a lane its neighbour feeds (a deceleration lane) it moves along that lane's own
  *   taper, with no S.
+ * - **No lane named (C1).** Ahead of an approach where no lane can be named (only a lane kept for car pools or buses
+ *   can be used, or the lanes to use lie beyond one), the plan heads for the road's line, where the path runs on that
+ *   approach: the band's middle before it leads the path toward the road's line and never past it, so the path reaches
+ *   the approach on the line with no move back to it.
  * - **Turns.** Where the route turns onto another road with lanes, the path goes on with its lane straight along the
  *   old road until the new road's line lies farther out, then blends onto it ([CrossSection.RampStart]): the route
  *   geometry's diagonal at a gore is never drawn. Where the drawing ends at such a turn, the path goes on straight in
@@ -216,6 +220,9 @@ class RoutePath private constructor(
         data class Turn(val turn: Double, val offset: Double) : Piece()
     }
 
+    /** Where the plan heads from before [station] on the run [run]: the middle of [lane], or the road's line where it is null (C1). */
+    private class Ref(val station: Double, val run: Int, val lane: Int?)
+
     /** A move in progress: [offset] left over at [from], gone by [to]. */
     private class Residual(val from: Double, val to: Double, val offset: Double) {
         fun at(station: Double): Double = offset * (1.0 - CrossSection.ramp(station, from, to))
@@ -240,16 +247,26 @@ class RoutePath private constructor(
         private val length = if (line.isEmpty()) 0.0 else lineStations.last()
 
         /**
-         * The first lane each card window names, with where the plan first names it, in route order. A window may begin
-         * between the plan's grid stations (the seam begins a run-up a few seconds of driving before a narrowing), where
-         * the plan names no lane until the first grid station inside it: the lane is the first one any stretch inside the
-         * window names, from where that stretch begins.
+         * Where the plan heads, in route order: the first lane each card window names, from where the plan first names it,
+         * and the road's line on each approach where no lane is named (C1), from where the plan's stretches without one
+         * begin. A window or an approach may begin between the plan's grid stations (the seam begins a run-up a few seconds
+         * of driving before a narrowing), and the plan changes only at the first grid station inside it: a window's lane is
+         * the first one any stretch inside it names, from where that stretch begins.
          */
-        private val refs: List<Pair<Double, Int>> = plan.windows.mapNotNull { w ->
-            val first = plan.segmentAt(w.from)?.takeIf { it.named != null }
-                ?: plan.segments.firstOrNull { it.named != null && it.from > w.from && it.from < w.to }
-            first?.let { max(w.from, it.from) to requireNotNull(it.named) }
-        }.sortedBy { it.first }
+        private val refs: List<Ref> = run {
+            val lanes = plan.windows.mapNotNull { w ->
+                val first = plan.segmentAt(w.from)?.takeIf { it.named != null }
+                    ?: plan.segments.firstOrNull { it.named != null && it.from > w.from && it.from < w.to }
+                first?.let {
+                    val lane = requireNotNull(it.named)
+                    Ref(max(w.from, it.from), topology.lanes[lane].run, lane)
+                }
+            }
+            val lines = plan.noLane.mapNotNull { n ->
+                plan.segments.firstOrNull { it.noLane != null && it.to > n.from && it.from < n.to }?.let { Ref(max(n.from, it.from), it.run, null) }
+            }
+            (lanes + lines).sortedBy { it.station }
+        }
 
         private val moves = ArrayList<Move>()
         private val folds = ArrayList<Fold>()
@@ -477,7 +494,7 @@ class RoutePath private constructor(
                 out.add(d.from)
                 out.add(d.to)
             }
-            for ((from, _) in refs) if (from > region.from && from < region.to) out.add(from)
+            for (ref in refs) if (ref.station > region.from && ref.station < region.to) out.add(ref.station)
             return out
         }
 
@@ -555,8 +572,8 @@ class RoutePath private constructor(
                 LaneEdge.LEFT -> 1
                 null -> 0
             }
-            val ref = refs.firstOrNull { it.first > station && it.first < drawing.to + 1e-6 && topology.lanes[it.second].run == seg.run }
-                ?.let { (from, lane) -> section.place(lane, from)?.centre }
+            val ref = refs.firstOrNull { it.station > station && it.station < drawing.to + 1e-6 && it.run == seg.run }
+                ?.let { r -> if (r.lane == null) 0.0 else section.place(r.lane, r.station)?.centre }
             return Piece.Band(seg.band, ref, edge)
         }
 
