@@ -624,7 +624,9 @@ Asked on 2026-11-11, with the answers about the app's own lanes:
   one lane in from the edge until that road is passed, since the road may take the edge lane with
   it, and moving it to the edge once after it. Where such a road comes less than about 12 s of
   driving before the exit, the lane reaches the edge before the road, and the card's words wait
-  until the road is passed. The app's lane plan does this; for now it is only written to the log
+  until the road is passed. The app's lane plan does this, with the edge as it is where the road
+  leaves: a lane that becomes the edge lane only on the way, because the lane beyond it leaves at an
+  earlier exit, is not lit before the road either. For now it is only written to the log
   (`lane_plan`, checks 46 to 48), and nothing on the screen changes.
 
 ### Checking a turn at home
@@ -951,9 +953,12 @@ writes that down and compares it with the card, and nothing on the screen change
     data: a run-up's row, a lane choice's, and on a freeway the exit's or the fork's own. At each
     freeway exit with lane data every `lane_agree` line should say `agree` true, or `why` `words` with
     `opensAhead` true where an exit-only lane opens ahead of the car (once the card reads the plan, it
-    keeps its words until that lane is there). A `why` of `lit` or `amber` is a place where the card
-    and the plan light different lanes: note the exit. There should be no `error` line with `where`
-    `lane_plan` or `lane_agree`, and Start and a reroute should feel as before.
+    keeps its words until that lane is there). A `why` of `lit` with `unknownAhead` true can be right
+    too: before a road without lane data on the exit's side the plan keeps clear of the lane that will
+    be at the edge where that road leaves, which the card may still light, without words. Any other
+    `lit` or `amber` is a place where the card and the plan light different lanes: note the exit.
+    There should be no `error` line with `where` `lane_plan` or `lane_agree`, and Start and a reroute
+    should feel as before.
 47. **How often a road without lane data dropped the hold.** A run-up's `unknownExits` in `lane_plan`
     counts the roads without lane data on the exit's side before it, and `unknownExitDropped` says
     where the plan lit the edge lane before such a road all the same, because it came less than about
