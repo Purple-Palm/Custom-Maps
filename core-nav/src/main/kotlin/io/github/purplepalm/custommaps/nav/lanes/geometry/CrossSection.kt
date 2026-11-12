@@ -395,7 +395,7 @@ class CrossSection private constructor(
         }
 
         /** The offset at [at] of the line straight on from [shift] to the left of the axis at [begin]; null where it is no longer read across. */
-        private fun lineOffset(axis: RoadAxis, begin: Double, shift: Double, at: Double): Double? {
+        internal fun lineOffset(axis: RoadAxis, begin: Double, shift: Double, at: Double): Double? {
             val start = axis.at(begin)
             val ox = start.point.x + start.nx * shift
             val oy = start.point.y + start.ny * shift

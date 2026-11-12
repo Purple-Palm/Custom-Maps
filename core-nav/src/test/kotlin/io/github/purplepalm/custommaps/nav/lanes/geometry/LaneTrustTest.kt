@@ -1,0 +1,631 @@
+package io.github.purplepalm.custommaps.nav.lanes.geometry
+
+import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
+import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
+import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
+import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.At
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
+import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
+import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
+import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Kind
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Part
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.RouteLane
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import kotlin.math.abs
+import kotlin.random.Random
+
+/**
+ * The trust properties of the app's own lanes on freeways (the design's 10.1, LaneTrust 1 to 11), on the made-up routes of
+ * [LaneScenes] and on the seeded random routes of [RandomRoutes]: what the drawing claims is the route's data, a rule, or
+ * nothing. The path's own rules are [RoutePathTest]'s; here the path is held against the lanes as they are drawn, and the
+ * plan's named lane stands for the lane the map will light.
+ */
+class LaneTrustTest {
+
+    private val gore = LaneScenes.GORE
+
+    /** How often each property met what it checks, by name: the properties must not hold for want of cases. */
+    private val seen = HashMap<String, Int>()
+
+    private fun saw(what: String) {
+        seen[what] = (seen[what] ?: 0) + 1
+    }
+
+    private fun assertSeen(vararg what: String) {
+        for (w in what) assertTrue((seen[w] ?: 0) > 0, "no case of $w among ${seen.toSortedMap()}")
+    }
+
+    private class Built(
+        val name: String,
+        val route: LaneRoute,
+        val plan: LanePlan,
+        val evidence: LaneEvidence,
+        val section: CrossSection,
+        val path: RoutePath,
+        val drawing: LaneDrawing,
+        val features: List<LaneDrawing.Feature>,
+    )
+
+    private fun build(name: String, route: LaneRoute, line: List<GeoPoint> = SceneLines.of(route)): Built {
+        val plan = SceneLines.planOf(route)
+        val evidence = plan.evidence()
+        val section = CrossSection.of(plan, evidence)
+        val path = RoutePath.of(plan, line, version = 1, evidence = evidence, section = section)
+        val drawing = LaneDrawing.of(plan, path, evidence, section)
+        return Built(name, route, plan, evidence, section, path, drawing, drawing.features())
+    }
+
+    @Test
+    fun `every trust property holds on every scene`() {
+        for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
+        assertSeen("line", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
+    }
+
+    @Test
+    fun `every trust property holds on seeded random approaches`() {
+        val rng = Random(RANDOM_SEED)
+        repeat(RANDOM_ROUTES) { k ->
+            val route = RandomRoutes.approach(rng, "random-$k")
+            val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
+            check(build("random-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
+        }
+        assertSeen("line", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
+    }
+
+    @Test
+    fun `every trust property holds where lanes are kept for car pools or buses, on seeded random routes`() {
+        val rng = Random(KEPT_SEED)
+        var flagged = 0
+        repeat(KEPT_ROUTES) { k ->
+            val route = RandomRoutes.keptLane(rng, "kept-$k")
+            val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
+            val built = build("kept-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first }))
+            if (built.plan.moves.any { it.back }) flagged++
+            check(built)
+        }
+        // 6: the plan names a lane farther from the exit's edge than the one before only where it flags that itself, on the
+        // careful reading of a few of these routes; never on the scenes or the approaches above.
+        assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
+        assertSeen("line", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
+    }
+
+    @Test
+    fun `11 the same route gives byte-equal features, whole and in windows`() {
+        for (route in listOf(LaneScenes.iw31(), LaneScenes.ia(), LaneScenes.carpoolEnds(), LaneScenes.thirdLaneForCarPools())) {
+            val one = build(route.routeId, route)
+            val two = build(route.routeId, route)
+            assertEquals(one.features, two.features)
+            assertEquals(one.features.toString(), two.features.toString())
+            val a = gore - 2_345.6
+            val b = gore + 123.4
+            assertEquals(one.drawing.features(a, b).toString(), two.drawing.features(a, b).toString())
+        }
+    }
+
+    @Test
+    fun `3 a lane only for bicycles is drawn at its own width with a solid line beside it, never as a vehicle lane`() {
+        val built = build("bicycle-lane", bicycleLane())
+        check(built)
+        val lane = built.plan.topology.lanes.first { it.kinds == setOf(DesignatedKind.BICYCLE) }
+        val place = built.drawing.lanesAt(gore - 1_200.0).single { it.lane == lane.id }
+        assertEquals(CrossSection.BICYCLE_LANE_METERS, place.width, 1e-9)
+        val beside = built.features.filter { it.kind == Kind.LANE_LINE && it.between?.first == lane.id }
+        assertTrue(beside.isNotEmpty())
+        assertTrue(beside.all { it.pattern == LaneDrawing.Pattern.SOLID && it.width == LaneDrawing.Width.NORMAL })
+        assertTrue(built.features.none { (it.kind == Kind.KEPT_LANE || it.kind == Kind.ARROW || it.kind == Kind.DIAMOND) && it.lane == lane.id })
+    }
+
+    /** Every property of the design's LaneTrust that the lanes, the lines, the symbols and the path through them can break. */
+    private fun check(b: Built) {
+        linesOnData(b)
+        noDoubleNoCentreNoChevron(b)
+        designatedByKind(b)
+        namedLaneDrawn(b)
+        movesTowardThePlansLane(b)
+        neverBack(b)
+        lanesOpenAndLeave(b)
+        tapersAtEveryEnd(b)
+        neverAwayFromTheExit(b)
+        notTheEdgeLaneWhileOneMayBeBeyond(b)
+    }
+
+    // ------------------------------------------------------------------ 1: lane lines only where the data gives the count
+
+    private fun linesOnData(b: Built) {
+        val turns = b.route.nodes.filter { LaneEvidence.planTurns(it) }.map { it.station }
+        for (f in b.features) {
+            if (f.kind != Kind.LANE_LINE) continue
+            when (f.part) {
+                Part.ROUTE -> {
+                    val between = requireNotNull(f.between)
+                    for (x in along(f.from, f.to, LINE_SAMPLE_METERS)) {
+                        val stretch = b.evidence.stretches.firstOrNull { x >= it.from && x < it.to }
+                        assertTrue(
+                            stretch != null && (stretch.kind == LaneEvidence.Kind.KNOWN || stretch.kind == LaneEvidence.Kind.BRIDGED),
+                            "${b.name}: the line $between at $x on a ${stretch?.kind} stretch",
+                        )
+                        val lanes = b.drawing.lanesAt(x)
+                        val l = lanes.indexOfFirst { it.lane == between.first }
+                        assertTrue(l >= 0 && lanes.getOrNull(l + 1)?.lane == between.second, "${b.name}: the line $between at $x lies between no two neighbours")
+                        assertTrue(
+                            lanes[l].state != CrossSection.State.POSSIBLE && lanes[l + 1].state != CrossSection.State.POSSIBLE,
+                            "${b.name}: the line $between at $x beside a lane that is only possible",
+                        )
+                        saw("line")
+                    }
+                }
+                // A stub carries the lanes the route does not take on for its length, by rule.
+                Part.STUB -> {
+                    assertTrue(
+                        turns.any { f.from >= it - CrossSection.RAMP_START_MAX_METERS && f.to <= it + LaneDrawing.STUB_METERS + 1e-6 },
+                        "${b.name}: a stub's line over ${f.from}..${f.to}",
+                    )
+                    saw("stub")
+                }
+                // Past a turn without lane data no count is known: no line between its lanes.
+                Part.BEYOND -> error("${b.name}: a lane line past a turn without lane data at ${f.from}")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 2: no double line, no centre line, no chevron
+
+    private fun noDoubleNoCentreNoChevron(b: Built) {
+        val known = setOf(Kind.ASPHALT, Kind.KEPT_LANE, Kind.LANE_LINE, Kind.EDGE_LINE, Kind.CHANNEL_LINE, Kind.DIAMOND, Kind.ARROW)
+        for (f in b.features) {
+            assertTrue(f.kind in known, "${b.name}: ${f.kind}")
+            // Yellow only on the left edge: never a centre line, never an oncoming carriageway's line.
+            if (f.paint == LaneDrawing.Paint.YELLOW) assertTrue(f.kind == Kind.EDGE_LINE && f.side == LaneEdge.LEFT, "${b.name}: a yellow ${f.kind} ${f.side}")
+            // The gore's lines are two plain wide white lines, never chevrons.
+            if (f.kind == Kind.CHANNEL_LINE) {
+                assertEquals(LaneDrawing.Width.WIDE, f.width)
+                assertEquals(LaneDrawing.Paint.WHITE, f.paint)
+                assertEquals(LaneDrawing.Pattern.SOLID, f.pattern)
+                assertEquals(1, f.parts.size)
+            }
+            // Lines run between lanes of the route's own carriageway, or at its edges.
+            if (f.kind == Kind.LANE_LINE) {
+                val between = requireNotNull(f.between)
+                assertTrue(between.first in b.plan.topology.lanes.indices && between.second in b.plan.topology.lanes.indices)
+            }
+        }
+        // One line on each boundary at a time.
+        for (part in Part.entries) {
+            val lines = b.features.filter { it.part == part && (it.kind == Kind.LANE_LINE || it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE) }
+            for ((key, group) in lines.groupBy { Triple(it.kind, it.between, it.side) }) {
+                val sorted = group.sortedBy { it.from }
+                for (i in 1 until sorted.size) {
+                    assertTrue(sorted[i].from > sorted[i - 1].to, "${b.name}: two $part lines $key over ${sorted[i].from}..${sorted[i - 1].to}")
+                }
+            }
+        }
+        // On the route's carriageway no more lane lines than boundaries between the lanes drawn, and at most one line at each edge.
+        for (d in b.path.drawings) {
+            for (x in along(d.from + 0.37, d.to, 5.0)) {
+                val here = b.features.filter { it.part == Part.ROUTE && x >= it.from && x <= it.to }
+                val lanes = b.drawing.lanesAt(x).size
+                assertTrue(here.count { it.kind == Kind.LANE_LINE } <= maxOf(0, lanes - 1), "${b.name} at $x: more lane lines than boundaries")
+                for (side in LaneEdge.entries) {
+                    assertTrue(
+                        here.count { (it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE) && it.side == side } <= 1,
+                        "${b.name} at $x: two lines at the $side edge",
+                    )
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 3: designated lanes by their kind
+
+    private fun designatedByKind(b: Built) {
+        val lanes = b.plan.topology.lanes
+        for (f in b.features) {
+            val lane = f.lane?.let { lanes[it] }
+            when (f.kind) {
+                Kind.DIAMOND -> {
+                    assertTrue(lane != null && DesignatedKind.HOV in lane.kinds, "${b.name}: a diamond in lane ${f.lane}")
+                    val middle = f.from + LaneDrawing.DIAMOND_LENGTH_METERS / 2.0
+                    val place = b.drawing.lanesAt(middle).single { it.lane == f.lane }
+                    val ring = f.parts.single().dropLast(1)
+                    val centre = GeoPoint(ring.sumOf { it.latitude } / ring.size, ring.sumOf { it.longitude } / ring.size)
+                    assertEquals(place.centre, offsetOf(requireNotNull(b.path.axisAt(middle)), middle, centre), 0.01, "${b.name}: a diamond off its lane's middle at ${f.from}")
+                    saw("diamond")
+                }
+                Kind.KEPT_LANE -> {
+                    assertTrue(
+                        lane != null && lane.designated && DesignatedKind.HOV !in lane.kinds && lane.kinds.any { it != DesignatedKind.BICYCLE },
+                        "${b.name}: lane ${f.lane} drawn darker, kept for ${lane?.kinds}",
+                    )
+                    saw("kept")
+                }
+                Kind.ARROW -> {
+                    assertFalse(requireNotNull(lane).designated, "${b.name}: an arrow on the designated lane ${f.lane}")
+                    val place = b.drawing.lanesAt(f.from).firstOrNull { it.lane == f.lane }
+                    assertTrue(place != null && place.state != CrossSection.State.POSSIBLE, "${b.name}: an arrow at ${f.from} on lane ${f.lane}, not drawn as there")
+                    // Every corner of it inside its lane.
+                    val axis = requireNotNull(b.path.axisAt(f.from))
+                    val start = axis.at(f.from)
+                    for (p in f.parts.flatten()) {
+                        val q = axis.toLocal(p)
+                        val at = f.from + (q.x - start.point.x) * start.tx + (q.y - start.point.y) * start.ty
+                        val drawn = b.drawing.lanesAt(at).single { it.lane == f.lane }
+                        assertTrue(abs(offsetOf(axis, at, p) - drawn.centre) <= drawn.width / 2.0, "${b.name}: an arrow's corner outside lane ${f.lane} at $at")
+                    }
+                    saw("arrow")
+                }
+                else -> Unit
+            }
+        }
+        // A lane only for bicycles is drawn at its own width wherever it is drawn (across the road: not where the lanes go on
+        // straight across a turn): never as a vehicle lane.
+        val turning = turns(b)
+        for (d in b.path.drawings) {
+            for (x in along(d.from, d.to, 20.0)) {
+                if (turning.any { x >= it.first && x <= it.second }) continue
+                for (p in b.drawing.lanesAt(x)) {
+                    if (lanes[p.lane].kinds == setOf(DesignatedKind.BICYCLE)) assertTrue(p.width <= CrossSection.BICYCLE_LANE_METERS + 1e-9, "${b.name} at $x")
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 4: the named lane is a lane of the drawing, the path in it
+
+    private fun namedLaneDrawn(b: Built) {
+        val excluded = b.path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(b) + folds(b)
+        for (window in b.plan.windows) {
+            for (x in along(window.from, window.to, 2.0)) {
+                val seg = b.plan.segmentAt(x) ?: continue
+                val named = seg.named ?: continue
+                if (!seg.inWindow || seg.noLane != null || b.path.drawings.none { x >= it.from && x < it.to }) continue
+                val lanes = b.drawing.lanesAt(x)
+                val lane = b.plan.topology.lanes[named]
+                assertFalse(lane.designated, "${b.name}: the designated lane $named named at $x")
+                val feeder = lane.fedBy?.let { f -> lanes.firstOrNull { it.lane == f } }
+                val place = lanes.firstOrNull { it.lane == named }
+                if (place == null) {
+                    // A lane entered along its taper opens from nothing: where it begins, it is still its feeder's width.
+                    assertTrue(feeder != null && x - lane.opens < OPENING_METERS, "${b.name}: the named lane $named is not drawn at $x")
+                    continue
+                }
+                assertTrue(place.state != CrossSection.State.POSSIBLE, "${b.name}: the named lane $named is drawn as only possible at $x")
+                if (excluded.any { x >= it.first && x <= it.second }) continue
+                val left = maxOf(place.left, feeder?.left ?: place.left)
+                val right = minOf(place.right, feeder?.right ?: place.right)
+                val offset = b.path.offsetAt(x)
+                assertTrue(offset <= left + 1e-9 && offset >= right - 1e-9, "${b.name} at $x: the path at $offset outside its drawn lane $right..$left")
+                saw("named")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 5: the path moves only toward the plan's lane
+
+    private fun movesTowardThePlansLane(b: Built) {
+        // Back to the road's line only where a drawing ends outside card windows.
+        for (move in b.path.moves) {
+            if (move.kind == RoutePath.Move.Kind.RETURN) assertFalse(b.plan.segmentAt(move.from + 0.5)?.inWindow == true, "${b.name}: a return inside a card window")
+        }
+        if (b.plan.moves.any { it.back }) return
+        val skip = turns(b) + folds(b)
+        for (drawing in b.path.drawings) {
+            var station = drawing.from
+            var first = 0.0 // the first move's direction while it lasts; 2 once it is over
+            var prev = b.path.offsetAt(station)
+            var approach = approachOf(b, station)
+            while (station < drawing.to) {
+                station = minOf(drawing.to, station + 1.0)
+                val now = b.path.offsetAt(station)
+                val here = approachOf(b, station)
+                if (here != approach) {
+                    approach = here
+                    first = 0.0
+                } else if (skip.none { station >= it.first && station <= it.second } && abs(now - prev) > 1e-9) {
+                    val sign = if (now > prev) 1.0 else -1.0
+                    val edge = edgeSign(b, station) ?: sign
+                    when {
+                        first == 0.0 -> first = sign
+                        first != 2.0 && sign == first -> Unit
+                        else -> {
+                            first = 2.0
+                            assertEquals(edge, sign, "${b.name} at $station: the path moves back ($prev to $now)")
+                        }
+                    }
+                }
+                prev = now
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 6: never back between maneuvers
+
+    private fun neverBack(b: Built) {
+        // The kept-lane routes count their flagged plans in their own test.
+        if (!b.name.startsWith("kept-")) {
+            assertTrue(b.plan.moves.none { it.back }, "${b.name}: the plan moves back at ${b.plan.moves.filter { it.back }.map { it.station }}")
+        }
+        // While the named lane stays the same, its count from the exit's edge grows only where a lane opens, or may begin,
+        // between it and that edge.
+        for (i in 1 until b.plan.segments.size) {
+            val before = b.plan.segments[i - 1]
+            val seg = b.plan.segments[i]
+            val count = seg.namedFromEdge ?: continue
+            val last = before.namedFromEdge ?: continue
+            if (seg.named != before.named || seg.edge != before.edge || seg.run != before.run || !sameRoad(b, before.from, seg.from)) continue
+            assertTrue(count <= last || laneBeginsBetween(b, seg), "${b.name} at ${seg.from}: lane ${seg.named} counts $count from the edge after $last")
+        }
+    }
+
+    /** Whether at the start of [seg] a lane open to every car opens, or may begin, between its named lane and the exit's edge. */
+    private fun laneBeginsBetween(b: Built, seg: PlanSegment): Boolean {
+        val named = b.plan.topology.lanes[requireNotNull(seg.named)]
+        return b.plan.topology.lanes.any { lane ->
+            val begins = listOfNotNull(lane.opens, lane.possibleFrom).any { abs(it - seg.from) <= LanePlanner.GRID_METERS + 1e-9 }
+            lane.run == named.run && !lane.designated && begins && if (seg.edge == LaneEdge.RIGHT) lane.slot > named.slot else lane.slot < named.slot
+        }
+    }
+
+    // ------------------------------------------------------------------ 7: lanes open no earlier and leave the band no later than the rules
+
+    private fun lanesOpenAndLeave(b: Built) {
+        val topology = b.plan.topology
+        for (lane in topology.lanes) {
+            val addedAt = lane.addedAt ?: continue
+            val point = topology.points[addedAt]
+            val evidence = point.station
+            if (lane.id in b.plan.named) {
+                // A lane the plan names opens no earlier than its first evidence less its taper (a deceleration lane's own
+                // length at an exit), and is not drawn before it opens.
+                val node = b.route.nodes[point.node]
+                val taper = if (LaneEvidence.planTurns(node)) {
+                    LaneTopology.DECEL_LATE_FULL_METERS + LaneTopology.DECEL_TAPER_METERS
+                } else {
+                    LaneTopology.addedTaperMeters(PlanningSpeed.of(b.route.nodes[maxOf(0, point.node - 1)]), b.route.approachRoad(point.node))
+                }
+                assertTrue(lane.opens >= evidence - taper - 1e-6, "${b.name}: the named lane ${lane.id} opens at ${lane.opens}, its evidence at $evidence")
+                saw("opens")
+                val before = lane.opens - 1.0
+                if (b.path.drawings.any { before > it.from && before < it.to }) {
+                    assertTrue(b.drawing.lanesAt(before).none { it.lane == lane.id }, "${b.name}: the named lane ${lane.id} drawn at $before, before it opens")
+                }
+            }
+            val possible = lane.possibleFrom ?: continue
+            if (lane.id in b.plan.named) continue
+            // An exit-side lane the plan does not name is drawn from where it may begin, as only possible until it opens.
+            val at = possible + POSSIBLE_SHOWN_METERS
+            if (at < lane.opens && b.path.drawings.any { at > it.from && at < it.to }) {
+                val place = b.drawing.lanesAt(at).firstOrNull { it.lane == lane.id }
+                assertTrue(place != null && place.state == CrossSection.State.POSSIBLE, "${b.name}: lane ${lane.id} is not drawn as possible at $at")
+                saw("possible")
+            }
+            if (b.path.drawings.any { possible - 1.0 > it.from && possible - 1.0 < it.to }) {
+                assertTrue(b.drawing.lanesAt(possible - 1.0).none { it.lane == lane.id }, "${b.name}: lane ${lane.id} drawn before it may begin")
+            }
+        }
+        // A lane that ends leaves the band no later than where a comfortable change still takes the car out of it: its end less
+        // the reaction and half a comfortable change (the planner keeps a lane until the car is half way across), a grid step or
+        // two aside; not where the plan flags the band, where a maneuver comes first, or where a lane it feeds takes it over.
+        for (lane in topology.lanes) {
+            if (lane.closes >= topology.runs[lane.run].to - 1e-6) continue
+            val inBand = b.plan.segments.filter { lane.id in it.band }
+            if (inBand.isEmpty()) continue
+            val lastIn = inBand.maxOf { it.to }
+            val node = b.route.nodes.lastOrNull { it.station <= lane.closes } ?: continue
+            val latest = lane.closes - PlanningSpeed.of(node) * (LanePlanner.REACTION_SECONDS + LanePlanner.COMFORTABLE_CHANGE_SECONDS / 2.0)
+            val flagged = b.plan.flags.any { it.to > latest && it.from < lane.closes }
+            val fed = topology.lanes.any { f -> f.fedBy == lane.id && b.plan.segmentAt(lastIn)?.band?.contains(f.id) == true }
+            val maneuver = b.route.nodes.any { it.station > lastIn && it.station <= lane.closes && LaneEvidence.planTurns(it) }
+            if (!flagged && !fed && !maneuver) {
+                assertTrue(lastIn <= latest + 2.0 * LanePlanner.GRID_METERS, "${b.name}: lane ${lane.id} ends at ${lane.closes} and works up to $lastIn")
+                saw("leaves")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 8: every drawn stretch begins and ends with a taper
+
+    private fun tapersAtEveryEnd(b: Built) {
+        val end = b.path.routeStations.last()
+        val asphalt = b.features.filter { it.kind == Kind.ASPHALT }
+        for (d in b.path.drawings) {
+            // From the map's band where the drawing begins, if the route does not begin with it.
+            val from = d.asphaltFrom
+            if (from > 0.0) {
+                val first = requireNotNull(asphalt.firstOrNull { it.part == Part.ROUTE && abs(it.from - from) < 1e-6 }) { "${b.name}: no asphalt from $from" }
+                assertTrue(first.to > d.from, "${b.name}: the asphalt from $from ends at ${first.to}")
+                assertEquals(bandAt(b, from), width(b.drawing.asphaltAt(from)), 1e-6, "${b.name}: the asphalt's width where it begins at $from")
+                saw("begins")
+            }
+            assertEquals(carriageway(b, d.from), width(b.drawing.asphaltAt(d.from)), 1e-6, "${b.name}: the asphalt's width where the drawing begins at ${d.from}")
+            if (d.turnsAtEnd) {
+                // At a turn the stub and the lanes beyond take the asphalt over across the same cut.
+                val main = asphalt.filter { it.part == Part.ROUTE && it.from < d.to && it.to > d.from }.maxByOrNull { it.to } ?: continue
+                assertTrue(
+                    asphalt.any { it.part != Part.ROUTE && abs(it.from - main.to) < 1e-6 },
+                    "${b.name}: nothing takes the asphalt over at ${main.to}, where the drawing ending at ${d.to} turns",
+                )
+                saw("turns")
+            } else if (d.asphaltTo < end) {
+                // Into the map's band where it ends on its road.
+                assertTrue(asphalt.any { it.part == Part.ROUTE && abs(it.to - d.asphaltTo) < 1e-6 }, "${b.name}: no asphalt to ${d.asphaltTo}")
+                assertEquals(bandAt(b, d.asphaltTo - 1e-3), width(b.drawing.asphaltAt(d.asphaltTo)), 1e-6, "${b.name}: the asphalt's width where it ends at ${d.asphaltTo}")
+                saw("ends")
+            }
+        }
+        // The path leaves the road's line where a drawing begins and is back on it where the drawing's path ends.
+        val reach = CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS + RoutePath.RETURN_METERS
+        val sorted = b.path.drawings.sortedBy { it.from }
+        for ((i, d) in sorted.withIndex()) {
+            val afterAnother = i > 0 && d.from <= sorted[i - 1].back + reach
+            val beforeAnother = i < sorted.size - 1 && sorted[i + 1].from <= d.back + reach
+            if (!afterAnother) assertEquals(0.0, b.path.offsetAt(d.from), END_METERS, "${b.name}: the path off the road's line where a drawing begins at ${d.from}")
+            if (!beforeAnother && d.back < end) assertEquals(0.0, b.path.offsetAt(d.back), END_METERS, "${b.name}: the path off the road's line at ${d.back}")
+        }
+    }
+
+    // ------------------------------------------------------------------ 9: inside a card window never away from the exit's edge
+
+    private fun neverAwayFromTheExit(b: Built) {
+        val excluded = b.path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(b) + folds(b)
+        for (window in b.plan.windows) {
+            val doubtful = b.plan.moves.any { it.back && it.station >= window.from && it.station <= window.to } ||
+                b.plan.flags.any { it.kind == LanePlan.Flag.Kind.CONFLICT && it.to > window.from && it.from < window.to }
+            if (doubtful) continue
+            var last: Double? = null
+            var lastStation = window.from
+            var station = window.from
+            while (station < window.to) {
+                val seg = b.plan.segmentAt(station)
+                val drawn = b.path.drawings.any { station >= it.from && station < it.to }
+                if (seg != null && seg.inWindow && seg.named != null && seg.noLane == null && drawn && excluded.none { station >= it.first && station <= it.second }) {
+                    val offset = b.path.offsetAt(station)
+                    val sign = edgeSign(b, station) ?: 0.0
+                    val prev = last
+                    if (prev != null && sign != 0.0 && station - lastStation < 1.5 && sameRoad(b, lastStation, station)) {
+                        assertTrue((offset - prev) * sign >= -1e-9, "${b.name} at $station: away from the exit's edge ($prev to $offset)")
+                        saw("toward")
+                    }
+                    last = offset
+                    lastStation = station
+                } else {
+                    last = null
+                }
+                station += 1.0
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 10: never the drawn edge lane while a lane may lie beyond it
+
+    private fun notTheEdgeLaneWhileOneMayBeBeyond(b: Built) {
+        val topology = b.plan.topology
+        for (window in b.plan.windows) {
+            for (x in along(window.from, window.to, 5.0)) {
+                val seg = b.plan.segmentAt(x) ?: continue
+                val named = seg.named ?: continue
+                val edge = seg.edge ?: continue
+                if (b.path.drawings.none { x >= it.from && x < it.to }) continue
+                val run = topology.lanes[named].run
+                val beyond = topology.lanes.any { lane ->
+                    val from = lane.possibleFrom
+                    from != null && lane.run == run && lane.id !in b.plan.named && x >= from + POSSIBLE_SHOWN_METERS && x < lane.opens
+                }
+                if (!beyond) continue
+                val lanes = b.drawing.lanesAt(x)
+                val outer = if (edge == LaneEdge.RIGHT) lanes.lastOrNull() else lanes.firstOrNull()
+                assertTrue(outer != null && outer.lane != named, "${b.name} at $x: the named lane $named is the drawn edge lane while a lane may lie beyond it")
+                saw("beyond")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    /** Stations from [from] to [to] every [step] metres, and one just before [to]. */
+    private fun along(from: Double, to: Double, step: Double): List<Double> {
+        if (to <= from) return emptyList()
+        val out = ArrayList<Double>()
+        var x = from
+        while (x < to) {
+            out.add(x)
+            x += step
+        }
+        out.add(to - 1e-4)
+        return out
+    }
+
+    private fun width(edges: Pair<Double, Double>?): Double = requireNotNull(edges).let { it.first - it.second }
+
+    /** The width of the drawn carriageway at [station] with its aprons. */
+    private fun carriageway(b: Built, station: Double): Double {
+        val lanes = b.drawing.lanesAt(station)
+        return lanes.first().left - lanes.last().right + 2.0 * CrossSection.APRON_METERS
+    }
+
+    /** The map's own band of the road at [station]. */
+    private fun bandAt(b: Built, station: Double): Double {
+        val road = b.route.nodes.lastOrNull { it.station <= station }?.road ?: RoadKind.FREEWAY
+        return if (road == RoadKind.FREEWAY) LaneDrawing.STANDARD_FREEWAY_BAND_METERS else LaneDrawing.STANDARD_RAMP_BAND_METERS
+    }
+
+    /** The stretches where the route turns onto another road with lanes, and the path's turns: the path's rules do not hold across them. */
+    private fun turns(b: Built): List<Pair<Double, Double>> = b.section.rampStarts.map {
+        it.station - 60.0 to it.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS
+    } + b.path.moves.filter { it.kind == RoutePath.Move.Kind.TURN }.map { it.from to it.to }
+
+    /** The folds the path keeps to the road's line through, with the blends around them. */
+    private fun folds(b: Built): List<Pair<Double, Double>> =
+        b.path.folds.map { it.from - RoutePath.RETURN_METERS - RoadAxis.SAMPLE_METERS to it.to + RoutePath.RETURN_METERS + RoadAxis.SAMPLE_METERS }
+
+    /** Which approach [station] lies on: the index of the next maneuver the plan counts. */
+    private fun approachOf(b: Built, station: Double): Int = b.route.nodes.indexOfFirst { it.station >= station && LaneEvidence.planTurns(it) }
+
+    private fun sameRoad(b: Built, a: Double, c: Double) = b.route.nodes.none { it.station > a && it.station <= c && LaneEvidence.planTurns(it) }
+
+    /** The direction toward the exit's edge at [station]: left positive. */
+    private fun edgeSign(b: Built, station: Double): Double? = when (b.plan.segmentAt(station)?.edge) {
+        LaneEdge.RIGHT -> -1.0
+        LaneEdge.LEFT -> 1.0
+        null -> null
+    }
+
+    /** The offset, left positive, of [p] from [axis] at [station]. */
+    private fun offsetOf(axis: RoadAxis, station: Double, p: GeoPoint): Double {
+        val q = axis.toLocal(p)
+        val place = axis.at(station)
+        return (q.x - place.point.x) * place.nx + (q.y - place.point.y) * place.ny
+    }
+
+    /** Scenes of the geometry's tests beyond [LaneScenes.all]: lanes whose kinds change, possible lanes beside an edge, a bicycle lane. */
+    private fun extraScenes(): Map<String, LaneRoute> = linkedMapOf(
+        "right-lane-for-buses" to LaneScenes.rightLaneForBuses(),
+        "third-lane-for-car-pools" to LaneScenes.thirdLaneForCarPools(),
+        "exit-side-gain" to LaneScenes.exitSideGain(),
+        "leaves-beside-possible" to LaneScenes.leavesBesidePossible(),
+        "bicycle-lane" to bicycleLane(),
+    )
+
+    /** Three lanes and, on their left, a lane only for bicycles, 1,600 and 900 m before a right exit from the right lane. */
+    private fun bicycleLane(): LaneRoute {
+        val bike = RouteLane(setOf(TurnModifier.STRAIGHT), valid = false, active = false, kinds = setOf(DesignatedKind.BICYCLE))
+        return LaneScenes.approach(
+            listOf(At(1_600.0, listOf(bike, s(), s(), s())), At(900.0, listOf(bike, s(), s(), s()))),
+            exit = listOf(bike, s(false), s(false), sr()),
+            id = "bicycle-lane",
+        )
+    }
+
+    private companion object {
+        const val RANDOM_SEED = 20261112
+        const val RANDOM_ROUTES = 60
+        const val KEPT_SEED = 7
+        const val KEPT_ROUTES = 200
+
+        /** Kept-lane routes of [KEPT_SEED] whose plan flags a move back itself, on the careful reading of the card. */
+        const val KEPT_FLAGGED_BACK = 2
+
+        /** A lane line is checked this often along its run. */
+        const val LINE_SAMPLE_METERS = 2.0
+
+        /** A possible lane opens from nothing along its taper: it is checked this far past where it may begin. */
+        const val POSSIBLE_SHOWN_METERS = 5.0
+
+        /** A lane entered along its taper is narrower than any drawn lane for this far after it opens. */
+        const val OPENING_METERS = 1.0
+
+        /** The path meets the road's line at a drawing's ends within this. */
+        const val END_METERS = 0.01
+    }
+}

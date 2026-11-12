@@ -138,6 +138,9 @@ class RoutePath private constructor(
     /** How many drawing windows the path was built in. */
     val windowCount: Int get() = windows.size
 
+    /** The axes of the drawing windows, in route order: the lanes are drawn along the same axes as the path. */
+    internal val axes: List<RoadAxis> get() = windows.map { it.axis }
+
     private fun windowAt(station: Double): Window? {
         for (w in windows) if (station >= w.stations.first() && station <= w.stations.last()) return w
         return null

@@ -11,11 +11,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.At
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.EXIT_LEFT
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.EXIT_RIGHT
-import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.JOIN_RIGHT
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.NodeAndLanes
-import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.THROUGH
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.hov
-import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.option
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sl
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
@@ -733,7 +730,7 @@ class RoutePathTest {
         val rng = Random(20261112)
         var checked = 0
         repeat(RANDOM_ROUTES) { k ->
-            val route = randomApproach(rng, "random-$k")
+            val route = RandomRoutes.approach(rng, "random-$k")
             val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
             val line = SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })
             checked += checkRules("random-$k", build(route, line))
@@ -743,7 +740,7 @@ class RoutePathTest {
 
     @Test
     fun `the path keeps the design's rules where lanes are kept for car pools or buses, on seeded random routes`() {
-        // Every route of randomKeptLane with its line bent as the routes above, and once more with its line bent by a few
+        // Every route of RandomRoutes.keptLane with its line bent as the routes above, and once more with its line bent by a few
         // degrees a few metres after its first drawing begins, so the axis' first arc begins with the drawing.
         val rng = Random(KEPT_LANE_SEED)
         var inside = 0
@@ -753,7 +750,7 @@ class RoutePathTest {
         var underWay = 0
         repeat(KEPT_LANE_ROUTES) { k ->
             val name = "kept-$k"
-            val route = randomKeptLane(rng, name)
+            val route = RandomRoutes.keptLane(rng, name)
             val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
             val all = (bends + SceneLines.bendsOf(route)).sortedBy { it.first }
             val built = build(route, SceneLines.line(route.lengthMeters, all))
@@ -1283,112 +1280,6 @@ class RoutePathTest {
         LaneScenes.node(5_900.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0),
         id = "fork-and-exit",
     )
-
-    /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
-    private fun randomApproach(rng: Random, id: String): LaneRoute {
-        val right = rng.nextBoolean()
-        val carpool = rng.nextDouble() < 0.25
-        var count = rng.nextInt(3, 6)
-        val points = ArrayList<At>()
-        var before = rng.nextDouble(2_400.0, 3_400.0)
-        while (true) {
-            before -= rng.nextDouble(300.0, 1_100.0)
-            if (before < 250.0 || points.size >= 3) break
-            count = (count + rng.nextInt(-1, 2)).coerceIn(2, 6)
-            val lanes = ArrayList<RouteLane>()
-            if (carpool) lanes.add(hov())
-            repeat(count) { lanes.add(s()) }
-            val roads = when (rng.nextInt(5)) {
-                0 -> {
-                    lanes[if (carpool) 1 else 0] = s(false)
-                    EXIT_LEFT
-                }
-                1 -> {
-                    lanes[lanes.size - 1] = s(false)
-                    EXIT_RIGHT
-                }
-                2 -> JOIN_RIGHT
-                else -> THROUGH
-            }
-            points.add(At(before, lanes, roads))
-        }
-        val exit = ArrayList<RouteLane>()
-        if (carpool) exit.add(hov())
-        repeat(count) { exit.add(s(false)) }
-        val usable = rng.nextInt(1, 3)
-        val edge = if (right) exit.size - 1 else if (carpool) 1 else 0
-        exit[edge] = if (right) sr() else sl()
-        if (usable == 2) {
-            val inner = if (right) edge - 1 else edge + 1
-            if (inner in exit.indices && !exit[inner].designated) exit[inner] = option()
-        }
-        if (rng.nextBoolean()) exit.add(if (right) exit.size else (if (carpool) 1 else 0), if (right) sr() else sl())
-        val split = rng.nextDouble() < 0.3
-        val maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT
-        val rampPoints = if (split) {
-            listOf(rng.nextDouble(150.0, 340.0) to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT))
-        } else {
-            emptyList()
-        }
-        return LaneScenes.approach(points, exit, maneuver, planMps = rng.nextDouble(22.0, 34.0), rampPoints = rampPoints, rampMeters = 600.0, id = id)
-    }
-
-    /**
-     * A made-up approach to an exit with a lane kept for car pools or buses: two to six lanes at up to three random lane
-     * points, one lane at a random index (either side or between others) kept for car pools or buses from a random point on,
-     * edge lanes leaving by roads, an exit on either side whose lanes may keep that lane or open it to every car again, one
-     * or two lanes to take, an added exit lane that may lie beyond the kept one, and a split after the gore in 30 %.
-     */
-    private fun randomKeptLane(rng: Random, id: String): LaneRoute {
-        val right = rng.nextBoolean()
-        val bus = rng.nextBoolean()
-        var count = rng.nextInt(2, 6)
-        val points = ArrayList<At>()
-        var before = rng.nextDouble(2_400.0, 3_400.0)
-        var lane = -1
-        val from = rng.nextInt(0, 3)
-        while (true) {
-            before -= rng.nextDouble(300.0, 1_100.0)
-            if (before < 250.0 || points.size >= 3) break
-            count = (count + rng.nextInt(-1, 2)).coerceIn(2, 6)
-            if (lane < 0 && points.size >= from) lane = rng.nextInt(count)
-            if (lane >= count) lane = count - 1
-            val lanes = ArrayList<RouteLane>()
-            repeat(count) { i -> lanes.add(if (i == lane) (if (bus) LaneScenes.bus() else hov()) else s()) }
-            val roads = when (rng.nextInt(5)) {
-                0 -> {
-                    if (lane != 0) lanes[0] = s(false)
-                    EXIT_LEFT
-                }
-                1 -> {
-                    if (lane != lanes.size - 1) lanes[lanes.size - 1] = s(false)
-                    EXIT_RIGHT
-                }
-                2 -> JOIN_RIGHT
-                else -> THROUGH
-            }
-            points.add(At(before, lanes, roads))
-        }
-        val exit = ArrayList<RouteLane>()
-        val keep = rng.nextBoolean()
-        repeat(count) { i -> exit.add(if (i == lane && keep) (if (bus) LaneScenes.bus() else hov()) else s(false)) }
-        val usable = rng.nextInt(1, 3)
-        val edge = if (right) exit.size - 1 else 0
-        exit[edge] = if (right) sr() else sl()
-        if (usable == 2) {
-            val inner = if (right) edge - 1 else edge + 1
-            if (inner in exit.indices && !exit[inner].designated) exit[inner] = option()
-        }
-        if (rng.nextBoolean()) exit.add(if (right) exit.size else 0, if (right) sr() else sl())
-        val split = rng.nextDouble() < 0.3
-        val maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT
-        val rampPoints = if (split) {
-            listOf(rng.nextDouble(150.0, 340.0) to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT))
-        } else {
-            emptyList()
-        }
-        return LaneScenes.approach(points, exit, maneuver, planMps = rng.nextDouble(22.0, 34.0), rampPoints = rampPoints, rampMeters = 600.0, id = id)
-    }
 
     private companion object {
         /** How many seeded random routes the rules are checked on. */
