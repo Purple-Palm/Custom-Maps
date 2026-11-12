@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
@@ -29,6 +30,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.max
+import kotlin.math.tan
 import kotlin.random.Random
 
 /** The route's path through its planned lanes on the made-up routes of [LaneScenes], drawn along made-up lines at sea. */
@@ -289,6 +292,34 @@ class RoutePathTest {
     }
 
     @Test
+    fun `where a drawing begins the path takes the road's heading within 1 degree, next to a bend of the line too`() {
+        // The measure on a straight road due north: a path that leaves the line at 100 m turned 0.98 degrees from it meets
+        // it; one turned 1.02 degrees does not.
+        val line = SceneLines.line(200.0)
+        val stations = doubleArrayOf(0.0, 100.0, 200.0)
+        val axis = RoadAxis.of(line, stations)
+        for ((degrees, meets) in listOf(0.98 to true, 1.02 to false)) {
+            val k = tan(Math.toRadians(degrees))
+            val turn = startTurn(axis, { s -> k * max(0.0, s - 100.0) }, line, stations, 100.0)
+            assertEquals(degrees, turn, 1e-6)
+            assertEquals(meets, turn < END_DEGREES, "turned $degrees degrees")
+        }
+        // Next to a bend: IA's drawing begins 2.5 m before its line bends by 2.5 degrees. The axis rounds the bend with an
+        // arc that begins where the drawing does, tangent to the line; the path's first drawn chord spans the arc and turns
+        // half the bend from the line before it, while the path's own heading there is the line's.
+        val ia = LaneScenes.ia()
+        val start = gore - 3_180.0
+        val path = build(ia, SceneLines.line(ia.lengthMeters, (SceneLines.bendsOf(ia) + (start + 2.5 to 2.5)).sortedBy { it.first })).path
+        assertEquals(start, path.drawings.single().from, 1e-9)
+        val fillet = requireNotNull(path.axisAt(start + 1e-6)).fillets.first()
+        assertEquals(start, fillet.from, 1e-9)
+        assertTrue(startTurn(requireNotNull(path.axisAt(start + 1e-6)), path::offsetAt, path.route, path.routeStations, start) < 1e-6)
+        val chord = turnBetween(headingAt(path.points, path.stations, start), headingAt(path.route, path.routeStations, start))
+        assertEquals(1.25, chord, 0.05)
+        assertContinuous("ia, bent near its drawing's start", path)
+    }
+
+    @Test
     fun `a long drawing is cut into windows of at most 3 km that meet without a step`() {
         // Lane points every 1.4 km on a 13 km freeway: one drawing in several windows.
         val exitAt = 13_000.0
@@ -527,7 +558,8 @@ class RoutePathTest {
 
     /**
      * Away from the drawings the path is the route's line, point for point; at every drawing end it meets that line within
-     * 1 cm, heading within 1 degree of it.
+     * [END_METERS], and its heading is the line's within [END_DEGREES]: where a drawing begins, the path's own heading
+     * ([startTurn]); where one ends, the path's next segment, which is the line's own.
      */
     private fun assertContinuous(name: String, path: RoutePath) {
         // Drawings close together are drawn as one: the path keeps to their axis between them.
@@ -547,15 +579,40 @@ class RoutePathTest {
         for (span in spans) {
             for (end in listOf(span.first, span.second)) {
                 if (end <= path.routeStations.first() || end >= path.routeStations.last()) continue
-                val onPath = pointAt(path.points, path.stations, end)
-                val onRoute = pointAt(path.route, path.routeStations, end)
-                assertTrue(Geo.meters(onPath, onRoute) < 0.01, "$name: ${Geo.meters(onPath, onRoute)} m off the line at $end")
-                val a = headingAt(path.points, path.stations, end)
-                val b = headingAt(path.route, path.routeStations, end)
-                assertTrue(abs(((a - b + 540.0) % 360.0) - 180.0) < 1.0, "$name: heading $a against $b at $end")
+                val meters = Geo.meters(pointAt(path.points, path.stations, end), pointAt(path.route, path.routeStations, end))
+                assertTrue(meters < END_METERS, "$name: $meters m off the line at $end")
+                val turn = if (end == span.first) {
+                    startTurn(requireNotNull(path.axisAt(end + 1e-6)), path::offsetAt, path.route, path.routeStations, end)
+                } else {
+                    turnBetween(headingAt(path.points, path.stations, end), headingAt(path.route, path.routeStations, end))
+                }
+                assertTrue(turn < END_DEGREES, "$name: a heading $turn degrees off the line's at $end")
             }
         }
     }
+
+    /**
+     * How far, in degrees, the heading of a path along [axis] at the offsets [offsetAt] turns from that of the road's line
+     * [route] (its points at [routeStations]) where a drawing begins at [start]. The path's heading there is its own: its
+     * axis' direction turned by the slope of its offset over the first [END_SLOPE_METERS] (the offset curve's tangent,
+     * design 4.1). Not the chord to its next drawn point: where the road's line bends a few metres on, the axis rounds the
+     * bend with an arc that may begin at the drawing's start, tangent to the line, and the 5 cm simplification may span
+     * that arc with one chord, whose heading lies between the line's before and after the bend.
+     */
+    private fun startTurn(axis: RoadAxis, offsetAt: (Double) -> Double, route: List<GeoPoint>, routeStations: DoubleArray, start: Double): Double {
+        val t = offsetAt(start)
+        val slope = (offsetAt(start + END_SLOPE_METERS) - t) / END_SLOPE_METERS
+        val place = axis.at(start)
+        val along = axis.regularity(start, t)
+        val from = axis.offset(start, t)
+        val to = LocalPoint(from.x + place.tx * along + place.nx * slope, from.y + place.ty * along + place.ny * slope)
+        val a = SceneLines.local(axis.toGeo(from))
+        val b = SceneLines.local(axis.toGeo(to))
+        return turnBetween(Math.toDegrees(atan2(b.x - a.x, b.y - a.y)), headingAt(route, routeStations, start))
+    }
+
+    /** The turn from heading [b] to heading [a], in degrees, 0 to 180. */
+    private fun turnBetween(a: Double, b: Double): Double = abs(((a - b + 540.0) % 360.0) - 180.0)
 
     private fun pointAt(points: List<GeoPoint>, stations: DoubleArray, s: Double): GeoPoint {
         val i = RoutePath.indexAtOrBefore(stations, s).coerceIn(0, points.size - 2)
@@ -671,5 +728,14 @@ class RoutePathTest {
     private companion object {
         /** How many seeded random routes the rules are checked on. */
         const val RANDOM_ROUTES = 60
+
+        /** At a drawing end the path meets the road's line within this distance (design 10.1, RoutePath)... */
+        const val END_METERS = 0.01
+
+        /** ...with its heading within this many degrees of the line's. */
+        const val END_DEGREES = 1.0
+
+        /** Where a drawing begins, the path's heading is taken from the slope of its offset over this distance. */
+        const val END_SLOPE_METERS = 0.1
     }
 }
