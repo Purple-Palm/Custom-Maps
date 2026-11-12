@@ -728,7 +728,32 @@ Other lines:
   `from` and `guidance`.
 - A **settings** line on every change of a setting: `key`, `value` as stored, and `guidance`. A
   change of `camera_style`, `lane_zoom` (`default` or `large`) or `lane_details` (true or false)
-  during a drive shows there.
+  during a drive shows there, and so does `day_night` (`auto`, `day` or `night`).
+- A **look** line for each change between the day and the night look
+  ([Day and night during guidance](#day-and-night-during-guidance)): `look` and `was` (`DAY`,
+  `NIGHT`), `cause` (`START`, the first look of the app's process; `RESUME`, back on screen;
+  `CHOICE`, the driver's; `SUN`; `PLACE`, a better position than the one the look was chosen for),
+  `choice` (`AUTO`, `DAY`, `NIGHT`), `place` (only where the sun was worked out for: `FIX`,
+  `LAST_KNOWN` or `TIME_ZONE`, never the position), `heldS` and `heldBy` (`MANEUVER`, `CLOSE_VIEW`,
+  `TUNNEL`) when the change waited for a quiet moment, `guidance`, and `themeDeferred` true when the
+  basemap's theme was left for one. From the map: `keys` (the style's settings written), `errors`
+  (and `failedKeys` with an error), `writeMs` (the whole write on the main thread), `reset` by day
+  (`null` when every colour given back to Standard read back as Standard has it, `snapshot` when one
+  had to be written back from what the style said as it loaded), `transitionMs` (the style's
+  transition for the light change) and `routeLine` (the route line took the look's colours). On
+  `START` also `startMs`, how long the first frame waited; a `START` line has no fields from the
+  map, whose first tiles are drawn in the look, and nor has a line while no map is on screen. A
+  change by the sun outside guidance writes no line: its time alone would be the local dusk or dawn.
+  Enums, whole seconds and booleans; no position, no sun angle, no time of the sun, no time zone.
+- A **look_theme** line when a theme left for a quiet moment goes: `themeHeldS`, `heldBy` (what
+  held it last) and the map's `writeMs`. A map made while it waited drew its tiles with the whole
+  look, so it then writes nothing.
+- A **look_settled** line after a `look` or `look_theme` line that wrote the basemap's theme, and
+  only when that line was written: `idleMs`, the time until the map had drawn every tile again, or
+  null when that had not happened within 10 s, and `look`.
+- The **map_style_loaded** line, at each style load, has `look` (what the basemap shows as it
+  loads), `keys` (the settings the style's data wrote, 16) and `errors` (and `failedKeys` with an
+  error).
 - A **lane_choice** line once for each point with lanes, when it comes as near as the close view
   would start for it, with every camera style and either lane zoom: `kind` (`straight` where the
   route goes straight on, `maneuver` at an exit or a fork), `key` (the route, leg, step and
@@ -1601,6 +1626,49 @@ point (`RunUpRule.EDGE_CLUSTER_METERS`), and the lanes to use in words may take 
 lane row, a distance 30 % (`LANE_WORDS_MAX_WIDTH_SHARE` and `LANE_LABEL_MAX_WIDTH_SHARE` in the
 app). The debug log's watch of a diverge runs 30 s or 1,000 m (`DivergeWatch.WATCH_SECONDS`,
 `WATCH_METERS`).
+
+## Day and night during guidance
+
+The app is light by day and dark at night ([DECISIONS.md](DECISIONS.md), 48). Under Auto the look
+follows the sun, and during guidance a change by the sun, or by a better position after the time
+zone's guess, waits for a quiet moment of the drive (`LookSwitch`, `LookTuning` in `:core-nav`):
+
+- **a tunnel** (the navigator's `inTunnel`) holds it for as long as it lasts;
+- **a close view** holds it for as long as it lasts (`MapRenderer.closeView`, worked out once per
+  progress update): with Smooth follow while the tilt onto a maneuver is on or still moving, and with
+  Large also while the lane-choice view or a run-up's is; with Mapbox tuned and Large while its lane
+  window holds or the SDK frames a maneuver at Large's zoom; never with Mapbox standard. So a change
+  never rebuilds the map's lane markings in the middle of a lane-choice close-up, 2 km before the
+  maneuver too;
+- **a maneuver** holds it within 300 m or 20 s before it, and for 6 s after the step changes. After
+  10 minutes of waiting, counted from the start of the wait with tunnels included, that window
+  narrows to 150 m or 10 s before and 3 s after, and stays so, never to nothing: on a drive with a
+  turn every 200 m the change comes between two turns, never at one;
+- **a car that stands**, below 0.5 m/s, outside a tunnel and a close view, takes it at once, as at a
+  red light.
+
+The driver's choice in Settings goes at once, at a turn too, and so does a change while Settings
+covers the map. Each progress update only looks at a change that waits; the sun is worked out once
+a minute while the app is on screen, never on an update.
+
+**The camera is never moved by a change of look.** It changes colours only, not the camera's frame,
+zoom, tilt or padding, and the panels keep their places in both looks (the strip above the Mapbox
+logo is 12 dp in both).
+
+**The basemap redraws its tiles once, at the theme.** Of the style's settings, the basemap's theme
+(`monochrome` at night, `default` by day) is the one write that makes the map rebuild its tiles
+(Maps 11.8.0: "Clear tile pyramid on color theme change"); the light preset and the colours change
+the tiles in place. The `look_settled` line says how long the map took.
+
+**A theme left for a quiet moment.** Coming back on screen during a drive near a maneuver, in a
+tunnel or a close view, the rest of the look goes at once: the screen, the light preset and the
+colours, the route line, the compass. Only the theme waits for the next quiet moment, with the same
+window and narrowing, and goes at once when guidance ends or Settings covers the map; meanwhile the
+map shows the night light on the day theme, or the other way round, dark at once with no rebuild
+while the driver looks at the turn. The `look` line says `themeDeferred`, and a `look_theme` line
+when the theme went. A map made in the meantime, as when Android makes the screen again, takes the
+whole look as it loads. The theme is a config write like the others: no style reload, no trip call,
+no route request.
 
 ## System animations
 

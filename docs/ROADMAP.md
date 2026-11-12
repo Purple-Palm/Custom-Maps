@@ -77,6 +77,10 @@ zoom setting and the trip history with prediction.
   into one line a minute, stop points of search results and GPS fix age.
 - Offline: the street map and routing data along the route are downloaded ahead while online, and a
   chip on the map says when the app has no internet.
+- **A light day look,** as the owner asked: by day a bright Mapbox map with white panels, at night
+  the dark look of before, by the sun at the phone's position (Auto) or by hand in **Settings → Day
+  and night**; during a drive a change by the sun waits until no turn is close. Built; not yet on a
+  drive ([DECISIONS.md](DECISIONS.md), 48).
 - **Trip history and prediction:** every trip is recorded on the phone (where, when, how often), and
   search shows the history. When the app opens it suggests likely destinations by time, day and how
   often each is visited. If the app stays open and the car drives off toward one of them, the

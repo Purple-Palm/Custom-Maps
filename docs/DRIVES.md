@@ -846,6 +846,51 @@ On the drive:
     for an exit missed, if one was, and `diverge_taken` lines for exits and points on the way where
     the route was kept; and on every `progress` and `off_route` line `match.raw`.
 
+The day and night looks, at home, parked ([DECISIONS.md](DECISIONS.md), 48):
+
+32. **A start by day, and one after dark.** By day: the graphite splash, then the light screen, with
+    no frame of the dark map and no night roads. The `look` line with `cause` `START` has `place` and
+    `startMs`. Then a cold start after dark: graphite all the way, no light frame at any moment.
+33. **Settings, Day and night, three times each way,** with no route (Settings opens only from the
+    search bar's gear for now). The map changes in place, with no reload and no black screen; the
+    pin and the Mapbox logo stay where they are, and no `map_style_loaded` line follows a `look`
+    line. The `look` lines say `errors` 0 and, by day, `reset` `null`, and give `writeMs` and
+    `transitionMs`; `look_settled` gives `idleMs`, how long the map took. Note any moment of a blank
+    or patchy map. By day the logo's top edge is clear of every panel's shadow, and the car's dot has
+    its dark edge.
+34. **A route preview across a change by the sun.** A minute before the time Settings shows under
+    Auto, open a route preview and wait for the next minute: the route keeps its amber with its
+    bronze edge by day, and the grey routes keep their dark edge.
+35. **Lane details on, by day,** on a road that has them: white markings on a dark asphalt, the amber
+    route on top, and where the details end, the asphalt's end (the owner chose this asphalt over
+    Mapbox's light road).
+36. **The phone's dark theme on and off, and Power saving on, by day:** nothing changes in the app.
+    At night with the phone's light theme, tap (i): the dialog is dark.
+37. **The app in the background across sunset, then back,** from Recents and from the launcher icon,
+    after a day of use: the night look at once, with no light frame at any moment (a `look` line with
+    `RESUME`). Recents shows a graphite tile for the app (Android 13 and newer).
+
+On the road:
+
+38. **A simulated drive across a change by the sun.** Start a simulated drive about five minutes
+    before the time shown under Auto and let it run across it. The change comes at a quiet moment:
+    `heldS` and `heldBy` in the `look` line, or at once at a stop, and never within 300 m of a turn.
+    The arrow stays above the route line after it. The map does not stutter: the `camera` line's
+    `camMaxGapMs` and `render.p95Ms` in the seconds around the `look` line. Then once more, with the
+    screen turned off a few minutes before the time and on again just before a turn after it: the
+    screen is dark at once (`themeDeferred` true), and `look_theme` comes after the turn.
+39. **A day drive.** Frame times against a night drive (`render.p95Ms`, `missedVsync`). The card's
+    numbers and the arrow in sunshine; the lanes to take found at one glance, in sun; the car's dot on
+    major roads and on white streets; the compass. The places' icons in their own colours (the
+    owner's choice), and whether the amber pin is ever taken for one of them. After a reroute, the
+    dimmed card for a moment: its road still readable on the white card.
+40. **A night drive:** today's look, with the dark snackbar, the lanes not to take plainly visible,
+    the lanes to take found at one glance, the switches' tracks visible in Settings; through a jam on
+    the lighter night roads (heavy and severe stand out from the road) and on a freeway (the route
+    outlined by its casing).
+41. **A real drive across dusk with Large on a freeway,** when one comes: a change due during a
+    lane-choice close-up waits for it (`heldBy` `CLOSE_VIEW`).
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -896,6 +941,10 @@ Then share the debug log. What to read in it:
 | `routes_committed`: `routeId`; `session_state`: `simulated` | The route a drive started on. In the Idle state, `simulated` is that of the drive that just ended; it is left out before the first drive of a run |
 | `replay_seek` | One for each release of the replay slider in a simulated drive: where the car was, `fromS` of `durationS` seconds of the replay and `fromM` metres along the route; `toS`, where it was sent (for a release that moved nothing, where the finger let go); `ok`, and with it `ms`, the time from the release until the replay played from there; else `why`: `near` (within 2 s of the car), `end` (already in the last stretch), `reroute` (a new route was on its way), `no_replay`, `replaced` (a newer release went instead), `ended` (the drive ended, its route changed, or the replay started over on an update of the routes first; in the last case the car goes on from where the replay started) or `refused` (the navigator or the replayer would not) |
 | Progress: `replaySeek` | An update between a seek of a simulated drive and the car's first position at its new place: logged, and left alone by everything on the screen. One or two per seek; more would mean the navigator was slow to find the new place |
+| `look` | Each change between the day and the night look: `cause` (`START`, `RESUME`, `CHOICE`, `SUN`, `PLACE`), `choice`, `place` (where the sun was worked out for: `FIX`, `LAST_KNOWN`, `TIME_ZONE`), `heldS` and `heldBy` when it waited, `guidance`, `themeDeferred`; the map's `keys`, `errors`, `writeMs`, `reset` by day (`null` expected), `transitionMs`, `routeLine`; on `START` `startMs`. A change by the sun shows only during guidance |
+| `look_theme`, `look_settled` | When a theme left for a quiet moment went (`themeHeldS`, `heldBy`, `writeMs`), and how long the map took to draw every tile after a theme was written (`idleMs`, null after 10 s) |
+| `map_style_loaded`: `look`, `keys`, `errors` | The look the map showed as its style loaded, with 16 settings written and 0 refused |
+| `settings` with `day_night` | Each change of Day and night in Settings |
 
 Reading the connectivity lines:
 

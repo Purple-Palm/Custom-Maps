@@ -6,7 +6,7 @@ Google Play's internal testing and as test builds made by the repository's CI; a
 described here. This policy says what the app keeps on the phone, what leaves the phone and why, and
 how to delete it.
 
-Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#changes).
+Last updated: 2026-11-12. It describes the app as it is today; see [Changes](#changes).
 
 ## In short
 
@@ -29,7 +29,7 @@ Last updated: 2026-11-11. It describes the app as it is today; see [Changes](#ch
   Settings. Each token names the Mapbox account that is billed for what the app does with it. They
   are stored only in the app's private storage, never in backups or device transfers, and never in
   the debug log, which names the token in use only by its place in the list and its name.
-- **Settings:** camera style, lane zoom, lane details and the simulated drive switch.
+- **Settings:** day and night, camera style, lane zoom, lane details and the simulated drive switch.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
@@ -95,7 +95,10 @@ its address holds the area on screen and the access token in use.
 - **Location, precise and approximate:** your position on the map, the start of routes, and
   guidance. During guidance a navigation service keeps it going, also with the screen off, and shows
   the trip notification; it ends with the drive. The app does not ask for location in the
-  background otherwise.
+  background otherwise. On the phone, to tell day from night: the app computes the sun's height for
+  the phone's last known position. That position is not stored or sent, and the debug log records
+  only which look was shown and why. On Android 13 and later, Android's list of recent apps shows a
+  plain dark tile for the app, not a picture of the map.
 - **Notifications:** the trip notification during guidance.
 - **Network access and network state:** to reach Mapbox, and to tell you when the phone is offline.
 

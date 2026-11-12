@@ -119,10 +119,14 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Alternative:** free drive for map-matched location at all times. It is billed as a trip.
 - **Cost:** no snapping to roads before Start.
 
-## 15. Night map from Mapbox Standard
+## 15. Mapbox Standard by night and by day
 
-- **Chosen:** Mapbox Standard with the night light preset, the monochrome theme and 3D buildings, and graphite road and water colours with amber routes. The configuration is applied when the style data loads, before the first tiles draw, so there is no daylight flash.
-- **Alternative:** a custom style made in Mapbox Studio. It would have to be maintained in the Mapbox account, outside this repository.
+- **Chosen:** one style, Mapbox Standard with 3D buildings, in two looks (48), each a column of one table of the style's settings (`MapPalette.keys`):
+  - **At night** the night light preset and the monochrome theme, with a graphite ground, roads and water and amber routes. The road colours are those of 43, the night look's own.
+  - **By day** the day light preset and Standard's default theme: every colour the night sets goes back to Standard's own, and the places' icons keep Mapbox's colours. The one colour of its own is the road under lane details (39), a dark asphalt `#575C64`, on which the white lane markings stand out.
+  - Both columns name the same keys, so nothing set at night is left over by day. The look is applied when the style's data loads, before the first tiles draw, so a map never shows a frame of the other look; a change later is config writes on the same style, never a reload.
+- **The route line** is amber in both looks, with a dark casing that deepens by day (`#5C3B00`; `#3A2800` at night) to carry the route on the light map. Moderate traffic is orange in both. Heavy and severe traffic are red and dark red by day and coral `#FF6B5E` and pink `#FF5C9E` at night: on 43's lighter night roads the dark reds all but vanished, a severe jam reading as a gap in the route. A closed section has a colour of its own in each look, platinum at night and dark grey by day, and the other routes a light grey `#9AA1AB` with a dark casing in both.
+- **Alternatives:** a custom style made in Mapbox Studio, which would have to be maintained in the Mapbox account, outside this repository; two separate styles, one for each look, as Mapbox's own navigation screens switch, which reloads the whole style at every change.
 
 ## 16. One map per activity
 
@@ -205,7 +209,8 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Lift the logo above whatever panel covers the bottom of the map. With the route sheet open it floated around the middle of the screen, and during guidance it sat next to the car.
   - The top left corner, below the search bar or the maneuver card. It still jumps whenever lanes or suggestions appear.
   - A smaller or semi-transparent logo. Mapbox does not allow it: "You may adjust the position of the Mapbox wordmark and attribution notice, but they must stay visible on the map ... You may not otherwise alter the Mapbox wordmark" (Maps SDK for Android guide), and "You may not style the Mapbox logo" (Mapbox attribution guide). The SDK has no setting for it either.
-- **Cost:** the bottom panels sit about 21 dp higher than before.
+- **The strip above the logo is 12 dp** in both looks, so that no panel's shadow, which by day reaches about 10 dp below the panel, falls on the logo or the (i) button. The logo itself does not move. **The (i) dialog** is the SDK's own, with its content and links, in its day or night variant by the app's look rather than the phone's theme (48).
+- **Cost:** the bottom panels sit about 27 dp higher than before.
 
 ## 26. Camera styles chosen in Settings
 
@@ -289,9 +294,9 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Guards:** the app refuses a public repository and classic tokens, never logs the token, and masks GitHub tokens in every log line.
 - **Why:** the code repository is public, and the logs hold location history.
 
-## 36. A bright day map in the car
+## 36. A bright day map in the car and on the phone
 
-- **Chosen (owner):** a bright, colourful day map by day and the existing dark map at night, following the car's day and night setting. The route stays amber.
+- **Chosen (owner):** a bright, colourful day map by day and the existing dark map at night. The route stays amber. In the car the map follows the car's day and night setting; on the phone, since the owner asked for the light version of the app too, the sun at the phone's position or the driver's choice (48).
 - **Alternative:** a pale or faded day theme, which the owner rejected.
 
 ## 37. The Then chip
@@ -546,3 +551,34 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Showing the Mapbox account each token belongs to, read from the token itself: left out. Its tests would need token-shaped fixtures that secret scanners flag, the account name is personal, and the driver names each token.
   - Handing a switched token over in the middle of a trip: every SDK reads the token with each request, so the rest of the session (reroutes, traffic updates, tiles) would go to the other token.
 - **Cost:** tokens are entered on each phone and in each app (the Play app and the debug app keep their own lists). A build from before the list, installed over a newer one, finds no token. Five at most.
+
+## 48. Day and night
+
+- **Chosen (owner):** the app is light by day and keeps today's dark look at night, on the phone: a bright Mapbox map with white panels and dark ink by day, the dark map with graphite panels at night (15, 36). The car follows its host (STAGE-2, Day and night).
+  - **Auto by the sun at the phone's position,** the default: the day look when the sun's centre is 2.5 degrees below the horizon or higher, the night look at 3.5 degrees below or lower, and in between the look on screen stays, so it cannot flicker. That is a little after sunset and a little before sunrise. After a switch by the sun nothing switches back for 10 minutes. The sun is worked out for the newest position the app has: the car's, then the location service's last known one, and without any the meridian of the phone's time zone, where the darkest of five latitudes on it decides, since a dark screen by day can be read and a light one at night blinds. A better position arriving later can switch once. **Day** and **Night** by hand in **Settings → Day and night**, at once, until Auto is picked again. The phone's own dark theme, battery saver and the car's setting are no inputs.
+  - **During guidance a switch by the sun waits for a quiet moment:** never in a tunnel, never in a close view of a junction or a lane choice, never within 300 m or 20 s before a maneuver or 6 s after one. After 10 minutes of waiting, tunnels included, the window narrows to 150 m or 10 s before and 3 s after, never to nothing; a standing car takes the switch at once outside a tunnel and a close view ([CAMERA.md](CAMERA.md), Day and night during guidance). The driver's own choice goes at once.
+  - **Coming back on screen,** the look goes at once; near a turn, in a tunnel or a close view only the basemap's theme, the one write that redraws its tiles, waits for the next quiet moment.
+  - **The start without a flash:** the first frame waits, 300 ms at most, until the look is decided and the screen is composed in it; the map takes the look as it is made, so its first tiles are drawn in it; the window's background and the bar icons follow the look. The system splash stays graphite in both looks, and from Android 13 the app leaves no screenshot in Recents, which then shows a graphite tile for it: a screenshot taken by day would light up a dark car when the app comes back at night. Below Android 13 Android keeps its screenshot.
+  - **The switch is config writes** on the style the map shows and the route line's colours, all in one go, never a style reload, no trip call and no request. The theme swap redraws the basemap's tiles once.
+  - **On the screen:** every colour is a token with a day and a night value, and all 48 of Material's colour roles are set, so none of Material's own lavender shows. Two ambers: the bright one for fills in both looks, and for amber text, arrows and thin marks a dark amber `#8A5A00` by day (the bright one on white is 2 to 1). Numbers read at a glance are near-black by day, green ones a darker green of their own, and a step heavier in both looks. The lanes to take differ from the others by shape too, a heavier arrow and a short bar under the lane, since by colour alone they differ too little in both looks. The card right after a new route is dimmed less by day (60 %) than at night (45 %), so its road stays readable on white.
+  - **The debug log** says when the look changed and why (`look`, `look_theme`, `look_settled`; [CAMERA.md](CAMERA.md), Logging), with no position, no sun angle, no time of the sun and no time zone. A switch by the sun outside guidance writes no line, since its time alone would be the local dusk.
+  - **The owner's answers of 2026-11-11** to four questions, all as proposed: by day the places' icons in Mapbox's colours, not one grey; with lane details by day the dark asphalt with white markings, not Standard's light road where they are faint; the plates that a later build floats over the map white by day, like the cards; and the numbers read at a glance a step heavier. Each can be undone in one commit.
+- **Alternatives:**
+  - The phone's own dark theme: on Android it changes only once the screen goes off, so a drive started before sunset never sees it; battery saver forces it at noon; and it is a preference for the screen, not the light outside.
+  - Clock times, such as light from 7 to 19: wrong with the seasons, near the poles and when travelling.
+  - Swapping whole styles, as Mapbox's own navigation screens do: a full reload at every change.
+  - A pale or faded day map: the owner rejected it (36).
+  - A night built from overrides on Standard's default theme: today's night would change, and that needs the owner's word.
+  - The phone's wallpaper colours (dynamic colour): the colours mean things the map cannot follow.
+  - An animated change of colours: the whole screen would be composed again on every frame of it.
+  - A light sensor: the look would flip under bridges and trees, and the tunnel hold covers the one real case.
+  - The equator as the time zone's guess: day long after dark at higher latitudes.
+  - A cap that ends the hold after a while: a long tunnel that ends just before a ramp would send the switch right at the ramp.
+- **Cost:**
+  - A switch costs a few milliseconds on the main thread and one recomposition of the screen, twice a day (estimate, not measured), and the theme swap a redraw of the basemap's tiles, which may leave it blank for a moment; the holds keep it away from turns.
+  - A cold start may wait up to 300 ms for its first frame; by day a start shows the graphite splash, and a start from Recents a graphite frame, before the light screen.
+  - Recents shows a graphite tile instead of the map.
+  - With location off for a long time, a summer afternoon can stay dark until a position arrives; Day by hand helps.
+  - The phone and the car can show different looks for some minutes at dusk, each following its own.
+  - Until the maneuver card gets its own gear for Settings, the look can be chosen only before Start and after arrival.
+  - None of it has run on a phone yet.

@@ -47,7 +47,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | Opening Custom Maps on the car screen again during a drive takes the car back from another navigation app | [onStopNavigation](#onstopnavigation) | 32 |
 | The real car runs the build from Google Play's internal testing, which came forward from stage 3 on 2026-11-11, instead of Internal App Sharing | [The real car](#the-real-car) | 42 |
 | Trip logs go to a private GitHub repository: a fine-grained token for that repository only, 366 days, a reminder two weeks before it expires, an upload after every trip and Upload now | [GitHub log upload](#github-log-upload) | 35 |
-| A bright, colourful day map in the car, the existing dark map at night | [Day and night](#day-and-night) | 36 |
+| A bright, colourful day map in the car, the existing dark map at night, following the host; the phone follows its own choice | [Day and night](#day-and-night) | 36, 48 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -315,11 +315,12 @@ Other notes:
 
   ```kotlin
   interface CarMapRenderer : MapRenderer {
-      fun setDarkMode(dark: Boolean)
       fun zoomBy(delta: Double)
       fun release()
   }
   ```
+
+  Day and night come through the `setLook(LookOnMap)` it inherits ([Day and night](#day-and-night)).
 
   `MapboxEngine.createCarMap(carContext: CarContext): CarMapRenderer` makes one per car Session. The
   engine takes the host's areas itself, so `setViewportPadding` is not used on the car.
@@ -393,33 +394,49 @@ Other notes:
 - `CarContext.isDarkMode()` says whether the car wants a dark map; changes arrive in
   `Session.onCarConfigurationChanged`. It is not read before the Session is CREATED. Apps draw light
   by default and must switch to dark when the host says so (quality guideline MR-1).
-- At night: today's map (DECISIONS 15). By day: a bright, colourful map, Mapbox Standard with the
-  `day` light preset and its default theme, not a faded one (DECISIONS 36). The route stays amber;
-  `MapPalette.routeLine(look)` gives the route line its colours for each look. The phone keeps the
-  night map.
-- `CarSession` passes the mode to the car map and the image renderers, then invalidates the screen,
-  so the template gets images in the right mode.
+- At night: the phone's night look (DECISIONS 15). By day: a bright, colourful map, Mapbox Standard
+  with the `day` light preset and its default theme, not a faded one (DECISIONS 36). The route stays
+  amber; `MapPalette.routeLine(look)` gives the route line its colours for each look.
+- The phone follows its own choice, by the sun or by hand (DECISIONS 48); the car follows the host.
+  The two can show different looks for some minutes at dusk, by design: each map takes its own look.
+  The phone's choice is not applied to the car for now; MR-1 would allow a choice of always light or
+  always dark later.
+- The car map takes its look through the `MapRenderer.setLook(LookOnMap)` it inherits, the entry the
+  phone map uses, and writes it as the phone map does.
+- **Two stages, against tunnel flips.** The host may follow a cabin light sensor, so its mode can flip
+  at a tunnel's entrance and back at its exit, often just before a junction. At each
+  `onCarConfigurationChanged` the car map writes the light preset and the colour settings at once:
+  dark at once, as MR-1 asks, with no tile rebuild. The basemap's theme follows once the host's mode
+  has held for 60 s (`CarLookTuning`, a first setting), and always in the STYLE callback; a flip back
+  within the 60 s cancels it. The theme swap redraws the basemap's tiles once, which is why it waits.
+  No maneuver hold in the car: the host's own screens flip at that moment.
+- `CarSession` passes the look to the car map and the image renderers, then invalidates the screen,
+  so the template gets images in the right look. Plates, signs and stop pictures drawn on the car's
+  surface follow the car's look, not the phone's.
 - The switch needs no style reload:
   - every basemap key is set on its own with `setStyleImportConfigProperty`, as `MapLook.write`
-    does today with the columns of `MapPalette.keys`. The day and the night configs name the same
-    keys, so nothing from one mode stays in the other;
-  - the route line gets the mode's colours through `MapboxRouteLineView.updateDynamicOptions` and is
+    does today with the columns of `MapPalette.keys`. The day and the night columns name the same
+    keys, so nothing from one look stays in the other;
+  - the route line gets the look's colours through `MapboxRouteLineView.updateDynamicOptions` and is
     drawn again from `MapboxRouteLineApi.getRouteDrawData`;
   - the attribution bitmap is redrawn.
+- A **car_look** line for each change: `dark`, `cause` (`START` or `HOST`) and `themeHeldS` when the
+  theme waited.
 - `setStyleImportConfigProperties` is not used. It replaces the import's whole config and resets
   every key it does not name to the style default (Maps 11.34.1). One such key is the Navigation
   SDK's `showHdRoads=false`, which `MapHdRoadsVisibilityController` (ui-maps 3.34.1) sets only when a
   style loads. Since stage 1.1 it is also the app's own setting for lane details on the map
   ([DECISIONS.md](DECISIONS.md), 39). The car map will set it the way the phone map does:
   `MapRenderer` has `setLaneZoom` and `setLaneDetails` for both.
-- The first mode is applied in the STYLE data-loaded callback, from `isDarkMode`, so there is no frame
-  in the wrong mode.
+- The first look is applied in the STYLE data-loaded callback, from `isDarkMode`, so there is no frame
+  in the wrong look.
 - Unverified: whether the light preset change animates. Check with the DHU's `day` and `night`
   commands, and use `setStyleTransition` if the jump looks harsh.
 - Mapbox's own car loader switches between two separate styles with a full reload; it is not used.
 - Day and night may also follow Android Auto's own "Day/night mode for maps" setting or the car's
   light sensor, and some cars are reported to stay in day mode. Check the DHU commands and that
-  setting. The log records the mode the car reports.
+  setting. The log records the mode the car reports. A tunnel flip of 30 s, the DHU's `night` and
+  then `day`, must write no theme.
 
 ### Performance
 
@@ -1366,7 +1383,7 @@ Debug build, phone on USB, Android Auto developer mode. Unlock the phone to star
 | AUTO_DRIVE | `adb shell dumpsys activity service io.github.purplepalm.custommaps.debug/io.github.purplepalm.custommaps.car.CustomMapsCarAppService AUTO_DRIVE`, then pick a place in the car and press Start. | A simulated drive. |
 | Process death | During guidance, **Settings → Debug → Crash now**. | No trip session until Resume; the resume offer on both screens; the exit reason in the log and in `adb shell dumpsys activity exit-info io.github.purplepalm.custommaps.debug`; the trip file closed as `interrupted`. |
 | Quota | Search, results, preview, tap every route several times, Start; also starting from a phone search. | No host error. |
-| Day and night | `day`, `night`, `daynight`; Android Auto's own day and night setting. | The bright day map and the night map, no reload, no frame in the wrong mode. |
+| Day and night | `day`, `night`, `daynight`; Android Auto's own day and night setting; `night`, then `day` 30 s later. | The bright day map and the night map, no reload, no frame in the wrong look; the light and colours at once, the theme after 60 s of the same mode; the 30 s flip writes no theme (`car_look` lines). |
 | Go there now | During a simulated drive, share a link on the phone and confirm. | The new destination in the routing card; the trip session log shows whether it counted as a new trip. |
 | Phone locked | A simulated drive with the car map, the phone locked and its screen off. | `camFps` near the display rate (CAMERA.md). |
 
@@ -1416,7 +1433,7 @@ Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then:
 |---|---|---|
 | 1 | Trip files and GitHub upload: redaction rules, trip files in `FileDebugLog`, engine marks, recovery, `GitHubClient`, the store and Settings, the WorkManager queue and worker. First, so that every DHU and car drive arrives logged. | JVM tests. On the phone: Check, a simulated drive, the file appears; airplane mode at arrival, then online again; a force stop and reopen; a revoked token shows a message. |
 | 2 | `:core-nav`: the stop reasons, `StartBlocked`, `StartResult`, the start problem, the route replacement, the routing card data, `CarMapRenderer`. | JVM tests: one session for two Starts, StartBlocked, no stop on a disconnect or a host stop, a route replacement never clears routes. |
-| 3 | Engine: the start guard, phone and car hosts, caught exceptions, the foreground service check, the debug switch, the logs; `MapScene` out of `PhoneMap`; the day config in `MapPalette`. | The phone unchanged; tests pass. |
+| 3 | Engine: the start guard, phone and car hosts, caught exceptions, the foreground service check, the debug switch, the logs; `MapScene` out of `PhoneMap` (the day column of `MapPalette` is there since stage 1.1). | The phone unchanged; tests pass. |
 | 4 | Car skeleton: catalog, `:car`, manifest, host validator, `CustomMapsCarAppService`, `CarSession` with the setup gate and the car host, the root `NavigationTemplate`, `CarNavigationMap` (surface, style, palette, logo, attribution, insets). | DHU at 800×480 and 1280×720. |
 | 5 | The "Allow all the time" flow, then the first device test. | Case (b) and location before Start on the owner's Samsung phone with Android 15; keep or relax the guard. |
 | 6 | Guidance bridge, mappers, image renderers, `updateTrip`; guidance on the car map, gestures, the map action strip. | A simulated drive on the DHU; the CAMERA.md checks. |

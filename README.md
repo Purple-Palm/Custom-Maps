@@ -3,10 +3,10 @@
 A personal navigation app for Android Auto, built on Mapbox. The phone app uses Jetpack Compose;
 the car app uses the Android for Cars App Library with the navigation template.
 
-**Status: stage 1 done, navigation on the phone.** The phone app shows a night map with your
-location, finds addresses and places, offers routes with traffic and alternatives, and guides turn
-by turn with lanes and arrival time. The car screen arrives in stage 2; the plan is in
-[docs/ROADMAP.md](docs/ROADMAP.md).
+**Status: stage 1 done, navigation on the phone.** The phone app shows a map with your location,
+light by day and dark at night, finds addresses and places, offers routes with traffic and
+alternatives, and guides turn by turn with lanes and arrival time. The car screen arrives in stage
+2; the plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Modules
 
@@ -84,9 +84,9 @@ The same builds also reach the phone through Google Play, where they update by t
    the bottom offers to switch. If Android has stopped asking, the prompt opens the app's system
    settings instead, where precise location can be turned on.
 2. Type an address or a place name in the search field and pick a suggestion.
-3. Tap **Directions**. Up to three routes appear: the chosen one in amber, turning orange, coral
-   and pink where traffic is heavy, the alternatives in grey. Tap a route, on the map or in the
-   list, to choose it.
+3. Tap **Directions**. Up to three routes appear: the chosen one in amber, turning orange where
+   traffic is slow and red, or coral and pink at night, where it is heavy; the alternatives in grey.
+   Tap a route, on the map or in the list, to choose it.
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
    notification. The maneuver card shows the next turn, its distance and the lanes; the bottom bar
    shows the arrival time, what is left, **Overview**/**Recenter** and **End**. Right after a new
@@ -98,6 +98,18 @@ The same builds also reach the phone through Google Play, where they update by t
 The phone screen stays in portrait. If Mapbox refuses the token (mistyped or revoked), the map
 stays empty and the app says so, with a button to Settings, where another token can be added and
 chosen.
+
+### Day and night
+
+The app is light by day and dark at night: a bright Mapbox map with white panels by day, and the
+dark map with graphite panels at night. **Settings → Day and night** offers **Auto**, the default,
+**Day** and **Night**. Auto follows the sun where the phone is and changes the look a little after
+sunset and a little before sunrise; under Auto, Settings says when the look changes next ("Dark
+from about ..." or "Light from about ..."). Day or Night by hand applies at once and stays until
+Auto is picked again. During a drive a change by the sun waits until no turn is close, and never
+comes in a tunnel or while the camera is close in on a junction or a lane choice; a car that stands
+takes it at once. The phone's own dark theme and Power saving change nothing. Until the maneuver
+card gets a gear of its own, Settings opens only before Start and after arrival.
 
 ### Simulated drive
 
@@ -154,6 +166,7 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
   where it is heading, how smoothly the camera and the car move, and the map's frame rate;
 - one summary line at the end of each drive: how it ended, how long and how far, reroutes, the
   time without internet, and the data and battery it took;
+- when the app changed between its day and night looks, and why;
 - map errors, the first of each kind in full and the repeats as one count a minute.
 
 To hand it over, open **Settings → Debug → Share debug log** and pick an app in the share sheet,
