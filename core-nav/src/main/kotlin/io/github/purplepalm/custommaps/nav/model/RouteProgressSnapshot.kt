@@ -41,6 +41,13 @@ data class RouteProgressSnapshot(
      * outside a run-up, and on a pending card.
      */
     val runUpLanes: RunUpLanes? = null,
+    /** The navigator says the car is in a tunnel at this update. */
+    val inTunnel: Boolean = false,
+    /**
+     * The car's speed at this update, in meters a second, as the navigator matched it: the speed
+     * the lane choices of the same update were read with. Null when unknown.
+     */
+    val speedMps: Double? = null,
 ) {
     /** The maneuver the Then chip shows, or null. The phone and the car screen both read this. */
     val thenManeuver: FollowingManeuver? get() = if (showThen) following else null

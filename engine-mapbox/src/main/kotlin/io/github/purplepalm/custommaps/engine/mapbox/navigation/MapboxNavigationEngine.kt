@@ -60,6 +60,7 @@ import io.github.purplepalm.custommaps.nav.guidance.StartPlan
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
@@ -278,6 +279,19 @@ internal class MapboxNavigationEngine(
      * service has no fix yet, and Start measures from it how far the car has moved.
      */
     var lastPuckPosition: Point? = null
+
+    /**
+     * During a trip, the navigator's latest matched position, which goes on while the screen is off,
+     * unless it is one the screen leaves alone ([progressHeld]); otherwise where the map's puck was
+     * drawn last. Worked out when asked, never on the puck's frames. Memory only, never logged.
+     */
+    override val lastPosition: GeoPoint?
+        get() {
+            val matched = lastMatch?.enhancedLocation?.takeIf { tripSessionRunning && !latestHeld() }
+            if (matched != null) return positionOrNull(matched.latitude, matched.longitude)
+            val puck = lastPuckPosition ?: return null
+            return positionOrNull(puck.latitude(), puck.longitude())
+        }
 
     /**
      * The navigator as [StartRefresher] uses it inside a running trip. Nothing here decides
@@ -1079,7 +1093,7 @@ internal class MapboxNavigationEngine(
         val card = if (active) cardContinuity.next(progress.navigationRoute.id, hasManeuver = next != null) else null
         val snapshot = when {
             next != null -> snapshotOf(progress, next)
-            card == CardUpdate.PENDING -> progress.toPendingSnapshot()
+            card == CardUpdate.PENDING -> progress.toPendingSnapshot(lastMatch?.enhancedLocation?.speed)
             else -> null
         }
         debugLog.log(
@@ -1243,9 +1257,10 @@ internal class MapboxNavigationEngine(
      * lane row or, outside a run-up, the lanes of a lane choice ahead.
      */
     private fun snapshotOf(progress: RouteProgress, next: MapboxManeuver): RouteProgressSnapshot {
-        val decided = thenTracker.decide(progress.toSnapshot(next))
-        // The speed the camera gets with this update, so the card's lanes and the close view come together.
+        // The speed the camera gets with this update, so the card's lanes and the close view come
+        // together. The snapshot carries the same one.
         val speed = lastMatch?.enhancedLocation?.speed
+        val decided = thenTracker.decide(progress.toSnapshot(next, speed))
         // The latch moved for this update already; this is its row.
         val runUp = laneChoices.runUp(progress, speed, nowSeconds())
         // None on a run-up: its row stands in for a lane choice's, and nothing of one is kept.

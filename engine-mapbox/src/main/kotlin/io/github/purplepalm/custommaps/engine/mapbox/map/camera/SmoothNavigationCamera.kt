@@ -21,6 +21,7 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserve
 import io.github.purplepalm.custommaps.nav.camera.Angles
 import io.github.purplepalm.custommaps.nav.camera.CameraSettling
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.CloseView
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
@@ -297,6 +298,9 @@ internal class SmoothNavigationCamera(
 
     override val state: String get() = if (arriving) "TRANSITION_TO_${mode.name}" else mode.name
 
+    override var closeView = false
+        private set
+
     override fun requestFollowing() = beginTransition(Mode.FOLLOWING)
 
     override fun requestOverview() = beginTransition(Mode.OVERVIEW)
@@ -411,6 +415,15 @@ internal class SmoothNavigationCamera(
         LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction)
         dataSource.evaluate()
         pacing.onProgress(SystemClock.elapsedRealtime())
+        // Once for this update: the view down onto a junction, with either lane zoom, or in for
+        // lanes, with Large; held there or on its way.
+        closeView = CloseView.smoothFollow(
+            maneuverGoal = maneuverFocus.goal,
+            maneuverMoving = maneuverFocus.isAnimating(now),
+            laneGoal = laneFocus.goal,
+            laneMoving = laneFocus.isAnimating(now),
+            large = laneZoom == LaneZoom.LARGE,
+        )
         // The tilt may have begun to move, also when the frame of the data source is the same.
         requestFrame()
     }
@@ -441,6 +454,7 @@ internal class SmoothNavigationCamera(
         laneFocus.reset(now)
         zoomPlanner.reset()
         forgetSpeeds()
+        closeView = false
         laneChoices = emptyList()
         speedMps = null
         teleportUntil = 0.0

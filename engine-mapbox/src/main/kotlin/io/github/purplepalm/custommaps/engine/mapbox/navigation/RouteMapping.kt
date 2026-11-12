@@ -23,6 +23,13 @@ import com.mapbox.navigation.tripdata.maneuver.model.Maneuver as MapboxManeuver
 
 internal fun GeoPoint.toPoint(): Point = Point.fromLngLat(longitude, latitude)
 
+/**
+ * A position from [latitude] and [longitude] in degrees; null where they are no coordinate. Never
+ * an exception: its message would carry the values.
+ */
+internal fun positionOrNull(latitude: Double, longitude: Double): GeoPoint? =
+    if (latitude in -90.0..90.0 && longitude in -180.0..180.0) GeoPoint(latitude, longitude) else null
+
 /** The route as the route sheet shows it; [place] is where it was asked to, for [RouteOption.endGap]. */
 internal fun NavigationRoute.toRouteOption(place: Place?): RouteOption = RouteOption(
     id = id,
@@ -91,9 +98,9 @@ internal fun laneInfoOf(lanes: List<LaneIndicator>): LaneInfo? {
 /**
  * Snapshot for the UI: the upcoming maneuver from the maneuver API, the maneuver after it from the
  * route's steps, and the trip totals. Whether the Then chip shows is decided by the engine, which
- * remembers the earlier updates.
+ * remembers the earlier updates. [speedMps] is the car's matched speed at this update.
  */
-internal fun RouteProgress.toSnapshot(next: MapboxManeuver): RouteProgressSnapshot {
+internal fun RouteProgress.toSnapshot(next: MapboxManeuver, speedMps: Double?): RouteProgressSnapshot {
     val type = ManeuverMapping.type(next.primary.type)
     val roundabout = ManeuverMapping.isRoundabout(type)
     val leg = currentLegProgress
@@ -118,6 +125,8 @@ internal fun RouteProgress.toSnapshot(next: MapboxManeuver): RouteProgressSnapsh
         stepKey = "${navigationRoute.id}/${leg?.legIndex}/${step?.stepIndex}",
         following = followingManeuver(),
         offRoute = currentState == RouteProgressState.OFF_ROUTE,
+        inTunnel = inTunnel,
+        speedMps = speedMps,
     )
 }
 
@@ -125,8 +134,9 @@ internal fun RouteProgress.toSnapshot(next: MapboxManeuver): RouteProgressSnapsh
  * The card of a route that has just come in, before the navigator's first instruction for it
  * ([RouteProgressSnapshot.pending]): the maneuver the step ends with, as the route's own step
  * describes it, and the trip's totals. Its distance is set, but the card does not show it.
+ * [speedMps] is the car's matched speed at this update.
  */
-internal fun RouteProgress.toPendingSnapshot(): RouteProgressSnapshot {
+internal fun RouteProgress.toPendingSnapshot(speedMps: Double?): RouteProgressSnapshot {
     val leg = currentLegProgress
     val step = leg?.currentStepProgress
     val next = step?.let { nextManeuverOf(leg?.routeLeg?.steps().orEmpty(), it.stepIndex) }
@@ -140,6 +150,8 @@ internal fun RouteProgress.toPendingSnapshot(): RouteProgressSnapshot {
         stepKey = "${navigationRoute.id}/${leg?.legIndex}/${step?.stepIndex}",
         offRoute = currentState == RouteProgressState.OFF_ROUTE,
         pending = true,
+        inTunnel = inTunnel,
+        speedMps = speedMps,
     )
 }
 

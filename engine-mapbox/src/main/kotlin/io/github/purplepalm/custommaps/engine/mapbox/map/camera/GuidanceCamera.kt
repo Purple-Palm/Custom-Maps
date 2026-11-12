@@ -25,6 +25,13 @@ internal interface GuidanceCamera {
     /** The camera's own name for what it is doing, for the debug log. */
     val state: String
 
+    /**
+     * Whether the camera shows a close view ([io.github.purplepalm.custommaps.nav.camera.CloseView]),
+     * as worked out at its last [onRouteProgress]: read right after it, never per frame. False
+     * before the first progress of a drive.
+     */
+    val closeView: Boolean
+
     /** Follows the car. Asking for what the camera already does changes nothing. */
     fun requestFollowing()
 

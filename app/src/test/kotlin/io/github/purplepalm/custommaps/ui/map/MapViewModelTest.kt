@@ -434,6 +434,7 @@ class MapViewModelTest {
         override val routeProgress = MutableStateFlow<RouteProgressSnapshot?>(null)
         override val destination = MutableStateFlow<Place?>(null)
         override val replay = MutableStateFlow<ReplayPosition?>(null)
+        override val lastPosition: GeoPoint? = null
 
         var previewResult: RouteRequestResult = RouteRequestResult.Success
         var previewGate: CompletableDeferred<Unit>? = null

@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.StateFlow
 interface MapRenderer {
     val cameraMode: StateFlow<CameraMode>
 
+    /**
+     * True while the guidance camera shows a close view: the view going down onto a junction or in
+     * for a lane choice, held there, or coming back ([io.github.purplepalm.custommaps.nav.camera.CloseView]).
+     * Worked out once per progress update of a drive, never per frame, and false outside guidance.
+     */
+    val closeView: StateFlow<Boolean>
+
     fun setCameraMode(mode: CameraMode)
 
     /** Screen area covered by UI, which the camera must keep the route out of. */

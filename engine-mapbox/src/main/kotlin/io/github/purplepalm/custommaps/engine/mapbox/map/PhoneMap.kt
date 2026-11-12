@@ -244,6 +244,10 @@ class PhoneMap internal constructor(
     private val _cameraMode = MutableStateFlow(CameraMode.IDLE)
     override val cameraMode: StateFlow<CameraMode> = _cameraMode.asStateFlow()
 
+    /** Set from the camera after each progress update it took; false outside guidance and for a new camera. */
+    private val _closeView = MutableStateFlow(false)
+    override val closeView: StateFlow<Boolean> = _closeView.asStateFlow()
+
     private val _accessDenied = MutableStateFlow(false)
 
     /**
@@ -511,6 +515,8 @@ class PhoneMap internal constructor(
         // The new camera starts idle; a transition the old one was in ends with it.
         transitionStartedAt = 0L
         camera = createCamera(style)
+        // It has seen no progress yet: its first one says whether it shows a close view.
+        _closeView.value = false
         when (mode) {
             CameraMode.FOLLOWING -> camera.requestFollowing()
             CameraMode.OVERVIEW -> camera.requestOverview()
@@ -641,6 +647,7 @@ class PhoneMap internal constructor(
                 useLocationProvider(guidance = false)
                 clearRoutes()
                 camera.onGuidanceEnded()
+                _closeView.value = false
                 // A camera that still showed the route goes back to the car and stays on it. One the
                 // driver had taken the map from, and one that is on the car already, are left alone.
                 val showedRoute = !camera.isIdle && !idleFollow.following
@@ -688,6 +695,8 @@ class PhoneMap internal constructor(
         // The engine reads the lane choices once for each update; its own observer got the same
         // list, and the run-up's latch moves once for it, so the card and the camera agree.
         camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), engine.runUpKey(progress))
+        // Once per update, and published only when it changes.
+        _closeView.value = camera.closeView
     }
 
     private fun onPuckMoved(point: Point) {

@@ -362,7 +362,7 @@ internal object LaneZoomFrames {
      * Whether the SDK frames the next maneuver at this [progress], for both styles that carry
      * Large. Without a progress it frames none.
      */
-    private fun framesManeuver(progress: RouteProgress?, options: FollowingFrameOptions): Boolean {
+    fun framesManeuver(progress: RouteProgress?, options: FollowingFrameOptions): Boolean {
         val step = progress?.currentLegProgress?.currentStepProgress ?: return false
         return framesManeuver(progress.bannerInstructions?.primary()?.type(), step.distanceRemaining, options.pitchNearManeuvers)
     }

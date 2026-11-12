@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav
 
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
@@ -27,6 +28,13 @@ interface NavigationEngine {
      * simulated drive runs.
      */
     val replay: StateFlow<ReplayPosition?>
+
+    /**
+     * The newest position of the phone this process has: during a trip the navigator's, otherwise
+     * where the map last drew it; null before the first. Read when asked, never pushed. Kept in
+     * memory only: never stored, logged or sent.
+     */
+    val lastPosition: GeoPoint?
 
     /** Requests routes with alternatives from the current position. Starts no trip session. */
     suspend fun previewRoutes(destination: Place): RouteRequestResult

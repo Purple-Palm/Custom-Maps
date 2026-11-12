@@ -24,6 +24,7 @@ import com.mapbox.navigation.ui.maps.camera.lifecycle.NavigationBasicGesturesHan
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraState
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraStateChangedObserver
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.CloseView
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.JumpFrame
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
@@ -174,6 +175,9 @@ internal class NavigationCameraAdapter(
 
     override val state: String get() = if (idleFollowing) GuidanceCamera.IDLE_FOLLOW else navigationCamera.state.name
 
+    override var closeView = false
+        private set
+
     override fun requestFollowing() {
         stopIdleFollow()
         if (tuned) {
@@ -275,6 +279,13 @@ internal class NavigationCameraAdapter(
                 junction = junction,
                 lanesCap = lanesCap,
             )
+            // Once for this update, from the limits just set: in close for a maneuver or for lanes, with Large.
+            val large = laneZoom == LaneZoom.LARGE
+            closeView = CloseView.mapboxTuned(
+                framesManeuver = large && LaneZoomFrames.framesManeuver(progress, options),
+                laneWindow = laneFocus.goal > 0.0,
+                large = large,
+            )
         }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
@@ -299,6 +310,7 @@ internal class NavigationCameraAdapter(
 
     override fun onGuidanceEnded() {
         jumpFrame.reset()
+        closeView = false
         // Mapbox standard keeps nothing else for a drive.
         if (!tuned) return
         laneFocus.reset(nowSeconds())
