@@ -6,6 +6,7 @@ import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteLane
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * The evidence model's first settings, in metres; each is to be tuned from the "lane_evidence" lines
@@ -48,10 +49,23 @@ data class EvidenceTuning(
  *    go on and the point only says which lanes to use ([goingOn]).
  * 7. Everything else is unknown ([Kind.NONE]).
  *
- * Counted, not drawn yet (the lane topology of a later stage decides how to draw them): the [gaps]
- * (rule 7a); the [changes] of the lane count between points on one carriageway, rule 5 being those
- * nothing explains ([CountChange.explained]); and the lanes a point lists and the one before it does
- * not, with the side their arrows put them on, the exit's or none (rule 2a, [AddedLanes]).
+ * Counted by this first pass ([of]): the [gaps] (rule 7a); the [changes] of the lane count between
+ * points on one carriageway, rule 5 being those nothing explains ([CountChange.explained]); and the
+ * lanes a point lists and the one before it does not, with the side their arrows put them on, the
+ * exit's or none (rule 2a, [AddedLanes]).
+ *
+ * A second pass ([withPlan]) follows the lane plan, which has read the lanes as one set
+ * ([LaneTopology]) and said which lanes it names; it marks:
+ * - 2a: a lane a point adds on its exit's side, which the plan does not name, is [Kind.POSSIBLE]
+ *   from the lane point before it ([LaneTopology.Lane.possibleFrom], at most
+ *   [EvidenceTuning.possibleLaneMaxM] back) to where it would open late, and known from there;
+ * - 5: a change of the lane count between two points that nothing explains (the topology's
+ *   [LaneTopology.Alignment.explained]) is a [Kind.ZONE] of 2 x [LaneTopology.addedTaperMeters] (a
+ *   gain) or [LaneTopology.endingTaperMeters] (a loss) + [ZONE_MIDDLE_METERS] without lines, placed
+ *   late: it ends at the second point;
+ * - 7a: a [Gap] is a [Kind.ZONE] where it lies inside a card window, at any length, and where a part
+ *   of it outside the windows, between two drawn stretches, is at most [EvidenceTuning.zoneBridgeMaxM]
+ *   long; at the wider neighbour's width.
  *
  * Pure; built once for a route, off the main thread, and never stored.
  */
@@ -67,6 +81,16 @@ class LaneEvidence private constructor(
     val changes: List<CountChange>,
     val added: List<AddedLanes>,
     val unknownExits: List<UnknownExit>,
+    /** The settings the evidence was built with. */
+    val tuning: EvidenceTuning = EvidenceTuning.DEFAULT,
+    /** The zones of the second pass ([withPlan]), in route order; none in the first. */
+    val zones: List<Zone> = emptyList(),
+    /**
+     * The second pass's lanes that may already be there ([Kind.POSSIBLE]), one stretch for the lanes a
+     * point adds on its exit's side, from where they may begin to where they would open late: [Stretch.lanes]
+     * lanes at the side of the point's exit, [Stretch.point] the point that lists them. None in the first pass.
+     */
+    val possibleLanes: List<Stretch> = emptyList(),
 ) {
 
     /** What is known of a stretch's lanes. */
@@ -77,6 +101,18 @@ class LaneEvidence private constructor(
         /** Between two lane points whose lanes agree (rule 4). */
         BRIDGED,
 
+        /**
+         * A lane a point adds on its exit's side, which the plan does not name: it may already be there
+         * from the lane point before (rule 2a). Only in [possibleLanes], beside the carriageway's stretches.
+         */
+        POSSIBLE,
+
+        /**
+         * The road goes on, its lanes here are not known: a change of the count nothing explains (rule 5)
+         * or a stretch without lane data between two drawn stretches (rule 7a). Second pass only.
+         */
+        ZONE,
+
         /** Nothing (rules 3, 7). */
         NONE,
     }
@@ -84,7 +120,9 @@ class LaneEvidence private constructor(
     /**
      * From [from] to [to] metres along the route, on one kind of [road], with [lanes] lanes (0 for
      * [Kind.NONE]) as the lane point [point] lists them (its index in the route): for a known stretch
-     * the point whose reach it is, for a bridged one the point before it, whose lanes go on.
+     * the point whose reach it is, for a bridged one the point before it, whose lanes go on; for a zone
+     * the point at its downstream end, [lanes] being the zone's width in lanes; for a possible stretch
+     * the point that first lists the lanes, [lanes] being how many may already be there.
      */
     data class Stretch(val from: Double, val to: Double, val kind: Kind, val lanes: Int, val road: RoadKind, val point: Int?) {
         val meters: Double get() = to - from
@@ -136,6 +174,28 @@ class LaneEvidence private constructor(
      */
     data class UnknownExit(val node: Int, val station: Double, val edge: LaneEdge)
 
+    /**
+     * A zone of the second pass ([withPlan]): from [from] to [to] metres along the route the road goes on
+     * with [lanes] lanes of asphalt, the wider neighbour's, and no lane lines; the lane plan holds its
+     * named lane through it at its count from the exit's edge. [cause] tells which rule made it, [after]
+     * is the lane point at its downstream end (its index in the route), and [inWindow] whether any of it
+     * lies inside a card window.
+     */
+    data class Zone(val from: Double, val to: Double, val lanes: Int, val cause: Cause, val after: Int, val inWindow: Boolean) {
+        val meters: Double get() = to - from
+
+        enum class Cause {
+            /** A change of the lane count between two points that nothing explains, placed late (rule 5). */
+            CHANGE,
+
+            /** A stretch without lane data between two drawn stretches (rule 7a). */
+            GAP,
+        }
+    }
+
+    /** For each intersection of the route, the side of the route's next exit there ([exitEdges]). */
+    val edges: List<LaneEdge?> by lazy { exitEdges(route) }
+
     /** How many lanes the route's lane points list for each kind of designated lane. */
     val designated: Map<DesignatedKind, Int> by lazy { designatedCounts() }
 
@@ -145,6 +205,46 @@ class LaneEvidence private constructor(
             val maneuver = route.nodes[m].maneuver
             m > 0 && maneuver != null && turnsAt(route.nodes[m]) && CardWindows.framesStreetManeuver(maneuver, route.nodes[m - 1])
         }
+    }
+
+    /**
+     * The second pass, once the lane plan has read [topology] from this evidence and named the lanes
+     * [named] (ids of [topology]'s lanes) inside its card windows [windows]: the zones of rules 5 and 7a
+     * and the possible lanes of rule 2a, on a new evidence; this one is left as it is. Its [stretches]
+     * have [Kind.ZONE] wherever a zone lies; its [gaps], [changes] and [added] are this pass's.
+     */
+    fun withPlan(topology: LaneTopology, named: Set<Int>, windows: List<CardWindow>): LaneEvidence {
+        val zones = ArrayList<Zone>()
+        for (alignment in topology.alignments) {
+            if (alignment.explained) continue
+            val before = topology.points[alignment.before]
+            val after = topology.points[alignment.after]
+            val road = route.approachRoad(after.node)
+            val speed = PlanningSpeed.of(route.nodes[if (after.node > 0) after.node - 1 else after.node])
+            val taper = if (alignment.change > 0) LaneTopology.addedTaperMeters(speed, road) else LaneTopology.endingTaperMeters(speed, road)
+            val to = after.station
+            val from = max(before.station, to - (2.0 * taper + ZONE_MIDDLE_METERS))
+            if (to > from) {
+                val lanes = max(alignment.lanesBefore, alignment.lanesAfter)
+                zones.add(Zone(from, to, lanes, Zone.Cause.CHANGE, after.node, CardWindows.metersInside(windows, from, to) > 0.0))
+            }
+        }
+        for (gap in gaps) {
+            val lanes = max(goingOn(route.nodes[gap.before]).size, route.nodes[gap.after].lanes.size)
+            for (piece in zonePieces(gap, windows, tuning.zoneBridgeMaxM)) {
+                zones.add(Zone(piece.first, piece.second, lanes, Zone.Cause.GAP, gap.after, CardWindows.metersInside(windows, piece.first, piece.second) > 0.0))
+            }
+        }
+        zones.sortBy { it.from }
+        val possible = topology.lanes
+            .filter { it.possibleFrom != null && it.addedAt != null && it.id !in named }
+            .groupBy { it.addedAt }
+            .map { (at, lanes) ->
+                val point = topology.points[requireNotNull(at)]
+                Stretch(lanes.minOf { requireNotNull(it.possibleFrom) }, lanes.maxOf { it.opens }, Kind.POSSIBLE, lanes.size, route.approachRoad(point.node), point.node)
+            }
+            .sortedBy { it.from }
+        return LaneEvidence(route, this.windows, lanePoints, overlay(stretches, zones), gaps, changes, added, unknownExits, tuning, zones, possible)
     }
 
     private fun designatedCounts(): Map<DesignatedKind, Int> {
@@ -176,6 +276,94 @@ class LaneEvidence private constructor(
             windows: List<CardWindow> = CardWindows.of(route),
             tuning: EvidenceTuning = EvidenceTuning.DEFAULT,
         ): LaneEvidence = Builder(route, windows, tuning).build()
+
+        /** A rule-5 zone is twice the taper of the change and this much more, without lines. */
+        const val ZONE_MIDDLE_METERS = 60.0
+
+        /**
+         * The parts of [gap] that are zones (rule 7a): every part inside [windows], and every part outside
+         * them, which then lies between two drawn stretches, no longer than [maxOutside]; touching parts
+         * as one. In route order, as (from, to).
+         */
+        fun zonePieces(gap: Gap, windows: List<CardWindow>, maxOutside: Double): List<Pair<Double, Double>> {
+            val inside = ArrayList<Pair<Double, Double>>()
+            for (window in windows.sortedBy { it.from }) {
+                val from = max(window.from, gap.from)
+                val to = min(window.to, gap.to)
+                if (to <= from) continue
+                val last = inside.lastOrNull()
+                if (last != null && from <= last.second) inside[inside.size - 1] = last.first to max(last.second, to) else inside.add(from to to)
+            }
+            val parts = ArrayList<Pair<Double, Double>>()
+            var cursor = gap.from
+            for (window in inside) {
+                if (window.first > cursor && window.first - cursor <= maxOutside) parts.add(cursor to window.first)
+                parts.add(window)
+                cursor = window.second
+            }
+            if (gap.to > cursor && gap.to - cursor <= maxOutside) parts.add(cursor to gap.to)
+            val merged = ArrayList<Pair<Double, Double>>()
+            for (part in parts) {
+                val last = merged.lastOrNull()
+                if (last != null && part.first <= last.second) merged[merged.size - 1] = last.first to max(last.second, part.second) else merged.add(part)
+            }
+            return merged
+        }
+
+        /** [base] with every stretch, or part of one, that lies in one of [zones] made a [Kind.ZONE] stretch. */
+        private fun overlay(base: List<Stretch>, zones: List<Zone>): List<Stretch> {
+            if (zones.isEmpty()) return base
+            // The zones as one list of stretches that do not overlap: where two overlap, the wider count.
+            val union = ArrayList<Zone>()
+            for (zone in zones.sortedBy { it.from }) {
+                val last = union.lastOrNull()
+                if (last != null && zone.from <= last.to) {
+                    union[union.size - 1] = last.copy(to = max(last.to, zone.to), lanes = max(last.lanes, zone.lanes), after = if (zone.to > last.to) zone.after else last.after)
+                } else {
+                    union.add(zone)
+                }
+            }
+            val out = ArrayList<Stretch>()
+            for (stretch in base) {
+                var cursor = stretch.from
+                for (zone in union) {
+                    if (zone.to <= cursor || zone.from >= stretch.to) continue
+                    if (zone.from > cursor) out.add(stretch.copy(from = cursor, to = zone.from))
+                    val to = min(zone.to, stretch.to)
+                    out.add(Stretch(max(zone.from, cursor), to, Kind.ZONE, zone.lanes, stretch.road, zone.after))
+                    cursor = to
+                }
+                if (cursor < stretch.to) out.add(stretch.copy(from = cursor))
+            }
+            val merged = ArrayList<Stretch>(out.size)
+            for (stretch in out) {
+                val last = merged.lastOrNull()
+                if (last != null && last.to == stretch.from && last.kind == stretch.kind && last.lanes == stretch.lanes &&
+                    last.road == stretch.road && last.point == stretch.point
+                ) {
+                    merged[merged.size - 1] = last.copy(to = stretch.to)
+                } else {
+                    merged.add(stretch)
+                }
+            }
+            return merged
+        }
+
+        /**
+         * For each intersection of [route], the side of the route's next exit: the side of the next
+         * maneuver where the route turns ([turnsAt], [RunUpRule.exitEdge]), at the intersection itself
+         * where it turns there; null where it cannot be told.
+         */
+        fun exitEdges(route: LaneRoute): List<LaneEdge?> {
+            val nodes = route.nodes
+            val edges = arrayOfNulls<LaneEdge>(nodes.size)
+            var next: LaneEdge? = null
+            for (i in nodes.indices.reversed()) {
+                if (turnsAt(nodes[i])) next = RunUpRule.exitEdge(nodes[i].maneuver?.modifier, nodes[i].lanes)
+                edges[i] = next
+            }
+            return edges.asList()
+        }
 
         /**
          * Whether the route turns at [node]: at the maneuver a step begins with, unless it is one where
@@ -244,7 +432,7 @@ class LaneEvidence private constructor(
     private class Builder(val route: LaneRoute, val windows: List<CardWindow>, val tuning: EvidenceTuning) {
         private val nodes = route.nodes
         private val turning = BooleanArray(nodes.size) { turnsAt(nodes[it]) }
-        private val exitEdges = exitEdges()
+        private val exitEdges = exitEdges(route)
         private val points = nodes.indices.filter { nodes[it].isLanePoint }
 
         /** For each pair of lane points in a row, the first's index into [points]: whether they are bridged. */
@@ -257,21 +445,7 @@ class LaneEvidence private constructor(
 
         fun build(): LaneEvidence {
             for (k in 0 until points.size - 1) pair(k, points[k], points[k + 1])
-            return LaneEvidence(route, windows, points, stretches(), gaps, changes, added, unknownExits)
-        }
-
-        /**
-         * The side of the route's next exit at each intersection: the side of the next maneuver where
-         * the route turns ([RunUpRule.exitEdge]), at the intersection itself where it turns there.
-         */
-        private fun exitEdges(): Array<LaneEdge?> {
-            val edges = arrayOfNulls<LaneEdge>(nodes.size)
-            var next: LaneEdge? = null
-            for (i in nodes.indices.reversed()) {
-                if (turning[i]) next = RunUpRule.exitEdge(nodes[i].maneuver?.modifier, nodes[i].lanes)
-                edges[i] = next
-            }
-            return edges
+            return LaneEvidence(route, windows, points, stretches(), gaps, changes, added, unknownExits, tuning)
         }
 
         /** The lane points [a] and [b] in a row, the [k]th pair. */

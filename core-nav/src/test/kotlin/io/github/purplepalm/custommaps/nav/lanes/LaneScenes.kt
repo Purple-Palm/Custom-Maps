@@ -1,0 +1,171 @@
+package io.github.purplepalm.custommaps.nav.lanes
+
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.RouteLane
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
+
+/**
+ * Made-up routes for the own lanes' tests: invented approaches with round synthetic stations, the gore
+ * of the exit at [GORE] metres from the route's start, no place. Lanes are written from the left; a
+ * lane the route cannot be followed from is written with false, and the route prefers a lane where it
+ * can be followed from it unless told otherwise. The route comes in from the south (bearing 180) and
+ * leaves to the north (0) at every intersection; other roads are given by their bearing and whether a
+ * car may take them.
+ */
+internal object LaneScenes {
+
+    /** The gore of every approach's exit, in metres from the route's start. */
+    const val GORE = 6_000.0
+
+    private val straight = TurnModifier.STRAIGHT
+    private val slightRight = TurnModifier.SLIGHT_RIGHT
+    private val slightLeft = TurnModifier.SLIGHT_LEFT
+
+    fun s(valid: Boolean = true, active: Boolean? = valid) = RouteLane(setOf(straight), valid = valid, active = active)
+    fun sr(valid: Boolean = true, active: Boolean? = valid) = RouteLane(setOf(slightRight), valid = valid, active = active)
+    fun sl(valid: Boolean = true, active: Boolean? = valid) = RouteLane(setOf(slightLeft), valid = valid, active = active)
+
+    /** A lane with the straight arrow and the one to the right: the option lane of a right exit. */
+    fun option(valid: Boolean = true, active: Boolean? = valid) = RouteLane(setOf(straight, slightRight), valid = valid, active = active)
+
+    /** A lane with the left turn's arrow, as a left pocket at a junction lists it. */
+    fun left(valid: Boolean = true, active: Boolean? = valid) = RouteLane(setOf(TurnModifier.LEFT), valid = valid, active = active)
+
+    /** A lane kept for car pools. */
+    fun hov(valid: Boolean = false, active: Boolean? = valid) =
+        RouteLane(setOf(straight), valid = valid, active = active, kinds = setOf(DesignatedKind.HOV))
+
+    /** The roads at an intersection besides the two the route takes, each as its bearing and whether a car may take it. */
+    class Roads(vararg val others: Pair<Int, Boolean>)
+
+    val THROUGH = Roads()
+    val EXIT_RIGHT = Roads(30 to true)
+    val EXIT_LEFT = Roads(330 to true)
+    val JOIN_RIGHT = Roads(160 to false)
+    val JOIN_LEFT = Roads(200 to false)
+
+    val DEPART = NodeManeuver(ManeuverType.DEPART)
+    val ARRIVE = NodeManeuver(ManeuverType.ARRIVE)
+    val OFF_RIGHT = NodeManeuver(ManeuverType.OFF_RAMP, slightRight, viewStaysUp = true)
+    val OFF_LEFT = NodeManeuver(ManeuverType.OFF_RAMP, slightLeft, viewStaysUp = true)
+    val FORK_LEFT = NodeManeuver(ManeuverType.FORK, slightLeft, viewStaysUp = true)
+    val FORK_RIGHT = NodeManeuver(ManeuverType.FORK, slightRight, viewStaysUp = true)
+    val TURN_LEFT = NodeManeuver(ManeuverType.TURN, TurnModifier.LEFT)
+    val TURN_RIGHT = NodeManeuver(ManeuverType.TURN, TurnModifier.RIGHT)
+
+    /** The posted speed of a road the own lanes plan at [planMps]. */
+    fun posted(planMps: Double) = planMps - PlanningSpeed.MARGIN_MPH * PlanningSpeed.MPS_PER_MPH
+
+    fun node(
+        at: Double,
+        vararg lanes: RouteLane,
+        roads: Roads = THROUGH,
+        road: RoadKind = RoadKind.FREEWAY,
+        maneuver: NodeManeuver? = null,
+        planMps: Double? = null,
+    ) = RouteNode(
+        station = at,
+        lanes = lanes.toList(),
+        bearings = listOf(180, 0) + roads.others.map { it.first },
+        entry = listOf(false, true) + roads.others.map { it.second },
+        inIndex = 0,
+        outIndex = 1,
+        freeway = road == RoadKind.FREEWAY,
+        ramp = road == RoadKind.RAMP,
+        maneuver = maneuver,
+        postedMps = planMps?.let { posted(it) },
+    )
+
+    fun route(vararg nodes: RouteNode, id: String = "route-1", length: Double = nodes.last().station) =
+        LaneRoute(id, steps = nodes.count { it.maneuver != null }, lengthMeters = length, nodes = nodes.toList())
+
+    /** A lane point of an approach, [before] metres before the gore. */
+    class At(val before: Double, val lanes: List<RouteLane>, val roads: Roads = THROUGH)
+
+    fun at(before: Double, vararg lanes: RouteLane, roads: Roads = THROUGH) = At(before, lanes.toList(), roads)
+
+    /** A node of an approach without lane data, [before] metres before the gore. */
+    fun bare(before: Double, roads: Roads) = At(before, emptyList(), roads)
+
+    /**
+     * A freeway approach to an exit at [GORE]: the departure at 0, [points] at metres before the gore (the
+     * freeway planned at [planMps]), the exit with [exit] as its lanes and [maneuver], the ramp planned at
+     * [rampMps] with [rampPoints] at metres after the gore, a turn at its end [rampMeters] after the gore
+     * and the arrival 100 m later.
+     */
+    fun approach(
+        points: List<At>,
+        exit: List<RouteLane>,
+        maneuver: NodeManeuver = OFF_RIGHT,
+        planMps: Double = 27.0,
+        rampMps: Double = 20.0,
+        rampPoints: List<Pair<Double, NodeAndLanes>> = emptyList(),
+        rampMeters: Double = 400.0,
+        id: String = "route-1",
+    ): LaneRoute {
+        val nodes = ArrayList<RouteNode>()
+        nodes.add(node(0.0, maneuver = DEPART, planMps = planMps))
+        for (p in points.sortedByDescending { it.before }) {
+            nodes.add(node(GORE - p.before, *p.lanes.toTypedArray(), roads = p.roads, planMps = planMps))
+        }
+        nodes.add(node(GORE, *exit.toTypedArray(), road = RoadKind.RAMP, maneuver = maneuver, planMps = rampMps))
+        for ((after, n) in rampPoints.sortedBy { it.first }) {
+            nodes.add(node(GORE + after, *n.lanes.toTypedArray(), roads = n.roads, road = RoadKind.RAMP, maneuver = n.maneuver, planMps = rampMps))
+        }
+        nodes.add(node(GORE + rampMeters, road = RoadKind.STREET, maneuver = TURN_LEFT, planMps = 15.0))
+        nodes.add(node(GORE + rampMeters + 100.0, road = RoadKind.STREET, maneuver = ARRIVE, planMps = 15.0))
+        return route(*nodes.toTypedArray(), id = id)
+    }
+
+    /** A node on a ramp: its lanes, roads and maneuver. */
+    class NodeAndLanes(val lanes: List<RouteLane>, val roads: Roads = THROUGH, val maneuver: NodeManeuver? = null)
+
+    // ------------------------------------------------------------------ the scenes
+
+    /** The exit of IA: the two right lanes of six, the fifth an option lane, the sixth exit-only. */
+    fun iaExit() = listOf(s(false), s(false), s(false), s(false), option(), sr())
+
+    /**
+     * IA: five general lanes and no car-pool lane at every point, the exit on the right. At IA0, 2,180 m
+     * before the gore, the left lane leaves by a road on the left; at IA1, 1,330 m, the right lane leaves by
+     * a road on the right; at IA2a and IA2b, 690 and 640 m (a pair 50 m apart with the same lists), the two
+     * left lanes cannot be used: no road leaves there, the route only narrows toward its exit. The exit
+     * takes the two right lanes of six. Planned at 27 m/s. [farSide]: the right lane leaves at IA0 and the
+     * left one at IA1.
+     */
+    fun ia(farSide: Boolean = false): LaneRoute {
+        val leftLeaves = listOf(s(false), s(), s(), s(), s())
+        val rightLeaves = listOf(s(), s(), s(), s(), s(false))
+        val ia0 = if (farSide) At(2_180.0, rightLeaves, EXIT_RIGHT) else At(2_180.0, leftLeaves, EXIT_LEFT)
+        val ia1 = if (farSide) At(1_330.0, leftLeaves, EXIT_LEFT) else At(1_330.0, rightLeaves, EXIT_RIGHT)
+        val narrowing = listOf(s(false), s(false), s(), s(), s())
+        return approach(listOf(ia0, ia1, At(690.0, narrowing), At(640.0, narrowing)), iaExit(), id = if (farSide) "ia-far" else "ia")
+    }
+
+    /**
+     * IW31: four general lanes g1 to g4 and no car-pool lane. P0 at 2,600 m before the gore, every lane goes
+     * on; P1 at 1,850 m, the leftmost general lane cannot be used; an entrance joins on the right at
+     * 1,550 m; P2 at 620 m is the first point to list the exit-only lane a5 beside the option lane g4. The
+     * gore lists the same five lanes; the ramp splits 260 m after the gore and the route takes its left
+     * branch, which only the option lane leads to. 65 mph before the gore, 45 mph on the ramp.
+     */
+    fun iw31(): LaneRoute {
+        val mph65 = 65.0 * PlanningSpeed.MPS_PER_MPH
+        val mph45 = 45.0 * PlanningSpeed.MPS_PER_MPH
+        val p2 = listOf(s(false), s(false), s(false), option(true, true), sr(true, false))
+        return approach(
+            listOf(
+                at(2_600.0, s(), s(), s(), s()),
+                at(1_850.0, s(false), s(), s(), s()),
+                bare(1_550.0, JOIN_RIGHT),
+                At(620.0, p2),
+            ),
+            exit = p2,
+            planMps = mph65,
+            rampMps = mph45,
+            rampPoints = listOf(260.0 to NodeAndLanes(listOf(sl(true, true), sr(false)), maneuver = FORK_LEFT)),
+            rampMeters = 700.0,
+            id = "iw31",
+        )
+    }
+}

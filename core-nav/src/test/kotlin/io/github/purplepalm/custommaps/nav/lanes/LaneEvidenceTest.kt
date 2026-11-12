@@ -801,4 +801,141 @@ class LaneEvidenceTest {
         assertTrue(evidence.changes.all { it.explained })
         assertTrue(evidence.gaps.isEmpty())
     }
+
+    // ------------------------------------------------------------------ the second pass: possible lanes and zones
+
+    /** The second pass on [route]'s evidence, the plan having named [named] (topology lane ids) in [windows]. */
+    private fun second(route: LaneRoute, named: Set<Int> = emptySet(), windows: List<CardWindow> = emptyList()): LaneEvidence {
+        val first = evidence(route)
+        return first.withPlan(LaneTopology.of(first), named, windows)
+    }
+
+    /** The zones as (from, to, cause), rounded to the metre. */
+    private fun LaneEvidence.zoneList(): List<String> = zones.map { "${round(it.from)}..${round(it.to)} ${it.cause}" }
+
+    /** A route with three-lane points at [a] and [b] and, right after [a], a node with roads on both sides: no bridge. */
+    private fun gapRoute(a: Double, b: Double) = route(
+        start(),
+        node(a, s(), s(), s()),
+        node(a + 1.0, roads = bothSides),
+        node(b, s(), s(), s()),
+        node(b + 2_000.0, maneuver = arrive),
+    )
+
+    @Test
+    fun `the first pass has no zones and no possible lanes`() {
+        val evidence = evidence(sceneS20())
+        assertTrue(evidence.zones.isEmpty())
+        assertTrue(evidence.possibleLanes.isEmpty())
+        assertTrue(evidence.stretches.none { it.kind == Kind.ZONE || it.kind == Kind.POSSIBLE })
+    }
+
+    @Test
+    fun `an exit-side lane the plan does not name is possible from the point before, at most 3,000 m back`() {
+        fun possible(metersBack: Double, named: Set<Int> = emptySet()): List<LaneEvidence.Stretch> = second(
+            route(
+                start(),
+                node(5_000.0 - metersBack, s(), s(), s()),
+                node(5_000.0, s(false), s(false), s(false), sr(), road = RoadKind.RAMP, maneuver = offRampRight),
+                node(5_300.0, road = RoadKind.RAMP, maneuver = arrive),
+            ),
+            named,
+        ).possibleLanes
+        for ((back, from) in listOf(2_999.0 to 2_001.0, 3_000.0 to 2_000.0, 3_001.0 to 2_000.0)) {
+            val stretch = possible(back).single()
+            assertEquals(from, stretch.from, 1e-9, "$back m back")
+            assertEquals(5_000.0 - 210.0, stretch.to, 1e-9, "to where the exit's deceleration lane would open late")
+            assertEquals(Kind.POSSIBLE, stretch.kind)
+            assertEquals(1, stretch.lanes)
+            assertEquals(2, stretch.point, "the exit, which lists it")
+        }
+        assertTrue(possible(2_999.0, named = setOf(3)).isEmpty(), "a lane the plan names opens late: never possible")
+    }
+
+    @Test
+    fun `a lane added on the far side is never possible`() {
+        val route = route(
+            start(),
+            node(2_000.0, s(), s(), s()),
+            node(3_000.0, s(), s(), s(), s()),
+            node(4_000.0, s(false), s(false), s(false), sr(), sr(), road = RoadKind.RAMP, maneuver = offRampRight),
+            node(4_300.0, road = RoadKind.RAMP, maneuver = arrive),
+        )
+        val evidence = second(route)
+        assertEquals(listOf(4_000.0 - 210.0), evidence.possibleLanes.map { it.to }, "only the exit's lane, at its edge")
+    }
+
+    @Test
+    fun `a stretch without lane data between two drawn stretches is a zone inside a card window at any length`() {
+        val route = gapRoute(1_000.0, 4_000.0)
+        assertEquals(LaneEvidence.Gap(1_000.0, 3_000.0, 0.0, false, 1, 3), evidence(route).gaps.single())
+        val all = second(route, windows = listOf(CardWindow(500.0, 4_000.0, CardWindow.Kind.RUN_UP, 4)))
+        assertEquals(listOf("1000..3000 GAP"), all.zoneList())
+        assertEquals(3, all.zones.single().lanes)
+        assertTrue(all.zones.single().inWindow)
+        assertEquals("1000..3000 ZONE", all.drawn().single { it.startsWith("1000..") }.substringBeforeLast(' '))
+        // A window over the gap's end: the part inside is a zone; the 2,000 m outside it are no short part.
+        val end = second(route, windows = listOf(CardWindow(2_500.0, 4_000.0, CardWindow.Kind.RUN_UP, 4)))
+        assertEquals(listOf("2500..3000 GAP"), end.zoneList())
+        assertEquals(listOf("0..1000 KNOWN 3", "1000..2500 NONE", "2500..3000 ZONE 3", "3000..4000 KNOWN 3", "4000..6000 NONE"), end.drawn())
+    }
+
+    @Test
+    fun `outside every window a gap is a zone up to 600 m`() {
+        val short = second(gapRoute(1_000.0, 2_600.0))
+        assertEquals(listOf("1000..1600 GAP"), short.zoneList())
+        assertFalse(short.zones.single().inWindow)
+        val long = second(gapRoute(1_000.0, 2_601.0))
+        assertTrue(long.zones.isEmpty(), "601 m is no short gap")
+        assertEquals("1000..1601 NONE", long.drawn()[1])
+    }
+
+    @Test
+    fun `a long gap reaching into a window is a zone inside it and where a part outside is short`() {
+        val route = gapRoute(1_000.0, 4_000.0)
+        val evidence = second(route, windows = listOf(CardWindow(1_400.0, 2_000.0, CardWindow.Kind.STREET, 4)))
+        assertEquals(listOf("1000..2000 GAP"), evidence.zoneList(), "400 m before the window, then the window; 1,000 m after it stay unknown")
+        val between = second(route, windows = listOf(CardWindow(1_100.0, 1_200.0, CardWindow.Kind.STREET, 4), CardWindow(2_400.0, 2_500.0, CardWindow.Kind.STREET, 4)))
+        assertEquals(listOf("1000..1200 GAP", "2400..3000 GAP"), between.zoneList(), "the 1,200 m between the windows are no short part")
+    }
+
+    @Test
+    fun `a change of the lane count nothing explains is a zone placed late, ending at the later point`() {
+        val gain = second(route(start(), node(2_000.0, s(), s(), s()), node(3_000.0, s(), s(), s(), s()), node(4_000.0, maneuver = arrive)))
+        // Planned at the freeway's setting of 65 mph + 5: an added lane's taper is 15 x 3.66 m.
+        val taper = 15.0 * 3.66
+        val zone = gain.zones.single()
+        assertEquals(LaneEvidence.Zone.Cause.CHANGE, zone.cause)
+        assertEquals(3_000.0 - (2.0 * taper + LaneEvidence.ZONE_MIDDLE_METERS), zone.from, 1e-9)
+        assertEquals(3_000.0, zone.to)
+        assertEquals(4, zone.lanes)
+        assertEquals(listOf("0..1000 NONE", "1000..2000 KNOWN 3", "2000..2830 KNOWN 4", "2830..3000 ZONE 4", "3000..4000 NONE"), gain.drawn())
+        // A loss tapers over the lane's width times the speed: 3.66 m x 70.
+        val loss = second(route(start(), node(2_000.0, s(), s(), s(), s()), node(3_000.0, s(), s(), s()), node(4_000.0, maneuver = arrive)))
+        assertEquals(3_000.0 - (2.0 * 3.66 * 70.0 + LaneEvidence.ZONE_MIDDLE_METERS), loss.zones.single().from, 1e-6)
+        // A close pair: the zone never reaches back past the first point.
+        val close = second(route(start(), node(2_000.0, s(), s(), s(), s()), node(2_100.0, s(), s(), s()), node(4_000.0, maneuver = arrive)))
+        assertEquals(2_000.0, close.zones.single().from)
+        // A road that joins on the way explains a gain: no zone for the change. The later point's reach stops at that
+        // road, and the 500 m between the first point and the road are a short gap: a zone of their own.
+        val joined = second(route(start(), node(2_000.0, s(), s(), s()), node(2_500.0, roads = joinRight), node(3_000.0, s(), s(), s(), s()), node(4_000.0, maneuver = arrive)))
+        assertEquals(listOf("2000..2500 GAP"), joined.zoneList())
+    }
+
+    @Test
+    fun `S20's lane added between its points is a zone, the exit's lane is possible unless named`() {
+        val route = sceneS20()
+        val taper = 15.0 * 3.66
+        val evidence = second(route)
+        assertEquals(listOf("${round(3_300.0 - 2.0 * taper - 60.0)}..3300 CHANGE"), evidence.zoneList())
+        assertEquals(listOf(3_300.0 to 4_000.0 - 210.0), evidence.possibleLanes.map { it.from to it.to })
+        val topology = LaneTopology.of(evidence(route))
+        val exitLane = topology.points.last().lanes.last()
+        assertTrue(second(route, named = setOf(exitLane)).possibleLanes.isEmpty())
+        // The stretches still cover the route end to end.
+        val stretches = evidence.stretches
+        assertEquals(0.0, stretches.first().from)
+        assertEquals(route.lengthMeters, stretches.last().to)
+        for (i in 1 until stretches.size) assertEquals(stretches[i - 1].to, stretches[i].from, 1e-9)
+    }
 }
