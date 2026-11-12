@@ -127,6 +127,10 @@ class LaneEvidenceTest {
         // A street before the intersection, a freeway after it: the point's reach is the freeway's.
         val evidence = evidence(route(start(RoadKind.STREET), node(100.0), node(800.0, s(), s()), node(1_000.0, maneuver = arrive)))
         assertEquals(listOf("0..100 NONE", "100..800 KNOWN 2", "800..1000 NONE"), evidence.drawn())
+        // A street leads to the point and a freeway leaves it: the street's 250 m, not the freeway's.
+        val street = RoadKind.STREET
+        val onto = evidence(route(start(street), node(100.0, road = street), node(700.0, s(), s()), node(1_000.0, maneuver = arrive)))
+        assertEquals(listOf("0..450 NONE", "450..700 KNOWN 2", "700..1000 NONE"), onto.drawn())
     }
 
     // ------------------------------------------------------------------ rule 3: past a point nothing is known
