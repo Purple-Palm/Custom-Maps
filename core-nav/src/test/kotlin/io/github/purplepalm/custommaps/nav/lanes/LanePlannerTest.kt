@@ -176,14 +176,53 @@ class LanePlannerTest {
     fun `P6 names the lane the next point prefers among equal ones`() {
         val route = approach(listOf(at(1_500.0, s(), s(), s())), listOf(s(false), option(true, true), sr(true, false)))
         val plan = plan(route)
-        assertEquals(1, plan.at(GORE - 100.0).named, "the option lane the exit prefers, not the edge lane")
+        // From the window's first station on, not only once a later move has put it right.
+        assertEquals(GORE - 965.0 to 1, plan.firstNamed(), "the option lane the exit prefers, not the edge lane")
+        assertTrue(plan.moves.isEmpty(), "${plan.moves}")
+        assertEquals(1, plan.at(GORE - 100.0).named)
         assertEquals(setOf(1, 2), plan.at(GORE - 100.0).band.toSet())
+    }
+
+    @Test
+    fun `P6 counts lane changes before any preference`() {
+        // The point 700 m before prefers the middle lanes, or the left ones, which need changes: the right lane needs
+        // none, and is named from the window's start; the split after the gore needs the exit's other lane, not the
+        // option lane the exit prefers.
+        for ((scene, first) in listOf(LaneScenes.prefersMiddle() to 990.0, LaneScenes.prefersLeft() to 965.0, LaneScenes.splitRight() to 965.0)) {
+            val plan = plan(scene)
+            assertEquals(GORE - first to 3, plan.firstNamed(), scene.routeId)
+            assertTrue(plan.moves.isEmpty(), "${scene.routeId}: ${plan.moves}")
+            assertEquals(3, plan.at(GORE - 5.0).named, scene.routeId)
+        }
+    }
+
+    @Test
+    fun `P6 takes the maneuver's preferred lane before the next point's, and never moves back to it`() {
+        // The point 1,200 m before prefers the exit-only lane, the exit the option lane: the option lane is named from
+        // the window's start to the gore, the lane the card lights there.
+        val plan = plan(LaneScenes.prefersOther())
+        assertEquals(GORE - 2_190.0 to 3, plan.firstNamed())
+        assertTrue(plan.moves.isEmpty(), "${plan.moves}")
+        assertEquals(3, plan.at(GORE - 1_200.0).named)
+        assertEquals(3, plan.at(GORE).named)
+        assertTrue(4 in plan.at(GORE - 1_000.0).band, "the exit-only lane works all the way, and is never named")
     }
 
     @Test
     fun `P6 names the lane nearest the maneuver's edge among equal ones`() {
         assertEquals(4, plan(LaneScenes.s6()).at(GORE - 100.0).named, "a right exit: the right lane")
         assertEquals(0, plan(LaneScenes.s7()).at(GORE - 100.0).named, "a left fork: the left lane")
+    }
+
+    @Test
+    fun `a move toward the edge is no move back, though a lane opens beyond the new lane there`() {
+        // Two lanes open on the right 955 m before the gore; the named lane moves into the inner one, which the exit
+        // takes: its count from the edge grows from 0 to 1, as the outer lane opens with it.
+        val move = plan(LaneScenes.twoAdded()).moves.single()
+        assertEquals(GORE - 950.0, move.station, 1e-9)
+        assertEquals(3 to 4, move.from to move.to)
+        assertEquals(0 to 1, move.fromEdge to move.toEdge)
+        assertFalse(move.back)
     }
 
     @Test
@@ -240,6 +279,14 @@ class LanePlannerTest {
         ),
         "roundabout" to Golden(null, listOf(g(150.0, null, null), g(0.0, null, null))),
         "bus-only-turn" to Golden(null, listOf(g(150.0, null, null), g(0.0, null, null))),
+        // P6's order: the option lane the exit prefers, though the point before prefers the exit-only lane; the lane that
+        // needs no change, though the point before prefers others; the lane the split after the gore needs.
+        "prefers-other" to Golden(GORE - 2_190.0 to 3, listOf(g(1_200.0, 3, 1), g(0.0, 3, 1))),
+        "prefers-middle" to Golden(GORE - 990.0 to 3, listOf(g(700.0, 3, 0), g(0.0, 3, 0))),
+        "prefers-left" to Golden(GORE - 965.0 to 3, listOf(g(700.0, 3, 0), g(0.0, 3, 0))),
+        "split-right" to Golden(GORE - 965.0 to 3, listOf(g(0.0, 3, 0), g(-150.0, 3, 0))),
+        // Into the inner of two lanes added on the right, where they open.
+        "two-added" to Golden(GORE - 995.0 to 3, listOf(g(2_000.0, null, null), g(900.0, 4, 1), g(0.0, 4, 1)), listOf(Triple(GORE - 950.0, 3, 4))),
     )
 
     @Test

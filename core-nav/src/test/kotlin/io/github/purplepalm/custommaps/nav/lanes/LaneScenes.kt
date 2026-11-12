@@ -311,6 +311,51 @@ internal object LaneScenes {
         id = "geom-s6",
     )
 
+    // ------------------------------------------------------------------ P6's order and where the named lane moves
+
+    /**
+     * A lane point 1,200 m before a right exit lists the exit's five lanes and prefers the exit-only lane; the
+     * exit itself prefers the option lane beside it, as IW31's does.
+     */
+    fun prefersOther() = approach(
+        listOf(at(1_200.0, s(false), s(false), s(false), option(true, false), sr(true, true))),
+        exit = listOf(s(false), s(false), s(false), option(true, true), sr(true, false)),
+        id = "prefers-other",
+    )
+
+    /** A lane point 700 m before a right exit prefers the two middle lanes of four; only the right lane leads to the exit. */
+    fun prefersMiddle() = approach(
+        listOf(at(700.0, s(true, false), s(true, true), s(true, true), s(true, false))),
+        exit = listOf(s(false), s(false), s(false), sr(true, true)),
+        id = "prefers-middle",
+    )
+
+    /** [prefersMiddle] where the point prefers the two left lanes and the exit takes the two right ones. */
+    fun prefersLeft() = approach(
+        listOf(at(700.0, s(true, true), s(true, true), s(true, false), s(true, false))),
+        exit = listOf(s(false), s(false), option(), sr()),
+        id = "prefers-left",
+    )
+
+    /**
+     * An exit whose ramp splits 150 m after the gore, the route on the right branch: the exit prefers its option
+     * lane, but only its other lane leads on to the right branch without a change.
+     */
+    fun splitRight() = approach(
+        emptyList(),
+        exit = listOf(s(false), s(false), option(true, true), sr(true, false)),
+        rampPoints = listOf(150.0 to NodeAndLanes(listOf(sl(false), sr(true, true)), maneuver = FORK_RIGHT)),
+        rampMeters = 450.0,
+        id = "split-right",
+    )
+
+    /** Two lanes added on the right at a point 900 m before a right exit, which takes the inner one only. */
+    fun twoAdded() = approach(
+        listOf(at(2_000.0, s(), s(), s(), s()), at(900.0, s(), s(), s(), s(), sr(), sr())),
+        exit = listOf(s(false), s(false), s(false), s(false), sr(), sr(false)),
+        id = "two-added",
+    )
+
     // ------------------------------------------------------------------ where no lane can be named (C1)
 
     /**
@@ -415,5 +460,10 @@ internal object LaneScenes {
         "carpool-ends" to carpoolEnds(),
         "roundabout" to roundabout(),
         "bus-only-turn" to busOnlyTurn(),
+        "prefers-other" to prefersOther(),
+        "prefers-middle" to prefersMiddle(),
+        "prefers-left" to prefersLeft(),
+        "split-right" to splitRight(),
+        "two-added" to twoAdded(),
     )
 }

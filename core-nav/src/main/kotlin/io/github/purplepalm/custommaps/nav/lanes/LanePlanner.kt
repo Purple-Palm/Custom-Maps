@@ -42,10 +42,13 @@ import kotlin.math.min
  *   maneuver with lane data, when that lies within [RAMP_BRIDGE_SECONDS] of driving at the ramp's
  *   planning speed ([CardWindow.Kind.RAMP]).
  * - **The named lane** (P6, E6): inside a card window, one lane of the band even while every lane
- *   works: the fewest changes to every point ahead, then preferred at the next point, then the lane
- *   nearest the maneuver's edge. It stays while it stays in the band and moves early, to the next
- *   point's preferred lane or one that needs fewer changes. Outside card windows no lane is named
- *   (P3): the band is kept and the path follows it.
+ *   works: the fewest changes to every point ahead, then one the next point lets be used, then
+ *   preferred at the maneuver the step ends with (the lanes the card's row lights there), then
+ *   preferred at the next point, then the lane nearest the maneuver's edge. It stays while it stays
+ *   in the band and moves early, but only to a lane no farther from the maneuver's edge that comes
+ *   first by that order, with fewer changes or as few and preferred: never back, and never to a lane
+ *   that needs more changes. Outside card windows no lane is named (P3): the band is kept and the
+ *   path follows it.
  * - **Unknown exits** (P7): before a road without lane data that leaves on the side of the next exit,
  *   the lane at that edge may be the road's own lane, so it is not named unless it is the only lane of
  *   the band; past the road the named lane moves to the edge once where that needs fewer changes. The
@@ -288,8 +291,9 @@ class LanePlan internal constructor(
 
     /**
      * The named lane moves from lane [from] to lane [to] at [station]; [fromEdge] and [toEdge] count it
-     * from the exit's edge just before and at the move, lanes that are there only. [back]: it moves away
-     * from the edge without a maneuver between, which the plan should never do.
+     * from the exit's edge just before and at the move, lanes that are there only. [back]: [to] lies
+     * farther from the edge than [from] across the road, with no maneuver between, which the plan should
+     * never do; a lane that opens or ends at the move changes the counts, never this.
      */
     data class Move(val station: Double, val from: Int, val to: Int, val fromEdge: Int?, val toEdge: Int?, val back: Boolean)
 
@@ -676,6 +680,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
      * The lane named at each station (local index, -1 for none): P6 inside card windows, nothing outside
      * (P3), and the lane at the exit's edge held back before an unknown exit (P7); where only that lane
      * is left in the band, the hold of every unknown exit ahead on the step is dropped there ([drops]).
+     * A lane once named moves only toward the maneuver's edge, unless it leaves the band or the hold.
      */
     private fun name(inWindow: BooleanArray, noLaneAt: Array<LanePlan.NoLane.Cause?>, drops: HashMap<Int, Double>): IntArray {
         val named = IntArray(n) { -1 }
@@ -706,16 +711,20 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
             }
             val cost = requireNotNull(costOf[i])
             val next = rules.getOrNull(nextRule)
-            val preferred = candidates.filter { next != null && next.preferred.get(it) }
+            val maneuver = maneuverAhead(nextRule, i)
             val edge = edges[i]
-            fun rank(l: Int) = Rank(cost[i * size + l], if (l in preferred) 0 else 1, fromEdge(l, i, edge), lanes[l].id)
+            fun rank(l: Int): Rank {
+                var preferred = 0
+                if (next != null && !next.allowed.get(l)) preferred += Rank.NOT_USABLE_NEXT
+                if (maneuver != null && !maneuver.preferred.get(l)) preferred += Rank.NOT_PREFERRED_AT_MANEUVER
+                if (next != null && !next.preferred.get(l)) preferred += Rank.NOT_PREFERRED_NEXT
+                return Rank(cost[i * size + l], preferred, fromEdge(l, i, edge), lanes[l].id)
+            }
             val choice = if (prev >= 0 && prev in candidates) {
-                val better = candidates.filter { cost[i * size + it] < cost[i * size + prev] }
-                when {
-                    preferred.isNotEmpty() && prev !in preferred -> preferred.minByOrNull(::rank)
-                    better.isNotEmpty() -> better.minByOrNull(::rank)
-                    else -> prev
-                }
+                // It moves early, and only toward the maneuver's edge: to a lane no farther from it that comes first
+                // by P6's order, with fewer changes or as few and preferred. Never back, never to a lane needing more.
+                val stay = rank(prev)
+                candidates.filter { it != prev && fromEdge(it, i, edge) <= stay.fromEdge && rank(it).before(stay) }.minByOrNull(::rank) ?: prev
             } else {
                 candidates.minByOrNull(::rank)
             }
@@ -725,9 +734,41 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         return named
     }
 
-    /** P6's order: fewest changes, then preferred at the next point, then nearest the maneuver's edge; the id last. */
+    /**
+     * The rule of the maneuver that ends the step of station [i], the first rule from [from] on that is a
+     * maneuver; null where that maneuver has no lane data, so no rule.
+     */
+    private fun maneuverAhead(from: Int, i: Int): Rule? {
+        for (r in from until rules.size) {
+            val rule = rules[r]
+            if (rule.station > nextTurn[i]) return null
+            if (rule.maneuver) return rule
+        }
+        return null
+    }
+
+    /**
+     * P6's order: fewest changes; then, of lanes as costly, one the next point lets be used, then one the
+     * maneuver the station's step ends with prefers (the lanes the card's row lights there), then one the next
+     * point prefers ([preferred], the sum of what a lane lacks of these); then nearest the maneuver's edge; the
+     * id last.
+     */
     private data class Rank(val cost: Int, val preferred: Int, val fromEdge: Int, val id: Int) : Comparable<Rank> {
         override fun compareTo(other: Rank): Int = compareValuesBy(this, other, { it.cost }, { it.preferred }, { it.fromEdge }, { it.id })
+
+        /** Whether this lane comes first by changes and preference alone: fewer changes, or as few and preferred. */
+        fun before(other: Rank): Boolean = cost < other.cost || (cost == other.cost && preferred < other.preferred)
+
+        companion object {
+            /** The next point does not let the lane be used. */
+            const val NOT_USABLE_NEXT = 4
+
+            /** The maneuver does not prefer it. */
+            const val NOT_PREFERRED_AT_MANEUVER = 2
+
+            /** The next point does not prefer it. */
+            const val NOT_PREFERRED_NEXT = 1
+        }
     }
 
     /** How many lanes open to every car that are there lie between the local lane [l] and [edge] at station [i]. */
@@ -781,7 +822,11 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
                 val before = fromEdge(named[i - 1], i - 1, edge)
                 val after = fromEdge(named[i], i, edge)
                 val crossed = rules.any { it.maneuver && stations[i - 1] < it.station && it.station <= s }
-                moves.add(LanePlan.Move(s, lanes[named[i - 1]].id, lanes[named[i]].id, before, after, back = after > before && !crossed))
+                // Farther from the edge across the road, as the two lanes lie side by side, whatever opens or ends there.
+                val from = lanes[named[i - 1]].slot
+                val to = lanes[named[i]].slot
+                val farther = if (edge == LaneEdge.RIGHT) to < from else if (edge == LaneEdge.LEFT) to > from else false
+                moves.add(LanePlan.Move(s, lanes[named[i - 1]].id, lanes[named[i]].id, before, after, back = farther && !crossed))
             }
             if (flags[i] != null && (i == 0 || flags[i - 1] != flags[i])) flagStart = i
             if (flags[i] != null && (i + 1 == n || flags[i + 1] != flags[i])) {
