@@ -1,8 +1,10 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import java.util.BitSet
 import kotlin.math.ceil
 import kotlin.math.max
@@ -51,6 +53,13 @@ import kotlin.math.min
  *   driving before the exit; nearer, the edge lane is named from where the band holds nothing else
  *   ([LanePlan.UnknownExitHold.droppedAt]). Until the road is passed the card shows no words
  *   ([PlanSegment.unknownExitAhead]).
+ * - **No lane** (C1): on the approach to a maneuver no lane open to every car can meet (only a lane
+ *   kept for car pools and the like is valid there, or the lanes to use lie beyond one, which is never
+ *   crossed), and on the approach to a roundabout and the way round it, no lane is named and nothing
+ *   is tinted: the band there is empty ([LanePlan.NoLane]). The approach runs from the start of the
+ *   maneuver's card window, or, for an exit that has none because no open lane leads to it, from as far
+ *   before it as the close view's window at the approach's planning speed, to the maneuver; the
+ *   evidence draws it as a zone.
  *
  * Pure and deterministic; built once for a route, off the main thread, and never stored.
  */
@@ -112,7 +121,8 @@ object LanePlanner {
             bridge(topology, k)?.let { planned.add(it) }
         }
         planned.sortBy { it.from }
-        val results = planners.map { it.result(planned) }
+        val noLane = noLane(topology, planners, planned)
+        val results = planners.map { it.result(planned, noLane) }
         val holds = exits.indices.map { e ->
             val station = exits[e]
             UnknownExitRecord(station, route).hold(
@@ -120,7 +130,42 @@ object LanePlanner {
                 droppedAt = results.mapNotNull { it.drops[e] }.minOrNull(),
             )
         }
-        return LanePlan(topology, planned, seams, holds, results)
+        return LanePlan(topology, planned, seams, holds, noLane, results)
+    }
+
+    /** The maneuvers that begin a way into a roundabout. */
+    private val ROUNDABOUT_ENTRIES = setOf(ManeuverType.ROUNDABOUT, ManeuverType.ROUNDABOUT_TURN, ManeuverType.ROTARY)
+
+    /** The maneuvers that end a way round a roundabout. */
+    private val ROUNDABOUT_EXITS = setOf(ManeuverType.EXIT_ROUNDABOUT, ManeuverType.EXIT_ROTARY)
+
+    /** The approaches where no lane is named (C1), in route order. */
+    private fun noLane(topology: LaneTopology, planners: List<RunPlanner>, windows: List<CardWindow>): List<LanePlan.NoLane> {
+        val route = topology.evidence.route
+        val nodes = route.nodes
+        val out = ArrayList<LanePlan.NoLane>()
+        var stepStart = 0.0
+        for (m in nodes.indices) {
+            val maneuver = nodes[m].maneuver ?: continue
+            if (m > 0) {
+                val point = topology.points.firstOrNull { it.node == m }
+                val cause = when {
+                    maneuver.type in ROUNDABOUT_ENTRIES || maneuver.type in ROUNDABOUT_EXITS -> LanePlan.NoLane.Cause.ROUNDABOUT
+                    point == null || !point.turns -> null
+                    point.allowed.isEmpty() && nodes[m].lanes.any { it.designated && it.marked } -> LanePlan.NoLane.Cause.DESIGNATED_ONLY
+                    point.allowed.isNotEmpty() && planners[point.run].beyondDesignated(point.station) -> LanePlan.NoLane.Cause.DESIGNATED_BETWEEN
+                    else -> null
+                }
+                if (cause != null) {
+                    val station = nodes[m].station
+                    val window = windows.firstOrNull { it.node == m && it.kind != CardWindow.Kind.RAMP }
+                    val from = window?.from ?: max(stepStart, station - LaneFocus.windowMeters(CameraTuning.PHONE, PlanningSpeed.of(nodes[m - 1])))
+                    if (station > from) out.add(LanePlan.NoLane(m, from, station, cause, zone = maneuver.type !in ROUNDABOUT_EXITS))
+                }
+            }
+            stepStart = nodes[m].station
+        }
+        return out
     }
 
     /** Where the run-up [window], whose exit lies on the run [planner] plans, begins with the seam. */
@@ -146,18 +191,22 @@ object LanePlanner {
      * The ramp a run-up holds through after its gore, the lane point [k] of [topology]: to the next point
      * of the same run that the plan constrains (one where the route turns, or where some lane open to every
      * car cannot be used, with a lane that can), when it lies within [RAMP_BRIDGE_SECONDS] of driving at
-     * the planning speed of the road that leaves the gore; null otherwise.
+     * the planning speed of the road that leaves the gore; null otherwise, and where that point is a
+     * roundabout, for which no lane is named (C1).
      */
     private fun bridge(topology: LaneTopology, k: Int): CardWindow? {
         val points = topology.points
         val exit = points[k]
-        val speed = PlanningSpeed.of(topology.evidence.route.nodes[exit.node])
+        val nodes = topology.evidence.route.nodes
+        val speed = PlanningSpeed.of(nodes[exit.node])
         for (j in k + 1 until points.size) {
             val point = points[j]
             if (point.run != exit.run) return null
             if (point.allowed.isEmpty()) continue
             val restricts = point.turns || point.lanes.any { !topology.lanes[it].designated && it !in point.allowed }
             if (!restricts) continue
+            val type = nodes[point.node].maneuver?.type
+            if (type in ROUNDABOUT_ENTRIES || type in ROUNDABOUT_EXITS) return null
             return if (point.station - exit.station <= RAMP_BRIDGE_SECONDS * speed) {
                 CardWindow(exit.station, point.station, CardWindow.Kind.RAMP, point.node)
             } else {
@@ -203,6 +252,8 @@ data class PlanSegment(
      * lane at that edge may be the road's own, so the card's words wait until it is passed.
      */
     val unknownExitAhead: Boolean = false,
+    /** Why no lane is named here and the band is empty, on an approach where none can be (C1); null elsewhere. */
+    val noLane: LanePlan.NoLane.Cause? = null,
 )
 
 /** The lane plan of a route ([LanePlanner.plan]). */
@@ -217,6 +268,8 @@ class LanePlan internal constructor(
     val seams: List<Seam>,
     /** For each road without lane data that leaves on the side of an exit, whether its hold lasted ([UnknownExitHold]). */
     val unknownExits: List<UnknownExitHold>,
+    /** The approaches where no lane is named (C1), in route order. */
+    val noLane: List<NoLane>,
     runs: List<RunResult>,
 ) {
     /** A stretch where the band is not comfortable. */
@@ -262,6 +315,28 @@ class LanePlan internal constructor(
         val held: Boolean get() = droppedAt == null
     }
 
+    /**
+     * From [from] to [to] metres along the route, the approach to the maneuver at the intersection [node],
+     * no lane is named and none is tinted, for [cause] (C1). [zone]: the evidence draws the approach as a
+     * zone without lane lines, to the gore or the stop line; not on the way round a roundabout, where
+     * nothing of the app's own is drawn.
+     */
+    data class NoLane(val node: Int, val from: Double, val to: Double, val cause: Cause, val zone: Boolean = true) {
+        enum class Cause(
+            /** How the debug log names it. */
+            val logName: String,
+        ) {
+            /** Only a lane kept for car pools and the like is valid at the maneuver. */
+            DESIGNATED_ONLY("designatedOnly"),
+
+            /** The lanes to use lie beyond a lane kept for car pools and the like, which is never crossed. */
+            DESIGNATED_BETWEEN("designatedBetween"),
+
+            /** A roundabout: its approach, or the way round it to its exit. */
+            ROUNDABOUT("roundabout"),
+        }
+    }
+
     /** The plan in route order, stretch by stretch. */
     val segments: List<PlanSegment> = runs.flatMap { it.segments }
 
@@ -289,7 +364,7 @@ class LanePlan internal constructor(
     }
 
     /** The second pass of the evidence for this plan ([LaneEvidence.withPlan]). */
-    fun evidence(): LaneEvidence = topology.evidence.withPlan(topology, named, windows)
+    fun evidence(): LaneEvidence = topology.evidence.withPlan(topology, named, windows, noLane)
 
     /** One run's part of the plan; [drops] maps an unknown exit (its index among the sorted stations) to where its hold was dropped. */
     internal class RunResult(val segments: List<PlanSegment>, val flags: List<Flag>, val moves: List<Move>, val drops: Map<Int, Double>)
@@ -416,9 +491,11 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
 
     /**
      * The fewest lane changes from each lane at each station to every rule up to the station [upTo],
-     * with changes of [seconds]; [INF] where none works.
+     * with changes of [seconds]; [INF] where none works. With [crossDesignated], lanes kept for car pools
+     * and the like may be driven through, never used at a rule: what the plan would do if they could be
+     * crossed.
      */
-    private fun costs(seconds: Double, allowed: Array<BitSet?>, upTo: Int): IntArray {
+    private fun costs(seconds: Double, allowed: Array<BitSet?>, upTo: Int, crossDesignated: Boolean = false): IntArray {
         val cost = IntArray(n * size) { INF }
         val nextRule = IntArray(n + 1).also { next ->
             next[n] = n
@@ -437,7 +514,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         for (i in upTo downTo 0) {
             val s = stations[i]
             for (l in order[i]) {
-                if (lanes[l].designated) continue
+                if (lanes[l].designated && !crossDesignated) continue
                 val rule = allowed[i]
                 if (rule != null && !rule.get(l)) continue
                 if (i == upTo) {
@@ -453,7 +530,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
                 if (reachesEnd) {
                     val k = order[i].indexOf(l)
                     for (m in intArrayOf(order[i].getOrElse(k - 1) { -1 }, order[i].getOrElse(k + 1) { -1 })) {
-                        if (m < 0 || lanes[m].designated) continue
+                        if (m < 0 || (lanes[m].designated && !crossDesignated)) continue
                         if (exists[m].nextClearBit(i) <= end) continue
                         if (exists[l].nextClearBit(i) <= (i + end) / 2) continue
                         if (!clear(l, m, i + 1, end)) continue
@@ -541,6 +618,19 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
     fun speedAt(station: Double): Double = speeds[nearest(station)]
 
     /**
+     * Whether no lane open to every car meets the maneuver of the run's rule at [station] only because a
+     * lane kept for car pools and the like lies between: the approach to it, from the maneuver before,
+     * has a station where no lane works, and there one would with such lanes crossed.
+     */
+    fun beyondDesignated(station: Double): Boolean {
+        val target = rules.firstOrNull { it.maneuver && it.station == station } ?: return false
+        val start = rules.lastOrNull { it.maneuver && it.index < target.index }?.index?.plus(1) ?: 0
+        val conflict = (start..target.index).firstOrNull { flags[it] == LanePlan.Flag.Kind.CONFLICT } ?: return false
+        val crossed = costs(LanePlanner.LATEST_CHANGE_SECONDS, allowedAt(target.index), target.index, crossDesignated = true)
+        return order[conflict].any { !lanes[it].designated && crossed[conflict * size + it] != INF }
+    }
+
+    /**
      * The first station of the run, up to the gore at [gore], where a lane open to every car leaves a band
      * that keeps another, for the next point ahead that narrows what may be driven, when that point lies
      * no earlier than [pointsFrom] (within the run-up's reach) and no later than the gore; null where none
@@ -573,12 +663,13 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         }
     }
 
-    /** The run's part of the plan, naming lanes inside [windows]. */
-    fun result(windows: List<CardWindow>): LanePlan.RunResult {
+    /** The run's part of the plan, naming lanes inside [windows] but never on the approaches of [noLane]. */
+    fun result(windows: List<CardWindow>, noLane: List<LanePlan.NoLane>): LanePlan.RunResult {
         val inWindow = BooleanArray(n) { i -> windows.any { stations[i] >= it.from && stations[i] <= it.to } }
+        val noLaneAt = Array(n) { i -> noLane.firstOrNull { stations[i] >= it.from && stations[i] <= it.to }?.cause }
         val drops = HashMap<Int, Double>()
-        val named = name(inWindow, drops)
-        return results(inWindow, named, drops)
+        val named = name(inWindow, noLaneAt, drops)
+        return results(inWindow, noLaneAt, named, drops)
     }
 
     /**
@@ -586,7 +677,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
      * (P3), and the lane at the exit's edge held back before an unknown exit (P7); where only that lane
      * is left in the band, the hold of every unknown exit ahead on the step is dropped there ([drops]).
      */
-    private fun name(inWindow: BooleanArray, drops: HashMap<Int, Double>): IntArray {
+    private fun name(inWindow: BooleanArray, noLaneAt: Array<LanePlan.NoLane.Cause?>, drops: HashMap<Int, Double>): IntArray {
         val named = IntArray(n) { -1 }
         var prev = -1
         var nextRule = 0
@@ -596,7 +687,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
             val s = stations[i]
             while (nextRule < rules.size && rules[nextRule].station < s) nextRule++
             while (nextExit < unknownExits.size && unknownExits[nextExit] <= s) nextExit++
-            if (!inWindow[i] || band.isEmpty()) {
+            if (!inWindow[i] || noLaneAt[i] != null || band.isEmpty()) {
                 prev = -1
                 continue
             }
@@ -663,7 +754,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         return lo < unknownExits.size && unknownExits[lo] <= nextTurn[i]
     }
 
-    private fun results(inWindow: BooleanArray, named: IntArray, drops: Map<Int, Double>): LanePlan.RunResult {
+    private fun results(inWindow: BooleanArray, noLaneAt: Array<LanePlan.NoLane.Cause?>, named: IntArray, drops: Map<Int, Double>): LanePlan.RunResult {
         // A lane that may already be there counts from where it may begin unless the plan names it; lanes of
         // other runs are never there at the same stations, so the run's own names are all that count.
         val namedIds = HashSet<Int>()
@@ -675,11 +766,11 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         for (i in 0 until n) {
             val s = stations[i]
             val to = if (i + 1 < n) stations[i + 1] else run.to
-            val band = requireNotNull(bands[i]).map { lanes[it].id }
+            val band = if (noLaneAt[i] != null) emptyList() else requireNotNull(bands[i]).map { lanes[it].id }
             val id = if (named[i] >= 0) lanes[named[i]].id else null
             val edge = edges[i]
             val count = if (id != null && edge != null) topology.fromEdge(id, s, edge, namedIds) else null
-            val segment = PlanSegment(s, max(to, s), run.index, band, id, count, edge, inWindow[i], flags[i], unknownExitAhead(i))
+            val segment = PlanSegment(s, max(to, s), run.index, band, id, count, edge, inWindow[i], flags[i], unknownExitAhead(i), noLaneAt[i])
             val lastSegment = segments.lastOrNull()
             if (lastSegment != null && lastSegment.copy(from = segment.from, to = segment.to) == segment) {
                 segments[segments.size - 1] = lastSegment.copy(to = segment.to)

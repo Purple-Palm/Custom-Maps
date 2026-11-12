@@ -65,7 +65,9 @@ data class EvidenceTuning(
  *   late: it ends at the second point;
  * - 7a: a [Gap] is a [Kind.ZONE] where it lies inside a card window, at any length, and where a part
  *   of it outside the windows, between two drawn stretches, is at most [EvidenceTuning.zoneBridgeMaxM]
- *   long; at the wider neighbour's width.
+ *   long; at the wider neighbour's width;
+ * - C1: an approach where the plan names no lane ([LanePlan.NoLane]) is a [Kind.ZONE] wherever it is
+ *   drawn, to the gore or, on a street, the stop line, so nothing of the drawing says which lane to take.
  *
  * Pure; built once for a route, off the main thread, and never stored.
  */
@@ -190,6 +192,9 @@ class LaneEvidence private constructor(
 
             /** A stretch without lane data between two drawn stretches (rule 7a). */
             GAP,
+
+            /** An approach where the lane plan names no lane ([LanePlan.NoLane], C1). */
+            NO_LANE,
         }
     }
 
@@ -209,11 +214,12 @@ class LaneEvidence private constructor(
 
     /**
      * The second pass, once the lane plan has read [topology] from this evidence and named the lanes
-     * [named] (ids of [topology]'s lanes) inside its card windows [windows]: the zones of rules 5 and 7a
-     * and the possible lanes of rule 2a, on a new evidence; this one is left as it is. Its [stretches]
-     * have [Kind.ZONE] wherever a zone lies; its [gaps], [changes] and [added] are this pass's.
+     * [named] (ids of [topology]'s lanes) inside its card windows [windows], and named none on the
+     * approaches [noLane]: the zones of rules 5, 7a and C1 and the possible lanes of rule 2a, on a new
+     * evidence; this one is left as it is. Its [stretches] have [Kind.ZONE] wherever a zone lies; its
+     * [gaps], [changes] and [added] are this pass's.
      */
-    fun withPlan(topology: LaneTopology, named: Set<Int>, windows: List<CardWindow>): LaneEvidence {
+    fun withPlan(topology: LaneTopology, named: Set<Int>, windows: List<CardWindow>, noLane: List<LanePlan.NoLane> = emptyList()): LaneEvidence {
         val zones = ArrayList<Zone>()
         for (alignment in topology.alignments) {
             if (alignment.explained) continue
@@ -234,6 +240,39 @@ class LaneEvidence private constructor(
             for (piece in zonePieces(gap, windows, tuning.zoneBridgeMaxM)) {
                 zones.add(Zone(piece.first, piece.second, lanes, Zone.Cause.GAP, gap.after, CardWindows.metersInside(windows, piece.first, piece.second) > 0.0))
             }
+        }
+        zones.sortBy { it.from }
+        // C1: the approaches where no lane is named, over the parts the drawing shows, to the gore or the stop line.
+        val drawn = overlay(stretches, zones)
+        for (approach in noLane) {
+            if (!approach.zone) continue
+            val end = if (route.approachRoad(approach.node) == RoadKind.STREET) approach.to - LaneTopology.STOP_LINE_METERS else approach.to
+            var pieceFrom = Double.NaN
+            var pieceTo = Double.NaN
+            var lanes = 0
+            fun close() {
+                if (pieceTo > pieceFrom) {
+                    zones.add(Zone(pieceFrom, pieceTo, lanes, Zone.Cause.NO_LANE, approach.node, CardWindows.metersInside(windows, pieceFrom, pieceTo) > 0.0))
+                }
+                pieceFrom = Double.NaN
+                lanes = 0
+            }
+            for (stretch in drawn) {
+                val from = max(stretch.from, approach.from)
+                val to = min(stretch.to, end)
+                if (to <= from) continue
+                if (stretch.kind == Kind.NONE || stretch.lanes <= 0) {
+                    close()
+                    continue
+                }
+                if (pieceFrom.isNaN() || from > pieceTo) {
+                    close()
+                    pieceFrom = from
+                }
+                pieceTo = to
+                lanes = max(lanes, stretch.lanes)
+            }
+            close()
         }
         zones.sortBy { it.from }
         val possible = topology.lanes

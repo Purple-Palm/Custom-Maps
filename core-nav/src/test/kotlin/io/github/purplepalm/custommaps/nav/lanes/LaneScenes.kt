@@ -36,6 +36,10 @@ internal object LaneScenes {
     fun hov(valid: Boolean = false, active: Boolean? = valid) =
         RouteLane(setOf(straight), valid = valid, active = active, kinds = setOf(DesignatedKind.HOV))
 
+    /** A lane kept for buses, with [arrow]. */
+    fun bus(arrow: TurnModifier = straight, valid: Boolean = false, active: Boolean? = valid) =
+        RouteLane(setOf(arrow), valid = valid, active = active, kinds = setOf(DesignatedKind.BUS))
+
     /** The roads at an intersection besides the two the route takes, each as its bearing and whether a car may take it. */
     class Roads(vararg val others: Pair<Int, Boolean>)
 
@@ -307,6 +311,59 @@ internal object LaneScenes {
         id = "geom-s6",
     )
 
+    // ------------------------------------------------------------------ where no lane can be named (C1)
+
+    /**
+     * A left exit beyond the car-pool lane: a car-pool lane and three open lanes 1,500 m before; the exit adds a
+     * lane on the left of the car-pool lane, the only one it can be taken from. Planned at 27 m/s.
+     */
+    fun carpoolBeyond() = approach(
+        listOf(at(1_500.0, hov(), s(), s(), s())),
+        exit = listOf(sl(), hov(), s(false), s(false), s(false)),
+        maneuver = OFF_LEFT,
+        id = "carpool-beyond",
+    )
+
+    /** [carpoolBeyond] where the car-pool lane is open to every car from a lane point 800 m before the gore. */
+    fun carpoolEnds() = approach(
+        listOf(at(1_500.0, hov(), s(), s(), s()), at(800.0, s(), s(), s(), s())),
+        exit = listOf(sl(), s(false), s(false), s(false), s(false)),
+        maneuver = OFF_LEFT,
+        id = "carpool-ends",
+    )
+
+    /**
+     * A street into a roundabout: two lanes 150 m before it, both of which the route can be followed from; the
+     * route leaves the roundabout 60 m on. 35 mph planned. With [turnInstead] a plain right turn takes its place.
+     */
+    fun roundabout(turnInstead: Boolean = false): LaneRoute {
+        val street = RoadKind.STREET
+        val mps = 35.0 * PlanningSpeed.MPS_PER_MPH
+        val entry = if (turnInstead) TURN_RIGHT else NodeManeuver(ManeuverType.ROUNDABOUT, TurnModifier.RIGHT)
+        val out = if (turnInstead) NodeManeuver(ManeuverType.TURN, TurnModifier.LEFT) else NodeManeuver(ManeuverType.EXIT_ROUNDABOUT, TurnModifier.RIGHT)
+        return route(
+            node(0.0, road = street, maneuver = DEPART, planMps = mps),
+            node(GORE - 150.0, s(), s(), road = street, planMps = mps),
+            node(GORE, s(), s(), road = street, maneuver = entry, planMps = mps),
+            node(GORE + 60.0, road = street, maneuver = out, planMps = mps),
+            node(GORE + 300.0, road = street, maneuver = ARRIVE, planMps = mps),
+            id = if (turnInstead) "turn" else "roundabout",
+        )
+    }
+
+    /** A street turn right that only the bus lane on the right is valid for; two open lanes beside it. 35 mph planned. */
+    fun busOnlyTurn(): LaneRoute {
+        val street = RoadKind.STREET
+        val mps = 35.0 * PlanningSpeed.MPS_PER_MPH
+        return route(
+            node(0.0, road = street, maneuver = DEPART, planMps = mps),
+            node(GORE - 150.0, s(), s(), bus(), road = street, planMps = mps),
+            node(GORE, s(false), s(false), bus(TurnModifier.RIGHT, valid = true), road = street, maneuver = TURN_RIGHT, planMps = mps),
+            node(GORE + 300.0, road = street, maneuver = ARRIVE, planMps = mps),
+            id = "bus-only-turn",
+        )
+    }
+
     /** A street turn: two lanes 200 m before a left turn whose list adds a left pocket. 35 mph planned. */
     fun streetPocket(): LaneRoute {
         val street = RoadKind.STREET
@@ -340,5 +397,9 @@ internal object LaneScenes {
         "geom-s5" to geomS5(),
         "geom-s6" to geomS6(),
         "street-pocket" to streetPocket(),
+        "carpool-beyond" to carpoolBeyond(),
+        "carpool-ends" to carpoolEnds(),
+        "roundabout" to roundabout(),
+        "bus-only-turn" to busOnlyTurn(),
     )
 }

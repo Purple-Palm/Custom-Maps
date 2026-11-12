@@ -1,5 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
+import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.ARRIVE
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.DEPART
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.FORK_RIGHT
@@ -15,6 +17,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -226,6 +229,17 @@ class LanePlannerTest {
         "geom-s5" to Golden(null, listOf(g(0.0, null, null))),
         "geom-s6" to Golden(null, listOf(g(1_500.0, null, null), g(500.0, null, null), g(0.0, null, null))),
         "street-pocket" to Golden(GORE - 180.0 to 0, listOf(g(200.0, null, null), g(0.0, 2, 0)), listOf(Triple(GORE - 55.0, 0, 2))),
+        // C1: nothing named where only a lane beyond the car-pool lane leads on, at a roundabout, at a turn only a bus may take.
+        "carpool-beyond" to Golden(null, listOf(g(1_500.0, null, null), g(0.0, null, null))),
+        // The car-pool lane opens to every car from 800 m before: the left open lane, the former car-pool lane where it
+        // opens late, and the exit lane along its taper.
+        "carpool-ends" to Golden(
+            GORE - 995.0 to 1,
+            listOf(g(1_500.0, null, null), g(800.0, 4, 0), g(0.0, 5, 0)),
+            listOf(Triple(GORE - 850.0, 1, 4), Triple(GORE - 210.0, 4, 5)),
+        ),
+        "roundabout" to Golden(null, listOf(g(150.0, null, null), g(0.0, null, null))),
+        "bus-only-turn" to Golden(null, listOf(g(150.0, null, null), g(0.0, null, null))),
     )
 
     @Test
@@ -463,6 +477,156 @@ class LanePlannerTest {
         assertTrue(plan.segments.all { it.named == null })
         assertEquals(LanePlan.Flag.Kind.CONFLICT, plan.flags.single().kind)
         assertEquals(GORE + LaneTopology.LEAVE_PAST_POINT_METERS, plan.flags.single().to, "up to where the run's lanes end")
+    }
+
+    // ------------------------------------------------------------------ C1: where no lane open to every car can be named
+
+    /** The approach's stretches of the plan: no lane named and nothing tinted, for [cause]. */
+    private fun assertNoLane(plan: LanePlan, approach: LanePlan.NoLane, cause: LanePlan.NoLane.Cause, name: String) {
+        assertEquals(cause, approach.cause, name)
+        for (segment in plan.segments) {
+            // A stretch's stations run from its start to one grid step before its end.
+            if (segment.to - LanePlanner.GRID_METERS < approach.from || segment.from > approach.to) continue
+            assertNull(segment.named, "$name at ${segment.from}")
+            assertTrue(segment.band.isEmpty(), "$name at ${segment.from}: nothing tinted")
+            assertEquals(cause, segment.noLane, "$name at ${segment.from}")
+        }
+    }
+
+    /** The evidence's zones of the plan's approaches where no lane is named. */
+    private fun LanePlan.noLaneZones() = evidence().zones.filter { it.cause == LaneEvidence.Zone.Cause.NO_LANE }
+
+    @Test
+    fun `where only a lane kept for car pools is valid at an exit no lane is named and its approach is a zone`() {
+        // GEOM's S5: the exit counts no open lane it can be taken from, so the card has no run-up for it; the approach is
+        // the close view's own window at the approach's planning speed.
+        val route = LaneScenes.geomS5()
+        val plan = plan(route)
+        val approach = plan.noLane.single()
+        val window = LaneFocus.windowMeters(CameraTuning.PHONE, 65.0 * PlanningSpeed.MPS_PER_MPH)
+        assertEquals(GORE - window, approach.from, 1e-9)
+        assertEquals(GORE, approach.to, 1e-9)
+        assertTrue(approach.zone)
+        assertNoLane(plan, approach, LanePlan.NoLane.Cause.DESIGNATED_ONLY, "geom-s5")
+        assertTrue(plan.segments.all { it.named == null })
+        assertEquals(LanePlan.Flag.Kind.CONFLICT, plan.flags.single().kind, "the conflict stays flagged")
+        val zone = plan.noLaneZones().single()
+        assertEquals(GORE - window, zone.from, 1e-9)
+        assertEquals(GORE, zone.to, 1e-9, "a freeway approach to the gore")
+        assertEquals(3, zone.lanes)
+        assertEquals(LaneEvidence.Kind.ZONE, plan.evidence().stretches.single { it.from <= GORE - 100.0 && GORE - 100.0 < it.to }.kind)
+    }
+
+    @Test
+    fun `before a left exit beyond the car-pool lane no lane is named, and the approach is a zone from the run-up's start`() {
+        val route = LaneScenes.carpoolBeyond()
+        val plan = plan(route)
+        val window = plan.windows.single { it.kind == CardWindow.Kind.RUN_UP }
+        val approach = plan.noLane.single()
+        assertEquals(window.from, approach.from, 1e-9)
+        assertEquals(window.node, approach.node)
+        assertEquals(GORE, approach.to, 1e-9)
+        assertNoLane(plan, approach, LanePlan.NoLane.Cause.DESIGNATED_BETWEEN, "carpool-beyond")
+        assertTrue(plan.segments.all { it.named == null }, "nothing named before the gore")
+        assertTrue(plan.flags.any { it.kind == LanePlan.Flag.Kind.CONFLICT })
+        val zone = plan.noLaneZones().single()
+        assertEquals(window.from to GORE, zone.from to zone.to)
+        assertTrue(zone.inWindow)
+    }
+
+    @Test
+    fun `where the car-pool lane opens to every car before the exit a lane is named and never moves back`() {
+        val plan = plan(LaneScenes.carpoolEnds())
+        assertTrue(plan.noLane.isEmpty())
+        assertTrue(plan.noLaneZones().isEmpty())
+        assertTrue(plan.flags.isEmpty())
+        assertNotNull(plan.firstNamed())
+        assertTrue(plan.moves.isNotEmpty() && plan.moves.none { it.back })
+        assertEquals(5, plan.at(GORE - 5.0).named, "the exit lane at the gore")
+    }
+
+    @Test
+    fun `no lane is named on a roundabout's approach or on the way round it, and only the approach is a zone`() {
+        val plan = plan(LaneScenes.roundabout())
+        assertEquals(2, plan.noLane.size)
+        val (approach, round) = plan.noLane
+        assertEquals(GORE - 180.0 to GORE, approach.from to approach.to, "the junction view's start to the roundabout")
+        assertTrue(approach.zone)
+        assertNoLane(plan, approach, LanePlan.NoLane.Cause.ROUNDABOUT, "roundabout")
+        assertEquals(GORE to GORE + 60.0, round.from to round.to, "the way round to its exit")
+        assertFalse(round.zone)
+        assertTrue(plan.segments.all { it.named == null })
+        val zone = plan.noLaneZones().single()
+        assertEquals(GORE - 180.0, zone.from, 1e-9)
+        assertEquals(GORE - LaneTopology.STOP_LINE_METERS, zone.to, 1e-9, "a street approach to its stop line")
+        assertEquals(2, zone.lanes)
+        // The same lanes before a plain turn: a lane is named there.
+        val turn = plan(LaneScenes.roundabout(turnInstead = true))
+        assertTrue(turn.noLane.isEmpty())
+        assertNotNull(turn.at(GORE - 100.0).named)
+    }
+
+    @Test
+    fun `a street turn only a bus lane is valid for names no lane, its approach a zone to the stop line`() {
+        val plan = plan(LaneScenes.busOnlyTurn())
+        val approach = plan.noLane.single()
+        assertEquals(GORE - 180.0 to GORE, approach.from to approach.to)
+        assertNoLane(plan, approach, LanePlan.NoLane.Cause.DESIGNATED_ONLY, "bus-only-turn")
+        val zone = plan.noLaneZones().single()
+        assertEquals(GORE - 180.0 to GORE - LaneTopology.STOP_LINE_METERS, zone.from to zone.to)
+        assertEquals(3, zone.lanes)
+    }
+
+    @Test
+    fun `an approach where no lane is named is a zone only where the drawing shows it`() {
+        // GEOM's S5 with an intersection without lanes 500 m before the gore: the exit's lanes reach back to it only, so
+        // the zone begins there, not at the start of the close view's window.
+        val route = approach(
+            listOf(LaneScenes.bare(500.0, LaneScenes.THROUGH)),
+            exit = listOf(LaneScenes.hov(true), s(false), s(false)),
+            maneuver = LaneScenes.OFF_LEFT,
+            planMps = 65.0 * PlanningSpeed.MPS_PER_MPH,
+        )
+        val plan = plan(route)
+        assertTrue(plan.noLane.single().from < GORE - 500.0)
+        val zone = plan.noLaneZones().single()
+        assertEquals(GORE - 500.0 to GORE, zone.from to zone.to)
+        val before = plan.evidence().stretches.single { it.from <= GORE - 600.0 && GORE - 600.0 < it.to }
+        assertEquals(LaneEvidence.Kind.NONE, before.kind, "nothing of the app's own before the lanes are known")
+    }
+
+    @Test
+    fun `a ramp is held to a split, never to a roundabout, for which no lane is named`() {
+        fun ramp(maneuver: NodeManeuver) = approach(
+            emptyList(),
+            exit = listOf(s(false), s(false), option(true, true), sr(true, false)),
+            planMps = 65.0 * PlanningSpeed.MPS_PER_MPH,
+            rampMps = 20.0,
+            rampPoints = listOf(200.0 to LaneScenes.NodeAndLanes(listOf(s(), s(false)), maneuver = maneuver)),
+            rampMeters = 500.0,
+        )
+        val roundabout = plan(ramp(NodeManeuver(ManeuverType.ROUNDABOUT, TurnModifier.RIGHT)))
+        assertTrue(roundabout.windows.none { it.kind == CardWindow.Kind.RAMP })
+        assertTrue(roundabout.segments.none { it.named != null && it.from >= GORE + LanePlanner.GRID_METERS })
+        assertEquals(LanePlan.NoLane.Cause.ROUNDABOUT, roundabout.noLane.single().cause)
+        val split = plan(ramp(LaneScenes.FORK_LEFT))
+        assertEquals(GORE + 200.0, split.windows.single { it.kind == CardWindow.Kind.RAMP }.to, 1e-9)
+    }
+
+    @Test
+    fun `no other scene names no lane`() {
+        val c1 = setOf("geom-s5", "carpool-beyond", "roundabout", "bus-only-turn")
+        for ((name, route) in LaneScenes.all()) {
+            if (name in c1) continue
+            val plan = plan(route)
+            assertTrue(plan.noLane.isEmpty(), name)
+            assertTrue(plan.segments.none { it.noLane != null }, name)
+        }
+    }
+
+    @Test
+    fun `the log names the causes as the design does`() {
+        assertEquals(listOf("designatedOnly", "designatedBetween", "roundabout"), LanePlan.NoLane.Cause.entries.map { it.logName })
     }
 
     // ------------------------------------------------------------------ the plan as an object
