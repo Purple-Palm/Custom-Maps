@@ -1,7 +1,11 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
+import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.geo.LocalLine
+import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.GORE
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -145,5 +149,58 @@ class LaneCarryTest {
         assertNotNull(carry)
         assertFalse(requireNotNull(carry).kept)
         assertNotEquals(2, carry.lane)
+    }
+
+    // ------------------------------------------------------------------ the car on each route's line (atChange)
+
+    /** A made-up line north along longitude [east] from latitude 0: one step of points every 0.0009 degrees (about 100 m), from station [start]. */
+    private fun line(east: Double, points: Int = 61, start: Double = 0.0): LaneCarry.Line =
+        LaneCarry.Line.of(listOf((0 until points).map { GeoPoint(it * 0.0009, east) }), listOf(start))
+
+    private val metre = 1.0 / 111_195.0
+
+    @Test
+    fun `the car is found on a route's line by the station of its nearest place`() {
+        val north = line(0.0)
+        val place = requireNotNull(north.nearest(GeoPoint(10.5 * 0.0009, 3.0 * metre)))
+        assertEquals(Geo.meters(0.0, 0.0, 10.5 * 0.0009, 0.0), place.station, 0.01)
+        assertEquals(3.0, place.meters, 0.01)
+        // Looked for only between two stations, as on the route before near the car's last place there.
+        val far = requireNotNull(north.nearest(GeoPoint(10.5 * 0.0009, 0.0), from = 3_000.0, to = 4_000.0))
+        assertEquals(3_000.0, far.station, 0.01)
+        assertNull(north.nearest(GeoPoint(0.0, 0.0), from = 9_000.0, to = 9_500.0), "beyond the line")
+        assertNull(LaneCarry.Line.of(emptyList(), emptyList()).nearest(GeoPoint(0.0, 0.0)))
+    }
+
+    @Test
+    fun `the line ahead of a station is cut where it ends, in metres of the car`() {
+        val north = line(0.0, start = 1_000.0)
+        val origin = LocalMeters(0.0, 0.0)
+        val ahead = north.ahead(1_050.0, 120.0, origin)
+        assertEquals(0.0, ahead.first().x, 1e-6)
+        assertEquals(50.0, ahead.first().y, 0.01)
+        assertEquals(170.0, ahead.last().y, 0.01)
+        assertEquals(120.0, LocalLine.length(ahead), 0.01)
+        assertTrue(north.ahead(Double.NaN, 10.0, origin).isEmpty())
+        assertEquals(1, north.ahead(99_999.0, 10.0, origin).size, "past its end: its last point")
+    }
+
+    @Test
+    fun `at a change of route the car is found on both lines and their heads compared`() {
+        // IA again as the new route: one carriageway, so the old count from the edge is kept.
+        val old = plan(LaneScenes.ia())
+        val new = plan(LaneScenes.ia(farSide = true))
+        val car = GeoPoint((GORE - 1_500.0) / 111_195.0 * 1.0, 0.0)
+        val road = LaneCarry.Line.of(listOf((0..70).map { GeoPoint(it * 0.0009, 0.0) }), listOf(0.0))
+        val same = requireNotNull(LaneCarry.atChange(old, road, null, new, road, car))
+        assertTrue(same.kept)
+        // The new route on a road 22 m east: another carriageway.
+        val beside = LaneCarry.Line.of(listOf((0..70).map { GeoPoint(it * 0.0009, 0.0002) }), listOf(0.0))
+        val other = requireNotNull(LaneCarry.atChange(old, road, null, new, beside, car))
+        assertFalse(other.kept)
+        // 110 m east: the car is not on the new route at all.
+        val away = LaneCarry.Line.of(listOf((0..70).map { GeoPoint(it * 0.0009, 0.001) }), listOf(0.0))
+        assertNull(LaneCarry.atChange(old, road, null, new, away, car))
+        assertTrue(LaneCarry.NEAR_LINE_METERS < 110.0)
     }
 }

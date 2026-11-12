@@ -1,7 +1,10 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalLine
+import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.geo.LocalPoint
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import kotlin.math.ceil
 import kotlin.math.hypot
@@ -117,6 +120,120 @@ object LaneCarry {
             }
         }
         return true
+    }
+
+    /** The car is on a new route only where its line passes no farther from the car than this. */
+    const val NEAR_LINE_METERS = 50.0
+
+    /** The car is looked for on the route before from this far behind its last known station there. */
+    private const val OLD_BEHIND_METERS = 300.0
+
+    /** And up to this far ahead of it. */
+    private const val OLD_AHEAD_METERS = 1_500.0
+
+    /**
+     * The lit lane at a change of route (D8), the car at [car]: the car is found on both routes' lines, on the
+     * route before near [oldNear], its station there at the last update (anywhere on it where that is not
+     * known), and the lines ahead of it are compared ([of]). Null where the new route's line passes farther
+     * than [NEAR_LINE_METERS] from the car, or where the new plan lights no lane there.
+     */
+    fun atChange(old: LanePlan, oldLine: Line, oldNear: Double?, new: LanePlan, newLine: Line, car: GeoPoint): Carry? {
+        val onNew = newLine.nearest(car) ?: return null
+        if (!(onNew.meters <= NEAR_LINE_METERS)) return null
+        val onOld = if (oldNear != null && oldNear.isFinite()) {
+            oldLine.nearest(car, oldNear - OLD_BEHIND_METERS, oldNear + OLD_AHEAD_METERS)
+        } else {
+            oldLine.nearest(car)
+        }
+        val oldStation = onOld?.station ?: return null
+        val origin = LocalMeters(car.latitude, car.longitude)
+        val length = holdMeters(new, onNew.station) + SAME_CARRIAGEWAY_METERS + SAMPLE_METERS
+        return of(old, oldStation, oldLine.ahead(oldStation, length, origin), new, onNew.station, newLine.ahead(onNew.station, length, origin))
+    }
+
+    /**
+     * A route's line with its stations: its steps' points, each step from where it begins along the route, as
+     * the route's lanes measure it ([LaneRoute]), for finding the car on it at a change of route. Lives with
+     * its route's plan, in memory only.
+     */
+    class Line private constructor(private val points: List<GeoPoint>, private val stations: DoubleArray) {
+
+        /** Where [car] is on the line: the station of its nearest place, and how far from it the car is. */
+        data class Place(val station: Double, val meters: Double)
+
+        /** The line's place nearest to [car] between [from] and [to] along it; null where none of it lies between. */
+        fun nearest(car: GeoPoint, from: Double = Double.NEGATIVE_INFINITY, to: Double = Double.POSITIVE_INFINITY): Place? {
+            if (points.isEmpty()) return null
+            val local = LocalMeters(car.latitude, car.longitude)
+            val here = LocalPoint(0.0, 0.0)
+            var best: Place? = null
+            if (points.size == 1) {
+                if (stations[0] < from || stations[0] > to) return null
+                return Place(stations[0], local.toLocal(points[0].latitude, points[0].longitude).distanceTo(here))
+            }
+            for (i in 1 until points.size) {
+                if (stations[i] < from || stations[i - 1] > to) continue
+                val a = local.toLocal(points[i - 1].latitude, points[i - 1].longitude)
+                val b = local.toLocal(points[i].latitude, points[i].longitude)
+                val dx = b.x - a.x
+                val dy = b.y - a.y
+                val square = dx * dx + dy * dy
+                val t = if (square > 0.0) ((here.x - a.x) * dx + (here.y - a.y) * dy) / square else 0.0
+                val f = t.coerceIn(0.0, 1.0)
+                val meters = hypot(a.x + f * dx, a.y + f * dy)
+                val station = (stations[i - 1] + f * (stations[i] - stations[i - 1])).coerceIn(from, to)
+                if (meters.isFinite() && (best == null || meters < best.meters)) best = Place(station, meters)
+            }
+            return best
+        }
+
+        /** The line from [station] on for [meters] or to its end, in metres east and north of [origin]. */
+        fun ahead(station: Double, meters: Double, origin: LocalMeters): List<LocalPoint> {
+            if (points.isEmpty() || !station.isFinite()) return emptyList()
+            val end = station + meters.coerceAtLeast(0.0)
+            var i = 0
+            while (i + 1 < points.size && stations[i + 1] <= station) i++
+            val out = ArrayList<LocalPoint>()
+            out.add(at(i, station, origin))
+            var j = i + 1
+            while (j < points.size && stations[j] < end) {
+                out.add(origin.toLocal(points[j].latitude, points[j].longitude))
+                j++
+            }
+            if (j < points.size) out.add(at(j - 1, end, origin))
+            return out
+        }
+
+        /** The place at [station] on the segment that begins with point [i], in metres of [origin]. */
+        private fun at(i: Int, station: Double, origin: LocalMeters): LocalPoint {
+            val a = origin.toLocal(points[i].latitude, points[i].longitude)
+            if (i + 1 >= points.size) return a
+            val b = origin.toLocal(points[i + 1].latitude, points[i + 1].longitude)
+            val span = stations[i + 1] - stations[i]
+            val f = if (span > 0.0) ((station - stations[i]) / span).coerceIn(0.0, 1.0) else 0.0
+            return LocalLine.between(a, b, f)
+        }
+
+        companion object {
+            /**
+             * The line of a route whose steps have the points [steps], each step beginning at the station of the
+             * same place in [starts]; a point that repeats the one before it is left out.
+             */
+            fun of(steps: List<List<GeoPoint>>, starts: List<Double>): Line {
+                val points = ArrayList<GeoPoint>()
+                val stations = ArrayList<Double>()
+                for ((k, step) in steps.withIndex()) {
+                    var along = starts.getOrNull(k) ?: continue
+                    for ((j, point) in step.withIndex()) {
+                        if (j > 0) along += Geo.meters(step[j - 1], point)
+                        if (points.isNotEmpty() && points.last() == point) continue
+                        points.add(point)
+                        stations.add(if (stations.isEmpty()) along else maxOf(along, stations.last()))
+                    }
+                }
+                return Line(points, stations.toDoubleArray())
+            }
+        }
     }
 
     /** Whether [point] lies within [SAME_CARRIAGEWAY_METERS] of the line [other]. */
