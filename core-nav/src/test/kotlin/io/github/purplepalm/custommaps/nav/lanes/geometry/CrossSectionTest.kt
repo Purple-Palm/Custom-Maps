@@ -242,6 +242,29 @@ class CrossSectionTest {
     }
 
     @Test
+    fun `where a lane leaves between others, the fewer lanes on one side close up along a taper`() {
+        // A left exit: at a point 2,000 m before it a road leaves on the left and takes the open lane beside the
+        // car-pool lane; the car-pool lane closes up toward the three lanes that go on.
+        val route = LaneScenes.approach(
+            listOf(LaneScenes.At(2_000.0, listOf(LaneScenes.hov(), s(false), s(), s(), s()), LaneScenes.EXIT_LEFT)),
+            exit = listOf(LaneScenes.hov(), LaneScenes.sl(), s(false), s(false)),
+            maneuver = LaneScenes.OFF_LEFT,
+        )
+        val section = section(route)
+        val leaves = gore - 2_000.0 + LaneTopology.LEAVE_PAST_POINT_METERS
+        val taper = LaneTopology.endingTaperMeters(27.0, RoadKind.FREEWAY)
+        assertEquals(2.0 * w, section.place(0, leaves - 1.0)!!.centre, 1e-12)
+        assertEquals(0.0, section.place(2, leaves - 1.0)!!.centre, 1e-12)
+        // Half-way along the taper the car-pool lane has moved half a lane; the lanes that go on have not moved.
+        assertEquals(1.5 * w, section.place(0, leaves + taper / 2.0)!!.centre, 1e-9)
+        assertEquals(CrossSection.State.CLOSING, section.place(1, leaves + taper / 2.0)!!.state)
+        assertEquals(0.0, section.place(2, leaves + taper / 2.0)!!.centre, 1e-12)
+        assertEquals(w, section.place(0, leaves + taper)!!.centre, 1e-12)
+        assertNull(section.place(1, leaves + taper))
+        assertEquals(-2.0 * w, section.place(4, leaves + taper)!!.centre, 1e-12)
+    }
+
+    @Test
     fun `lanes lie side by side in order, never over each other, on every scene`() {
         for ((name, route) in LaneScenes.all()) {
             val section = section(route)

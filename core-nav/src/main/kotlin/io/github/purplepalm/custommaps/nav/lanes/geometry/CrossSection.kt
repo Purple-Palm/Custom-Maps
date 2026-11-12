@@ -36,8 +36,10 @@ import kotlin.math.min
  *   [LaneTopology.DECEL_LATE_FULL_METERS] before the gore) or [LaneTopology.addedTaperMeters] (8:1 up to 45 mph,
  *   15:1 from 50); a lane on the exit's side that the plan does not name is drawn from where it may begin
  *   ([LaneTopology.Lane.possibleFrom]), [State.POSSIBLE] until it is known; a lane that ends with nothing to take
- *   it narrows over [LaneTopology.endingTaperMeters] (W S from 45 mph, W S^2 / 60 below, at least 30 m). A lane
- *   that leaves by a road, or is followed in its place by another, ends where it leaves.
+ *   it narrows over [LaneTopology.endingTaperMeters] (W S from 45 mph, W S^2 / 60 below, at least 30 m), and so does one
+ *   that leaves by a road between other lanes of its road. A lane that leaves by a road at an edge, or is followed in
+ *   its place by another, ends where it leaves. Where a lane opens or ends between others, the fewer lanes on one side
+ *   of it move and the rest stay.
  * - **A ramp's start** ([RampStart]): where the route turns off its road and lanes go on, they keep their place,
  *   straight on along the old road, until the new road's line lies farther out, and then blend onto the new
  *   road's carriageway over [RAMP_BLEND_METERS]: the route geometry's diagonal across the lanes at a gore is
@@ -385,8 +387,8 @@ class CrossSection private constructor(
                     val there = lanes.filter { it.from <= from && it.to > from }
                     val width = there.sumOf { it.widthAt(from) }
                     val left = if (kind == Carriageway.TWO_WAY) 0.0 else width / 2.0
-                    val opening = lanes.filter { it.from > from && it.from < to && leftmost(it, lanes, it.from) }
-                    val closing = lanes.filter { it.closeFrom >= from && it.closeFrom < to && leftmost(it, lanes, it.closeFrom) }
+                    val opening = lanes.filter { it.from > from && it.from < to && leftSide(it, lanes, it.from) }
+                    val closing = lanes.filter { it.closeFrom >= from && it.closeFrom < to && leftSide(it, lanes, it.closeFrom) }
                     val zones = if (kind == Carriageway.TWO_WAY) emptyList() else zonesOf(run.index, from, to, road)
                     val layout = Layout(run.index, from, to, road, kind, lanes, left, opening, closing, zones)
                     if (turn != null && previous != null) {
@@ -408,9 +410,19 @@ class CrossSection private constructor(
             return CrossSection(topology, layouts, starts)
         }
 
-        /** Whether [d] lies at the left edge at [station]: no other lane of [lanes] there lies to its left. */
-        private fun leftmost(d: DrawnLane, lanes: List<DrawnLane>, station: Double): Boolean =
-            lanes.none { it !== d && station >= it.from && station < it.to && it.lane.slot < d.lane.slot }
+        /**
+         * Whether [d] opens or ends on the left side at [station]: it has no more lanes of [lanes] to its left there than to
+         * its right, so the lanes on its left move and the others stay; at the left edge it is, at the right edge it is not.
+         */
+        private fun leftSide(d: DrawnLane, lanes: List<DrawnLane>, station: Double): Boolean {
+            var left = 0
+            var right = 0
+            for (other in lanes) {
+                if (other === d || station < other.from || station >= other.to) continue
+                if (other.lane.slot < d.lane.slot) left++ else right++
+            }
+            return left <= right
+        }
 
         /**
          * How the left edge moves over the rule-5 zones on the road from [from] to [to] of [run]: where the topology put
@@ -479,9 +491,25 @@ class CrossSection private constructor(
                 openTo = from + taper
                 possibleTo = from
             }
-            val to = if (vanishes(lane, run)) lane.closes + LaneTopology.endingTaperMeters(speedAt(lane.closes), roadAt(lane.closes)) else lane.closes
+            val tapers = vanishes(lane, run) || interiorEnd(lane, run)
+            val to = if (tapers) lane.closes + LaneTopology.endingTaperMeters(speedAt(lane.closes), roadAt(lane.closes)) else lane.closes
             return DrawnLane(lane, width, from, to, openTo, possibleTo, lane.closes)
         }
+
+        /**
+         * Whether [lane] leaves by a road with lanes of its run on both sides of it (a lane kept for car pools beyond it):
+         * the lanes on one side then close up, along the ending taper, not in a step.
+         */
+        private fun interiorEnd(lane: LaneTopology.Lane, run: LaneTopology.Run): Boolean {
+            if (lane.closes >= run.to - 1e-9 || replacedAt(lane)) return false
+            val at = lane.closes - 1e-6
+            val others = topology.lanes.filter { it.run == lane.run && it.id != lane.id && it.exists(at) }
+            return others.any { it.slot < lane.slot } && others.any { it.slot > lane.slot }
+        }
+
+        /** Whether a lane of [lane]'s slot takes its place where it ends. */
+        private fun replacedAt(lane: LaneTopology.Lane): Boolean =
+            topology.lanes.any { it.run == lane.run && it.id != lane.id && it.slot == lane.slot && abs(it.opens - lane.closes) < 1e-9 }
 
         /** Whether [lane] takes the place of a lane of the same slot that ends where it opens (its kinds changed). */
         private fun replaces(lane: LaneTopology.Lane): Boolean =
@@ -494,7 +522,7 @@ class CrossSection private constructor(
         private fun vanishes(lane: LaneTopology.Lane, run: LaneTopology.Run): Boolean {
             if (lane.closes >= run.to - 1e-9) return false
             if (nodes.any { abs(it.station + LaneTopology.LEAVE_PAST_POINT_METERS - lane.closes) < 1e-6 }) return false
-            return topology.lanes.none { it.run == lane.run && it.id != lane.id && it.slot == lane.slot && abs(it.opens - lane.closes) < 1e-9 }
+            return !replacedAt(lane)
         }
     }
 }
