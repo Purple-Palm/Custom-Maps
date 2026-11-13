@@ -905,7 +905,10 @@ internal class MapScene(
         camera.setVisible(visible && !away)
     }
 
-    /** Stops listening to the navigator. The map itself follows the lifecycle of its host. */
+    /**
+     * Stops listening to the navigator, and on the phone turns the location component off. The map
+     * itself follows the lifecycle of its host.
+     */
     fun release() {
         zoomEase.cancel()
         // A wait for the map to settle after a look ends without an answer.
@@ -933,8 +936,22 @@ internal class MapScene(
         plugins.location.removeOnIndicatorBearingChangedListener(puckBearingListener)
         // The car's puck lets go of its provider and draws no more.
         puckRelay?.release()
+        // The phone's location component takes its positions itself, from the engine's puck or the
+        // platform's ([useLocationProvider]): it goes off, which lets go of them and cancels its
+        // animators, so a released scene never stays a listener of either, whatever its view's
+        // lifecycle did. A map whose view was destroyed had it stopped first, and is left alone.
+        if (puckRelay == null && mapboxMap.isValid()) turnLocationOff()
         routeLineApi.cancel()
         routeLineView.cancel()
+    }
+
+    /** The location component off: it lets go of its provider, cancels its animators and takes its layers out. */
+    private fun turnLocationOff() {
+        try {
+            plugins.location.updateSettings { enabled = false }
+        } catch (e: RuntimeException) {
+            debugLog.error("locationOff", e)
+        }
     }
 
     /**
