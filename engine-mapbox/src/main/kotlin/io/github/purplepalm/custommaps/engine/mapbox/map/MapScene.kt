@@ -133,7 +133,10 @@ import kotlinx.coroutines.withContext
  * Behind a Debug switch ([setOwnRouteLine]) the route line of a drive is the app's own, drawn along
  * the lanes of the route's lane plan in place of the navigation SDK's primary line ([OwnRouteLine]).
  * Behind another ([setDrawOwnLanes]) the app draws the freeway lanes under it too ([OwnLanes]), and
- * the route line is the app's own whatever the first switch says.
+ * the route line is the app's own whatever the first switch says; and during guidance the app draws
+ * the car itself, from the puck's place every frame, the location component's puck invisible from
+ * Start to the drive's end ([CarLayer]): over the drawn lanes in a close view a bar across them,
+ * elsewhere the usual dot.
  *
  * While the scene exists, the style it shows is among what is kept ahead of the car during guidance
  * for stretches without a connection ([OfflineData]).
@@ -213,6 +216,25 @@ internal class MapScene(
     }
 
     private val scope = MainScope()
+
+    /**
+     * Mapbox's own dot and bearing arrow on its white disc, with a graphite edge around the disc so it
+     * shows on the light day map too; the same in both looks. The edge is the puck's shadow image,
+     * which with a bearing is the white disc alone.
+     */
+    private val puck = createDefault2DPuck(withBearing = true).copy(shadowImage = ImageHolder.from(R.drawable.puck_ring))
+
+    /**
+     * The car drawn by the app itself during guidance, with Draw the app's lanes on; with it off it
+     * touches nothing. Its fallback runs on the main thread after the frame that failed.
+     */
+    private val carLayer = CarLayer(CarLayer.on(context, mapboxMap, plugins.location, puck), debugLog, later = { block -> scope.launch { block() } })
+
+    /** Whether Settings is open over the map ([setCovered]): the car layer's watchdog does not count while it is. */
+    private var covered = false
+
+    /** How often the render thread was called in the camera line's last window: 0 while the map draws nothing. */
+    private var renderCalls = 0
 
     private var style: Style? = null
     private var lastPuck: Point? = null
@@ -605,6 +627,8 @@ internal class MapScene(
             applyRouteLineWidths()
             // The style comes without the pin of a place that was shown before it loaded.
             placePin.onStyleLoaded()
+            // Nor with the car's own layer: it is added again where the app draws the car.
+            carLayer.onStyleLoaded()
             // The phone fades its map in here.
             host.onStyleLoaded()
             render(guidanceState)
@@ -624,10 +648,7 @@ internal class MapScene(
         puckRelay?.follow(platformPuck)
         plugins.location.updateSettings {
             enabled = true
-            // Mapbox's own dot and bearing arrow on its white disc, with a graphite edge around the
-            // disc so it shows on the light day map too; the same in both looks. The edge is the
-            // puck's shadow image, which with a bearing is the white disc alone.
-            locationPuck = createDefault2DPuck(withBearing = true).copy(shadowImage = ImageHolder.from(R.drawable.puck_ring))
+            locationPuck = puck
             puckBearingEnabled = true
             puckBearing = PuckBearing.COURSE
         }
@@ -822,6 +843,8 @@ internal class MapScene(
     override fun setDrawOwnLanes(enabled: Boolean) {
         ownLanesSwitch = enabled
         applyOwnLine()
+        // The car drawn by the app goes with the lanes.
+        carLayer.setDrawing(enabled)
     }
 
     /** The own route line on while either switch is, with the lanes while theirs is. */
@@ -886,6 +909,15 @@ internal class MapScene(
     fun setVisible(visible: Boolean) {
         this.visible = visible
         camera.setVisible(visible && !away)
+        carLayer.setShown(visible && !away)
+    }
+
+    /**
+     * Call with true while Settings is open over the map, and with false when it closes: the car
+     * layer's watchdog counts only while the map can be seen.
+     */
+    fun setCovered(covered: Boolean) {
+        this.covered = covered
     }
 
     /**
@@ -903,6 +935,7 @@ internal class MapScene(
         if (!away && guidanceState == GuidanceState.ACTIVE && _cameraMode.value != CameraMode.FOLLOWING) camera.requestFollowing()
         camera.setAway(away)
         camera.setVisible(visible && !away)
+        carLayer.setShown(visible && !away)
     }
 
     /**
@@ -924,6 +957,7 @@ internal class MapScene(
         MapboxNavigationApp.unregisterObserver(navigationObserver)
         engine.lanePlans.removeListener(planListener)
         ownLine.release()
+        carLayer.release()
         // Nothing is kept ahead for this map any more, and nothing there holds on to it.
         offlineData?.detachMap(mapboxMap)
         platformPuck.onGlide = null
@@ -1028,6 +1062,8 @@ internal class MapScene(
     private fun render(state: GuidanceState) {
         if (style == null) return
         if (state == GuidanceState.ACTIVE) startCameraSampling() else stopCameraSampling()
+        // The car drawn by the app from Start to the drive's end, with the switch on.
+        carLayer.onGuidance(state == GuidanceState.ACTIVE)
         when (state) {
             GuidanceState.PREVIEW -> {
                 useLocationProvider(guidance = false)
@@ -1118,6 +1154,8 @@ internal class MapScene(
     }
 
     private fun onPuckMoved(point: Point) {
+        // The car drawn by the app, with the switch on: the bar while the lit lane shows in the route line's place, else the dot.
+        carLayer.onPosition(point.latitude(), point.longitude(), lastBearing ?: 0.0, if (ownLine.swapped) ownLine.carBar else null)
         lastPuck = point
         engine.lastPuckPosition = point
         if (cameraSampling != null) puckCadence.tick(SystemClock.elapsedRealtimeNanos())
@@ -1479,6 +1517,8 @@ internal class MapScene(
                 // away for the list writes it while its screen is on, with "away", and draws nothing.
                 val sample = cameraSample()
                 if (if (away) visible else host.shown) debugLog.log("camera", sample)
+                // The car layer's watchdog: only while the map is on screen, nothing over it, and drawing frames.
+                carLayer.check(onScreen = visible && !away && !covered && host.shown && renderCalls > 0, speedMps = guidancePuck.lastLocation?.speed)
             }
         }
     }
@@ -1642,6 +1682,7 @@ internal class MapScene(
         val stats = recorder.stop()
         recorder.start()
         val frames = stats.frameTimeList
+        renderCalls = frames.size
         host.onRenderWindow(frames.size, stats.totalSkippedVsync, stats.totalTime)
         return RenderStats.fields(
             callbacks = frames.size,
@@ -1659,6 +1700,7 @@ internal class MapScene(
     private fun stopFrameStats() {
         val recorder = controllable.renderThreadStatsRecorder
         if (recorder.isRecording) recorder.stop()
+        renderCalls = 0
     }
 
     private fun metersBetween(from: Point, to: Point): Double =

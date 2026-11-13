@@ -202,6 +202,12 @@ class PhoneMap internal constructor(
     fun setAway(away: Boolean) = scene.setAway(away)
 
     /**
+     * Call with true while Settings is open over this map, and with false when it closes. The map draws on underneath; the
+     * watchdog of the car the app draws counts only while nothing covers it ([MapScene.setCovered]).
+     */
+    fun setCovered(covered: Boolean) = scene.setCovered(covered)
+
+    /**
      * Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle,
      * once it has been in the window.
      */

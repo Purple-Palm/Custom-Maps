@@ -78,6 +78,7 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                     phoneScreen = phoneScreen,
                     onMapButton = graph.phoneScreens::onMapButton,
                     onListButton = graph.phoneScreens::onListButton,
+                    settingsOpen = showSettings,
                 )
             }
         }

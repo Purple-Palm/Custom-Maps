@@ -19,6 +19,7 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneSwap
@@ -509,6 +510,18 @@ internal class OwnRouteLine(
         if (!enabled || !lanes) return
         if (swap.onZoom(zoom, latitude)) applySwap()
     }
+
+    /**
+     * Whether the lit lane shows in the route line's place now ([LaneSwap]): with the lanes, on a line drawn for the route
+     * the drive is on. Only while it is does the car show as a bar across the lanes ([carBar]).
+     */
+    val swapped: Boolean get() = enabled && lanes && drawn && swap.swapped
+
+    /**
+     * The car's bar along the window of the lanes the map holds ([LaneWindow.carBar]), with the lanes drawn for the route the
+     * drive is on; null otherwise. A lookup, read every frame.
+     */
+    val carBar: CarBar? get() = if (enabled && lanes && drawn) window?.carBar else null
 
     /** The swap's state on the drawn line; a line not drawn takes it when it is ([show]). */
     private fun applySwap() {

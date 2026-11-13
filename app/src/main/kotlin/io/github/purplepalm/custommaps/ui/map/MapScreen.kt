@@ -103,7 +103,8 @@ import kotlinx.coroutines.withContext
  * the phone then shows the drive without its map ([ListScreen]), with Map ([onMapButton]) to bring
  * the map back; the map is put away meanwhile, kept as it is but out of the window, and comes back as
  * of now. On the map the guidance bar has List ([onListButton]) while [phoneScreen] offers it. With no
- * car the screen is never the list and the bar has no List button.
+ * car the screen is never the list and the bar has no List button. [settingsOpen] is true while
+ * Settings is open over the map.
  */
 @Composable
 fun MapScreen(
@@ -116,6 +117,7 @@ fun MapScreen(
     phoneScreen: PhoneScreenState,
     onMapButton: () -> Unit,
     onListButton: () -> Unit,
+    settingsOpen: Boolean = false,
 ) {
     val listShown = phoneScreen.screen == PhoneScreen.LIST
     val context = LocalContext.current
@@ -181,6 +183,8 @@ fun MapScreen(
             phoneMap.setVisible(true)
             onStopOrDispose { phoneMap.setVisible(false) }
         }
+        // Settings over the map: it draws on underneath, unseen.
+        LaunchedEffect(phoneMap, settingsOpen) { phoneMap.setCovered(settingsOpen) }
     }
     // What the camera does, for the guidance bar on the map; there is no camera before the map.
     val cameraMode by (if (phoneMap != null) phoneMap.cameraMode.collectAsStateWithLifecycle() else NO_CAMERA)

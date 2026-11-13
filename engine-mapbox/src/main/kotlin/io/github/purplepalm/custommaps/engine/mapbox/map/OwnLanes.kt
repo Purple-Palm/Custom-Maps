@@ -11,6 +11,7 @@ import com.mapbox.geojson.Point
 import com.mapbox.geojson.Polygon
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.lanes.geometry.GoreArrow
@@ -49,7 +50,8 @@ internal class OwnLanes(
 
     /**
      * The features of [window] as the drawing's source takes them, with the traffic of each lit piece from [runs] along
-     * [table]'s path. The tint pieces of the lanes that end at one station are one feature ([mergeTints]).
+     * [table]'s path. The tint pieces of the lanes that end at one station are one feature ([mergeTints]). With them the car's
+     * bar along the window ([CarBar]), for the car drawn over the lanes in a close view.
      */
     fun window(window: DrawingWindows.Window, table: StationTable, runs: List<TrafficRun>): LaneWindow {
         val features = mergeTints(drawing.features(window.from, window.to))
@@ -85,6 +87,7 @@ internal class OwnLanes(
             tints = tints.sortedBy { it.to },
             levels = levels,
             latitude = latitude,
+            carBar = CarBar.of(drawing, window.from, window.to),
         )
     }
 
@@ -214,7 +217,7 @@ internal class OwnLanes(
  * One window of the app's own lanes as the drawing's source takes it: [window], its [collection] of features, how many
  * [features], [coordinates] and [bytes] of GeoJSON text it has, the [tints]' pieces the map hides once the car is past
  * them, and each lit piece's traffic where it has some ([levels]), by feature state; the [latitude] it lies at (not a
- * number without features), for the layers' widths.
+ * number without features), for the layers' widths; and the car's bar along it ([carBar]), null where none was made.
  */
 internal class LaneWindow(
     val window: DrawingWindows.Window,
@@ -225,6 +228,7 @@ internal class LaneWindow(
     val tints: List<Piece>,
     val levels: List<Pair<String, String>>,
     val latitude: Double,
+    val carBar: CarBar? = null,
 ) {
     /** A piece of a tint: its feature's [id], and the route station where it ends. */
     data class Piece(val id: String, val to: Double)

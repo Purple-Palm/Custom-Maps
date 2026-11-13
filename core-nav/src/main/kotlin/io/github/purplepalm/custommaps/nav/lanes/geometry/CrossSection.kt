@@ -275,6 +275,9 @@ class CrossSection private constructor(
     /** The kind of road at [station] on a run; null off every run. */
     fun roadAt(station: Double): RoadKind? = layoutAt(station)?.road
 
+    /** How the carriageway at [station] sits on its road's line: one-way, or the route's half of a two-way street; null off every run. */
+    fun carriagewayAt(station: Double): Carriageway? = layoutAt(station)?.carriageway
+
     /** The run whose roads hold [station]: the later one where two meet; null off every run. */
     fun runAt(station: Double): Int? = layoutAt(station)?.run
 
