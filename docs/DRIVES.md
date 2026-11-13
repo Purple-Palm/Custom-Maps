@@ -1032,6 +1032,10 @@ switch off everything is as before:
 - **The arrow at the gore.** The white maneuver arrow of the exit runs along the lit lane from just
   before the gore onto the ramp, not across the lanes; at a split on the ramp the same. With the
   switch off it is Mapbox's arrow as before.
+- **An exit no lane open to every car leads to** (its lane lies beyond a car-pool lane). No lane is
+  lit before the gore; the line keeps to the road's line to the gore and across it, over asphalt
+  without any line of the app's from where it turns off until it is in the ramp's lane, and the
+  arrow there is Mapbox's. On the ramp the lit lane begins where the line moves into its lane.
 - **A reroute in the run-up, a look switch, the switch.** A reroute: Mapbox's line and no lit lane
   until the new route's path and lanes have loaded (`route_line` `loaded`, `lane_drawing` `route`),
   never the old route's lanes lit. A change of Day and night in Settings during the run-up: the

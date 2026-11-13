@@ -1707,7 +1707,11 @@ them, whatever that line's own switch says. Before Start nothing changes, and st
   the zoom: asphalt and lines from zoom 15.5, arrows and diamonds from 16.5, the lit lane and tints
   from 16.85 (at latitude 0; a little lower farther from the equator). Both looks have their own
   colours (`MapPalette.lanes`), all with emissive strength 1; nothing of the drawing is faded behind
-  3D buildings, and nothing is drawn over the Mapbox logo or the attribution.
+  3D buildings, and nothing is drawn over the Mapbox logo or the attribution. Where no lane can be
+  named before an exit and the line keeps to the road's line to the gore, the route's line runs
+  across the lanes there, which go on straight: from where it turns off at the gore to where it
+  moves into the ramp's lane, the asphalt there, the stub and the lanes beyond the gore are drawn
+  without any line, arrow, diamond, lit lane or tint (`RoutePath.Diagonal`).
 - **Layer order** in the style's middle slot, from the bottom: Standard's roads; the asphalt, tints,
   lit lane and its edges, the eraser, the lane lines and the diamonds; the SDK's route line (its
   primary hidden) and the app's route line in two pairs (one over the lit stretches, one over the
@@ -1716,32 +1720,39 @@ them, whatever that line's own switch says. Before Start nothing changes, and st
   positions; slots inside the middle slot are built but not used until seen to work on a phone); the
   `map_layers` line checks the order.
 - **Windows** (`DrawingWindows`): the map holds a window of the drawing around the car, from 50 m
-  behind it to 300 m past the next card window (the run-up to a maneuver), at most 3 km unless a card
-  window has to be taken whole. The first window is built with the route's path and sent with it, and
-  the line is drawn once both have loaded; the next is built off the main thread and sent 1 km before
-  the held one ends, or as soon as it can take the next card window whole, never inside a card window
-  and never while a new route loads. A 3 km window is about 4 to 90 KB of GeoJSON and up to about
-  3,000 coordinates (design budget 600 KB and 20,000).
+  behind it to 300 m past the next card window (the run-up to a maneuver), at most 3 km unless a
+  card window has to be taken whole. Card windows that begin less than 500 m after the end of the
+  one before are taken together, so the window held in the first reaches 300 m past the last of
+  them. The first window is built with the route's path and sent with it, and the line is drawn once
+  both have loaded; the next is built off the main thread and sent 1 km before the held one ends, or
+  as soon as it can take the next card window whole, never inside a card window and never while a
+  new route loads. A 3 km window is about 4 to 90 KB of GeoJSON and up to about 3,000 coordinates
+  (design budget 600 KB and 20,000).
 - **The lit lane and the eraser.** The lit lane runs along the route's path, a lane wide, from the
-  run-up's start to the gore and on onto the ramp where the ramp has lanes. A line of the road's
-  colour on the route line's own path, trimmed with the route line's own trim, covers it behind the
-  car, so the amber ends at the car. The tint pieces the car has passed are hidden one station at a
-  time by feature state; a lit piece takes its stretch's traffic colour the same way.
+  run-up's start to the gore and on onto the ramp where the ramp has lanes. It is drawn only where
+  it is the lane the plan names: where the line lies within half a lane of that lane's middle, or
+  moves into it, and the lit lane lies on the lanes drawn there. Where the line waits on the road's
+  line beside a lane that is still opening, or keeps to the road's line around a curve too sharp for
+  the lanes, the route line shows there instead. A line of the road's colour on the route line's own
+  path, trimmed with the route line's own trim, covers it behind the car, so the amber ends at the
+  car. The tint pieces the car has passed are hidden one station at a time by feature state; a lit
+  piece takes its stretch's traffic colour the same way.
 - **The swap** (`LaneSwap`): over the lit stretches the route line is drawn whole or not at all.
   While the camera's close view for the lanes or its junction view holds (`CloseView`'s latched
-  rules: Smooth follow once the view has reached its goal and no longer moves; Mapbox tuned while
-  its close view is on) and a drawn lane is at least 10.4 dp wide, the pair over the lit stretches
-  gets opacity 0 and the amber lane is the route there; it gets 1 again when the view lets go or the
-  lane is under 9.6 dp. Between the two widths nothing changes, and the opacity is written only when
-  that state flips, as a step with no transition. At the swap the amber is 9.8 dp against the held
-  line's 10.38, and wider at every closer zoom. With Large in Smooth follow the swap comes at peak
-  speeds up to about 33 m/s; above, in Mapbox tuned (lanes of about 7 to 9.2 dp) and with Default
-  (about 4 dp) the line stays, opaque, in the named lane.
+  rules: Smooth follow once the view has reached its goal and no longer moves; never Mapbox tuned,
+  whose close views are the navigation SDK's frames) and a drawn lane is at least 10.4 dp wide, the
+  pair over the lit stretches gets opacity 0 and the amber lane is the route there; it gets 1 again
+  when the view lets go or the lane is under 9.6 dp. Between the two widths nothing changes, and the
+  opacity is written only when that state flips, as a step with no transition. At the swap the amber
+  is 9.8 dp against the held line's 10.38, and wider at every closer zoom. With Large in Smooth
+  follow the swap comes at peak speeds up to about 33 m/s; above, in Mapbox tuned, whose frames may
+  hold lanes wider than the swap's at a low peak speed and at a maneuver, and with Default (about
+  4 dp) the line stays, opaque, in the named lane.
 - **The maneuver arrow** (`GoreArrow`): where the next maneuver leaves at a gore of the drawing, the
   SDK's arrow is given the path's points from 12 m before the gore to 30 m past it, as the U-turn
   arrow is, so it runs along the lit lane onto the ramp rather than across the lanes. It is set
   again when the app's line comes or goes; without it, and with the switch off, the arrow is the
-  SDK's.
+  SDK's, as it is at a gore the line reaches on the road's line, where both follow that line.
 - **A change of route, a style load, a look switch.** At a new route the SDK's line shows and the lit
   layers are hidden until the new path and its first window have loaded; a style load sends the held
   window again with the path; a look switch colours the lanes and both pairs of the line in place.
