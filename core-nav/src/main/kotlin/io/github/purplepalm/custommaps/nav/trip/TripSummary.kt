@@ -4,14 +4,14 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 
-/** How a trip ended, as its "trip_summary" line names it in [logName]. */
+/**
+ * How a trip ended, as its "trip_summary" line names it in [logName]. End pressed on the car screen is
+ * an End in the app, like one on the phone; a car that goes away ends no trip.
+ */
 enum class TripEnding(val logName: String) {
     ARRIVED("arrived"),
     END_IN_APP("end_in_app"),
     END_IN_NOTIFICATION("end_in_notification"),
-
-    /** Ended by the car screen (stage 2). */
-    CAR("car"),
 
     /** The app's process ended during the trip; found at its next start. */
     PROCESS_DEATH("process_death"),
@@ -22,7 +22,6 @@ enum class TripEnding(val logName: String) {
         fun of(reason: StopReason): TripEnding = when (reason) {
             StopReason.USER_CANCELLED -> END_IN_APP
             StopReason.STOPPED_OUTSIDE_APP -> END_IN_NOTIFICATION
-            StopReason.CAR_DISCONNECTED, StopReason.CAR_HOST_REQUEST -> CAR
         }
     }
 }

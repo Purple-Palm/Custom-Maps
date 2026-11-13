@@ -2,10 +2,13 @@ package io.github.purplepalm.custommaps.nav.guidance
 
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 
+/**
+ * Why guidance was stopped. Only an End ends a drive: a car that disconnects, or a host that asks the
+ * app to stop navigating because another app navigates now, leaves the drive running on the phone.
+ */
 enum class StopReason {
+    /** End pressed in the app, on the phone or on the car screen. */
     USER_CANCELLED,
-    CAR_DISCONNECTED,
-    CAR_HOST_REQUEST,
 
     /** The trip session was stopped outside the app, from the End Navigation button of its notification. */
     STOPPED_OUTSIDE_APP,

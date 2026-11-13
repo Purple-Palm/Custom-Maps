@@ -151,10 +151,8 @@ class TripSummaryTest {
     fun `every way of stopping has its ending`() {
         assertEquals(TripEnding.END_IN_APP, TripEnding.of(StopReason.USER_CANCELLED))
         assertEquals(TripEnding.END_IN_NOTIFICATION, TripEnding.of(StopReason.STOPPED_OUTSIDE_APP))
-        assertEquals(TripEnding.CAR, TripEnding.of(StopReason.CAR_DISCONNECTED))
-        assertEquals(TripEnding.CAR, TripEnding.of(StopReason.CAR_HOST_REQUEST))
         assertEquals(
-            listOf("arrived", "end_in_app", "end_in_notification", "car", "process_death"),
+            listOf("arrived", "end_in_app", "end_in_notification", "process_death"),
             TripEnding.entries.map { it.logName },
         )
     }

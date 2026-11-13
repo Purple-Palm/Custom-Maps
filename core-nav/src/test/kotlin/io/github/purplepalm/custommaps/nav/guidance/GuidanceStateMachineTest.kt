@@ -28,7 +28,7 @@ class GuidanceStateMachineTest {
         GuidanceEvent.CommitFailed,
         GuidanceEvent.Arrived,
         GuidanceEvent.Stopped(StopReason.USER_CANCELLED),
-        GuidanceEvent.Stopped(StopReason.CAR_DISCONNECTED),
+        GuidanceEvent.Stopped(StopReason.STOPPED_OUTSIDE_APP),
         GuidanceEvent.ArrivalDismissed,
     )
 

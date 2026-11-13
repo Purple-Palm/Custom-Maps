@@ -39,6 +39,18 @@ interface UrgentDebugLog : DebugLog {
     fun logNow(type: String, fields: Map<String, Any?>, timeoutMillis: Long): Boolean
 }
 
+/**
+ * This log with [fields] added to every line written through it, ahead of the line's own fields, as
+ * the car map's lines carry `screen=car` beside the phone's. A line's own field of the same name wins.
+ */
+fun DebugLog.withFields(fields: Map<String, Any?>): DebugLog {
+    val base = this
+    val extra = fields.toMap()
+    return object : DebugLog {
+        override fun log(type: String, fields: Map<String, Any?>) = base.log(type, extra + fields)
+    }
+}
+
 /** Records [error] with a short stack trace. */
 fun DebugLog.error(where: String, error: Throwable) {
     log(
