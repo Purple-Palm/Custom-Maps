@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.nav.lanes.geometry
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows.Window
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -95,12 +96,69 @@ class DrawingWindowsTest {
     }
 
     @Test
+    fun `card windows that begin within 500 m of the one before are taken together, farther apart one at a time`() {
+        val near = DrawingWindows(listOf(2_000.0..3_100.0, 3_599.0..3_800.0, 4_299.0..4_400.0), routeLength = 9_000.0)
+        assertEquals(2_000.0..4_400.0, near.nextGroup(1_000.0))
+        // Each window that takes the first takes them all, and 300 m past the last.
+        assertEquals(Window(1_750.0, 4_700.0), near.windowAt(1_800.0))
+        assertEquals(Window(1_850.0, 4_700.0), near.windowAt(1_900.0))
+        // From inside one of them, or between two, the rest of them.
+        assertEquals(3_599.0..4_400.0, near.nextGroup(3_300.0))
+        assertEquals(Window(3_250.0, 4_700.0), near.windowAt(3_300.0))
+        assertEquals(4_299.0..4_400.0, near.nextGroup(4_000.0))
+        assertNull(near.nextGroup(4_400.0))
+        // Just over 500 m apart: one at a time.
+        val far = DrawingWindows(listOf(2_000.0..3_100.0, 3_601.0..3_800.0), routeLength = 9_000.0)
+        assertEquals(2_000.0..3_100.0, far.nextGroup(1_000.0))
+        assertEquals(Window(1_750.0, 3_400.0), far.windowAt(1_800.0))
+        assertEquals(3_601.0..3_800.0, far.nextGroup(3_100.0))
+        // Merged card windows stay as they were: the groups are the window rule's alone.
+        assertEquals(listOf(2_000.0..3_100.0, 3_599.0..3_800.0, 4_299.0..4_400.0), near.cards)
+        assertFalse(near.inCard(3_300.0))
+    }
+
+    @Test
+    fun `through card windows a few metres apart nothing is sent inside one, and each holds the drawing to 300 m past them`() {
+        // The gap between a fork's card window and the next one's, at one progress update a second from 27 to 34 m/s: a
+        // gap no update falls in, gaps an update falls in, and gaps on both sides of 500 m.
+        for (gap in listOf(3.0, 6.0, 15.0, 40.0, 120.0, 260.0, 499.0, 501.0, 800.0)) {
+            val first = 2_000.0..4_500.0
+            val second = (4_500.0 + gap)..7_000.0
+            val route = DrawingWindows(listOf(first, second), routeLength = 9_000.0)
+            for (step in 27..34) {
+                for (start in listOf(0.0, 11.0, 23.0)) {
+                    var car = start
+                    var held = route.windowAt(car)
+                    while (car <= 9_000.0) {
+                        if (route.due(car, held, changing = false)) {
+                            assertFalse(route.inCard(car), "sent at $car inside a card window, gap $gap m, $step m/s")
+                            held = route.windowAt(car)
+                        }
+                        assertTrue(held.holds(car), "nothing drawn at $car, gap $gap m, $step m/s: $held")
+                        for (card in route.cards) {
+                            if (car >= card.start && car <= card.endInclusive) {
+                                val need = minOf(card.endInclusive + DrawingWindows.PAST_CARD_METERS, 9_000.0)
+                                assertTrue(held.to >= need - 1e-9, "at $car in $card held $held, gap $gap m, $step m/s")
+                            }
+                        }
+                        car += step
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun `each constant on both sides of its border`() {
         assertEquals(50.0, DrawingWindows.BEHIND_METERS)
         assertEquals(3_000.0, DrawingWindows.MAX_METERS)
         assertEquals(1_000.0, DrawingWindows.SEND_AHEAD_METERS)
         assertEquals(300.0, DrawingWindows.PAST_CARD_METERS)
         assertEquals(200.0, DrawingWindows.ENTRY_METERS)
+        assertEquals(500.0, DrawingWindows.TOGETHER_METERS)
+        // 500 m between two card windows: together just under it, one at a time from it on.
+        assertEquals(1_000.0..2_900.0, DrawingWindows(listOf(1_000.0..2_000.0, 2_499.9..2_900.0), 9_000.0).nextGroup(0.0))
+        assertEquals(1_000.0..2_000.0, DrawingWindows(listOf(1_000.0..2_000.0, 2_500.0..2_900.0), 9_000.0).nextGroup(0.0))
         // 50 m behind the car, not before the route's start.
         assertEquals(950.0, windows.windowAt(1_000.0).from)
         assertEquals(0.0, windows.windowAt(30.0).from)

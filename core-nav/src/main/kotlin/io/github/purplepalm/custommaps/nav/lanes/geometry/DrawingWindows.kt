@@ -9,9 +9,11 @@ import kotlin.math.min
  * of the next card window and the drawing that follows it for [PAST_CARD_METERS], or [MAX_METERS] of the route where the
  * next card window lies farther than that. A card window the car is about to enter, within [ENTRY_METERS], or is in, is
  * always taken whole, even where that makes the window longer than [MAX_METERS]: inside a card window no window is sent.
+ * Card windows that begin within [TOGETHER_METERS] of the end of the one before are taken together ([nextGroup]): the
+ * gap between two that close may hold no progress update at all, or too little road to send and load a window on.
  *
  * The next window is due while the car drives, [SEND_AHEAD_METERS] before the current one's end, or once the window from
- * the car would take the next card window whole where the current one does not: never inside a card window and never
+ * the car would take the next card windows whole where the current one does not: never inside a card window and never
  * while a new route's path and first window load (the route-change swap sends the first window with the path). Where
  * nothing is drawn at the car, as after a seek of a simulated drive, the next one is due at once.
  *
@@ -53,18 +55,34 @@ class DrawingWindows(
     /** The first card window that has not ended at [car]: the one the car is in, or the next ahead; null past the last. */
     fun nextCard(car: Double): ClosedFloatingPointRange<Double>? = cards.firstOrNull { it.endInclusive > car }
 
+    /**
+     * The card windows a window takes together from [car]: [nextCard] and each card window after it that begins within
+     * [TOGETHER_METERS] of the end of the one before, from the first's start to the last's end; null past the last.
+     */
+    fun nextGroup(car: Double): ClosedFloatingPointRange<Double>? {
+        val first = cards.indexOfFirst { it.endInclusive > car }
+        if (first < 0) return null
+        var end = cards[first].endInclusive
+        var k = first + 1
+        while (k < cards.size && cards[k].start < end + TOGETHER_METERS) {
+            end = max(end, cards[k].endInclusive)
+            k++
+        }
+        return cards[first].start..end
+    }
+
     /** The window for the car at [car]. */
     fun windowAt(car: Double): Window {
         val from = max(0.0, car - BEHIND_METERS)
         val cap = from + MAX_METERS
-        val card = nextCard(car)
+        val group = nextGroup(car)
         val to = when {
-            card == null -> cap
-            // The next card window and the drawing past it fit.
-            card.endInclusive + PAST_CARD_METERS <= cap -> card.endInclusive + PAST_CARD_METERS
-            // About to enter it, or in it: all of it, whatever that makes the window's length.
-            car >= card.start - ENTRY_METERS -> card.endInclusive + PAST_CARD_METERS
-            // It lies farther: as much road as a window takes; a later one takes the card window.
+            group == null -> cap
+            // The next card windows and the drawing past them fit.
+            group.endInclusive + PAST_CARD_METERS <= cap -> group.endInclusive + PAST_CARD_METERS
+            // About to enter them, or in them: all of them, whatever that makes the window's length.
+            car >= group.start - ENTRY_METERS -> group.endInclusive + PAST_CARD_METERS
+            // They lie farther: as much road as a window takes; a later one takes the card windows.
             else -> cap
         }
         return Window(from, max(from, min(to, routeLength)))
@@ -82,8 +100,8 @@ class DrawingWindows(
         val next = windowAt(car)
         if (next.to <= current.to + SAME_STATION) return false
         if (car >= current.to - SEND_AHEAD_METERS) return true
-        val card = nextCard(car) ?: return false
-        val need = min(card.endInclusive + PAST_CARD_METERS, routeLength)
+        val group = nextGroup(car) ?: return false
+        val need = min(group.endInclusive + PAST_CARD_METERS, routeLength)
         return current.to < need - SAME_STATION && next.to >= need - SAME_STATION
     }
 
@@ -105,6 +123,13 @@ class DrawingWindows(
 
         /** A card window this close ahead of the car is taken whole by the next window, however long that makes it. */
         const val ENTRY_METERS = 200.0
+
+        /**
+         * A card window that begins this close past the end of the one before is taken with it ([nextGroup]): the window
+         * held for the one before reaches [PAST_CARD_METERS] past its end, and the car would be [ENTRY_METERS] from the next
+         * before it reaches that.
+         */
+        const val TOGETHER_METERS = PAST_CARD_METERS + ENTRY_METERS
 
         /** Two stations closer than this are one. */
         private const val SAME_STATION = 1e-6
