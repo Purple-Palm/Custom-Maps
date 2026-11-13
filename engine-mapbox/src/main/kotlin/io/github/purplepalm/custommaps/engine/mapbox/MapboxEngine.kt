@@ -12,6 +12,7 @@ import com.mapbox.navigation.base.options.RoutingTilesOptions
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
 import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
+import io.github.purplepalm.custommaps.engine.mapbox.navigation.NavigatorHosts
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.engine.mapbox.search.MapboxSearchProvider
 import io.github.purplepalm.custommaps.nav.NavigationEngine
@@ -44,16 +45,34 @@ class MapboxEngine private constructor(
 
     val search: SearchProvider = MapboxSearchProvider(debugLog)
 
+    /** The screens that keep the navigator alive: the phone's and each car session's ([NavigatorHosts]). */
+    private val hosts = NavigatorHosts(
+        attach = { owner -> MapboxNavigationApp.attach(owner) },
+        detach = { owner -> MapboxNavigationApp.detach(owner) },
+        debugLog = debugLog,
+        guidance = { navigationEngine.guidanceState.value },
+    )
+
     /**
-     * Keeps the navigator alive while [owner] is at least created. Attach a screen only after a
-     * valid access token has been applied.
+     * Keeps the navigator alive while [owner], the phone's screen, is at least created, until
+     * [detachPhoneHost]. Attach it only after a valid access token has been applied.
      */
-    fun attachHost(owner: LifecycleOwner) {
-        MapboxNavigationApp.attach(owner)
+    fun attachPhoneHost(owner: LifecycleOwner) {
+        hosts.attachPhone(owner)
     }
 
-    fun detachHost(owner: LifecycleOwner) {
-        MapboxNavigationApp.detach(owner)
+    /** The phone's screen [owner] no longer keeps the navigator alive. */
+    fun detachPhoneHost(owner: LifecycleOwner) {
+        hosts.detachPhone(owner)
+    }
+
+    /**
+     * Keeps the navigator alive while [owner], a car session, is at least created. There is no detach:
+     * the navigator lets the session go by itself when it is destroyed ([NavigatorHosts]). Attach it
+     * only after a valid access token has been applied. Starts nothing that Mapbox bills.
+     */
+    fun attachCarHost(owner: LifecycleOwner) {
+        hosts.attachCar(owner)
     }
 
     /**

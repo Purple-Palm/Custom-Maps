@@ -125,8 +125,8 @@ fun MapScreen(
 
     // The navigator lives while this screen does (and for the length of any drive).
     DisposableEffect(lifecycleOwner) {
-        engine.attachHost(lifecycleOwner)
-        onDispose { engine.detachHost(lifecycleOwner) }
+        engine.attachPhoneHost(lifecycleOwner)
+        onDispose { engine.detachPhoneHost(lifecycleOwner) }
     }
 
     // The map is made with the look it is to show, so its first tiles are drawn in that look.
