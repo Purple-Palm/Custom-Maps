@@ -52,6 +52,8 @@ import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineApiOptions
 import com.mapbox.navigation.ui.maps.route.line.model.MapboxRouteLineViewOptions
 import io.github.purplepalm.custommaps.engine.mapbox.AccessErrors
 import io.github.purplepalm.custommaps.engine.mapbox.R
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.DisplayFrames
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.FrameSource
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidanceCamera
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.JunctionPoints
@@ -155,6 +157,12 @@ internal class MapScene(
     private val host: Host,
     /** Hears each new position of the platform's location, as the puck starts to glide there; outside guidance only. */
     private val onPlatformFix: (() -> Unit)? = null,
+    /**
+     * The frames of the Smooth follow camera: the display's on the phone; the car's frame clock in
+     * the car, which goes on while Android gives the main thread no frames. The two Mapbox styles keep
+     * Mapbox's own animators.
+     */
+    private val frames: FrameSource = DisplayFrames(),
 ) : MapRenderer {
 
     /** What the scene needs to know of the screen its map is on, and tells it. Main thread only. */
@@ -1292,6 +1300,7 @@ internal class MapScene(
                     tuning,
                     cameraListener,
                     junctionPoints,
+                    frames,
                 )
         }
         created.setLaneZoom(laneZoom)

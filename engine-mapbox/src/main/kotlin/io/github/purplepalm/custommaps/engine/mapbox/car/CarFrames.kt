@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.car
 import android.os.Handler
 import android.os.Looper
 import android.view.Choreographer
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.FrameSource
 import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarFrameClock
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -21,7 +22,7 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLog
  * thrown, writes a "car_error" line and goes on: the car, the phone and the drive share one process.
  * Main thread only.
  */
-internal class CarFrames(private val log: DebugLog) {
+internal class CarFrames(private val log: DebugLog) : FrameSource {
 
     private val clock = CarFrameClock()
     private val choreographer = Choreographer.getInstance()
@@ -66,14 +67,14 @@ internal class CarFrames(private val log: DebugLog) {
     }
 
     /** [callback] gets the next tick, once; asking again before it comes changes nothing. */
-    fun post(callback: Choreographer.FrameCallback) {
+    override fun post(callback: Choreographer.FrameCallback) {
         if (pending.contains(callback)) return
         pending.add(callback)
         if (!dispatching) wantFrames()
     }
 
     /** [callback] gets no tick it asked for, also not the one under way. */
-    fun remove(callback: Choreographer.FrameCallback) {
+    override fun remove(callback: Choreographer.FrameCallback) {
         pending.remove(callback)
         val index = ticking.indexOf(callback)
         if (index >= 0) ticking[index] = null

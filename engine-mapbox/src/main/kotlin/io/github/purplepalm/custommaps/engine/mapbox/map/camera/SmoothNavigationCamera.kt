@@ -54,8 +54,10 @@ import kotlin.math.sin
  * The Smooth follow style: a camera that moves the map itself, once on every display frame.
  *
  * While it follows the car or shows the overview, nothing else sets the map's camera. It sets it
- * once per frame with [MapboxMap.setCamera], from a [Choreographer] callback on the main thread:
- * the thread and the frame the puck's own animation runs on. What the navigator sends once a second
+ * once per frame with [MapboxMap.setCamera], from a frame of its [FrameSource] on the main thread:
+ * on the phone the display's own frames ([Choreographer]), the thread and the frame the puck's own
+ * animation runs on; on the car the car's frame clock, which goes on while Android gives the main
+ * thread no frames. What the navigator sends once a second
  * only moves targets. The viewport data source still computes the bearing that looks ahead along
  * the road, the zoom, and the frames around a maneuver and of the overview; each of its frames is
  * reached over [CameraTuning.sampleHoldSeconds]. The camera goes after the targets on critically
@@ -90,6 +92,8 @@ internal class SmoothNavigationCamera(
     private val listener: GuidanceCamera.Listener,
     /** The road past a maneuver point that the data source frames with Large; the map owns it. */
     private val junction: JunctionPoints,
+    /** Where its frames come from: the display's on the phone, the car's frame clock in the car. */
+    private val frameSource: FrameSource,
 ) : GuidanceCamera, Choreographer.FrameCallback {
 
     /** What the camera is doing, [shown] to the screen as one of its camera modes. */
@@ -102,7 +106,6 @@ internal class SmoothNavigationCamera(
         OVERVIEW(CameraMode.OVERVIEW, onPuck = false),
     }
 
-    private val choreographer = Choreographer.getInstance()
     private var mode = Mode.IDLE
 
     /** True from a change of mode until the camera has reached what the new mode shows. */
@@ -978,11 +981,11 @@ internal class SmoothNavigationCamera(
     private fun requestFrame() {
         if (framePosted || !visible || mode == Mode.IDLE) return
         framePosted = true
-        choreographer.postFrameCallback(this)
+        frameSource.post(this)
     }
 
     private fun cancelFrame() {
-        if (framePosted) choreographer.removeFrameCallback(this)
+        if (framePosted) frameSource.remove(this)
         framePosted = false
     }
 

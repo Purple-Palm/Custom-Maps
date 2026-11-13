@@ -383,6 +383,8 @@ internal class CarNavigationMap(
             guidancePuck = engine.guidancePuck,
             host = sceneHost,
             onPlatformFix = { platformFixes += 1 },
+            // Smooth follow moves on the car's own frames, also while the main thread gets none from the display.
+            frames = frames,
         )
         scene = created
         created.setCameraStyle(cameraStyle)
