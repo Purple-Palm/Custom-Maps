@@ -8,6 +8,15 @@
     -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+        The car's screen: the templates of a navigation app, and the surface the app draws its map on
+        (maps-androidauto declares the second too; setting a surface callback without it throws).
+        Neither is a runtime permission. Location in the background is not asked for here: Google
+        Play reviews it, and the car's screen does not need it for now.
+    -->
+    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
+
     <application
         android:name=".CustomMapsApplication"
         android:allowBackup="true"
@@ -18,6 +27,21 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.CustomMaps"
         tools:targetApi="31">
+
+        <!--
+            The car's screen (docs/STAGE-2.md, Manifest). Car API level 7 is the lowest the screens
+            need; the host refuses the app when its own level is lower. The car's host draws the
+            app's buttons in the theme's amber and graphite where they pass its contrast check.
+        -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="7" />
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="androidx.car.app.theme"
+            android:resource="@style/Theme.CustomMaps.Car" />
 
         <!--
             Portrait only: the panels are laid out for a tall screen, and in landscape they would
@@ -38,6 +62,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            The service Android Auto binds to, in the navigation category, in the app's one process.
+            Exported without a permission: the host validator decides who may bind, by the host's
+            signing certificate, which is what Google advises for this warning. Bound only, and for
+            the car's main display only: no cluster, and no NAVIGATE action (a drive starts on the
+            phone).
+        -->
+        <service
+            android:name=".car.CustomMapsCarAppService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.NAVIGATION" />
+            </intent-filter>
+        </service>
 
         <!-- Read access to exported debug log files, granted only to the app picked in the share sheet. -->
         <provider

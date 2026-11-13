@@ -5,12 +5,15 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
+import androidx.car.app.Session
+import androidx.car.app.SessionInfo
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import io.github.purplepalm.custommaps.car.CarSession
 import io.github.purplepalm.custommaps.diagnostics.DeviceLog
 import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
@@ -149,6 +152,12 @@ class AppGraph(private val application: Application) {
 
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()
+
+    /**
+     * The car's screen for a connection of the car's host, from the car app service. [info] says
+     * which of the car's displays it is for; the app declares only the main one.
+     */
+    fun carSession(info: SessionInfo): Session = CarSession(debugLog, info.displayType)
 
     /**
      * When the app was installed on this phone, which is when its trip session log began: an

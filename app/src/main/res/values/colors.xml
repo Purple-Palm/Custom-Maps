@@ -3,4 +3,8 @@
     <color name="graphite">#FF0E1013</color>
     <color name="ic_launcher_background">#FF14171B</color>
     <color name="amber">#FFF5A524</color>
+    <!-- The dark amber of the day look, for amber that bright text stands on. -->
+    <color name="amber_ink">#FF8A5A00</color>
+    <!-- The night look's ink. -->
+    <color name="platinum">#FFE5E4E2</color>
 </resources>

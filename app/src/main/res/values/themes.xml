@@ -12,4 +12,18 @@
     </style>
 
     <style name="Theme.CustomMaps" parent="Base.Theme.CustomMaps" />
+
+    <!--
+        The car's screen, by the manifest's androidx.car.app.theme. Each colour has a light variant, for
+        a mark on the host's dark ground, and a dark one, for a ground under bright text: amber and
+        the day look's dark amber, the night look's platinum and graphite. The host uses them only
+        where they pass its contrast check, and its own colours otherwise. No parent: it is no window
+        theme and takes nothing of the phone's.
+    -->
+    <style name="Theme.CustomMaps.Car" parent="">
+        <item name="carColorPrimary">@color/amber</item>
+        <item name="carColorPrimaryDark">@color/amber_ink</item>
+        <item name="carColorSecondary">@color/platinum</item>
+        <item name="carColorSecondaryDark">@color/graphite</item>
+    </style>
 </resources>

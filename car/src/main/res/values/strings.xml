@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The car's screen. Anything that needs the phone says so, to be done when the car is parked. -->
+    <string name="car_start_idle">Choose a destination and press Start on the phone when you are parked.</string>
+</resources>
