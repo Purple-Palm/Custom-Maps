@@ -126,7 +126,7 @@ class LaneRowLog {
             "source" to row.card.source.name.lowercase(),
             "key" to row.key,
             "row" to lanes?.map(::token),
-            "lit" to lanes?.indices?.filter { lanes[it].isRecommended },
+            "lit" to lanes?.indices?.filter { lanes[it].isRecommended && !lanes[it].outline },
             "des" to lanes?.indices?.filter { lanes[it].designated }?.takeIf { it.isNotEmpty() },
             "label" to label,
             "words" to shown?.let(::words),
@@ -180,7 +180,8 @@ class LaneRowLog {
          * One lane of a row as the line writes it: its arrows joined by `+` (`s` straight, `sl`,
          * `l` and `shl` slight, normal and sharp left, `sr`, `r` and `shr` the same to the right,
          * `u` a U-turn), `-` for a lane without arrows, then `*` when it is lit and `>` with the
-         * arrow lit on it where that is not simply its one arrow: `s+sr*>sr`.
+         * arrow lit on it where that is not simply its one arrow: `s+sr*>sr`. A lane drawn as an
+         * outline, which is never lit, ends in `~` instead: `sr~`.
          */
         fun token(lane: Lane): String {
             val out = StringBuilder()
@@ -192,7 +193,9 @@ class LaneRowLog {
                 arrows++
             }
             if (arrows == 0) out.append('-')
-            if (lane.isRecommended) {
+            if (lane.outline) {
+                out.append('~')
+            } else if (lane.isRecommended) {
                 out.append('*')
                 val lit = lane.activeIndication
                 if (lit != null && !(arrows == 1 && lit in lane.indications)) out.append('>').append(arrowToken(lit))
@@ -208,7 +211,7 @@ class LaneRowLog {
         private fun litOnlyDesignated(lanes: List<Lane>): Boolean {
             var lit = false
             for (lane in lanes) {
-                if (!lane.isRecommended) continue
+                if (!lane.isRecommended || lane.outline) continue
                 if (!lane.designated) return false
                 lit = true
             }

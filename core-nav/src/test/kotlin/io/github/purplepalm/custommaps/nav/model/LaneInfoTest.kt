@@ -59,6 +59,18 @@ class LaneInfoTest {
     }
 
     @Test
+    fun `a lane is drawn as itself unless it is still to come, which adds no check and is never counted lit`() {
+        assertFalse(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, TurnModifier.STRAIGHT).outline)
+        // Odd combinations are lanes all the same: the run-up's row decides, and the card never lights an outline.
+        val odd = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT, outline = true)
+        assertTrue(odd.outline)
+        val toCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
+        val lit = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, TurnModifier.STRAIGHT)
+        assertEquals(1, LaneInfo(listOf(lit, toCome)).recommendedLaneCount)
+        assertEquals(1, LaneInfo(listOf(lit, odd)).recommendedLaneCount)
+    }
+
+    @Test
     fun `a lane as the route lists it can be used only when open and marked for the route`() {
         val straight = setOf(TurnModifier.STRAIGHT)
         assertTrue(RouteLane(straight, valid = true).usable)

@@ -34,6 +34,9 @@ class LaneGlyphTest {
         Row("a car pool lane, dim", Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false, designated = true), TurnModifier.STRAIGHT, 0.09f, toTake = false),
         // Where it is the only lane the route marks, its arrow is lit, in colour alone.
         Row("a car pool lane lit as the only one", Lane(setOf(TurnModifier.STRAIGHT), true, TurnModifier.STRAIGHT, designated = true), TurnModifier.STRAIGHT, 0.09f, toTake = false),
+        // A lane the map does not draw yet: hollow arrows as wide as a lane to take's, never lit, never the bar.
+        Row("a lane still to come", Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true), TurnModifier.SLIGHT_RIGHT, 0.15f, toTake = false),
+        Row("a lane still to come, marked to take", straightOrRight(lit = true).copy(outline = true), TurnModifier.SLIGHT_RIGHT, 0.15f, toTake = false),
     )
 
     @Test

@@ -9,6 +9,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -99,6 +100,38 @@ class GlyphShapesTest {
         // A U-turn lane arrow is the phone's U-turn at the lane's width.
         val uTurn = GlyphShapes.lane(Lane(setOf(TurnModifier.U_TURN), true, TurnModifier.U_TURN))
         assertEquals(GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.U_TURN).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_ACTIVE), GlyphInk.LIT) }, uTurn)
+    }
+
+    @Test
+    fun `a lane still to come is hollow arrows, never lit, whatever else the lane says`() {
+        val toCome = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
+        val straight = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.STRAIGHT)
+        val right = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SLIGHT_RIGHT)
+        val outside = (straight + right).map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_STROKE), GlyphInk.DIM) }
+        val hollow = (straight + right).map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_HOLE), GlyphInk.HOLE) }
+        // Every arrow's outside first, then every hollow, so no outside covers a hollow cut before it.
+        assertEquals(outside + hollow, GlyphShapes.lane(toCome))
+        // Marked recommended with the route's arrow all the same: still hollow and dim, never lit, never to take.
+        val odd = toCome.copy(isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+        assertEquals(outside + hollow, GlyphShapes.lane(odd))
+        assertTrue(GlyphShapes.lane(odd).none { it.ink == GlyphInk.LIT })
+        assertFalse(GlyphShapes.isLaneToTake(odd))
+        assertEquals(GlyphShapes.LANE_OUTLINE_STROKE, GlyphShapes.laneArrowStroke(odd, TurnModifier.SLIGHT_RIGHT))
+        // A lane without arrows still comes as a straight one; a car pool lane still to come is the same outline.
+        assertEquals(
+            straight.map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_STROKE), GlyphInk.DIM) } +
+                straight.map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_HOLE), GlyphInk.HOLE) },
+            GlyphShapes.lane(Lane(emptySet(), isRecommended = false, designated = true, outline = true)),
+        )
+    }
+
+    @Test
+    fun `an outline is as wide as the route's arrow in a lane to take, with a rim of 0_04 on each side of its hollow`() {
+        assertEquals(GlyphShapes.LANE_STROKE_ACTIVE, GlyphShapes.LANE_OUTLINE_STROKE)
+        assertEquals(0.07f, GlyphShapes.LANE_OUTLINE_HOLE)
+        assertEquals(0.04f, (GlyphShapes.LANE_OUTLINE_STROKE - GlyphShapes.LANE_OUTLINE_HOLE) / 2f, 1e-6f)
+        // Its rim is thinner than any lane arrow, so the hollow is what tells it.
+        assertTrue((GlyphShapes.LANE_OUTLINE_STROKE - GlyphShapes.LANE_OUTLINE_HOLE) / 2f < GlyphShapes.LANE_STROKE_OTHER)
     }
 
     @Test

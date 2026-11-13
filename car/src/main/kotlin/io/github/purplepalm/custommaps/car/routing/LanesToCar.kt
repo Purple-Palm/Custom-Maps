@@ -21,8 +21,8 @@ data class CarLane(val directions: List<CarLaneDirection>)
  * none, and the arrow the route takes from it should the data not list that one. An arrow is
  * recommended where the card lights it: the route's arrow in a lane the route can be followed from,
  * every arrow of such a lane when the route names none of them, and the arrow of a lane kept for car
- * pools or buses that the card lights because no other lane can be used. Traffic is on the right, so a
- * U-turn arrow is a left one.
+ * pools or buses that the card lights because no other lane can be used; never an arrow of a lane the
+ * card draws as an outline. Traffic is on the right, so a U-turn arrow is a left one.
  */
 object LanesToCar {
 
@@ -30,9 +30,11 @@ object LanesToCar {
 
     fun lane(lane: Lane): CarLane {
         val arrows = lane.indications.ifEmpty { setOf(TurnModifier.STRAIGHT) }
-        val active = lane.activeIndication.takeIf { lane.isRecommended }
+        // A lane the card draws as an outline is never lit.
+        val lit = lane.isRecommended && !lane.outline
+        val active = lane.activeIndication.takeIf { lit }
         val drawn = if (active != null && active !in arrows) arrows + active else arrows
-        return CarLane(drawn.map { arrow -> CarLaneDirection(shape(arrow), lane.isRecommended && (active == null || arrow == active)) })
+        return CarLane(drawn.map { arrow -> CarLaneDirection(shape(arrow), lit && (active == null || arrow == active)) })
     }
 
     fun shape(turn: TurnModifier): Int = when (turn) {

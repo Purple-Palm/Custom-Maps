@@ -49,6 +49,14 @@ class LanesToCarTest {
     }
 
     @Test
+    fun `a lane the card draws as an outline has no arrow recommended, whatever else it says`() {
+        val toCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
+        assertEquals(CarLane(listOf(direction(LaneDirection.SHAPE_SLIGHT_RIGHT, false))), LanesToCar.lane(toCome))
+        val odd = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT, outline = true)
+        assertEquals(CarLane(listOf(direction(LaneDirection.SHAPE_STRAIGHT, false))), LanesToCar.lane(odd))
+    }
+
+    @Test
     fun `a lane not to take has no arrow recommended`() {
         val lane = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.RIGHT), isRecommended = false)
         assertTrue(LanesToCar.lane(lane).directions.none { it.recommended })

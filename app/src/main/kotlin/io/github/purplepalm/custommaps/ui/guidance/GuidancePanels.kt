@@ -197,7 +197,8 @@ internal fun cardContentAlpha(pending: Boolean, dimmed: Float): Float = if (pend
  * there are more than fit, all of them get narrower, since the lane to take is often the last one.
  * A lane to take ([isLaneToTake]) is marked by shape as well as colour: its arrow is heavier
  * ([laneStroke]) and a short bar lies under it, in a band the row has whether any lane is to take
- * or not.
+ * or not. A lane the map does not draw yet ([Lane.outline]) has hollow arrows in
+ * [LookTokens.laneOff], is never lit and never has the bar; it takes a lane's place like any other.
  *
  * With a [label], for lanes that are not the next maneuver's, the label stands at the start of the
  * row in small type: a lane choice's distance, or on the run-up to an exit the lanes to use in
@@ -849,6 +850,49 @@ private fun RunUpLeftLanePreview(@PreviewParameter(LookParameter::class) look: L
     )
 }
 
+/**
+ * Before an exit where an exit-only lane is still to come beside the option lane: the lane the map does
+ * not draw yet stands in the row as an outline, never lit and without a bar, and the row has no words
+ * until that lane is there. The option lane is lit.
+ */
+@Preview(name = "run-up, a lane still to come", widthDp = 360)
+@Preview(name = "run-up, a lane still to come, larger font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "run-up, a lane still to come, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun RunUpOutlinePreview(@PreviewParameter(LookParameter::class) look: Look) {
+    RunUpPreview(
+        look,
+        Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
+        RunUpLanes(
+            LaneInfo(listOf(previewOn(false), previewOn(false), previewOn(false), previewOption, previewToCome)),
+            target = null,
+            key = "route/0/3/end",
+            odd = null,
+        ),
+    )
+}
+
+/**
+ * The same exit once the exit-only lane may be there: a lane of the row like the others, the option
+ * lane lit as the second from the right, and still no words until the lane is known.
+ */
+@Preview(name = "run-up, no words yet", widthDp = 360)
+@Preview(name = "run-up, no words yet, larger font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "run-up, no words yet, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun RunUpNoWordsPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    RunUpPreview(
+        look,
+        Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Exit 24: Oak Street"),
+        RunUpLanes(
+            LaneInfo(listOf(previewOn(false), previewOn(false), previewOn(false), previewOption, previewLeaving)),
+            target = null,
+            key = "route/0/3/end",
+            odd = null,
+        ),
+    )
+}
+
 @Composable
 private fun RunUpPreview(look: Look, maneuver: Maneuver, row: RunUpLanes) {
     PreviewOnMap(look) {
@@ -922,8 +966,9 @@ private fun ArrivedCardPreview(@PreviewParameter(LookParameter::class) look: Loo
 
 /**
  * Lanes rows on a card: two lanes with one to take, four with two to take (one of them with two
- * arrows), six with one to take, and a lane choice's row with its distance. A lane to take has the
- * heavier arrow and the bar under it; on a narrow phone, also with a large font.
+ * arrows), six with one to take, a lane choice's row with its distance, and a row whose right lane is
+ * still to come, an outline. A lane to take has the heavier arrow and the bar under it; an outline
+ * lane is hollow and never has the bar; on a narrow phone, also with a large font.
  */
 @Preview(name = "lanes to take", widthDp = 360)
 @Preview(name = "lanes to take, large font", widthDp = 360, fontScale = 1.3f)
@@ -942,6 +987,8 @@ private fun LanesRowPreview(@PreviewParameter(LookParameter::class) look: Look) 
                 LanesRow(LaneInfo(listOf(previewCarPool, straight, straight, straight, straight, previewExit)))
                 Spacer(Modifier.height(12.dp))
                 LanesRow(LaneInfo(listOf(previewOn(true), previewOn(true), previewLeaving, previewLeaving)), label = "0.4 mi")
+                Spacer(Modifier.height(12.dp))
+                LanesRow(LaneInfo(listOf(straight, straight, straight, previewOption, previewToCome)))
             }
         }
     }
@@ -958,3 +1005,9 @@ private val previewLeaving = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommende
 
 /** A lane that goes on to the exit, lit. */
 private val previewExit = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+
+/** The option lane of a right exit, lit on its exit's arrow. */
+private val previewOption = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+
+/** An exit-only lane the map does not draw yet: an outline. */
+private val previewToCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)

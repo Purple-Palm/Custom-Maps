@@ -1,8 +1,11 @@
 package io.github.purplepalm.custommaps.car.routing
 
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import androidx.car.app.model.CarIcon
 import androidx.core.graphics.createBitmap
@@ -135,7 +138,7 @@ class LanesImageRenderer(private val density: () -> Float, private val log: Debu
         val colors = CarImageColors.of(key.look)
         lanes.forEachIndexed { index, lane ->
             val box = layout.arrows(index)
-            val parts = GlyphShapes.lane(lane).map { it.part to if (it.ink == GlyphInk.LIT) colors.lit else colors.dim }
+            val parts = GlyphShapes.lane(lane).map { it.part to inkOf(it.ink, colors) }
             val edge = CarImageColors.edgePx(key.density, box.width.toFloat())
             GlyphPainter.paint(canvas, parts, box, edge)
             if (GlyphShapes.isLaneToTake(lane)) GlyphPainter.bar(canvas, layout.bar(index), colors.lit, edge)
@@ -146,6 +149,13 @@ class LanesImageRenderer(private val density: () -> Float, private val log: Debu
     private companion object {
         /** The rows of a run-up, a lane choice and the maneuver after it, in both looks. */
         const val CAPACITY = 6
+
+        /** The car's ink for [ink]: null for a part cut out of what is drawn under it, the hollow of an outline lane. */
+        fun inkOf(ink: GlyphInk, colors: CarImageColors): CarInk? = when (ink) {
+            GlyphInk.LIT -> colors.lit
+            GlyphInk.DIM -> colors.dim
+            GlyphInk.HOLE -> null
+        }
     }
 }
 
@@ -164,15 +174,18 @@ private class BoundedSet<K : Any>(private val capacity: Int) {
 /**
  * Draws glyph parts on a canvas, as the phone's card draws them with Compose: lines with round ends
  * and corners, in the middle of a box and as large as its shorter side. Every part's edge is drawn
- * first and every colour after, so no edge crosses a colour drawn before it.
+ * first and every colour after, so no edge crosses a colour drawn before it. A part without an ink
+ * is cut out of what lies under it, to the image's transparent ground: the hollow of an outline
+ * lane's arrows, which only that lane's own ink lies under.
  */
 private object GlyphPainter {
 
-    fun paint(canvas: Canvas, parts: List<Pair<GlyphPart, CarInk>>, box: PixelBox, edge: Float) {
+    fun paint(canvas: Canvas, parts: List<Pair<GlyphPart, CarInk?>>, box: PixelBox, edge: Float) {
         val side = min(box.width, box.height).toFloat()
         val place = Place(box.left + box.width / 2f - side / 2f, box.top + box.height / 2f - side / 2f, side)
-        for ((part, ink) in parts) draw(canvas, part, ink.edge, place, grow = edge)
-        for ((part, ink) in parts) draw(canvas, part, ink.fill, place, grow = 0f)
+        for ((part, ink) in parts) if (ink != null) draw(canvas, part, ink.edge, place, grow = edge)
+        for ((part, ink) in parts) if (ink != null) draw(canvas, part, ink.fill, place, grow = 0f)
+        for ((part, ink) in parts) if (ink == null) draw(canvas, part, Color.TRANSPARENT, place, grow = 0f, cut = true)
     }
 
     /** A bar under a lane to take: a short line with round ends, with its edge. */
@@ -193,12 +206,13 @@ private object GlyphPainter {
         fun y(point: GlyphPoint) = top + point.y * side
     }
 
-    /** [part] in [color], every line [grow] pixels wider on each side, for the edge under it. */
-    private fun draw(canvas: Canvas, part: GlyphPart, color: Int, place: Place, grow: Float) {
+    /** [part] in [color], every line [grow] pixels wider on each side, for the edge under it; with [cut], cleared to transparent. */
+    private fun draw(canvas: Canvas, part: GlyphPart, color: Int, place: Place, grow: Float, cut: Boolean = false) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
+            if (cut) xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
         }
         val side = place.side
         when (part) {

@@ -82,6 +82,23 @@ class LaneRowLogTest {
         assertEquals("s+r*", LaneRowLog.token(Lane(setOf(TurnModifier.RIGHT, TurnModifier.STRAIGHT), true)))
         // Every arrow, in the token's own order.
         assertEquals("s+sl+l+shl+sr+r+shr+u", LaneRowLog.token(Lane(TurnModifier.entries.toSet(), false)))
+        // A lane still to come, an outline: never lit, whatever else it says.
+        assertEquals("sr~", LaneRowLog.token(Lane(setOf(TurnModifier.SLIGHT_RIGHT), false, outline = true)))
+        assertEquals("s+sr~", LaneRowLog.token(Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), true, TurnModifier.SLIGHT_RIGHT, outline = true)))
+    }
+
+    @Test
+    fun `a lane still to come is in the row as an outline and never among its lit lanes`() {
+        val log = LaneRowLog()
+        val toCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
+        val option = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+        val row = RunUpLanes(LaneInfo(listOf(off, off, off, option, toCome)), target = null, key = "r/0/2/end", odd = null, need = 0)
+        val line = requireNotNull(log.at(snapshot(runUpLanes = row), runUpMeters = 900.0, runUp = "r/0/2/end", start = "edge"))
+        assertEquals(listOf("s", "s", "s", "s+sr*>sr", "sr~"), line["row"])
+        assertEquals(listOf(3), line["lit"])
+        // The lane drawn as a lane once the map draws it: a line of its own, on the same key.
+        val drawn = requireNotNull(log.at(snapshot(runUpLanes = row.copy(lanes = LaneInfo(listOf(off, off, off, option, leaving)))), runUpMeters = 600.0, runUp = "r/0/2/end", start = "edge"))
+        assertEquals(listOf("s", "s", "s", "s+sr*>sr", "sr"), drawn["row"])
     }
 
     @Test

@@ -14,6 +14,12 @@ data class Lane(
      * decide that; nothing here checks it, so odd lane data never stops guidance.
      */
     val designated: Boolean = false,
+    /**
+     * A lane of the row's point that the map does not draw where the car is yet: one that opens on the way there, or
+     * may already be there only from farther on. Drawn as an outline, never lit and never counted in the lanes' words;
+     * the run-up's row from the lane plan marks it, and nothing checks it, as for [designated].
+     */
+    val outline: Boolean = false,
 ) {
     init {
         require(activeIndication == null || isRecommended) { "Only a recommended lane has an active indication" }
@@ -26,5 +32,6 @@ data class LaneInfo(val lanes: List<Lane>) {
         require(lanes.isNotEmpty()) { "Lane guidance needs at least one lane" }
     }
 
-    val recommendedLaneCount: Int get() = lanes.count { it.isRecommended }
+    /** The lanes the route can be followed from; a lane drawn as an outline is never one of them. */
+    val recommendedLaneCount: Int get() = lanes.count { it.isRecommended && !it.outline }
 }

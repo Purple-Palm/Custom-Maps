@@ -2,15 +2,19 @@ package io.github.purplepalm.custommaps.ui.guidance
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import io.github.purplepalm.custommaps.nav.glyph.GlyphInk
 import io.github.purplepalm.custommaps.nav.glyph.GlyphPart
 import io.github.purplepalm.custommaps.nav.glyph.GlyphPoint
@@ -53,12 +57,22 @@ internal fun glyphKey(type: ManeuverType, turn: TurnModifier?, roundaboutExitDeg
  * One lane: every arrow painted on it, the one the route takes in [highlight] and the others in
  * [dim]. In a lane to take ([isLaneToTake]) the route's arrow is also drawn heavier than any other
  * lane arrow ([laneStroke]), since the two colours alone differ too little in lightness to tell
- * at a glance in the sun: 1.91:1 by day, 2.31:1 at night.
+ * at a glance in the sun: 1.91:1 by day, 2.31:1 at night. A lane drawn as an outline
+ * ([Lane.outline]) has hollow arrows in [dim]: their middle is cut out on a layer of the lane's own,
+ * so the card shows through.
  */
 @Composable
 fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        GlyphShapes.lane(lane).forEach { drawPart(it.part, if (it.ink == GlyphInk.LIT) highlight else dim) }
+    val parts = remember(lane) { GlyphShapes.lane(lane) }
+    val layer = if (parts.any { it.ink == GlyphInk.HOLE }) Modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen) else Modifier
+    Canvas(modifier.then(layer)) {
+        parts.forEach {
+            when (it.ink) {
+                GlyphInk.LIT -> drawPart(it.part, highlight)
+                GlyphInk.DIM -> drawPart(it.part, dim)
+                GlyphInk.HOLE -> drawPart(it.part, dim, BlendMode.Clear)
+            }
+        }
     }
 }
 
@@ -98,14 +112,14 @@ internal val ROUNDABOUTS = GlyphShapes.ROUNDABOUTS
  */
 internal fun roundaboutArmAngle(exitDegrees: Double?, turn: TurnModifier?): Float = GlyphShapes.roundaboutArmAngle(exitDegrees, turn)
 
-/** Draws [part] of a glyph in the middle of the canvas, as large as its shorter side. */
-private fun DrawScope.drawPart(part: GlyphPart, color: Color) {
+/** Draws [part] of a glyph in the middle of the canvas, as large as its shorter side, in [color] by [blendMode]. */
+private fun DrawScope.drawPart(part: GlyphPart, color: Color, blendMode: BlendMode = DrawScope.DefaultBlendMode) {
     val side = size.minDimension
     when (part) {
-        is GlyphPart.Line -> drawPath(pathOf(part), color, style = stroke(part.width))
-        is GlyphPart.Segment -> drawLine(color, point(part.from), point(part.to), strokeWidth = side * part.width, cap = StrokeCap.Round)
-        is GlyphPart.Ring -> drawCircle(color, side * part.radius, point(part.center), style = stroke(part.width))
-        is GlyphPart.Dot -> drawCircle(color, side * part.radius, point(part.center))
+        is GlyphPart.Line -> drawPath(pathOf(part), color, style = stroke(part.width), blendMode = blendMode)
+        is GlyphPart.Segment -> drawLine(color, point(part.from), point(part.to), strokeWidth = side * part.width, cap = StrokeCap.Round, blendMode = blendMode)
+        is GlyphPart.Ring -> drawCircle(color, side * part.radius, point(part.center), style = stroke(part.width), blendMode = blendMode)
+        is GlyphPart.Dot -> drawCircle(color, side * part.radius, point(part.center), blendMode = blendMode)
     }
 }
 

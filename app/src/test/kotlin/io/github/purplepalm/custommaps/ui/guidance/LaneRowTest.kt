@@ -2,6 +2,8 @@ package io.github.purplepalm.custommaps.ui.guidance
 
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
+import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import kotlin.math.roundToInt
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -130,6 +132,27 @@ class LaneRowTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `a lane still to come takes a lane's place, has no bar, and leaves the row as high as before`() {
+        val off = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false)
+        val option = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+        val toCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
+        val drawn = toCome.copy(outline = false)
+        val withOutline = listOf(off, off, off, option, toCome)
+        val withLane = listOf(off, off, off, option, drawn)
+        // The row's places and height come from the number of lanes alone, so the lane coming changes neither.
+        for (reserved in listOf(0, 98)) {
+            assertEquals(
+                laneRowGeometry(width = 304, lanes = withLane.size, fullSlot = 44, reserved = reserved, band = band),
+                laneRowGeometry(width = 304, lanes = withOutline.size, fullSlot = 44, reserved = reserved, band = band),
+            )
+        }
+        // Only the option lane has a bar, before and after the lane comes; marked to take, the outline still has none.
+        assertEquals(listOf(3), withOutline.indices.filter { isLaneToTake(withOutline[it]) })
+        assertEquals(listOf(3), withLane.indices.filter { isLaneToTake(withLane[it]) })
+        assertFalse(isLaneToTake(option.copy(outline = true)))
     }
 
     @Test
