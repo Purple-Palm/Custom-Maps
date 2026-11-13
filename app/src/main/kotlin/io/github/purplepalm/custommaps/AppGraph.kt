@@ -162,6 +162,7 @@ class AppGraph(private val application: Application) {
             laneDetails = settings.laneDetails,
             ownRouteLine = settings.ownRouteLine,
             drawOwnLanes = settings.drawOwnLanes,
+            frameTarget = settings.carMapFps,
         ),
         look = lookController,
         debugLog = debugLog,

@@ -47,4 +47,6 @@ class CarMapSettings(
     val laneDetails: Flow<Boolean>,
     val ownRouteLine: Flow<Boolean>,
     val drawOwnLanes: Flow<Boolean>,
+    /** Debug: the frames a second the car's map draws, 30 or 60, for the car's map alone. */
+    val frameTarget: Flow<Int>,
 )

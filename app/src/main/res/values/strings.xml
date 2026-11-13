@@ -184,6 +184,9 @@
     <string name="debug_own_route_line_note">During guidance the app draws the route line itself, as Mapbox would, to compare the two; Mapbox\'s line comes back if the app\'s fails.</string>
     <string name="debug_draw_own_lanes">Draw the app\'s lanes</string>
     <string name="debug_draw_own_lanes_note">On freeways with lane data the app draws the lanes under its own route line and lights the lane to take close to an exit.</string>
+    <string name="debug_car_map_fps">Car map frames</string>
+    <string name="debug_car_map_fps_value">%1$d a second</string>
+    <string name="debug_car_map_fps_note">How many frames a second the map on the car\'s screen draws, to compare 30 with 60 in the car. The car may show fewer than the map draws, since it shows the app\'s screen at a rate of its own, and 60 costs the phone more power and heat.</string>
     <string name="debug_crash_now">Crash now</string>
     <string name="debug_crash_now_note">Debug builds only. Ends the app at once with an error, as a crash would, to check that the crash and how the app ended are in the debug log.</string>
     <string name="debug_crash_now_title">Crash the app now?</string>

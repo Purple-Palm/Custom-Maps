@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
@@ -51,6 +53,14 @@ interface AppSettings {
     val drawOwnLanes: Flow<Boolean>
 
     suspend fun setDrawOwnLanes(enabled: Boolean)
+
+    /**
+     * Debug: the frames a second the map on the car's screen draws, one of [CarFrameRate.TARGETS]: 30,
+     * or 60 to compare with what the car's screen shows.
+     */
+    val carMapFps: Flow<Int>
+
+    suspend fun setCarMapFps(fps: Int)
 }
 
 /**
@@ -119,6 +129,16 @@ class DataStoreAppSettings(
         onChanged(DRAW_OWN_LANES.name, enabled)
     }
 
+    /** A number of frames the Debug switch does not offer reads as 30. */
+    override val carMapFps: Flow<Int> =
+        preferences.map { CarFrameRate.targetOf(it[CAR_MAP_FPS] ?: CarFrameRate.TARGET_FPS) }.distinctUntilChanged()
+
+    override suspend fun setCarMapFps(fps: Int) {
+        val stored = CarFrameRate.targetOf(fps)
+        dataStore.edit { it[CAR_MAP_FPS] = stored }
+        onChanged(CAR_MAP_FPS.name, stored)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -131,6 +151,7 @@ class DataStoreAppSettings(
         private val DAY_NIGHT = stringPreferencesKey("day_night")
         private val OWN_ROUTE_LINE = booleanPreferencesKey("own_route_line")
         private val DRAW_OWN_LANES = booleanPreferencesKey("draw_own_lanes")
+        private val CAR_MAP_FPS = intPreferencesKey("car_map_fps")
 
         private fun CameraStyle.stored(): String = when (this) {
             CameraStyle.MAPBOX_STANDARD -> "mapbox_standard"

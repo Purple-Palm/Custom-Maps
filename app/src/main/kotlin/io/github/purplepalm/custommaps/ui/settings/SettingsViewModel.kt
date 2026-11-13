@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.purplepalm.custommaps.look.NextLook
+import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.look.Look
@@ -48,7 +49,10 @@ data class LookSettings(
 /** A recent trip session, and whose token it ran on. */
 data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
-/** The debug section: trip sessions started on this phone, the simulated drive, own route line and own lanes switches, and the debug log. */
+/**
+ * The debug section: trip sessions started on this phone, the simulated drive, own route line and own
+ * lanes switches, the car map's frames, and the debug log.
+ */
 data class DebugState(
     /** The month's trip sessions, and since when the count runs when that is after the month began. */
     val trips: MonthCount = MonthCount(0),
@@ -61,6 +65,8 @@ data class DebugState(
     val ownRouteLine: Boolean = false,
     /** Whether the app draws the freeway lanes of a drive itself. */
     val drawOwnLanes: Boolean = false,
+    /** The frames a second the car's map draws: 30, or 60 ([CarFrameRate.TARGETS]). */
+    val carMapFps: Int = CarFrameRate.TARGET_FPS,
     /** Size of the debug log on the phone; null until measured. */
     val logBytes: Long? = null,
 )
@@ -95,13 +101,15 @@ class SettingsViewModel(
         combine(settings.dayNight, shownLook) { choice, shown -> LookSettings(choice, nextLook(choice, shown)) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
-    /** The three Debug switches, in one value. */
-    private val switches = combine(settings.simulateDrive, settings.ownRouteLine, settings.drawOwnLanes) { simulate, ownLine, ownLanes ->
-        Triple(simulate, ownLine, ownLanes)
+    /** The Debug switches, in one value. */
+    private data class Switches(val simulate: Boolean, val ownLine: Boolean, val ownLanes: Boolean, val carMapFps: Int)
+
+    private val switches = combine(settings.simulateDrive, settings.ownRouteLine, settings.drawOwnLanes, settings.carMapFps) { simulate, ownLine, ownLanes, fps ->
+        Switches(simulate, ownLine, ownLanes, fps)
     }
 
     val debug: StateFlow<DebugState> =
-        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, ownLanes), bytes, list ->
+        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, ownLanes, carMapFps), bytes, list ->
             val time = now()
             DebugState(
                 trips = TripLog.monthCount(entries, time, installedAt()),
@@ -110,6 +118,7 @@ class SettingsViewModel(
                 simulateDrive = simulate,
                 ownRouteLine = ownLine,
                 drawOwnLanes = ownLanes,
+                carMapFps = carMapFps,
                 logBytes = bytes,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
@@ -157,6 +166,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value, which the map keeps too.
                 debugLog.error("settings.setDrawOwnLanes", e)
+            }
+        }
+    }
+
+    /** Applies at once, also during a drive: the car's map draws 30 or 60 frames a second from its next frames on. */
+    fun setCarMapFps(fps: Int) {
+        viewModelScope.launch {
+            try {
+                settings.setCarMapFps(fps)
+            } catch (e: IOException) {
+                // Not stored, so the choice keeps showing the stored value, which the car's map keeps too.
+                debugLog.error("settings.setCarMapFps", e)
             }
         }
     }

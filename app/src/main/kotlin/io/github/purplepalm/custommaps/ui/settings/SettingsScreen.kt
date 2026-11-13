@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.look.NextLook
+import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
@@ -113,6 +114,7 @@ fun SettingsScreen(
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
     onDrawOwnLanesChange: (Boolean) -> Unit,
+    onCarMapFpsChange: (Int) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onBack: () -> Unit,
@@ -157,7 +159,17 @@ fun SettingsScreen(
             SectionDivider()
             GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
             SectionDivider()
-            DebugSection(debug, onSimulateDriveChange, onOwnRouteLineChange, onDrawOwnLanesChange, onShareLog, onClearLog, onCrashNow, temporaryDebugKey)
+            DebugSection(
+                debug,
+                onSimulateDriveChange,
+                onOwnRouteLineChange,
+                onDrawOwnLanesChange,
+                onCarMapFpsChange,
+                onShareLog,
+                onClearLog,
+                onCrashNow,
+                temporaryDebugKey,
+            )
             SectionDivider()
 
             SectionTitle(R.string.about_title)
@@ -382,6 +394,7 @@ private fun DebugSection(
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
     onDrawOwnLanesChange: (Boolean) -> Unit,
+    onCarMapFpsChange: (Int) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onCrashNow: (() -> Unit)?,
@@ -498,6 +511,10 @@ private fun DebugSection(
         AppSwitch(checked = debug.drawOwnLanes, onCheckedChange = onDrawOwnLanesChange)
     }
 
+    // The car's map at 30 or 60 frames a second, to compare what the car shows of each.
+    Spacer(Modifier.height(16.dp))
+    CarMapFramesBlock(debug.carMapFps, onCarMapFpsChange)
+
     Spacer(Modifier.height(16.dp))
     if (temporaryDebugKey) {
         Text(
@@ -513,6 +530,40 @@ private fun DebugSection(
         Spacer(Modifier.height(16.dp))
         CrashNowBlock(onCrashNow)
     }
+}
+
+/**
+ * How many frames a second the map on the car's screen draws: one of two, applied at once, also
+ * during a drive, with a line that says what the car shows of them.
+ */
+@Composable
+private fun CarMapFramesBlock(fps: Int, onCarMapFpsChange: (Int) -> Unit) {
+    Text(
+        text = stringResource(R.string.debug_car_map_fps),
+        style = MaterialTheme.typography.titleSmall,
+        color = LookTheme.tokens.onCard,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+    ) {
+        val targets = CarFrameRate.TARGETS
+        targets.forEachIndexed { index, target ->
+            SegmentedButton(
+                selected = target == fps,
+                onClick = { onCarMapFpsChange(target) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = targets.size),
+            ) {
+                SegmentLabel(stringResource(R.string.debug_car_map_fps_value, target))
+            }
+        }
+    }
+    Text(
+        text = stringResource(R.string.debug_car_map_fps_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = LookTheme.tokens.onCardMuted,
+    )
 }
 
 /** Debug builds only: a deliberate crash, to check the crash record on the phone. */
@@ -709,6 +760,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onSimulateDriveChange = {},
             onOwnRouteLineChange = {},
             onDrawOwnLanesChange = {},
+            onCarMapFpsChange = {},
             onShareLog = {},
             onClearLog = {},
             onBack = {},

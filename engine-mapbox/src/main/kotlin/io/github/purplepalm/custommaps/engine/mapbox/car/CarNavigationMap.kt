@@ -107,13 +107,16 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   map_layers lines among them, beside "car_surface", "car_look", "car_location" and "frame_clock".
  *   An exception caught here writes a "car_error" line with the call, the class and the message.
  *
- * The surface draws [CarFrameRate.TARGET_FPS] frames a second: the map library paces the car's surface
+ * The surface draws [CarFrameRate.TARGET_FPS] frames a second, or [CarFrameRate.HIGH_TARGET_FPS] with
+ * the Debug switch "Car map frames" ([setFrameTarget], at once): the map library paces the car's surface
  * by its render thread's ticks against a display rate of 60, so its cap is worked out for the rate those
  * ticks really come at ([CarFrameCap]): during guidance from the render thread's own statistics, which
  * the camera line takes each second, otherwise from the rate of the display's frames ([CarFrames]),
  * and 60 while the frame clock runs on its timer. It is set again when the map would draw more than a
- * tenth off 30 at the cap set now; a "car_surface" line with `event` fps says each new cap. Main thread
- * only.
+ * tenth off the target at the cap set now; a "car_surface" line with `event` fps says each new cap and
+ * each new target, and every "car_surface" line and the car's camera line carry the target
+ * (`targetFps`). The car's host may show fewer frames than the map draws: it shows the app's surface
+ * at a rate of its own. Main thread only.
  */
 @OptIn(MapboxExperimental::class)
 internal class CarNavigationMap(
@@ -208,12 +211,14 @@ internal class CarNavigationMap(
         }
 
         // The frame clock's ticks of the second, from the display and from the timer while the main
-        // thread got no frames, the cap on the surface's frames and where its rate came from, and the
-        // display rate measured now. The render thread's next window starts here.
+        // thread got no frames, the cap on the surface's frames, the frames a second it is for and
+        // where its rate came from, and the display rate measured now. The render thread's next window
+        // starts here.
         override fun cameraFields(): Map<String, Any?> {
             val fields = mapOf(
                 "clock" to frames.takeTicks(),
                 "maxFps" to frameCap.maxFps,
+                "targetFps" to frameCap.targetFps,
                 "capFrom" to frameCap.basis?.let(::basisName),
                 "measuredHz" to frames.displayHz()?.let { Motion.round(it, 1) },
             )
@@ -349,6 +354,16 @@ internal class CarNavigationMap(
             log.log(LOOK_LINE, CarLook.fields(hostDark(), CarLook.CAUSE_APP, request) + writeFields(shown))
         }
         return applied
+    }
+
+    /**
+     * The Debug switch's frames a second: the cap is worked out for them at once and set on the surface
+     * there is, with a "car_surface" line with `event` fps; a later surface starts with it.
+     */
+    override fun setFrameTarget(fps: Int) {
+        guard("setFrameTarget") {
+            if (frameCap.setTarget(fps) && carSurface != null) applyCap()
+        }
     }
 
     override fun zoomBy(delta: Double) {
@@ -656,6 +671,7 @@ internal class CarNavigationMap(
             "visible" to CarAreas.insets(width, height, visible)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "attaches" to attaches,
             "maxFps" to frameCap.maxFps,
+            "targetFps" to frameCap.targetFps,
             "measuredHz" to frameCap.rateHz.takeUnless { it.isNaN() }?.let { Motion.round(it, 1) },
             "capFrom" to frameCap.basis?.let(::basisName),
         )

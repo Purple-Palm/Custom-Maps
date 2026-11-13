@@ -340,6 +340,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             follow(settings.laneDetails, "setLaneDetails", created::setLaneDetails)
             follow(settings.ownRouteLine, "setOwnRouteLine", created::setOwnRouteLine)
             follow(settings.drawOwnLanes, "setDrawOwnLanes", created::setDrawOwnLanes)
+            // The car's map alone: 30 or 60 frames a second, from the Debug switch.
+            follow(settings.frameTarget, "setFrameTarget", created::setFrameTarget)
             // The place of the preview, the drive and the arrival, as the phone pins it.
             follow(parts.navigation.destination, "showPlace", created::showPlace)
             follow(created.cameraMode, "cameraMode") { cameraMode.value = it }

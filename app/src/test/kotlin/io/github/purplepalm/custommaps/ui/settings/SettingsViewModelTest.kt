@@ -369,6 +369,32 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `the car's map draws 30 frames a second until 60 is chosen, and the choice is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        runCurrent()
+        assertEquals(30, viewModel.debug.value.carMapFps)
+        viewModel.setCarMapFps(60)
+        runCurrent()
+        assertEquals(60, settings.carMapFps.value)
+        assertEquals(60, viewModel.debug.value.carMapFps)
+        assertFalse(viewModel.debug.value.drawOwnLanes, "the other Debug switches are their own")
+        viewModel.setCarMapFps(30)
+        runCurrent()
+        assertEquals(30, viewModel.debug.value.carMapFps)
+    }
+
+    @Test
+    fun `a choice of the car map's frames that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setCarMapFps(60)
+        runCurrent()
+        assertEquals(30, viewModel.debug.value.carMapFps)
+        assertEquals(30, settings.carMapFps.value)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
     fun `an own route line switch that cannot be stored stays as it was`() = runTest(dispatcher) {
         settings.storageFull = true
         val viewModel = viewModel()

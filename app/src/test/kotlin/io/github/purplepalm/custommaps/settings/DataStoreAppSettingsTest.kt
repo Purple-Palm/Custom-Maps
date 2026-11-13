@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -72,6 +73,32 @@ class DataStoreAppSettingsTest {
         assertFalse(settings.laneDetails.first())
         settings.setDrawOwnLanes(false)
         assertFalse(settings.drawOwnLanes.first())
+    }
+
+    @Test
+    fun `the car's map draws 30 frames a second until the Debug switch says 60, stored under its own key`() = runBlocking {
+        assertEquals(30, settings.carMapFps.first())
+        settings.setCarMapFps(60)
+        assertEquals(60, settings.carMapFps.first())
+        assertEquals(60, dataStore.data.first()[intPreferencesKey("car_map_fps")])
+        assertFalse(settings.drawOwnLanes.first(), "the other Debug switches are their own")
+        assertFalse(settings.ownRouteLine.first())
+        settings.setCarMapFps(30)
+        assertEquals(30, settings.carMapFps.first())
+        assertEquals(listOf<Pair<String, Any>>("car_map_fps" to 60, "car_map_fps" to 30), changes)
+    }
+
+    @Test
+    fun `a number of frames the switch does not offer reads and stores as 30`() = runBlocking {
+        settings.setCarMapFps(60)
+        // As a file from a build with other numbers would hold it.
+        for (stored in listOf(45, 0, 120, -60)) {
+            dataStore.edit { it[intPreferencesKey("car_map_fps")] = stored }
+            assertEquals(30, settings.carMapFps.first(), "$stored")
+        }
+        settings.setCarMapFps(90)
+        assertEquals(30, dataStore.data.first()[intPreferencesKey("car_map_fps")])
+        assertEquals("car_map_fps" to 30, changes.last())
     }
 
     @Test

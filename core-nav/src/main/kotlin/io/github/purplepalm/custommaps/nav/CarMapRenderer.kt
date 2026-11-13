@@ -20,6 +20,13 @@ interface CarMapRenderer : MapRenderer {
     fun zoomBy(delta: Double)
 
     /**
+     * Debug: the frames a second the map draws on the car's surface, 30 or 60
+     * ([io.github.purplepalm.custommaps.nav.car.CarFrameRate.TARGETS]). A change applies at once on
+     * the surface there is, and every later surface starts with it.
+     */
+    fun setFrameTarget(fps: Int)
+
+    /**
      * The car session ends: the map lets go of the surface, the navigator and everything it drew.
      * Nothing it does stops the drive. Calling it again does nothing.
      */

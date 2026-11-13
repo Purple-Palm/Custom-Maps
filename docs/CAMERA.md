@@ -703,6 +703,16 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   while the clock runs on its timer. At 120 Hz the cap is 15 to 20. While a car surface shows the
   map, the phone's map draws at most 60 frames a second (`setMaximumFps(60)`, which its pacing knows
   the phone's real rate for), and as before once the surface goes.
+- **Frame target (step 1c).** **Settings → Debug → Car map frames** sets what the car's map aims
+  at: 30 frames a second, the default, or 60, at once, also during a drive and on the surface there
+  is. The cap is then `round(target × 60 / rate)`, within 1 and 60, and the band that holds a cap is
+  a tenth of the target either way (54 to 66 at 60): at 60 the cap is 30 at 120 Hz, 40 at 90 Hz and
+  60 at 60 Hz and on the timer. Every `car_surface` line and the car's camera line carry `targetFps`,
+  and a new target writes a `car_surface` line with `event` `fps` while a surface is there. The car's
+  host may show fewer frames than the map draws: it shows the app's surface on the car's screen at a
+  rate of its own, which the app cannot read, so 60 drawn may look no smoother there than 30. The
+  switch is there to compare the two on the car's screen; the car's camera line says what the map
+  drew (`render.drawnFps`), and the `thermal` lines what it cost.
 
 ### Logging
 
@@ -733,7 +743,7 @@ not. The car's map writes its own, with `screen` `car`.
 | `hz` | the display's refresh rate; left out on the car, whose host does not say it | |
 | `capped` | the phone's map only: true while it draws at most 60 frames a second because a car's surface shows the map too; left out otherwise | |
 | `clock` | the car's map only: the ticks of its frame clock that second, `vsyncTicks` from the display's frames and `timerTicks` from the timer | about 60 together while moving; `timerTicks` 0 while the display sends frames |
-| `maxFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; where the rate it was worked out for came from, `render` (the render thread's own ticks), `display` or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 to 20, `render` and about 120 on a phone at 120 Hz during a drive |
+| `maxFps`, `targetFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; the frames a second it is worked out for, 30 or 60 (**Settings → Debug → Car map frames**); where the rate it was worked out for came from, `render` (the render thread's own ticks), `display` or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 to 20 at a target of 30 (30 to 40 at 60), `render` and about 120 on a phone at 120 Hz during a drive |
 | `laneDetails` | the switch for lane details on the map | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
@@ -807,7 +817,8 @@ Other lines:
   `from` and `guidance`.
 - A **settings** line on every change of a setting: `key`, `value` as stored, and `guidance`. A
   change of `camera_style`, `lane_zoom` (`default` or `large`) or `lane_details` (true or false)
-  during a drive shows there, and so does `day_night` (`auto`, `day` or `night`).
+  during a drive shows there, and so do `day_night` (`auto`, `day` or `night`) and `car_map_fps`
+  (30 or 60).
 - A **look** line for each change between the day and the night look
   ([Day and night during guidance](#day-and-night-during-guidance)): `look` and `was` (`DAY`,
   `NIGHT`), `cause` (`START`, the first look of the app's process; `RESUME`, back on screen;

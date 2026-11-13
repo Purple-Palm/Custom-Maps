@@ -190,6 +190,7 @@ class CarLookSessionTest {
         override fun setDrawOwnLanes(enabled: Boolean) = Unit
         override fun showPlace(place: Place?) = Unit
         override fun zoomBy(delta: Double) = Unit
+        override fun setFrameTarget(fps: Int) = Unit
         override fun release() = Unit
     }
 }
