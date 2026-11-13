@@ -10,6 +10,13 @@
     <!-- The action during a drive: it ends, as the phone's End ends it. -->
     <string name="car_end">End</string>
 
+    <!-- The routing card's words, as the phone's maneuver card, Then chip and arrival card word them. -->
+    <string name="car_roundabout_exit">Exit %1$d</string>
+    <string name="car_then_on_left">On the left</string>
+    <string name="car_then_on_right">On the right</string>
+    <string name="car_destination">Destination</string>
+    <string name="car_arrived">You have arrived</string>
+
     <!-- While the phone reads its saved token, at a start from the car. -->
     <string name="car_loading">Loading Custom Maps…</string>
 

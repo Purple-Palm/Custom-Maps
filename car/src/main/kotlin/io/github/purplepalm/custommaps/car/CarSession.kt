@@ -4,20 +4,34 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.os.SystemClock
 import androidx.car.app.Screen
 import androidx.car.app.ScreenManager
 import androidx.car.app.Session
+import androidx.car.app.connection.CarConnection
+import androidx.car.app.navigation.NavigationManager
+import androidx.car.app.navigation.model.MessageInfo
+import androidx.car.app.navigation.model.RoutingInfo
+import androidx.car.app.navigation.model.TravelEstimate
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
+import io.github.purplepalm.custommaps.car.routing.CarRouting
+import io.github.purplepalm.custommaps.car.routing.CarRoutingCard
+import io.github.purplepalm.custommaps.car.routing.LanesImageRenderer
+import io.github.purplepalm.custommaps.car.routing.ManeuverIconRenderer
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarLook
 import io.github.purplepalm.custommaps.nav.debug.withFields
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import java.time.ZonedDateTime
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +62,11 @@ import kotlinx.coroutines.launch
  *   pins the destination of the preview or the drive, and follows the host's day and night.
  * - **The screens** are the home screen and at most one message on top of it ([CarStack]), so the
  *   host's template count stays low and every flow ends on the home screen.
+ * - **The drive** goes to the host through the guidance bridge ([CarGuidanceBridge]), set up first
+ *   thing at ON_CREATE, and to the home screen's routing card from the same content, with the app's
+ *   own images in the host's day or night look. A drive running when the session is made shows at
+ *   once. Opening the app on the car's screen again during a drive takes the car back. At ON_DESTROY
+ *   the bridge lets go before the map does; the drive goes on on the phone.
  *
  * The car, the phone and the drive share one process, and car-app rethrows an exception of the app's
  * code on the main thread, which would end the phone's guidance too. So every way in catches it,
@@ -91,6 +110,36 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
     private val cameraMode = MutableStateFlow(CameraMode.IDLE)
 
     private var home: CarHomeScreen? = null
+
+    /** The drive as the host hears of it; null before ON_CREATE, or when the host's navigation manager could not be had. */
+    private var bridge: CarGuidanceBridge? = null
+
+    /** The look of the routing card's images: the host's day or night, at once. */
+    private var imageLook: Look = Look.DAY
+
+    private val words by lazy { CarDriveWords(carContext) }
+
+    private val maneuverIcons = ManeuverIconRenderer({ carContext.resources.displayMetrics.density }, log)
+    private val lanesImages = LanesImageRenderer({ carContext.resources.displayMetrics.density }, log)
+
+    /** The routing card, the trip and the arrival, with the images in the look the car shows now. */
+    private val card = CarRoutingCard(
+        arrow = { parts, role -> maneuverIcons.icon(parts, role, imageLook) },
+        lanesImage = { lanes -> lanesImages.image(lanes, imageLook) },
+    )
+
+    private val drive = object : CarHomeScreen.Drive {
+        override fun routingInfo(): RoutingInfo = card.routingInfo(bridge?.shown)
+
+        override fun destinationEstimate(): TravelEstimate? = card.destinationEstimate(bridge?.shown)
+
+        override fun arrival(): MessageInfo = card.arrival(words.arrived, parts.navigation.destination.value?.name)
+    }
+
+    /** CarConnection's type while the session lives, for the log of the host's stop; null before it reports. */
+    private var connectionType: Int? = null
+    private var connection: LiveData<Int>? = null
+    private val connectionObserver = Observer<Int> { type -> guard("connection") { onConnection(type) } }
 
     private val homeListener = object : CarHomeScreen.Listener {
         override fun onStartOnPhone() {
@@ -147,7 +196,11 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
     }
 
     override fun onNewIntent(intent: Intent) {
-        guard("onNewIntent") { log.log(SESSION_LINE, mapOf("event" to "intent", "action" to intent.action)) }
+        guard("onNewIntent") {
+            log.log(SESSION_LINE, mapOf("event" to "intent", "action" to intent.action))
+            // The driver opened the app on the car's screen again: during a drive, it takes the car back.
+            bridge?.takeBack(CarGuidanceBridge.CAUSE_INTENT)
+        }
     }
 
     /**
@@ -158,6 +211,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         guard("onCarConfigurationChanged") {
             val dark = carContext.isDarkMode
             log.log(SESSION_LINE, mapOf("event" to "configuration", "dark" to dark))
+            // The routing card's images take the host's look at once; each is drawn once in it.
+            imageLook = CarLook.lookOf(dark)
             map?.setLook(LookOnMap(CarLook.lookOf(dark)))
             home?.refresh()
         }
@@ -167,14 +222,26 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         val fields = mapOf("event" to event.name, "guidance" to parts.navigation.guidanceState.value.name)
         when (event) {
             Lifecycle.Event.ON_CREATE -> {
+                // The navigation manager's callback before anything else.
+                guard("startGuidance") { startGuidance() }
                 log.log(SESSION_LINE, fields + hostFields() + ("access" to parts.mapsAccess.value.toString()))
+                guard("watchConnection") { watchConnection() }
                 scope.launch { parts.mapsAccess.collect { guard("access") { evaluate("access") } } }
-                scope.launch { parts.navigation.guidanceState.collect { guard("guidance") { evaluate("guidance") } } }
+                // The drive's state before its progress, so that a drive running now shows at once.
+                scope.launch {
+                    parts.navigation.guidanceState.collect { state ->
+                        guard("guidanceBridge") { bridge?.onGuidance(state) }
+                        guard("guidance") { evaluate("guidance") }
+                    }
+                }
+                scope.launch { parts.navigation.routeProgress.collect { guard("progress") { bridge?.onProgress(it) } } }
             }
             Lifecycle.Event.ON_START -> {
                 log.log(SESSION_LINE, fields)
                 // Back on the car's screen: precise location may have been allowed meanwhile.
-                evaluate("start")
+                guard("start") { evaluate("start") }
+                // And during a drive another app may have been shown meanwhile: the app takes the car back.
+                guard("takeBack") { bridge?.takeBack(CarGuidanceBridge.CAUSE_START) }
             }
             Lifecycle.Event.ON_DESTROY -> {
                 log.log(SESSION_LINE, fields)
@@ -190,6 +257,10 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
      */
     private fun stop() {
         destroyed = true
+        // The bridge first: it is gone and lets go of the navigation manager before the map goes.
+        guard("stopGuidance") { bridge?.stop() }
+        guard("connection") { connection?.removeObserver(connectionObserver) }
+        connection = null
         scope.cancel()
         mapJobs = null
         preciseWatch = null
@@ -336,7 +407,54 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
     }
 
     private fun homeScreen(): CarHomeScreen =
-        CarHomeScreen(carContext, parts.navigation.guidanceState, cameraMode.asStateFlow(), homeListener, log).also { home = it }
+        CarHomeScreen(carContext, parts.navigation.guidanceState, cameraMode.asStateFlow(), homeListener, log, drive).also { home = it }
+
+    /**
+     * The guidance bridge on the session's own navigation manager, its callback set; the routing
+     * card's images in the host's look of now.
+     */
+    private fun startGuidance() {
+        imageLook = read("isDarkMode") { CarLook.lookOf(carContext.isDarkMode) } ?: Look.DAY
+        val manager = carContext.getCarService(NavigationManager::class.java)
+        val bridge = CarGuidanceBridge(
+            port = CarNavigationManager(manager, card::trip),
+            content = { progress -> CarRouting.of(progress, parts.navigation.destination.value, ZonedDateTime.now(), words) },
+            log = log,
+            clock = SystemClock::elapsedRealtime,
+            schedule = ::later,
+            lifecycle = { lifecycle.currentState.name },
+            connection = { connectionType },
+            onShown = { home?.refresh() },
+        )
+        this.bridge = bridge
+        bridge.start()
+    }
+
+    /** Runs [action] after [delayMillis] on the main thread, unless the session ends first; the result cancels it. */
+    private fun later(delayMillis: Long, action: () -> Unit): () -> Unit {
+        val job = scope.launch {
+            delay(delayMillis)
+            guard("later") { action() }
+        }
+        return { job.cancel() }
+    }
+
+    /**
+     * Whether the phone is connected to a car, as CarConnection says, from now until the session
+     * ends: the line of the host's request to stop navigating says it, so a disconnect can be told
+     * from another app's start.
+     */
+    private fun watchConnection() {
+        val type = CarConnection(carContext.applicationContext).type
+        connection = type
+        type.observeForever(connectionObserver)
+    }
+
+    private fun onConnection(type: Int?) {
+        if (type == connectionType) return
+        connectionType = type
+        log.log(SESSION_LINE, mapOf("event" to "connection", "type" to CarGuidanceBridge.connectionName(type)))
+    }
 
     private fun messageScreen(message: CarMessage) = CarMessageScreen(carContext, message, log, stack::onGone)
 

@@ -9,7 +9,10 @@ import androidx.car.app.model.CarColor
 import androidx.car.app.model.CarIcon
 import androidx.car.app.model.OnClickListener
 import androidx.car.app.model.Template
+import androidx.car.app.navigation.model.MessageInfo
 import androidx.car.app.navigation.model.NavigationTemplate
+import androidx.car.app.navigation.model.RoutingInfo
+import androidx.car.app.navigation.model.TravelEstimate
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -30,13 +33,20 @@ import kotlinx.coroutines.launch
  * in every state, so the screens of a later step can be pushed on it and every flow ends on it, which
  * starts the host's template count over.
  *
- * The template follows the drive's state and the camera's: each change asks the host for a new one,
- * which for a navigation template is a refresh and counts nothing. Building it cannot reach the host's
- * call with an exception: a failure writes a "car_template" line with its cause's class, and the screen
- * sends a plain navigation template with the one action the state allows instead. A click that fails
- * writes a "car_error" line.
+ * During a drive the template carries the routing card, as the phone's maneuver card: the maneuver
+ * with its arrow, distance and words, the lane row, the Then step while the phone shows it, and the
+ * arrival time, time and distance left; it loads while the route is worked out again. At the arrival
+ * it says so, as the phone's arrival card, until the phone's card goes. The host draws all of it; the
+ * car's surface shows only the map.
+ *
+ * The template follows the drive's state and the camera's, and the drive's progress as the guidance
+ * bridge passes it on ([refresh]): each change asks the host for a new one, which for a navigation
+ * template is a refresh and counts nothing. Building it cannot reach the host's call with an exception:
+ * a failure writes a "car_template" line with its cause's class, and the screen sends a plain navigation
+ * template with the one action the state allows instead. A click that fails writes a "car_error" line.
  *
  * @param camera the camera of the car's map as it is now; idle while there is no map
+ * @param drive what the template shows of the drive
  */
 internal class CarHomeScreen(
     carContext: CarContext,
@@ -44,7 +54,20 @@ internal class CarHomeScreen(
     private val camera: StateFlow<CameraMode>,
     private val listener: Listener,
     private val log: DebugLog,
+    private val drive: Drive,
 ) : Screen(carContext) {
+
+    /** What the template shows of the drive, made by the session from the guidance bridge's content. */
+    interface Drive {
+        /** The routing card during a drive; loading before its first progress and while the route is worked out again. */
+        fun routingInfo(): RoutingInfo
+
+        /** The arrival time, time and distance left; null before the first progress. */
+        fun destinationEstimate(): TravelEstimate?
+
+        /** The arrival, as the phone's arrival card shows it. */
+        fun arrival(): MessageInfo
+    }
 
     /** What the screen's buttons do. Main thread, as the host calls them. */
     interface Listener {
@@ -86,14 +109,23 @@ internal class CarHomeScreen(
     }
 
     override fun onGetTemplate(): Template {
-        val home = CarHome.of(guidance.value, camera.value)
+        val state = guidance.value
+        val home = CarHome.of(state, camera.value)
         return try {
-            NavigationTemplate.Builder()
+            val template = NavigationTemplate.Builder()
                 .setActionStrip(ActionStrip.Builder().addAction(action(home.action)).build())
                 .setMapActionStrip(mapStrip(home.mapButton))
-                .build()
+            when (state) {
+                GuidanceState.ACTIVE -> {
+                    template.setNavigationInfo(drive.routingInfo())
+                    drive.destinationEstimate()?.let(template::setDestinationTravelEstimate)
+                }
+                GuidanceState.ARRIVED -> template.setNavigationInfo(drive.arrival())
+                GuidanceState.IDLE, GuidanceState.PREVIEW -> Unit
+            }
+            template.build()
         } catch (e: RuntimeException) {
-            log.log(TEMPLATE_LINE, CarFailure.fields("onGetTemplate", e) + mapOf("template" to "home", "action" to home.action.name))
+            log.log(TEMPLATE_LINE, CarFailure.fields("onGetTemplate", e) + mapOf("template" to "home", "action" to home.action.name, "guidance" to state.name))
             fallback(home.action)
         }
     }
