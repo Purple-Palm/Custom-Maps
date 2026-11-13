@@ -24,6 +24,10 @@ dependencies {
     implementation(libs.mapbox.navigation.ui.maps)
     implementation(libs.mapbox.navigation.tripdata)
     implementation(libs.mapbox.search)
+    implementation(libs.mapbox.maps.androidauto)
+
+    // The car's context is in the engine's public API, where a car session asks for its map.
+    api(libs.androidx.car.app)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime)

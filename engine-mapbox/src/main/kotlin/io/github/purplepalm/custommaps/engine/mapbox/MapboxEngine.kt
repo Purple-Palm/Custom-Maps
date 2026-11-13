@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.engine.mapbox
 
 import android.app.Application
 import android.content.Context
+import androidx.car.app.CarContext
 import androidx.lifecycle.LifecycleOwner
 import com.mapbox.common.TileStore
 import com.mapbox.maps.MapboxMapsOptions
@@ -10,11 +11,13 @@ import com.mapbox.navigation.base.formatter.UnitType
 import com.mapbox.navigation.base.options.NavigationOptions
 import com.mapbox.navigation.base.options.RoutingTilesOptions
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
+import io.github.purplepalm.custommaps.engine.mapbox.car.CarNavigationMap
 import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.NavigatorHosts
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.engine.mapbox.search.MapboxSearchProvider
+import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -81,6 +84,14 @@ class MapboxEngine private constructor(
      */
     fun createPhoneMap(context: Context, lookOnMap: LookOnMap): PhoneMap =
         PhoneMap(context, navigationEngine, debugLog, offlineData, lookOnMap)
+
+    /**
+     * The map for the car's screen of the session whose context is [carContext], showing the same scene
+     * as the phone's map on the surface the car's host gives. One per car session; call
+     * [CarMapRenderer.release] when the session ends. Make it once the session is created and maps may
+     * be shown. Nothing it does starts a trip session, ends one or asks Mapbox for anything billed.
+     */
+    fun createCarMap(carContext: CarContext): CarMapRenderer = CarNavigationMap(carContext, navigationEngine, debugLog)
 
     /**
      * What the maneuver card did with the words of a run-up's lane row: [shown] false when they did

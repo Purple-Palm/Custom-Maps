@@ -7,6 +7,7 @@ import com.mapbox.common.Cancelable
 import com.mapbox.api.directions.v5.models.ManeuverModifier
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.CameraState
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.ImageHolder
@@ -19,6 +20,7 @@ import com.mapbox.maps.StyleDataLoadedType
 import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
+import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.MapAnimationOwnerRegistry
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.delegates.MapPluginProviderDelegate
@@ -67,6 +69,7 @@ import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
+import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -131,7 +134,8 @@ internal class MapScene(
     context: Context,
     private val engine: MapboxNavigationEngine,
     private val debugLog: DebugLog,
-    private val offlineData: OfflineData,
+    /** Where the style the map shows is kept ahead of the car during guidance; null keeps nothing for this map. */
+    private val offlineData: OfflineData?,
     /** The look the map shows from its first tile on; [setLook] brings any later one. */
     lookOnMap: LookOnMap,
     /** The map the scene draws on. */
@@ -148,6 +152,8 @@ internal class MapScene(
      */
     private val guidancePuck: GuidancePuck,
     private val host: Host,
+    /** Hears each new position of the platform's location, as the puck starts to glide there; outside guidance only. */
+    private val onPlatformFix: (() -> Unit)? = null,
 ) : MapRenderer {
 
     /** What the scene needs to know of the screen its map is on, and tells it. Main thread only. */
@@ -381,6 +387,9 @@ internal class MapScene(
     private var lastFixAt = 0L
     private var lastKeyPoints = 0
     private var padding: ViewportPadding? = null
+
+    /** The padding of the overview; the same as [padding] on the phone. */
+    private var overviewPadding: ViewportPadding? = null
     private var paddingChanges = 0
     private var transitionStartedAt = 0L
 
@@ -555,6 +564,7 @@ internal class MapScene(
         // own updates, and the data source learns each position, in every style: the route's camera
         // then starts from where the car is. Nothing is computed from it before a route is shown.
         platformPuck.onGlide = { target, glideMillis ->
+            onPlatformFix?.invoke()
             if (idleFollow.following) {
                 camera.onPuckGlide(target, glideMillis)
                 feedPuck(target)
@@ -583,7 +593,7 @@ internal class MapScene(
         engine.lanePlans.addListener(planListener)
         // The style this map shows is kept ahead of the car during guidance from now on. The style
         // may still be loading: it is taken when it has loaded, and again each time it loads.
-        offlineData.attachMap(mapboxMap)
+        offlineData?.attachMap(mapboxMap)
         scope.launch {
             combine(engine.guidanceState, engine.previewRoutes) { state, _ -> state }.collect { state -> render(state) }
         }
@@ -608,16 +618,53 @@ internal class MapScene(
         }
     }
 
-    override fun setViewportPadding(padding: ViewportPadding) {
+    override fun setViewportPadding(padding: ViewportPadding) = setPadding(following = padding, overview = padding)
+
+    /**
+     * The camera's padding while it follows the car and for the overview, in pixels. The phone gives
+     * both the same; the car frames the stable and the visible area apart.
+     */
+    fun setPadding(following: ViewportPadding, overview: ViewportPadding) {
         // The same padding again would only make the camera start its move over.
-        if (padding == this.padding) return
+        if (following == this.padding && overview == overviewPadding) return
         // A new padding moves the camera at once; the next camera line says to what, and how often.
-        this.padding = padding
+        this.padding = following
+        overviewPadding = overview
         paddingChanges += 1
-        val insets = EdgeInsets(padding.top.toDouble(), padding.left.toDouble(), padding.bottom.toDouble(), padding.right.toDouble())
-        viewportDataSource.followingPadding = insets
-        viewportDataSource.overviewPadding = insets
+        viewportDataSource.followingPadding = insetsOf(following)
+        viewportDataSource.overviewPadding = insetsOf(overview)
         viewportDataSource.evaluate()
+    }
+
+    private fun insetsOf(padding: ViewportPadding) =
+        EdgeInsets(padding.top.toDouble(), padding.left.toDouble(), padding.bottom.toDouble(), padding.right.toDouble())
+
+    /**
+     * The driver moved the map with a gesture that starts no camera animation of its own, as the car's
+     * scroll and pinch do ([kind]): the camera lets go of the map, as it does for a touch on the phone,
+     * and the browsing map stops following the car. A "camera_taken" line says so when the camera had
+     * the map.
+     */
+    fun onDriverMoved(kind: String) {
+        idleFollow.onMapMoved()
+        if (camera.isIdle) return
+        debugLog.log("camera_taken", mapOf("owner" to DRIVER_OWNER, "animator" to kind, "from" to camera.state))
+        camera.requestIdle()
+    }
+
+    /**
+     * The zoom buttons: the camera lets go of the map ([onDriverMoved]) and the zoom eases by [delta]
+     * levels, within [CarZoom.MIN] and [CarZoom.MAX].
+     */
+    fun zoomBy(delta: Double) {
+        onDriverMoved(ZOOM_KIND)
+        val from = mapboxMap.cameraState.zoom
+        val to = CarZoom.after(from, delta)
+        if (to == from) return
+        plugins.camera.easeTo(
+            CameraOptions.Builder().zoom(to).build(),
+            MapAnimationOptions.Builder().owner(ZOOM_OWNER).duration(ZOOM_EASE_MS).build(),
+        )
     }
 
     override fun setCameraStyle(style: CameraStyle) {
@@ -750,7 +797,7 @@ internal class MapScene(
         engine.lanePlans.removeListener(planListener)
         ownLine.release()
         // Nothing is kept ahead for this map any more, and nothing there holds on to it.
-        offlineData.detachMap(mapboxMap)
+        offlineData?.detachMap(mapboxMap)
         platformPuck.onGlide = null
         plugins.camera.removeCameraAnimationsLifecycleListener(driverMoves)
         camera.destroy()
@@ -1468,5 +1515,13 @@ internal class MapScene(
 
         /** How long a write of the theme waits for the map to settle before it says it did not. */
         private const val LOOK_SETTLE_MS = 10_000L
+
+        /** Who moved the map in a "camera_taken" line of a gesture without an animation of its own. */
+        private const val DRIVER_OWNER = "driver"
+
+        /** The zoom buttons, as a kind of the driver's moves, and the owner and length of their ease. */
+        const val ZOOM_KIND = "zoom"
+        private const val ZOOM_OWNER = "custommaps-zoom"
+        private const val ZOOM_EASE_MS = 300L
     }
 }
