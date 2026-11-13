@@ -556,6 +556,34 @@ class LaneDrawingTest {
     }
 
     @Test
+    fun `past a turn without lane data the path reaches on the new road's line, the lanes narrow over the asphalt's taper`() {
+        // A left exit beyond a car-pool lane, no lane named on its approach: the path reaches the gore on the road's line and is
+        // on the new road's line where the turn's arc ends, so the lanes beyond the turn (the exit's lane and the lane the path is
+        // in, three lanes across) would narrow to one lane within the arc; they narrow over the asphalt's taper, never in a step.
+        val d = draw(LaneScenes.carpoolBeyond())
+        val drawing = d.path.drawings.single { it.turnsAtEnd }
+        assertEquals(0.0, d.path.offsetAt(drawing.to), UM)
+        assertTrue(drawing.back - drawing.to < RoutePath.ASPHALT_TAPER_METERS, "back on the line ${drawing.back - drawing.to} m past the turn")
+        val ring = d.of(Kind.ASPHALT, Part.BEYOND).single().parts.single()
+        val line = RoadAxis.of(d.path.route, d.path.routeStations)
+        fun width(x: Double) = DrawingProbe.across(line, x, listOf(ring)).let { it.last() - it.first() }
+        val start = width(drawing.to + 0.5)
+        assertTrue(start > w + 2.0 * apron + 1.0, "the lanes the route takes at the turn, $start m with their aprons")
+        // Narrower metre by metre (measured square to the new road, which turns away from the lanes' straight lines at first), by
+        // no more than the asphalt's half-cosine over its taper from there to the ramp's band.
+        val most = (start - LaneDrawing.STANDARD_RAMP_BAND_METERS) * Math.PI / 2.0 / RoutePath.ASPHALT_TAPER_METERS
+        var last = start
+        var x = drawing.to + 1.5
+        while (x < drawing.to + RoutePath.ASPHALT_TAPER_METERS) {
+            val now = width(x)
+            assertTrue(now <= last + 0.05 && last - now <= most + 0.02, "at ${x - drawing.to} m past the turn: $now m, a metre before $last m")
+            last = now
+            x += 1.0
+        }
+        assertEquals(LaneDrawing.STANDARD_RAMP_BAND_METERS, width(drawing.back + RoutePath.ASPHALT_TAPER_METERS - 0.01), 0.01)
+    }
+
+    @Test
     fun `a line breaks where it would move more than a metre sideways, and more across than along`() {
         assertFalse(LaneDrawing.steps(LaneDrawing.STEP_METERS, 0.0))
         assertTrue(LaneDrawing.steps(LaneDrawing.STEP_METERS + 0.01, 0.5))

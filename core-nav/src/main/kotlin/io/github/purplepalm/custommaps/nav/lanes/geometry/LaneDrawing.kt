@@ -490,6 +490,13 @@ class LaneDrawing private constructor(
     ) {
         private val place = axis.at(begin)
 
+        /**
+         * Where the lanes beyond the turn are one lane: where the path is on the new road's line ([back]), and no nearer the
+         * split than the asphalt's taper, so where the path reaches the turn on that line already the lanes do not narrow in a
+         * step.
+         */
+        val narrowed: Double get() = max(back, station + RoutePath.ASPHALT_TAPER_METERS)
+
         /** The point [u] metres straight on from the axis at [begin] and [t] to the left of it. */
         fun straight(u: Double, t: Double): LocalPoint =
             LocalPoint(place.point.x + place.tx * u + place.nx * t, place.point.y + place.ty * u + place.ny * t)
@@ -1033,8 +1040,9 @@ class LaneDrawing private constructor(
          * Where the left ([left]) or right edge of the lanes beyond the turn of [gore], and [extra] metres more to the left,
          * lies at [s], as an offset from the axis. Up to the split it lies on its own straight line from where the turn's arc
          * begins, beside the path as it lay there, moved sideways only as far as the path has settled off its straight line;
-         * from the split it blends, by the time the path is on the new road's line ([Gore.back]), into one lane about the path
-         * across the new road: past the turn the route's data gives no count, and one lane is the rule.
+         * from the split it blends, by the time the path is on the new road's line ([Gore.back]) and over the asphalt's taper at
+         * least ([Gore.narrowed]), into one lane about the path across the new road: past the turn the route's data gives no
+         * count, and one lane is the rule.
          */
         private fun beyondOffset(gore: Gore, s: Double, left: Boolean, extra: Double): Double {
             val r = (if (left) gore.beyondLeft else gore.beyondRight) + extra
@@ -1043,7 +1051,7 @@ class LaneDrawing private constructor(
             val line = CrossSection.lineOffset(gore.axis, gore.begin, p0 + r, s)
             val pathLine = CrossSection.lineOffset(gore.axis, gore.begin, p0, s)
             val straight = if (line == null || pathLine == null) r else line - pathLine
-            return path.offsetAt(s) + straight + (target - straight) * CrossSection.ramp(s, gore.station, gore.back)
+            return path.offsetAt(s) + straight + (target - straight) * CrossSection.ramp(s, gore.station, gore.narrowed)
         }
 
         /** The stub of [gore] between [a] and [b]: its asphalt and lines. */
