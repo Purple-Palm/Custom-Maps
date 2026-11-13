@@ -99,23 +99,39 @@ class CarFrameClockTest {
     }
 
     @Test
-    fun `when the display's frames come back the timer stops at once`() {
+    fun `when the display's frames come back the timer stops with the second one`() {
         val rig = Rig().apply { start(); runTo(SECOND) }
         val lastFrame = rig.ticks.last().second
         rig.display = null
         rig.runTo(3 * SECOND)
-        val timerTicks = rig.ticksFrom(Source.TIMER)
         rig.display = HZ_60
         rig.runTo(4 * SECOND)
         assertEquals(Source.VSYNC, rig.clock.source)
         assertEquals(2, rig.clock.switches)
-        // Quiet from the last frame to the first one back, and the ticks the timer gave meanwhile.
+        // The first frame back could be one of a display that only now and then sends one; the
+        // second, a display frame later, brings the clock back. Quiet from the last frame before
+        // the timer took over until that second one.
         val firstBack = (3 * SECOND / HZ_60 + 1) * HZ_60
-        assertEquals((firstBack - lastFrame) / MS, rig.clock.switchQuietMillis)
-        assertEquals(timerTicks, rig.clock.switchTimerTicks)
-        assertEquals(timerTicks, rig.ticksFrom(Source.TIMER), "no timer tick once the display is back")
+        val secondBack = firstBack + HZ_60
+        assertEquals((secondBack - lastFrame) / MS, rig.clock.switchQuietMillis)
+        assertEquals(rig.ticksFrom(Source.TIMER), rig.clock.switchTimerTicks, "no timer tick once the display is back")
+        assertTrue(rig.ticks.none { it.first == Source.TIMER && it.second > secondBack })
         assertTrue(rig.ticks.last().first == Source.VSYNC)
         assertGapsAtLeast(rig, MIN_GAP)
+    }
+
+    @Test
+    fun `a display that sends a frame only now and then leaves the clock on its timer`() {
+        val rig = Rig().apply { start(); runTo(SECOND) }
+        // A display slowed down to 10 Hz, as one can when nothing on it changes.
+        rig.display = 100 * MS
+        rig.runTo(5 * SECOND)
+        assertEquals(Source.TIMER, rig.clock.source)
+        assertEquals(1, rig.clock.switches, "one switch, not two at every frame")
+        assertGapsAtLeast(rig, MIN_GAP)
+        // The timer's ticks go on through the display's frames, about 60 a second.
+        val lastSecond = rig.ticks.count { it.second > 4 * SECOND }
+        assertTrue(lastSecond in 58..63, "$lastSecond ticks in the last second")
     }
 
     @Test

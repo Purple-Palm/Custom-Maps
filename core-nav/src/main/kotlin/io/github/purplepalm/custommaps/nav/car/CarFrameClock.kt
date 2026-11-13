@@ -7,8 +7,10 @@ package io.github.purplepalm.custommaps.nav.car
  * and the car's screen still showed the map: the camera and the puck stood still although the drive
  * went on. So the car's map takes its frames from this clock: from the display while it sends them
  * ([Source.VSYNC]), and, once none has come for [quietNanos] while frames are wanted, from a timer
- * every [timerNanos] ([Source.TIMER]) until the display's next frame comes. Two ticks are never closer
- * than [minGapNanos]: at most about 60 a second, also on a display at 120 Hz.
+ * every [timerNanos] ([Source.TIMER]) until the display's frames come back: two of them less than
+ * [returnNanos] apart. A single frame now and then, as from a display that has slowed down to save
+ * power, keeps the timer, which would otherwise hand over and take back on every frame. Two ticks
+ * are never closer than [minGapNanos]: at most about 60 a second, also on a display at 120 Hz.
  *
  * This is the clock's decisions only. Its Android part posts the display callback while
  * [vsyncWanted] says so, runs one timer for [timerAtNanos], reports both back ([onVsync], [onTimer])
@@ -20,6 +22,7 @@ class CarFrameClock(
     private val quietNanos: Long = QUIET_MILLIS * NANOS_PER_MILLI,
     private val timerNanos: Long = TIMER_MILLIS * NANOS_PER_MILLI,
     private val minGapNanos: Long = MIN_GAP_MILLIS * NANOS_PER_MILLI,
+    private val returnNanos: Long = RETURN_MILLIS * NANOS_PER_MILLI,
 ) {
 
     /** Where the ticks come from. */
@@ -59,7 +62,10 @@ class CarFrameClock(
     var switches = 0
         private set
 
-    /** How long the display had been quiet at the last switch, in milliseconds: waited for on the way to the timer, gone for on the way back. */
+    /**
+     * How long the display had been quiet at the last switch, in milliseconds: waited for on the way to
+     * the timer; on the way back, from then until the frame that brought the clock back.
+     */
     var switchQuietMillis = 0L
         private set
 
@@ -67,9 +73,13 @@ class CarFrameClock(
     var switchTimerTicks = 0
         private set
 
-    /** When the display's frame callback last came; when frames were wanted since, if that was later. */
+    /** When the display's frame callback last came, and the time of its frame; when frames were wanted since, if that was later. */
     private var lastVsyncAt = NONE
+    private var lastVsyncFrame = NONE
     private var wantedSince = NONE
+
+    /** Since when the display had been quiet when the timer took over. */
+    private var timerFrom = NONE
     private var lastTick = NONE
     private var stretchTicks = 0
 
@@ -79,6 +89,7 @@ class CarFrameClock(
         source = Source.VSYNC
         wanted = false
         lastVsyncAt = now
+        lastVsyncFrame = NONE
         wantedSince = now
         lastTick = NONE
         stretchTicks = 0
@@ -105,16 +116,23 @@ class CarFrameClock(
 
     /**
      * The display's frame callback came at [now] for the frame of [frameTimeNanos]. Returns the time
-     * to tick with, the frame's own, or [NONE] for no tick: nothing is wanted, or the last tick was
-     * too recent.
+     * to tick with, the frame's own, or [NONE] for no tick: nothing is wanted, the last tick was too
+     * recent, or the clock stays on its timer until a second display frame comes close after this one.
      */
     fun onVsync(frameTimeNanos: Long, now: Long): Long {
         if (!running) return NONE
-        if (source == Source.TIMER) {
-            source = Source.VSYNC
-            switched(quietMillis = (now - lastVsyncAt) / NANOS_PER_MILLI, timerTicks = stretchTicks)
-        }
+        val previousFrame = lastVsyncFrame
         lastVsyncAt = now
+        lastVsyncFrame = frameTimeNanos
+        if (source == Source.TIMER) {
+            val back = previousFrame != NONE && frameTimeNanos - previousFrame in 1 until returnNanos
+            if (!back) {
+                update()
+                return NONE
+            }
+            source = Source.VSYNC
+            switched(quietMillis = (now - timerFrom) / NANOS_PER_MILLI, timerTicks = stretchTicks)
+        }
         val tick = if (wanted && spaced(frameTimeNanos)) frameTimeNanos else NONE
         if (tick != NONE) {
             lastTick = tick
@@ -141,6 +159,7 @@ class CarFrameClock(
             }
             source = Source.TIMER
             stretchTicks = 0
+            timerFrom = quietSince()
             switched(quietMillis = waited / NANOS_PER_MILLI, timerTicks = 0)
         }
         val tick = if (spaced(now)) now else NONE
@@ -192,6 +211,9 @@ class CarFrameClock(
 
         /** The least time between two ticks, from either source. */
         const val MIN_GAP_MILLIS = 15L
+
+        /** Two display frames closer than this bring the clock back from its timer: a display at 40 Hz or more. */
+        const val RETURN_MILLIS = 25L
 
         const val NANOS_PER_MILLI = 1_000_000L
     }
