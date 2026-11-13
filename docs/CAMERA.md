@@ -423,14 +423,20 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `LaneZoomFrames` | `:engine-mapbox`, `map/camera/LaneZoomFrames.kt` | What the lane zoom changes on the viewport data source for each camera style, and the way a change of it reaches a route the data source already has. |
 | `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
-| `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. |
+| `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. Its frames come from a `FrameSource`. |
+| `FrameSource`, `DisplayFrames` | `:engine-mapbox`, `map/camera/FrameSource.kt` | Where Smooth follow and the zoom buttons' ease get their frames, as from Choreographer: the main thread's display frames on the phone (`DisplayFrames`), the car's frame clock in the car. |
 | `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport, from where it glides on for one glide along its heading at its speed (`PuckGlide`); for Mapbox standard it glides 1.0 s and slides also on a teleport. In every style, Mapbox standard included, the first position after a seek of a simulated drive (`onFix(jump = true)`) puts it at the new place at once, and it glides on from there in the same way. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
 | `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
 | `LaneDetails`, `RouteLineWidths` | `:engine-mapbox`, `map/LaneDetails.kt`, `map/RouteLineWidths.kt` | Lane markings on the map, set after the SDK has turned them off, and the route line that stays thin close in while they are on. |
 | `MapScene` | `:engine-mapbox`, `map/MapScene.kt` | Everything of a map that is not tied to a view, the same on the phone and in the car: creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log (in the car with `screen` `car`). |
 | `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | The phone's map view around its `MapScene`: the logo and attribution strip, the compass, the look's (i) dialog, the fade-in and the tap that picks a route. |
 | `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, the lane zoom and the lane details switch, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
-| `CarNavigationMap` | `:engine-mapbox`, `car/CarNavigationMap.kt` | The car's map (stage 2, step 1): a `MapScene` with `CameraTuning.CAR` on the car's surface, with its padding, gestures, zoom buttons, logo and attribution, and day and night. |
+| `CarNavigationMap` | `:engine-mapbox`, `car/CarNavigationMap.kt` | The car's map (stage 2, step 1): a `MapScene` with `CameraTuning.CAR` on the car's surface, with its padding, gestures, zoom buttons, logo and attribution, its frame clock, puck and frame rate cap (step 1b), and the app's look. |
+| `CarFrameClock` | `:core-nav`, `nav/car/CarFrameClock.kt` | The car map's frame clock, its decisions: the display's frames while they come, a timer every 16 ms once none has come for 50 ms while a frame is wanted, back to the display when two of its frames come within 25 ms, never two ticks within 15 ms. |
+| `CarFrames` | `:engine-mapbox`, `car/CarFrames.kt` | The clock on Android for each car surface: Choreographer and a main-thread `Handler`, the car's `FrameSource`, the `frame_clock` lines, and the rate of the display's frames for the cap. |
+| `PuckTrack` | `:core-nav`, `nav/car/PuckTrack.kt` | Where the car's puck is at a tick: through an update's points at one speed, in the update's time, the bearing the short way round, a new update from where the puck is. |
+| `CarPuck`, `PuckRelay` | `:engine-mapbox`, `car/CarPuck.kt`, `map/camera/PuckRelay.kt` | The car's location provider: follows the platform's location or the guidance puck and, on each tick of the car's clock, hands the location component the puck's place and bearing with no duration. |
+| `CarFrameRate`, `VsyncRate` | `:core-nav`, `nav/car/CarFrameRate.kt` | The cap of the car's surface for a real 30 frames a second, and the rate of the display's frames it is worked out from. |
 
 The math is pure Kotlin on the Java 8 API in `:core-nav` (DECISIONS 4) and is tested on the JVM.
 Everything that touches Mapbox types stays in `:engine-mapbox` (DECISIONS 12).
@@ -458,7 +464,8 @@ Result: one sample per update, instead of two animator restarts.
 
 While anything moves:
 
-1. The frame time comes from the `Choreographer`. A gap counts as at most 0.1 s.
+1. The frame time comes from the `Choreographer`, on the car from its frame clock
+   ([The car map](#the-car-map-stage-2)). A gap counts as at most 0.1 s.
 2. A new sample, if one arrived, feeds the ramps: zoom, bearing (unwrapped), the world centre, the
    four padding sides and the on-puck weight. The weight is 1 when the frame puts the car on the
    data source's one-pixel focal point (following on the road), and 0 for maneuver framing and the
@@ -612,11 +619,11 @@ instead of jumping.
 
 ### The car map (stage 2)
 
-Built in stage 2's step 1. `CarNavigationMap` is a `MapboxCarMapObserver` (maps-androidauto
-11.34.1), registered with `registerObserver(...).setGestureHandler(...)`. The style chosen in
-Settings applies to the car screen too (DECISIONS 26); this section covers Smooth follow, the
-default and the only style designed for the car so far. The rest of the car screen is in
-[STAGE-2.md](STAGE-2.md).
+Built in stage 2's step 1, its frames reworked in step 1b. `CarNavigationMap` is a
+`MapboxCarMapObserver` (maps-androidauto 11.34.1), registered with
+`registerObserver(...).setGestureHandler(...)`. The style chosen in Settings applies to the car
+screen too (DECISIONS 26); this section covers Smooth follow, the default and the only style
+designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE-2.md).
 
 - **On attach:** a new `MapScene` on the car's map surface: the same puck settings as the phone,
   its own `MapboxNavigationViewportDataSource`, and a `SmoothNavigationCamera` with
@@ -638,15 +645,49 @@ default and the only style designed for the car so far. The rest of the car scre
   surface attaches, and its stable insets can be missing or stale. So the padding is computed from
   the stable area's rectangle and the surface size on every attach.
 - **Gestures:** car scroll and scale call `setCamera` directly, without animators. A double-tap zoom
-  eases with an animator, which the hand-over rule catches anyway, and Mapbox's default handler
-  does nothing on a fling. The gesture handler calls `requestIdle()` before passing on scroll,
-  fling and scale. **Recenter** comes from the map's action strip.
+  eases with an animator, which the hand-over rule catches anyway and which, like every animator,
+  waits for the main thread's display frames; Mapbox's default handler does nothing on a fling. The
+  gesture handler calls `requestIdle()` before passing on scroll, fling and scale. **Recenter** comes
+  from the map's action strip.
 - **One puck for both maps:** `GuidancePuck` and the navigator feed are the engine's. Each fix
   reaches the phone and car maps once, and `newDrive()` runs when guidance starts. Mapbox's
-  `CarLocationProvider` is not used: it keeps the 1000 ms glide.
+  `CarLocationProvider` is not used: it keeps the 1000 ms glide. On the car the puck is drawn on the
+  car's frame clock (below).
 - **Zoom buttons** in the map's action strip step by 0.5 between 6 and 20 and hand the camera to
-  the driver, as a gesture does; a pinch past the limits is dropped.
-- **Frames:** the car's surface draws at most 30 frames a second (`setMaximumFps(30)`).
+  the driver, as a gesture does; a pinch past the limits is dropped. Since step 1b their 300 ms ease
+  runs on the car's frame clock (smootherstep, one camera write a tick), not on an animator.
+- **Frames (step 1b).** The car's map takes its frames from a clock of its own (`CarFrameClock`, run
+  for each surface by `CarFrames`): the main thread's display frames while they come, and once none
+  has come for 50 ms while a frame is wanted, a main-thread timer every 16 ms, until two display
+  frames come less than 25 ms apart again. Two ticks are never closer than 15 ms, so there are at most
+  about 60 a second, also on a phone at 120 Hz. Each tick has a `System.nanoTime` time,
+  Choreographer's own clock. The clock runs only from a surface's attach to its detach, and only
+  while something wants a frame. Smooth follow, the zoom buttons' ease and the puck move on it: on
+  the first car test the main thread got no display frames for 18 s with the phone app in the
+  background, and the car's map stood still.
+- **The puck on the clock (step 1b).** The car's location component takes `CarPuck` as its provider,
+  which follows the platform's location before Start and the guidance puck during a drive. It takes
+  each update with its points and its glide time (the options' duration; without options the
+  component's default of 1 s; 0 a jump; every update a jump while Android's animations are off, as
+  on the phone), and on each tick `PuckTrack` gives the place and bearing of that moment: through
+  the key points at one speed, each part of the way taking its share of the distance as the
+  navigation SDK's provider has it, the bearing the short way round, a new update in the middle of
+  a glide from where the puck is then. They go to the component with a duration of 0, which it draws
+  inside the call. The puck asks for each tick first, so the camera of the same tick reads where the
+  puck is. The phone's puck is Mapbox's animation, as before.
+- **Smooth follow on the car.** Only Smooth follow keeps moving while the main thread gets no display
+  frames. The two Mapbox styles keep Mapbox's own animators, and so does the double tap's zoom: they
+  stand still then, as the whole car map did before step 1b.
+- **Frame rate (step 1b).** The car's surface draws a real 30 frames a second:
+  `setMaximumFps(round(30 × 60 / rate))`, within 1 and 60, for the rate at which the display's frames
+  come, measured from display callbacks asked for one right after the other (the lower quartile of
+  the last 16 intervals), 60 while the clock runs on its timer, and set again when the rate moves by
+  more than a tenth: 15 on a phone at 120 Hz. Mapbox paces the car's surface against 60 Hz, the rate
+  of car-app's own virtual display by Android's sources and Mapbox's own fallback, while its render
+  thread is called at the phone's rate, so the former `setMaximumFps(30)` drew 60 frames a second at
+  120 Hz. While a car surface shows the map,
+  the phone's map draws at most 60 frames a second (`setMaximumFps(60)`, which its pacing knows the
+  phone's real rate for), and as before once the surface goes.
 
 ### Logging
 
@@ -671,10 +712,13 @@ not. The car's map writes its own, with `screen` `car`.
 | `fixes` | matched positions that second | 1 |
 | `keyPoints` | the points the navigator sent with the latest position, which the puck glides through | |
 | `padding`, `paddingChanges` | the map's padding in pixels (top, left, bottom, right) and how often it changed; in the first line and whenever it changed. The top includes the Then chip's band | rare, since the top padding only grows; never when the Then chip comes or goes |
-| `render` | the render thread that second: `frames`, `fps`, `missedVsync`, `p50Ms`, `p95Ms`, `maxMs` | |
-| `renderFps` | the renderer's own rate (`MapView.setOnFpsChangedListener`, called on the render thread); left out while the map draws nothing | at least 55 at 60 Hz |
+| `render` | the render thread that second: `frames` and `fps`, how often it was called; `drawn` and `drawnFps`, how many of those calls drew a frame, since under a frame rate cap some calls draw nothing (paced); `missedVsync`; and `p50Ms`, `p95Ms` and `maxMs` of every call, the paced ones with their near-zero times too | on the car `drawnFps` about 30; on the phone `drawn` the same as `frames` without a cap |
+| `renderFps` | the renderer's own estimate of its rate (`MapView.setOnFpsChangedListener`, called on the render thread), worked out against the display rate the map library believes, which on the car's surface is 60 whatever the phone's: there it reads 15 at 120 Hz once the cap is right, and `render.drawnFps` is the real rate; left out while the map draws nothing | at least 55 at 60 Hz on the phone |
 | `animatorsEnabled` | `ValueAnimator.areAnimatorsEnabled()` | false: the animator scale is 0 and the puck jumps |
-| `hz` | the display's refresh rate | |
+| `hz` | the display's refresh rate; left out on the car, whose host does not say it | |
+| `capped` | the phone's map only: true while it draws at most 60 frames a second because a car's surface shows the map too; left out otherwise | |
+| `clock` | the car's map only: the ticks of its frame clock that second, `vsyncTicks` from the display's frames and `timerTicks` from the timer | about 60 together while moving; `timerTicks` 0 while the display sends frames |
+| `maxFps`, `measuredHz` | the car's map only: the cap set on its surface, and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 and about 120 on a phone at 120 Hz |
 | `laneDetails` | the switch for lane details on the map | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
@@ -720,6 +764,14 @@ Large while the SDK frames a maneuver.
 
 Other lines:
 
+- A **frame_clock** line, with `screen` `car`, at each switch of the car's frame clock: `source`
+  `timer` when the timer takes over, with `quietMs`, how long the display's frames had been awaited;
+  `source` `vsync` when the display's frames are back, with `quietMs`, how long the display was quiet
+  from the start of that wait, and `timerTicks`, the ticks the timer gave meanwhile.
+- A **display_state** line, from the app (not an activity), at its start and at every change of the
+  phone's own display, also while the car's screen shows the app: `state` (`ON`, `OFF`, `DOZE`,
+  `DOZE_SUSPEND`, `VR`, `ON_SUSPEND` or `UNKNOWN`) and `hz`, its refresh rate to a tenth. No position
+  and no time of day.
 - A **camera_state** line on every change of the camera's state, with `state`, `style` and, once a
   change has arrived, `ms`: how long it took. Besides the states above there is `IDLE_FOLLOW`, the
   camera on the car before guidance. For the Mapbox styles a transition that should take 673 ms or
@@ -890,8 +942,11 @@ Stage 5, 3D:
 
 - Raise `cruisePitch` for a steeper tilt while following.
 - A 3D car in place of the arrow reports its position through the same listener.
-- Cap the frame rate with `MapView.setMaximumFps(60)` if the phone gets hot.
+- Cap the frame rate with `MapView.setMaximumFps(60)` if the phone gets hot. Built for two maps at
+  once in stage 2's step 1b: the phone's map draws at most 60 while a car surface shows the map.
 - An own frame clock for the puck, if it is wanted (see [System animations](#system-animations)).
+  Built for the car in step 1b (`CarFrames`, `PuckTrack`, `CarPuck`); the phone's puck is still
+  Mapbox's animation.
 
 ### Residual risks
 
@@ -919,16 +974,22 @@ Stage 5, 3D:
   like breathing.
 - **Labels** update less eagerly while the camera moves (`setUserAnimationInProgress`).
 - **Chase distance.** If 2τ × speed reads as lag, lower the centre τ to 0.15 s. It is one constant.
-- **Phone locked in the car.** The frame loop and the puck run on the main thread. Mapbox's
-  `AnimationThreadController` (Maps 11.34.1) says its background animation thread can be essential
-  for Android Auto on some devices when the phone is locked. Check on the DHU and in the car.
-  Fallbacks: take the controller's frame tick from the car surface, or from a `Choreographer` on a
-  background thread that posts the camera write to the main thread; move the puck animators with
-  `AnimationThreadController.useBackgroundThread()`, which is experimental and moves every Mapbox
-  animation in the app. Measure before choosing.
+- **Phone locked in the car.** On the first car test the main thread got no display frames for 18 s
+  with the phone app in the background, and the car's camera and puck, which moved on them, stood
+  still. Built in stage 2's step 1b: the car's camera, its zoom buttons' ease and its puck take their
+  frames from the car's frame clock, which falls back to a main-thread timer then. Still waiting for
+  the main thread's frames on the car: the two Mapbox camera styles and the double tap's zoom. And
+  the map's render thread draws only on display callbacks of its own: whether it still gets them
+  while the main thread gets none is not known yet (the car's camera lines, `render.frames` and
+  `drawn`, say it). While the clock is on its timer, each puck update leaves a cleared entry in
+  Android's animation list until the next display frame, since an animator of no duration still
+  registers there: a few MB and a few percent of a core after an hour, gone at the first frame. The
+  app's own puck layer of a later step ends it. `AnimationThreadController.useBackgroundThread()`,
+  experimental and for every Mapbox animation in the app, is not used.
 - **Two maps at once.** With the phone app open and the car connected, two loops and two renderers
   run. The phone loop stops with the activity, but Settings drawn over the map keeps it running, as
-  map rendering does today.
+  map rendering does today. Since step 1b the phone's map draws at most 60 frames a second while a
+  car surface shows the map, and the car's surface a real 30.
 - **Step changes.** The bearing still swings toward the new step, by up to 45°; it is now a glide of
   at most 60°/s instead of a cut (animations off) or a one-second linear move (animations on).
 - **The constants** come from simulation and need drives to tune.
@@ -1830,8 +1891,14 @@ zone's guess, waits for a quiet moment of the drive (`LookSwitch`, `LookTuning` 
   red light.
 
 The driver's choice in Settings goes at once, at a turn too, and so does a change while Settings
-covers the map. Each progress update only looks at a change that waits; the sun is worked out once
-a minute while the app is on screen, never on an update.
+covers the map, unless the car's screen shows the map then. Each progress update only looks at a
+change that waits; the sun is worked out once a minute while the app is on screen, the phone's or
+the car's, never on an update.
+
+**The car shows the same look** (stage 2's step 1b, [DECISIONS.md](DECISIONS.md), 50): one look for
+the app, decided once for both screens, so a change, and a theme that waits, reach the phone's map
+and the car's at the same moment. While the phone's app is not on screen, the car camera's close
+view is the one that holds a change.
 
 **The camera is never moved by a change of look.** It changes colours only, not the camera's frame,
 zoom, tilt or padding, and the panels keep their places in both looks (the strip above the Mapbox
@@ -1855,14 +1922,16 @@ no route request.
 ## System animations
 
 - **The Smooth follow camera does not depend on the system animation setting.** Its frames come from
-  `Choreographer` callbacks, which the animator duration scale does not affect. Tilt, zoom, bearing
-  and padding stay smooth with animations off, and so does the centre in junction framing and in
-  the overview.
+  `Choreographer` callbacks, on the car from the car's frame clock, which the animator duration
+  scale does not affect. Tilt, zoom, bearing and padding stay smooth with animations off, and so
+  does the centre in junction framing and in the overview.
 - **The puck does.** Its glide is a `ValueAnimator` in the Maps SDK's location component; with the
   scale at 0 it jumps once a second. While following, the camera chases the drawn puck, so its
   centre then gets a once-a-second input again: no more cuts, but not continuous either (see
   [the verdict](#the-verdict-on-once-a-second-updates)).
 - **The two Mapbox styles depend on it entirely:** their camera is made of animators.
+- **On the car** the puck moves on the car's frame clock since stage 2's step 1b, and still follows
+  the setting as on or off: with animations off each update is a jump there too.
 - **If the owner keeps animations off on purpose,** an always-smooth puck needs its own frame clock:
   one `Choreographer` callback that moves the puck, the camera and the route line together, which
   the stage 5 plans already point to. That path would ignore the system setting on purpose. Remove
@@ -2125,9 +2194,11 @@ With the 800×480 and 1280×720 profiles, run the simulated drive with the car m
 - Car scroll and scale switch to idle, and **Recenter** from the action strip comes back smoothly.
 - One fix moves both pucks the same way.
 
-Then lock the phone and turn its screen off. The car camera's `camFps` must stay near the display
-rate. If it collapses, the main thread's frames are being held back: try the fallbacks under
-[Residual risks](#residual-risks). Measure before committing to one.
+Then lock the phone, and later leave the app with Home: the car's map and its puck keep moving.
+`frame_clock` lines say when the car's clock went to its timer and came back, the car's camera lines
+keep `camFps` and `camWrites` near 60 (`clock.timerTicks` while on the timer) and a small `puckLagM`,
+`render.frames` and `drawn` say whether Mapbox still drew, and `display_state` lines say what the
+phone's display did. With the phone app in front the car's `render.drawnFps` is about 30.
 
 ### Acceptance
 
