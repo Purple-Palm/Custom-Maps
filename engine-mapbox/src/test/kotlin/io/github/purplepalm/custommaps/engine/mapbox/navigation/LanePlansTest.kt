@@ -14,6 +14,7 @@ import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
+import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -96,9 +97,9 @@ class LanePlansTest {
     /**
      * Depart at 0 onto a freeway; lanes at 8 (five, the right one leaving: an edge point) and at 10; a road
      * without lane data leaves on the right at 12; off the freeway to the right at 15 with [gore]'s lanes; a
-     * turn at 17; the arrival at 19. [east] moves it all that many degrees of longitude east.
+     * turn at 17, with [turn]'s lanes where given; the arrival at 19. [east] moves it all that many degrees of longitude east.
      */
-    private fun shortRoute(east: Double = 0.0): Pair<List<RouteLeg>, List<List<List<Point>>>> {
+    private fun shortRoute(east: Double = 0.0, turn: List<IntersectionLanes>? = null): Pair<List<RouteLeg>, List<List<List<Point>>>> {
         val five = listOf(lane(true), lane(true), lane(true), lane(true), lane(false))
         val steps = listOf(
             legStep(
@@ -114,7 +115,7 @@ class LanePlansTest {
                 east,
             ),
             legStep("off ramp", "slight right", 15, listOf(intersection(15, gore, motorway = true, east = east)), east),
-            legStep("turn", "right", 17, listOf(intersection(17, east = east)), east),
+            legStep("turn", "right", 17, listOf(intersection(17, turn, east = east)), east),
             legStep("arrive", "right", 19, listOf(intersection(19, east = east)), east),
         )
         return listOf(leg(steps, 19, 60)) to shapes(listOf(0, 15, 17, 19), 19, east)
@@ -223,6 +224,24 @@ class LanePlansTest {
         assertNull(held.pointOf("route-b#0/0/0/1"), "another route's key")
         assertNull(held.pointOf(null))
         assertNull(held.input.keyOf(0), "the departure has no lanes")
+    }
+
+    @Test
+    fun `the ramp a run-up holds through after its gore is found by the exit's key, the same object each time`() {
+        // The ramp from the gore at 15 ends at the turn at 17, whose lanes the plan names one of: 200 m, within 15 s at the
+        // ramp's planning speed, its posted 60 mph and the margin.
+        val (legs, shapes) = shortRoute(turn = listOf(lane(false, listOf("left")), lane(true, listOf("right"))))
+        val held = requireNotNull(planRoute("route-a#0", { legs }, { shapes }, debugLog = DebugLog.NONE))
+        val ramp = requireNotNull(held.rampAfter("route-a#0/0/0/end"))
+        assertEquals(along(17) - along(15), ramp.meters, 1e-6)
+        assertEquals((60.0 + PlanningSpeed.MARGIN_MPH) * PlanningSpeed.MPS_PER_MPH, ramp.planningMps, 1e-6)
+        assertSame(ramp, held.rampAfter("route-a#0/0/0/end"))
+        assertSame(ramp, held.rampAfter("route-a#0/0/1/0"), "the exit's own key names the same gore")
+        assertNull(held.rampAfter("route-a#0/0/0/1"), "a lane point that is no gore")
+        assertNull(held.rampAfter("route-b#0/0/0/end"), "another route's key")
+        assertNull(held.rampAfter(null))
+        // Without lanes at the turn the plan constrains nothing on the ramp: none.
+        assertNull(requireNotNull(plan()).rampAfter("route-a#0/0/0/end"))
     }
 
     @Test

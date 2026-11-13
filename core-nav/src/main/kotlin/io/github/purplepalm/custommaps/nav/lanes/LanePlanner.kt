@@ -88,7 +88,10 @@ object LanePlanner {
     /** A run-up begins at least this much driving before the band's first narrowing for a lane point within its reach (the seam). */
     const val SEAM_SECONDS = 6.0
 
-    /** A run-up holds through the ramp after its gore to a point the plan constrains no more than this much driving away. */
+    /**
+     * A run-up holds through the ramp after its gore to a point the plan constrains no more than this much driving away;
+     * the camera's close view holds through the same ramps ([CameraTuning.rampBridgeSeconds], the same number).
+     */
     const val RAMP_BRIDGE_SECONDS = 15.0
 
     /**
@@ -373,6 +376,30 @@ class LanePlan internal constructor(
 
     /** The second pass of the evidence for this plan ([LaneEvidence.withPlan]). */
     fun evidence(): LaneEvidence = topology.evidence.withPlan(topology, named, windows, noLane)
+
+    /**
+     * A ramp a run-up holds through after its gore ([CardWindow.Kind.RAMP], D20): the next point the plan constrains
+     * there lies [meters] past the gore, its station after the gore, on a ramp planned at [planningMps]. The engine
+     * hands both to the run-up's latch as plain numbers, and the close view holds to that point
+     * ([io.github.purplepalm.custommaps.nav.camera.RunUpLatch]).
+     */
+    data class RampHold(val meters: Double, val planningMps: Double)
+
+    /** The ramp the run-up to the exit or fork at the intersection [goreNode] holds through after its gore; null where it holds through none. */
+    fun rampAfter(goreNode: Int): RampHold? = rampsByGore[goreNode]
+
+    /** Each ramp a run-up holds through, by the intersection of its gore: worked out once, the first time one is asked for. */
+    private val rampsByGore: Map<Int, RampHold> by lazy {
+        val nodes = topology.evidence.route.nodes
+        val out = HashMap<Int, RampHold>()
+        for (ramp in windows) {
+            if (ramp.kind != CardWindow.Kind.RAMP) continue
+            // The run-up that ends at the ramp's start names the exit's own intersection, the gore.
+            val runUp = windows.firstOrNull { it.kind == CardWindow.Kind.RUN_UP && it.to == ramp.from } ?: continue
+            out[runUp.node] = RampHold(ramp.to - ramp.from, PlanningSpeed.of(nodes[runUp.node]))
+        }
+        out
+    }
 
     /** One run's part of the plan; [drops] maps an unknown exit (its index among the sorted stations) to where its hold was dropped. */
     internal class RunResult(val segments: List<PlanSegment>, val flags: List<Flag>, val moves: List<Move>, val drops: Map<Int, Double>)

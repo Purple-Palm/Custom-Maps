@@ -20,6 +20,13 @@ import kotlin.math.max
  *
  * It holds, whatever the speed does, until the exit is no longer a lane choice ahead: past the
  * gore, on a new route, off the route. Each of these records when it ended.
+ *
+ * Past the gore it holds on through the ramp ([rampAhead]) where the lane plan constrains the next
+ * point there, a fork or a split with lane data or a ramp step's maneuver the plan names a lane for,
+ * within [CameraTuning.rampBridgeSeconds] of driving at the ramp's planning speed: the engine hands
+ * that point's station after the gore with every update. It holds until the car is at that point,
+ * and ends before it on a new route, off the route and at a seek, which record when it ended as
+ * above, and where an exit or fork that counts lies ahead within reach, whose run-up goes on at once.
  */
 class RunUpLatch(private val tuning: CameraTuning) {
 
@@ -34,8 +41,25 @@ class RunUpLatch(private val tuning: CameraTuning) {
     var startKey: String? = null
         private set
 
+    /**
+     * On the ramp after the gore, while the latch holds through it: how far the point it holds to
+     * still lies ahead of the car, in metres; not a number elsewhere. The exit it holds for, [exitKey],
+     * is the one whose gore the car has passed.
+     */
+    var rampAhead = Double.NaN
+        private set
+
     /** When the last run-up ended; minus infinity when none did, or when it was forgotten. */
     private var endedAt = Double.NEGATIVE_INFINITY
+
+    /** Where along the route the gore of the exit held lies, from the last update it lay ahead; not a number outside a run-up. */
+    private var goreAt = Double.NaN
+
+    /** Where along the route the point lies that the latch holds to through the ramp; not a number when it holds through none. */
+    private var rampTo = Double.NaN
+
+    /** How far along the route the car was at the last update: a new route counts from its own start. */
+    private var lastRouteMeters = Double.NaN
 
     /**
      * One progress update.
@@ -43,9 +67,28 @@ class RunUpLatch(private val tuning: CameraTuning) {
      * @param choices the points with lanes ahead of the car, as the map engine reads them
      * @param speedMps the car's speed; unknown counts as standing
      * @param onRoute false while the navigator has the car off the route
-     * @return the exit the run-up is held for; null outside a run-up
+     * @param routeMeters how far the car is along the current route; not a number where it is not
+     *   known, where the latch holds through no ramp
+     * @param rampMeters the next point the lane plan constrains after the gore of the exit held now
+     *   ([exitKey]): its station after the gore, in metres; not a number where the plan has none
+     * @param rampMps the planning speed of the ramp that leaves that gore, at which
+     *   [CameraTuning.rampBridgeSeconds] are driven
+     * @return the exit the run-up is held for while it lies ahead; null outside a run-up and on its
+     *   ramp
      */
-    fun onProgress(nowSeconds: Double, choices: List<LaneChoice>, speedMps: Double?, onRoute: Boolean = true): LaneChoice? {
+    fun onProgress(
+        nowSeconds: Double,
+        choices: List<LaneChoice>,
+        speedMps: Double?,
+        onRoute: Boolean = true,
+        routeMeters: Double = Double.NaN,
+        rampMeters: Double = Double.NaN,
+        rampMps: Double = Double.NaN,
+    ): LaneChoice? {
+        // A new route counts its metres from its own start: a ramp held on the route before says
+        // nothing of it.
+        val newRoute = routeMeters < lastRouteMeters - ROUTE_RESTART_METERS
+        lastRouteMeters = routeMeters
         if (!onRoute) {
             end(nowSeconds)
             return null
@@ -58,11 +101,29 @@ class RunUpLatch(private val tuning: CameraTuning) {
                 break
             }
         }
+        if (!rampTo.isNaN()) {
+            // On the ramp: held until the car is at the point the plan constrains, unless an exit or
+            // fork that counts lies ahead within reach, whose own run-up goes on at once.
+            if (!newRoute && routeMeters < rampTo && (exit == null || exit.metersAhead > reachMeters(tuning, speedMps))) {
+                rampAhead = rampTo - routeMeters
+                return null
+            }
+            end(nowSeconds)
+        }
         if (exit == null) {
+            // Just past the gore: on through the ramp where the plan constrains a point near enough.
+            if (exitKey != null && !newRoute && holdsRamp(routeMeters, rampMeters, rampMps)) {
+                rampTo = goreAt + rampMeters
+                rampAhead = rampTo - routeMeters
+                return null
+            }
             end(nowSeconds)
             return null
         }
-        if (exit.key == exitKey) return exit
+        if (exit.key == exitKey) {
+            goreAt = routeMeters + exit.metersAhead
+            return exit
+        }
         // Another exit than the one held for: on a new route, or the next step's.
         if (exitKey != null) end(nowSeconds)
         if (exit.metersAhead > reachMeters(tuning, speedMps)) return null
@@ -84,28 +145,37 @@ class RunUpLatch(private val tuning: CameraTuning) {
         }
         exitKey = exit.key
         startKey = start
+        goreAt = routeMeters + exit.metersAhead
         return exit
     }
 
     /**
-     * A seek ([seek]) ends the run-up now, and it may begin again within
+     * Whether the point [rampMeters] past the gore of the exit held lies within
+     * [CameraTuning.rampBridgeSeconds] of driving at [rampMps], and still ahead of a car
+     * [routeMeters] along the route.
+     */
+    private fun holdsRamp(routeMeters: Double, rampMeters: Double, rampMps: Double): Boolean =
+        rampMps > 0.0 && rampMeters >= 0.0 && rampMeters <= tuning.rampBridgeSeconds * rampMps && routeMeters < goreAt + rampMeters
+
+    /**
+     * A seek ([seek]) ends the run-up now, also on its ramp, and it may begin again within
      * [CameraTuning.runUpResumeSeconds] on its reach alone. A new drive or the end of guidance
      * forgets it.
      */
     fun reset(nowSeconds: Double, seek: Boolean = false) {
-        if (seek) {
-            end(nowSeconds)
-        } else {
-            exitKey = null
-            startKey = null
-            endedAt = Double.NEGATIVE_INFINITY
-        }
+        end(nowSeconds)
+        if (!seek) endedAt = Double.NEGATIVE_INFINITY
+        // The car is somewhere else now: its metres along the route start anew.
+        lastRouteMeters = Double.NaN
     }
 
     private fun end(nowSeconds: Double) {
         if (exitKey != null) endedAt = nowSeconds
         exitKey = null
         startKey = null
+        goreAt = Double.NaN
+        rampTo = Double.NaN
+        rampAhead = Double.NaN
     }
 
     companion object {
@@ -114,6 +184,9 @@ class RunUpLatch(private val tuning: CameraTuning) {
 
         /** [startKey] of a run-up begun again soon after one ended. */
         const val RESUME = "resume"
+
+        /** The matched position can slip back by less than this; a new route starts far below the old one. */
+        private const val ROUTE_RESTART_METERS = 1.0
 
         /**
          * How far before the exit a run-up can begin: the close view's window plus

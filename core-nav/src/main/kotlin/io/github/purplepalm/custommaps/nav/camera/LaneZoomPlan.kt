@@ -130,6 +130,9 @@ enum class LaneChoiceSkip {
  * - On a run-up to a freeway exit or fork ([RunUpLatch]), the exit holds the view between the
  *   choices on the way, from where the run-up begins to the gore: one approach, one move in. The
  *   latch is shared and passed in, so a camera made anew in the middle of one stays in.
+ * - Past the gore, where the latch holds on through the ramp to the next point the lane plan
+ *   constrains ([RunUpLatch.rampAhead], [CameraTuning.rampBridgeSeconds]), that point holds the
+ *   view as a choice ahead does, and the hold past it is measured from it.
  * - A turn the camera frames as a junction, coming right after the hold ([TurnAhead]), keeps the
  *   view in until its framing begins: no way out and back in just before a turn. Never past it.
  * - A reversal starts from where the focus is and takes the share of the time that is left to go.
@@ -148,6 +151,9 @@ class LaneFocus(private val tuning: CameraTuning) {
 
     /** The step of the turn the view is kept in for after a choice ([TurnAhead]); null when none. */
     private var bridgeStep: String? = null
+
+    /** The run-up's latch holds the view through the ramp after its gore, or held it last ([RunUpLatch.rampAhead]). */
+    private var rampHeld = false
     private var lastRouteMeters = Double.NaN
 
     /** The choice that holds the view close, for the log; null on the road. */
@@ -176,6 +182,8 @@ class LaneFocus(private val tuning: CameraTuning) {
      *   one; null where it does not, and then the view is let go as it always was
      * @param runUpKey the exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up,
      *   and then the view is held as it always was
+     * @param rampAhead on the ramp after the run-up's gore, while the latch holds through it, how far
+     *   the point it holds to still lies ahead ([RunUpLatch.rampAhead]); not a number elsewhere
      */
     fun onProgress(
         now: Double,
@@ -185,6 +193,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         onRoute: Boolean = true,
         turnAhead: TurnAhead? = null,
         runUpKey: String? = null,
+        rampAhead: Double = Double.NaN,
     ) {
         // A new route counts its meters from its own start, and off the route they stand still.
         // Where the last choice lay says nothing then: only the time still holds the view, and a
@@ -214,8 +223,18 @@ class LaneFocus(private val tuning: CameraTuning) {
             choiceAt = routeMeters + ahead.metersAhead
             passedAt = Double.NaN
             bridgeStep = null
-            this.runUpKey = exit?.key
-        } else if (current != null) {
+            rampHeld = false
+            // On a ramp the latch holds through, a choice ahead on it holds the view for that run-up.
+            this.runUpKey = exit?.key ?: runUpKey?.takeIf { onRoute && rampAhead >= 0.0 }
+        } else if (runUpKey != null && onRoute && rampAhead >= 0.0) {
+            // Through the ramp after the gore, the point the latch holds to holds the view as a
+            // choice ahead does; a camera made anew on the ramp comes in at once.
+            choiceAt = routeMeters + rampAhead
+            passedAt = Double.NaN
+            bridgeStep = null
+            rampHeld = true
+            this.runUpKey = runUpKey
+        } else if (current != null || rampHeld) {
             if (passedAt.isNaN()) passedAt = now
             val holding = now - passedAt < tuning.laneHoldSeconds || routeMeters < choiceAt + tuning.laneHoldMeters
             // Past the hold, a turn that the camera begins to frame within this much driving keeps
@@ -228,11 +247,12 @@ class LaneFocus(private val tuning: CameraTuning) {
             if (!bridged) bridgeStep = null
             if (!holding && !soon && !bridged) {
                 current = null
+                rampHeld = false
                 passedAt = Double.NaN
                 this.runUpKey = null
             }
         }
-        val newGoal = if (current != null) 1.0 else 0.0
+        val newGoal = if (current != null || rampHeld) 1.0 else 0.0
         if (newGoal != goal) animateTo(newGoal, now)
     }
 
@@ -243,6 +263,7 @@ class LaneFocus(private val tuning: CameraTuning) {
         passedAt = Double.NaN
         lastRouteMeters = Double.NaN
         bridgeStep = null
+        rampHeld = false
         runUpKey = null
         if (goal != 0.0) animateTo(0.0, now)
     }

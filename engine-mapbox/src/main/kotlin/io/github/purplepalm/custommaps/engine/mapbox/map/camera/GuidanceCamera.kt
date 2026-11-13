@@ -88,9 +88,11 @@ internal interface GuidanceCamera {
      * them from the route; the Large lane zoom goes close for the ones that count. [runUpKey] is
      * the exit of the run-up on now, from the engine's one latch for the card and every camera
      * (`RunUpLatch`): its close view stays in from the run-up's start to the gore. Null outside a
-     * run-up.
+     * run-up. [rampAhead]: past the gore, while the same latch holds on through the ramp to the
+     * next point the lane plan constrains there, how far that point still lies ahead, in metres
+     * (`RunUpLatch.rampAhead`): the close view stays in to it. Not a number elsewhere.
      */
-    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?)
+    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double)
 
     /** There is no guidance, or no longer: whatever the camera kept for the drive is dropped. */
     fun onGuidanceEnded()

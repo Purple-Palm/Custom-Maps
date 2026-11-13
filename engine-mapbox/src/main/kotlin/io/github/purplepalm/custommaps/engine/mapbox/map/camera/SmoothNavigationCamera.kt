@@ -370,7 +370,7 @@ internal class SmoothNavigationCamera(
         if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
     }
 
-    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?) {
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double) {
         val now = now()
         // The zoom planner sees the tilt only on frames that follow the car. In the overview,
         // with the map in the driver's hands or hidden, it would keep the last junction's zoom
@@ -402,6 +402,7 @@ internal class SmoothNavigationCamera(
             // view is down.
             turnAhead = LaneZoomFrames.turnAhead(progress, { it !in excluded }, tuning.maneuverFramingMeters),
             runUpKey = runUpKey,
+            rampAhead = rampAhead,
         )
         updateLanesCap(now)
         // Near a lane choice, and while the view looks down onto a turn, Large turns the view

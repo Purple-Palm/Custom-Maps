@@ -510,6 +510,27 @@ class LanePlannerTest {
         assertNull(notHeld.at(GORE + 5.0).named)
     }
 
+    @Test
+    fun `the ramp a run-up holds through is found by its gore, for the camera's latch`() {
+        // IW31: the split 260 m past the gore, on its ramp's planning speed, slower than the freeway's.
+        val route = LaneScenes.iw31()
+        val iw31 = plan(route)
+        val goreNode = route.nodes.indexOfFirst { it.station == GORE }
+        val ramp = requireNotNull(iw31.rampAfter(goreNode))
+        assertEquals(260.0, ramp.meters, 1e-9)
+        assertEquals(PlanningSpeed.of(route.nodes[goreNode]), ramp.planningMps, 1e-9)
+        assertTrue(ramp.planningMps < PlanningSpeed.of(route.nodes[goreNode - 1]))
+        assertSame(ramp, iw31.rampAfter(goreNode), "the same object every time")
+        // The split's own node and a node before the gore hold through nothing.
+        assertNull(iw31.rampAfter(route.nodes.indexOfFirst { it.station == GORE + 260.0 }))
+        assertNull(iw31.rampAfter(goreNode - 1))
+        // GEOM's S2: a split 150 m after the gore is held to; one 400 m after is not.
+        val near = LaneScenes.geomS2(150.0)
+        assertEquals(150.0, plan(near).rampAfter(near.nodes.indexOfFirst { it.station == GORE })?.meters)
+        val far = LaneScenes.geomS2(400.0)
+        assertNull(plan(far).rampAfter(far.nodes.indexOfFirst { it.station == GORE }))
+    }
+
     // ------------------------------------------------------------------ P7: roads without lane data on the exit's side
 
     @Test

@@ -1,6 +1,10 @@
 package io.github.purplepalm.custommaps.nav.camera
 
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -660,6 +664,172 @@ class LaneZoomTest {
         // Held past the gore until the turn's framing begins, 220 m past it: let go at 224 m.
         assertEquals(-224.0, goals.first { it.first < 0.0 && it.second == 0.0 }.first, 1e-9)
         assertTrue(goals.filter { it.first in -197.0..667.0 }.all { it.second == 1.0 })
+    }
+
+    // ------------------------------------------------------------------ the ramp bridge (D20)
+
+    /** IW31's route; its gore, with the exit's lanes as the camera counts them. */
+    private val iw31 = LaneScenes.iw31()
+    private val iw31Gore = iw31.nodes.first { it.station == LaneScenes.GORE }
+
+    /** IW31's ramp as its lane plan holds through it: the split 260 m past the gore, at the ramp's planning speed. */
+    private val iw31Ramp = requireNotNull(LanePlanner.plan(LaneTopology.of(LaneEvidence.of(iw31))).rampAfter(iw31.nodes.indexOf(iw31Gore)))
+
+    /** IW31's ramp's planning speed. */
+    private val rampMps = iw31Ramp.planningMps
+
+    /** Where the exit's gore lies along the route in [rampDrive]. */
+    private val rampGore = 1_600.0
+
+    /** One update of [rampDrive]: how far past the gore the car is, and the lane focus at it. */
+    private class RampStep(val t: Int, val pastGore: Double, val goal: Double, val focus: Double, val runUp: String?)
+
+    /**
+     * IW31's exit on other stations, its lanes as the camera counts them: the exit's own, two of them the route's, and on the
+     * ramp its split, two lanes, no lane choice of its own, [splitAfter] metres past the gore. One update a second at 28 m/s
+     * on the freeway to the gore, [rampGore] metres from the start, and at 20 m/s on the ramp. While the run-up to the exit is
+     * on, the latch is handed the plan's point [rampMeters] past the gore on a ramp at IW31's planning speed, as the engine
+     * hands it; [focus] gets the latch's key and, with [giveRamp], its distance on the ramp, as the cameras do. At [rerouteAt]
+     * the car is put on a new route without lanes, whose metres start anew; at [seekAt] a seek ends the run-up and resets the
+     * focus, as the engine and the camera do, and puts the car [seekTo] metres along the route (where it is: not a number).
+     */
+    private fun rampDrive(
+        rampMeters: Double,
+        focus: LaneFocus = LaneFocus(tuning),
+        giveRamp: Boolean = true,
+        splitAfter: Double = 260.0,
+        rerouteAt: Int? = null,
+        seekAt: Int? = null,
+        seekTo: Double = Double.NaN,
+        each: (t: Int, routeMeters: Double, choices: List<LaneChoice>, speed: Double, latch: RunUpLatch) -> Unit = { _, _, _, _, _ -> },
+    ): List<RampStep> {
+        val latch = RunUpLatch(tuning)
+        val out = ArrayList<RampStep>()
+        var car = 0.0
+        var newRoute = Double.NaN
+        for (t in 0..110) {
+            val now = t.toDouble()
+            if (t == seekAt) {
+                latch.reset(now, seek = true)
+                focus.reset(now)
+                if (!seekTo.isNaN()) car = seekTo
+            }
+            if (t == rerouteAt) newRoute = 0.0
+            val speed = if (car < rampGore) 28.0 else 20.0
+            val choices = when {
+                !newRoute.isNaN() -> emptyList()
+                car <= rampGore -> listOf(LaneChoice("r1/0/3/end", rampGore - car, iw31Gore.lanes.size, iw31Gore.lanes.count { it.usable }, 0, onFreeway = true, atManeuver = true))
+                else -> listOf(LaneChoice("r1/0/4/end", rampGore + splitAfter - car, 2, 1, 0, onFreeway = true, atManeuver = true)).filter { it.isAhead }
+            }
+            val routeMeters = if (newRoute.isNaN()) car else newRoute
+            val handed = latch.exitKey == "r1/0/3/end"
+            latch.onProgress(
+                now,
+                choices,
+                speed,
+                routeMeters = routeMeters,
+                rampMeters = if (handed) rampMeters else Double.NaN,
+                rampMps = if (handed) rampMps else Double.NaN,
+            )
+            focus.onProgress(now, routeMeters, choices, speed, runUpKey = latch.exitKey, rampAhead = if (giveRamp) latch.rampAhead else Double.NaN)
+            out.add(RampStep(t, car - rampGore, focus.goal, focus.focusAt(now), focus.runUpKey))
+            each(t, routeMeters, choices, speed, latch)
+            car += speed
+            if (!newRoute.isNaN()) newRoute += speed
+        }
+        return out
+    }
+
+    @Test
+    fun `IW31's run-up holds the close view through the ramp to its split and lets go past it`() {
+        // The split 260 m past the gore is 12.9 s at the ramp's planning speed: held to.
+        assertEquals(260.0, iw31Ramp.meters, 1e-9)
+        assertEquals(12.9, 260.0 / rampMps, 0.05)
+        assertTrue(iw31Gore.lanes.count { it.usable } in 1 until iw31Gore.lanes.size, "the exit counts as a lane choice")
+        val held = rampDrive(rampMeters = 260.0)
+        // In at the exit's own window, 700 m before the gore at 28 m/s: the update 676 m before it.
+        val first = held.first { it.goal == 1.0 }
+        assertEquals(33, first.t)
+        assertEquals(-676.0, first.pastGore, 1e-9)
+        // Held with no gap through the gore and the ramp; at 264 m the car is past the split, and the view stays its 2 s.
+        assertEquals(264.0, held.single { it.t == 70 }.pastGore, 1e-9)
+        assertTrue(held.filter { it.t in 33..71 }.all { it.goal == 1.0 }, "no gap")
+        assertTrue(held.filter { it.t >= 72 }.all { it.goal == 0.0 })
+        // On the ramp the run-up's key holds it, for the camera line.
+        assertTrue(held.filter { it.pastGore > 0.0 && it.pastGore < 260.0 }.all { it.runUp == "r1/0/3/end" })
+        assertNull(held.last().runUp)
+        // Without the ramp, the interim's hold: 2 s past the gore, and out.
+        val interim = rampDrive(rampMeters = Double.NaN)
+        assertTrue(interim.filter { it.t in 33..59 }.all { it.goal == 1.0 })
+        assertTrue(interim.filter { it.t >= 60 }.all { it.goal == 0.0 })
+    }
+
+    @Test
+    fun `a split farther than 15 s, one without lane data and a camera not given the ramp let go past the gore as before`() {
+        val interim = rampDrive(rampMeters = Double.NaN).map { it.goal }
+        val beyond = (tuning.rampBridgeSeconds + 1.0) * rampMps
+        assertEquals(interim, rampDrive(rampMeters = beyond, splitAfter = beyond).map { it.goal }, "a split a second beyond the limit")
+        // A split without lane data: the plan constrains no point there and hands none.
+        assertEquals(interim, rampDrive(rampMeters = Double.NaN, splitAfter = 200.0).map { it.goal }, "no lane data")
+        // The latch holds through the ramp, but a camera not given its distance holds as before.
+        assertEquals(interim, rampDrive(rampMeters = 260.0, giveRamp = false).map { it.goal }, "not given the ramp")
+        // The border, 15 s at the ramp's planning speed: held to its very end, past it 2 s more; a centimetre farther, the
+        // interim's.
+        val border = tuning.rampBridgeSeconds * rampMps
+        val atBorder = rampDrive(rampMeters = border, splitAfter = border)
+        assertTrue(atBorder.filter { it.t in 33..73 }.all { it.goal == 1.0 })
+        assertEquals(0.0, atBorder.single { it.t == 74 }.goal)
+        assertEquals(interim, rampDrive(rampMeters = border + 0.01, splitAfter = border + 0.01).map { it.goal })
+    }
+
+    @Test
+    fun `a reroute on the ramp lets the view go after the interim's time hold, and a seek there lets it go at once`() {
+        // A new route 64 m past the gore: its metres start anew, the latch lets go, and the view keeps only its 2 s.
+        val rerouted = rampDrive(rampMeters = 260.0, rerouteAt = 60)
+        assertEquals(64.0, rerouted.single { it.t == 60 }.pastGore, 1e-9)
+        assertTrue(rerouted.filter { it.t in 33..61 }.all { it.goal == 1.0 })
+        assertTrue(rerouted.filter { it.t >= 62 }.all { it.goal == 0.0 })
+        // A seek that lands on the ramp: the run-up ends, the focus goes out from where it is, and nothing holds it again.
+        val seekOnRamp = rampDrive(rampMeters = 260.0, seekAt = 60)
+        assertTrue(seekOnRamp.filter { it.t >= 60 }.all { it.goal == 0.0 })
+        // A seek back onto the approach, 600 m before the gore: within 3 s the run-up goes on, and through the ramp again.
+        val seekBack = rampDrive(rampMeters = 260.0, seekAt = 60, seekTo = 1_000.0)
+        assertEquals(1.0, seekBack.single { it.t == 60 }.goal)
+        val again = seekBack.filter { it.t >= 60 }
+        val split = again.first { it.pastGore >= 260.0 }
+        assertTrue(again.filter { it.t < split.t + 2 }.all { it.goal == 1.0 }, "through the gore and the ramp again")
+        assertEquals(0.0, again.single { it.t == split.t + 2 }.goal)
+    }
+
+    @Test
+    fun `a camera made anew on the ramp comes in at once and lets go past the split with the others`() {
+        val goals = ArrayList<Pair<Int, Double>>()
+        val second = LaneFocus(tuning)
+        val first = rampDrive(rampMeters = 260.0) { t, routeMeters, choices, speed, latch ->
+            if (t >= 60) {
+                second.onProgress(t.toDouble(), routeMeters, choices, speed, runUpKey = latch.exitKey, rampAhead = latch.rampAhead)
+                goals.add(t to second.goal)
+            }
+        }
+        assertEquals(1.0, goals.first().second, "its first update, on the ramp")
+        assertEquals(first.filter { it.t >= 60 }.map { it.t to it.goal }, goals)
+    }
+
+    @Test
+    fun `with the Default lane zoom nothing follows the lane focus, so the ramp bridge changes nothing`() {
+        // Mapbox standard reads no lane focus at all and is given no ramp; Default reads the focus but follows none of it.
+        val planner = ZoomPlanner(tuning)
+        for (drive in listOf(rampDrive(rampMeters = 260.0), rampDrive(rampMeters = Double.NaN))) {
+            for (step in drive) {
+                assertEquals(17.25, planner.target(LaneZoom.DEFAULT, 17.25, 0.0, 0.0, false, step.focus, roadFrame = true), "at ${step.t} s")
+                assertFalse(CloseView.smoothFollow(0.0, false, step.goal, laneMoving = step.focus != step.goal, large = false))
+                assertFalse(CloseView.smoothFollowLatched(0.0, false, step.goal, false, large = false))
+                assertFalse(CloseView.mapboxTuned(framesManeuver = false, laneWindow = step.goal > 0.0, large = false))
+            }
+        }
+        // With Large the same drive does follow it: the ramp's hold is the close view's.
+        val large = rampDrive(rampMeters = 260.0).single { it.t == 66 }
+        assertTrue(CloseView.smoothFollowLatched(0.0, false, large.goal, false, large = true))
     }
 
     @Test

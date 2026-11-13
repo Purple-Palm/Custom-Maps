@@ -55,6 +55,16 @@ internal class RouteLanePlan(
     }
 
     private val pointsByNode: Map<Int, LaneTopology.Point> by lazy { plan.topology.points.associateBy { it.node } }
+
+    /**
+     * Where the plan holds the run-up to the exit the lane choices' [key] names through the ramp after its gore
+     * ([LanePlan.rampAfter]): the same object for that exit every time; null where it holds through none, and for a key
+     * of no lane point of this route.
+     */
+    fun rampAfter(key: String?): LanePlan.RampHold? {
+        val node = input.nodeOf(key) ?: return null
+        return plan.rampAfter(node)
+    }
 }
 
 /**

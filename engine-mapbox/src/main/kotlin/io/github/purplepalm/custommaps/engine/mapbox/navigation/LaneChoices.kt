@@ -15,6 +15,7 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
+import io.github.purplepalm.custommaps.nav.lanes.LanePlan
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Lane
@@ -40,6 +41,9 @@ import io.github.purplepalm.custommaps.nav.model.RunUpLanes
  * close view comes in once for it and stays to the gore, and the card shows one lane row for it
  * ([RunUpRule]). The one latch for the card and every camera is held here and moved once per
  * update of the route progress ([runUp]); the cameras get the exit it holds for ([runUpKey]).
+ * Past the gore it holds on through the ramp to the next point the lane plan constrains there,
+ * when that is near ([rampAhead]): the card shows the row of the ramp step's own maneuver, the
+ * split's, from the gore on, and the cameras keep the close view to it.
  *
  * The engine owns one. The lanes of a step are read once, when the car enters it; an update of the
  * route progress only measures how far ahead each point is. Called on the main thread.
@@ -295,10 +299,21 @@ internal class LaneChoices(
      *
      * @param speedMps the car's speed, the one the card's lanes and the cameras get
      * @param nowSeconds the engine's clock, which a resume and a seek are timed on
+     * @param ramp where the lane plan of [progress]'s route holds the run-up on now ([runUpKey]) through
+     *   the ramp after its gore ([LanePlan.rampAfter]); null where it holds through none
      */
-    fun runUp(progress: RouteProgress, speedMps: Double?, nowSeconds: Double): RunUpLanes? = runUpOnce(progress) {
+    fun runUp(progress: RouteProgress, speedMps: Double?, nowSeconds: Double, ramp: LanePlan.RampHold? = null): RunUpLanes? = runUpOnce(progress) {
         val metersOnStep = progress.currentLegProgress?.currentStepProgress?.distanceTraveled?.toDouble() ?: 0.0
-        moveRunUp(ahead(progress), progress.currentState != RouteProgressState.OFF_ROUTE, metersOnStep, speedMps, nowSeconds)
+        moveRunUp(
+            ahead(progress),
+            progress.currentState != RouteProgressState.OFF_ROUTE,
+            metersOnStep,
+            speedMps,
+            nowSeconds,
+            routeMeters = progress.distanceTraveled.toDouble(),
+            rampMeters = ramp?.meters ?: Double.NaN,
+            rampMps = ramp?.planningMps ?: Double.NaN,
+        )
     }
 
     /**
@@ -316,13 +331,31 @@ internal class LaneChoices(
     /**
      * One move of the latch, in plain values: [choices] as [ahead] gave them for a car
      * [metersOnStep] into the loaded step. The row it gives is also what [runUp] hands out until
-     * the next move.
+     * the next move. On the ramp the latch holds through after a gore, the row is that of the
+     * step's own maneuver, the split's, from the gore on.
      *
      * @param onRoute false while the navigator has the car off the route
+     * @param routeMeters how far the car is along the route; not a number where it is not known
+     * @param rampMeters the next point the lane plan constrains after the gore of the run-up on now,
+     *   its station after the gore, in metres; not a number where the plan has none
+     * @param rampMps the planning speed of that ramp
      */
-    fun moveRunUp(choices: List<LaneChoice>, onRoute: Boolean, metersOnStep: Double, speedMps: Double?, nowSeconds: Double): RunUpLanes? {
-        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute)
-        val row = if (exit == null) null else rowOf(exit.key, metersOnStep)
+    fun moveRunUp(
+        choices: List<LaneChoice>,
+        onRoute: Boolean,
+        metersOnStep: Double,
+        speedMps: Double?,
+        nowSeconds: Double,
+        routeMeters: Double = Double.NaN,
+        rampMeters: Double = Double.NaN,
+        rampMps: Double = Double.NaN,
+    ): RunUpLanes? {
+        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute, routeMeters, rampMeters, rampMps)
+        val row = when {
+            exit != null -> rowOf(exit.key, metersOnStep)
+            latch.rampAhead >= 0.0 -> maneuverPoint?.let { rowOf(it.key, metersOnStep) }
+            else -> null
+        }
         // The object stays the same while the row does, so a screen skips it.
         if (row != runUpRow) runUpRow = row
         return runUpRow
@@ -330,6 +363,12 @@ internal class LaneChoices(
 
     /** The exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up. */
     val runUpKey: String? get() = latch.exitKey
+
+    /**
+     * On the ramp after the run-up's gore, while the latch holds through it, how far the point it holds
+     * to still lies ahead, in metres ([RunUpLatch.rampAhead]); not a number elsewhere.
+     */
+    val rampAhead: Double get() = latch.rampAhead
 
     /** The key of the lane choice whose lanes [lanesAhead] gave the card at its last call; null when it gave none. */
     val choiceKey: String? get() = cardKey

@@ -1141,8 +1141,10 @@ internal class MapScene(
         renderManeuverArrow(style, progress)
         lastProgress = progress
         // The engine reads the lane choices once for each update; its own observer got the same
-        // list, and the run-up's latch moves once for it, so the card and the camera agree.
-        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), engine.runUpKey(progress))
+        // list, and the run-up's latch moves once for it, so the card and the camera agree, also on
+        // the ramp the latch holds through after a gore.
+        val runUpKey = engine.runUpKey(progress)
+        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), runUpKey, engine.laneChoices.rampAhead)
         // Once per update, and published only when it changes.
         _closeView.value = camera.closeView
         // The app's own lanes, with their switch on: whether the camera's close view holds, for the swap of the route line

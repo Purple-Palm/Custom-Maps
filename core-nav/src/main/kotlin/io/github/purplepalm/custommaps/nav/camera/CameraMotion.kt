@@ -114,6 +114,14 @@ data class CameraTuning(
      */
     val runUpResumeSeconds: Double = 3.0,
     /**
+     * After the gore of a run-up's exit the close view holds through the ramp to the next point the
+     * lane plan constrains there, a fork or a split with lane data or a ramp step's maneuver the plan
+     * names a lane for, when that point lies within this much driving at the ramp's planning speed
+     * ([RunUpLatch]). Elsewhere the view is let go past the gore after its hold of [laneHoldSeconds]
+     * and [laneHoldMeters], as before.
+     */
+    val rampBridgeSeconds: Double = 15.0,
+    /**
      * With Large, Smooth follow tilts the close view for a lane choice to this, along the same
      * curve as the zoom ([guidancePitch]): the lanes at the car keep [freewayLaneDp], and more of
      * the road ahead shows above them.

@@ -245,7 +245,7 @@ internal class NavigationCameraAdapter(
         if (isTeleport && !away) navigationCamera.resetFrame()
     }
 
-    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?) {
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double) {
         dataSource.onRouteProgressChanged(progress)
         if (tuned) {
             val now = nowSeconds()
@@ -260,6 +260,7 @@ internal class NavigationCameraAdapter(
                 // A maneuver the SDK frames, as it counts them, from where it begins to frame it.
                 turnAhead = LaneZoomFrames.turnAhead(progress, { near.enabled && it !in near.excludedManeuvers }, near.triggerDistanceFromManeuver),
                 runUpKey = runUpKey,
+                rampAhead = rampAhead,
             )
             // The SDK's own tilt: the floor is worked out for it. A map that is going has no size
             // to ask, and the floor stays as it was.

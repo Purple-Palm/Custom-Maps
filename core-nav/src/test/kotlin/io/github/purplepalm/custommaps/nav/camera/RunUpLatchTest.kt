@@ -1,8 +1,13 @@
 package io.github.purplepalm.custommaps.nav.camera
 
+import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
+import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /** Made-up keys and round synthetic distances, in metres ahead of the car. */
@@ -211,5 +216,193 @@ class RunUpLatchTest {
         latch.onProgress(0.0, emptyList(), 25.0, onRoute = false)
         latch.reset(1.0, seek = true)
         assertNull(latch.onProgress(1.5, listOf(exit(1_300.0)), 25.0))
+    }
+
+    // ------------------------------------------------------------------ the ramp bridge (D20)
+
+    /** IW31's ramp as its lane plan holds through it: the split 260 m past the gore, and the ramp's planning speed. */
+    private val iw31Ramp = LaneScenes.iw31().let { route ->
+        val plan = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)))
+        requireNotNull(plan.rampAfter(route.nodes.indexOfFirst { it.station == LaneScenes.GORE }))
+    }
+
+    /** IW31's ramp's planning speed. */
+    private val rampMps = iw31Ramp.planningMps
+
+    /** The ramp step's split ahead: a fork of two lanes, no lane choice of its own. */
+    private fun split(ahead: Double, route: String = "r1") =
+        LaneChoice("$route/0/4/end", ahead, laneCount = 2, usableLanes = 1, designatedLanes = 0, onFreeway = true, atManeuver = true)
+
+    /** One update of [rampDrive]: how far past the gore the car is, and what the latch held. */
+    private class RampUpdate(val t: Int, val pastGore: Double, val exitKey: String?, val startKey: String?, val rampAhead: Double)
+
+    /** Where the exit's gore lies along the route in [rampDrive]. */
+    private val gore = 1_000.0
+
+    /**
+     * The run-up to the exit `r1/0/3/end`, whose gore lies [gore] metres along the route, driven at 20 m/s from the route's start
+     * with one update a second, and on along the ramp past it to its split [splitAfter] metres past the gore. While the run-up
+     * to that exit is on, the latch is handed the plan's point [rampMeters] past the gore on a ramp planned at [planningMps], as
+     * the engine hands it ([io.github.purplepalm.custommaps.nav.lanes.LanePlan.rampAfter]).
+     */
+    private fun rampDrive(rampMeters: Double, planningMps: Double = rampMps, splitAfter: Double = rampMeters): List<RampUpdate> {
+        val latch = RunUpLatch(tuning)
+        val out = ArrayList<RampUpdate>()
+        for (t in 0..75) {
+            val car = 20.0 * t
+            val choices = if (car <= gore) listOf(exit(gore - car)) else listOfNotNull(split(gore + splitAfter - car).takeIf { it.isAhead })
+            val handed = latch.exitKey == "r1/0/3/end"
+            latch.onProgress(
+                t.toDouble(),
+                choices,
+                20.0,
+                routeMeters = car,
+                rampMeters = if (handed) rampMeters else Double.NaN,
+                rampMps = if (handed) planningMps else Double.NaN,
+            )
+            out.add(RampUpdate(t, car - gore, latch.exitKey, latch.startKey, latch.rampAhead))
+        }
+        return out
+    }
+
+    @Test
+    fun `past the gore it holds through the ramp to the split the plan constrains within 15 s`() {
+        assertEquals(15.0, tuning.rampBridgeSeconds)
+        assertEquals(LanePlanner.RAMP_BRIDGE_SECONDS, tuning.rampBridgeSeconds, "the plan's ramp windows and the camera's hold agree")
+        // IW31: the ramp splits 260 m past the gore, 12.9 s at its planning speed.
+        assertEquals(260.0, iw31Ramp.meters, 1e-9)
+        assertEquals(12.9, 260.0 / rampMps, 0.05)
+        val drive = rampDrive(rampMeters = 260.0)
+        // From the exit's own window, 500 m before the gore at 20 m/s, to the gore, as before.
+        val runUp = drive.filter { it.pastGore in -500.0..0.0 }
+        assertEquals(26, runUp.size)
+        assertTrue(runUp.all { it.exitKey == "r1/0/3/end" && it.startKey == "r1/0/3/end" && it.rampAhead.isNaN() })
+        // On through the ramp, the exit and its start kept, with how far the split still is.
+        val ramp = drive.filter { it.pastGore > 0.0 && it.pastGore < 260.0 }
+        assertEquals(12, ramp.size)
+        for (u in ramp) {
+            assertEquals("r1/0/3/end", u.exitKey, "${u.pastGore} m past the gore")
+            assertEquals("r1/0/3/end", u.startKey)
+            assertEquals(260.0 - u.pastGore, u.rampAhead, 1e-9)
+        }
+        // At the split it lets go, as at a gore without a ramp to hold through.
+        assertTrue(drive.filter { it.pastGore >= 260.0 }.all { it.exitKey == null && it.startKey == null && it.rampAhead.isNaN() })
+    }
+
+    @Test
+    fun `a split farther than 15 s at the ramp's planning speed, or none the plan constrains, is not held to`() {
+        fun ramp(rampMeters: Double, planningMps: Double = rampMps) =
+            rampDrive(rampMeters, planningMps, splitAfter = 300.0).filter { it.pastGore > 0.0 && it.exitKey != null }.size
+        // 15 s at the ramp's planning speed: held to its very end; a centimetre farther, not at all.
+        val border = tuning.rampBridgeSeconds * rampMps
+        assertEquals(15, ramp(border), "held over the ramp's 15 updates")
+        assertEquals(0, ramp(border + 0.01))
+        // A split a second beyond the limit, as the plan would never hand one: let go at the gore.
+        assertEquals(0, ramp((tuning.rampBridgeSeconds + 1.0) * rampMps))
+        // No point the plan constrains (a split without lane data), and a ramp with no planning speed.
+        assertEquals(0, ramp(Double.NaN))
+        assertEquals(0, ramp(260.0, planningMps = Double.NaN))
+        assertEquals(0, ramp(260.0, planningMps = 0.0))
+        // Nor without the car's metres along the route, as a caller that does not give them.
+        val latch = RunUpLatch(tuning)
+        latch.onProgress(0.0, listOf(exit(300.0)), 20.0)
+        latch.onProgress(15.0, listOf(split(240.0)), 20.0, rampMeters = 260.0, rampMps = rampMps)
+        assertNull(latch.exitKey)
+        assertTrue(latch.rampAhead.isNaN())
+    }
+
+    @Test
+    fun `on the ramp it holds whatever the speed does, and its numbers alone hold nothing`() {
+        val latch = RunUpLatch(tuning)
+        latch.onProgress(0.0, listOf(exit(300.0)), 20.0, routeMeters = 700.0)
+        latch.onProgress(15.0, listOf(split(240.0)), 20.0, routeMeters = 1_020.0, rampMeters = 260.0, rampMps = rampMps)
+        // Slowed to a stop, and with no speed at all: still held, still 120 m short of the split.
+        for ((t, speed) in listOf(22.0 to 0.0, 40.0 to 0.0, 41.0 to null)) {
+            assertNull(latch.onProgress(t, listOf(split(120.0)), speed, routeMeters = 1_140.0, rampMeters = 260.0, rampMps = rampMps))
+            assertEquals("r1/0/3/end", latch.exitKey, "at $speed m/s")
+            assertEquals(120.0, latch.rampAhead, 1e-9)
+        }
+        // Outside a run-up the plan's numbers begin nothing.
+        val idle = RunUpLatch(tuning)
+        assertNull(idle.onProgress(0.0, listOf(split(200.0)), 20.0, routeMeters = 1_060.0, rampMeters = 260.0, rampMps = rampMps))
+        assertNull(idle.exitKey)
+        assertTrue(idle.rampAhead.isNaN())
+    }
+
+    @Test
+    fun `a reroute on the ramp ends it, and a new route's exit in reach goes on as after any end`() {
+        /** On the ramp 80 m past the gore, held to its split 260 m past it. */
+        fun onRamp(): RunUpLatch = RunUpLatch(tuning).also {
+            it.onProgress(0.0, listOf(exit(300.0)), 20.0, routeMeters = 700.0)
+            it.onProgress(19.0, listOf(split(180.0)), 20.0, routeMeters = 1_080.0, rampMeters = 260.0, rampMps = rampMps)
+            assertEquals(180.0, it.rampAhead, 1e-9)
+        }
+        // The navigator puts the car on a new route, whose metres start anew: the ramp is not held on.
+        val rerouted = onRamp()
+        assertNull(rerouted.onProgress(20.0, listOf(split(160.0, route = "r2")), 20.0, routeMeters = 0.0))
+        assertNull(rerouted.exitKey)
+        assertTrue(rerouted.rampAhead.isNaN())
+        // Nor later on the new route, whose numbers the engine no longer hands.
+        assertNull(rerouted.onProgress(21.0, listOf(split(140.0, route = "r2")), 20.0, routeMeters = 20.0))
+        assertTrue(rerouted.rampAhead.isNaN())
+        // A new route whose own exit lies within reach: its run-up goes on at once, as after a reroute before a gore.
+        val again = onRamp()
+        assertEquals("r2/0/3/end", again.onProgress(20.0, listOf(exit(1_200.0, route = "r2")), 20.0, routeMeters = 0.0)?.key)
+        assertEquals(RunUpLatch.RESUME, again.startKey)
+        assertTrue(again.rampAhead.isNaN())
+        // Later than 3 s after the end, on its reach alone, it would not.
+        val late = onRamp()
+        assertNull(late.onProgress(20.0, listOf(split(160.0, route = "r2")), 20.0, routeMeters = 0.0))
+        assertNull(late.onProgress(23.0, listOf(exit(1_200.0, route = "r2")), 20.0, routeMeters = 60.0))
+        // Off the route on the ramp: ended as well, and back on it the ramp is not held again.
+        val off = onRamp()
+        assertNull(off.onProgress(20.0, emptyList(), 20.0, onRoute = false, routeMeters = 1_080.0))
+        assertNull(off.onProgress(21.0, listOf(split(160.0)), 20.0, routeMeters = 1_100.0))
+        assertNull(off.exitKey)
+        assertTrue(off.rampAhead.isNaN())
+    }
+
+    @Test
+    fun `a seek on the ramp ends it, and one back onto the approach within 3 s goes on through the ramp again`() {
+        val latch = RunUpLatch(tuning)
+        latch.onProgress(0.0, listOf(exit(300.0)), 20.0, routeMeters = 700.0)
+        latch.onProgress(15.0, listOf(split(240.0)), 20.0, routeMeters = 1_020.0, rampMeters = 260.0, rampMps = rampMps)
+        latch.reset(15.4, seek = true)
+        assertNull(latch.exitKey)
+        assertTrue(latch.rampAhead.isNaN())
+        // Landed on the ramp: no exit ahead, nothing to go on with.
+        assertNull(latch.onProgress(15.8, listOf(split(120.0)), 20.0, routeMeters = 1_140.0))
+        assertTrue(latch.rampAhead.isNaN())
+        // A seek back 600 m before the gore within 3 s: the run-up goes on on its reach alone, and through the ramp at its gore.
+        latch.reset(17.0, seek = true)
+        assertEquals("r1/0/3/end", latch.onProgress(17.5, listOf(exit(600.0)), 20.0, routeMeters = 400.0)?.key)
+        assertEquals(RunUpLatch.RESUME, latch.startKey)
+        latch.onProgress(47.5, listOf(exit(0.0)), 20.0, routeMeters = 1_000.0)
+        latch.onProgress(48.5, listOf(split(240.0)), 20.0, routeMeters = 1_020.0, rampMeters = 260.0, rampMps = rampMps)
+        assertEquals("r1/0/3/end", latch.exitKey)
+        assertEquals(240.0, latch.rampAhead, 1e-9)
+        // A seek back onto the approach later than 3 s after the run-up ended: nothing before the exit's own window.
+        latch.reset(49.0, seek = true)
+        assertNull(latch.onProgress(53.0, listOf(exit(600.0)), 20.0, routeMeters = 400.0))
+    }
+
+    @Test
+    fun `an exit or fork that counts ahead on the ramp within reach takes over, one beyond reach does not`() {
+        fun onRamp(): RunUpLatch = RunUpLatch(tuning).also {
+            it.onProgress(0.0, listOf(exit(300.0)), 20.0, routeMeters = 700.0)
+            it.onProgress(15.0, listOf(split(240.0)), 20.0, routeMeters = 1_020.0, rampMeters = 260.0, rampMps = rampMps)
+        }
+        // A fork of four lanes, two of them the route's, 200 m ahead: its own run-up, begun again at once.
+        val fork = LaneChoice("r1/0/4/end", 200.0, laneCount = 4, usableLanes = 2, designatedLanes = 0, onFreeway = true, atManeuver = true)
+        val near = onRamp()
+        assertSame(fork, near.onProgress(15.4, listOf(fork), 20.0, routeMeters = 1_040.0, rampMeters = 260.0, rampMps = rampMps))
+        assertEquals("r1/0/4/end", near.exitKey)
+        assertEquals(RunUpLatch.RESUME, near.startKey)
+        assertTrue(near.rampAhead.isNaN())
+        // Beyond the reach of 2,000 m at 20 m/s, it begins nothing yet: the ramp is held on.
+        val far = onRamp()
+        assertNull(far.onProgress(15.4, listOf(fork.copy(metersAhead = 2_000.5)), 20.0, routeMeters = 1_040.0, rampMeters = 260.0, rampMps = rampMps))
+        assertEquals("r1/0/3/end", far.exitKey)
+        assertEquals(220.0, far.rampAhead, 1e-9)
     }
 }
