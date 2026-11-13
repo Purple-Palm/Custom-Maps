@@ -75,6 +75,8 @@
     <string name="guidance_then_on_left">On the left</string>
     <string name="guidance_then_on_right">On the right</string>
     <string name="guidance_then_destination">Destination</string>
+    <!-- The route data on the phone's screen while the car shows the map: no map, so no logo, and this in its place. -->
+    <string name="data_attribution">© Mapbox © OpenStreetMap</string>
     <string name="replay_position">Simulated drive position</string>
     <string name="replay_position_percent">%1$d%%</string>
     <string name="then_sharp_right">sharp right</string>

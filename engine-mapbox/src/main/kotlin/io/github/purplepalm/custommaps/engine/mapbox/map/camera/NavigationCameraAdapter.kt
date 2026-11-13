@@ -123,6 +123,9 @@ internal class NavigationCameraAdapter(
     /** True while the navigation camera is sent idle on the way to another state, which is reported instead. */
     private var quiet = false
 
+    /** True while the phone's map is put away for the list ([setAway]): the camera hears nothing of its data source. */
+    private var away = false
+
     /**
      * Counts the camera's frame updates, each one a new animation, and the ones cancelled before
      * they finished because the next update or a gesture came first. Also reports who takes the map
@@ -237,8 +240,9 @@ internal class NavigationCameraAdapter(
         }
         // The route progress of this update comes right after the location and evaluates.
         if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
-        // The puck jumps on a teleport, and the camera with it: neither slides across the map.
-        if (isTeleport) navigationCamera.resetFrame()
+        // The puck jumps on a teleport, and the camera with it: neither slides across the map. A map
+        // put away goes to the frame of now when it is back.
+        if (isTeleport && !away) navigationCamera.resetFrame()
     }
 
     override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?) {
@@ -291,7 +295,7 @@ internal class NavigationCameraAdapter(
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
         // A seek put the car here: the camera goes to the new place's frame at once, with it.
-        if (jumpFrame.progressJumps()) navigationCamera.resetFrame()
+        if (jumpFrame.progressJumps() && !away) navigationCamera.resetFrame()
     }
 
     override fun onJump() {
@@ -322,6 +326,18 @@ internal class NavigationCameraAdapter(
 
     // It draws no frames of its own that would have to stop.
     override fun setVisible(visible: Boolean) = Unit
+
+    /**
+     * Each frame the data source computes starts an animation of the navigation camera, on the main
+     * thread, drawn or not: while the phone's map is put away for the list the camera hears none of
+     * them, and back it goes to the frame of now at once, from wherever the map was left.
+     */
+    override fun setAway(away: Boolean) {
+        if (away == this.away) return
+        this.away = away
+        source.paused = away
+        if (!away) navigationCamera.resetFrame()
+    }
 
     override fun diagnostics(): Map<String, Any?> {
         val limits = dataSource.options.followingFrameOptions
@@ -403,25 +419,36 @@ internal class NavigationCameraAdapter(
     /**
      * [NavigationCamera] listens to its data source for as long as it lives and has no call to stop.
      * It gets this stand-in, which passes everything on to the real data source and can take the
-     * camera's observer off it again when the camera is destroyed.
+     * camera's observer off it again when the camera is destroyed. While [paused] the camera's
+     * observer hears no new frame; the data source goes on computing them for everyone else.
      */
     private class DetachableSource(private val source: ViewportDataSource) : ViewportDataSource {
+        /** The camera's observers, and the stand-in of each that the real data source calls. */
         private val observers = ArrayList<ViewportDataSourceUpdateObserver>(1)
+        private val gates = ArrayList<ViewportDataSourceUpdateObserver>(1)
+
+        /** True while the phone's map is put away for the list. */
+        var paused = false
 
         override fun getViewportData(): ViewportData = source.getViewportData()
 
         override fun registerUpdateObserver(viewportDataSourceUpdateObserver: ViewportDataSourceUpdateObserver) {
+            val gate = ViewportDataSourceUpdateObserver { data -> if (!paused) viewportDataSourceUpdateObserver.viewportDataSourceUpdated(data) }
             observers += viewportDataSourceUpdateObserver
-            source.registerUpdateObserver(viewportDataSourceUpdateObserver)
+            gates += gate
+            source.registerUpdateObserver(gate)
         }
 
         override fun unregisterUpdateObserver(viewportDataSourceUpdateObserver: ViewportDataSourceUpdateObserver) {
-            observers -= viewportDataSourceUpdateObserver
-            source.unregisterUpdateObserver(viewportDataSourceUpdateObserver)
+            val index = observers.indexOf(viewportDataSourceUpdateObserver)
+            if (index < 0) return
+            observers.removeAt(index)
+            source.unregisterUpdateObserver(gates.removeAt(index))
         }
 
         fun detach() {
-            observers.forEach(source::unregisterUpdateObserver)
+            gates.forEach(source::unregisterUpdateObserver)
+            gates.clear()
             observers.clear()
         }
     }

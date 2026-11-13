@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,11 +32,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -95,6 +98,10 @@ import kotlinx.coroutines.withContext
 /**
  * The main screen: the map with search, route choice and guidance drawn over it. [network] is the
  * app's network as Android reports it, for the chip that says when the app is offline.
+ *
+ * While [listShown], during a drive while a car's surface shows the map ([PhoneScreens]), the phone
+ * shows the drive without its map: the map is put away, kept as it is but out of the window, and comes
+ * back as of now when the list goes. With no car it is never shown.
  */
 @Composable
 fun MapScreen(
@@ -104,6 +111,7 @@ fun MapScreen(
     debugLog: DebugLog,
     network: StateFlow<NetworkStatus>,
     onOpenSettings: () -> Unit,
+    listShown: Boolean,
 ) {
     val context = LocalContext.current
     val activity = LocalActivity.current
@@ -129,19 +137,31 @@ fun MapScreen(
         onDispose { engine.detachPhoneHost(lifecycleOwner) }
     }
 
-    // The map is made with the look it is to show, so its first tiles are drawn in that look.
+    // The map is made with the look it is to show, so its first tiles are drawn in that look. It is
+    // kept while the list shows in its place: back, it is the same map, with no new style load.
     val phoneMap = remember { engine.createPhoneMap(context, looks.lookOnMap.value) }
     DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
-    // Every later look, at once, and what the map did with it for the look's line in the debug log.
-    LaunchedEffect(phoneMap) { looks.showOn(phoneMap::setLook) }
-    // Whether the camera shows a close view, which holds a look switch. Taken as the map works it
-    // out at each progress update, within that update, so the switch reads the update's own.
-    LaunchedEffect(phoneMap) {
-        withContext(Dispatchers.Main.immediate) {
-            try {
-                phoneMap.closeView.collect { looks.onCloseView(it) }
-            } finally {
-                looks.onCloseView(false)
+    // Put away while the list shows: its view leaves the window below, which stops it as a stopped
+    // activity does, and its scene draws nothing. It takes no part in the look meanwhile: no look is
+    // shown on it, and the car map's close view holds a switch in place of its own.
+    DisposableEffect(phoneMap, listShown) {
+        phoneMap.setAway(listShown)
+        looks.onPhoneMapAway(listShown)
+        onDispose { looks.onPhoneMapAway(false) }
+    }
+    if (!listShown) {
+        // Every later look, at once, and what the map did with it for the look's line in the debug
+        // log. Back from the list, its first one is the look decided meanwhile.
+        LaunchedEffect(phoneMap) { looks.showOn(phoneMap::setLook) }
+        // Whether the camera shows a close view, which holds a look switch. Taken as the map works it
+        // out at each progress update, within that update, so the switch reads the update's own.
+        LaunchedEffect(phoneMap) {
+            withContext(Dispatchers.Main.immediate) {
+                try {
+                    phoneMap.closeView.collect { looks.onCloseView(it) }
+                } finally {
+                    looks.onCloseView(false)
+                }
             }
         }
     }
@@ -285,7 +305,12 @@ fun MapScreen(
             .fillMaxSize()
             .onSizeChanged { screenHeight = it.height },
     ) {
-        AndroidView(factory = { phoneMap.view }, modifier = Modifier.fillMaxSize())
+        // Out of the window while the list shows. The view is the same one when it comes back: it
+        // leaves whatever parent it had first, for a view can be in only one. Mapbox stops and starts
+        // it with the window; nothing here calls its lifecycle.
+        if (!listShown) {
+            AndroidView(factory = { phoneMap.view.also { view -> (view.parent as? ViewGroup)?.removeView(view) } }, modifier = Modifier.fillMaxSize())
+        }
 
         Column(
             Modifier
@@ -416,6 +441,18 @@ fun MapScreen(
                     onAction = requestLocation,
                 )
             }
+        }
+
+        // Mapbox's route data with no map under it: a static attribution where the map's own was.
+        if (listShown) {
+            Text(
+                text = stringResource(R.string.data_attribution),
+                style = MaterialTheme.typography.labelSmall,
+                color = LookTheme.tokens.onCardMuted,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 12.dp, bottom = with(density) { ornamentInset.toDp() } + 6.dp),
+            )
         }
 
         // Material's snackbar reads the inverse roles: the look's dark card with an amber action.

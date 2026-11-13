@@ -105,6 +105,15 @@ internal interface GuidanceCamera {
     fun setVisible(visible: Boolean)
 
     /**
+     * True while the phone's map is put away: its view is out of the window while the phone shows the
+     * list of the maneuvers ahead in its place, and [setVisible] is false too. A camera that moves the
+     * map with Mapbox's own animators, which run on the main thread whether the map draws or not,
+     * starts none then, and when the map is back goes at once to the frame of now. A camera that draws
+     * its own frames has nothing to do here beyond [setVisible].
+     */
+    fun setAway(away: Boolean) = Unit
+
+    /**
      * What this camera adds to the once-a-second camera line of the debug log. Counts cover the time
      * since the last call and start again.
      */

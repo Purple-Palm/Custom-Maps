@@ -37,7 +37,9 @@ import kotlinx.coroutines.flow.StateFlow
  * the style has loaded, and the tap that picks a route of the preview.
  *
  * The view's lifecycle follows the hosting activity; say with [setVisible] when the map is on screen,
- * and call [release] when the view leaves the composition.
+ * and call [release] when the view leaves the composition. While the phone shows the list of the
+ * maneuvers ahead in its place the screen keeps this map and takes its view out of the window, which
+ * stops the view as a stopped activity does, and says so with [setAway].
  */
 class PhoneMap internal constructor(
     context: Context,
@@ -186,6 +188,16 @@ class PhoneMap internal constructor(
      * starts as not on screen.
      */
     fun setVisible(visible: Boolean) = scene.setVisible(visible)
+
+    /**
+     * Call with true while the phone shows the list of the maneuvers ahead in place of this map, its
+     * view out of the window, and with false when the view is back; [setVisible] goes on saying
+     * whether the hosting activity is started. Out of the window the view stops as it does with a
+     * stopped activity: Mapbox's own lifecycle takes it to created, its render thread draws nothing
+     * and its puck takes no positions. The scene draws nothing either ([MapScene.setAway]) and comes
+     * back as of now: the puck where the car is, the route as driven and the camera on the car.
+     */
+    fun setAway(away: Boolean) = scene.setAway(away)
 
     /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
     fun release() {

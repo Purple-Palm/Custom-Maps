@@ -118,7 +118,8 @@ import kotlinx.coroutines.withContext
  * free drive billing) is needed just to see where you are. The camera follows the car there too,
  * from its first position until the driver moves the map, and again after My location
  * ([IdleFollow]); that takes no trip session and no request either. Say with [setVisible] when the
- * map is on screen, and call [release] when it goes.
+ * map is on screen, with [setAway] when the phone's map is put away for the list of the maneuvers
+ * ahead, and call [release] when it goes.
  *
  * During guidance, while the map is on screen, it writes a "camera" line to the debug log once a
  * second: where the camera is and where the viewport data source wants it, how smoothly the camera
@@ -390,6 +391,9 @@ internal class MapScene(
 
     /** Whether the map is on screen, as the hosting screen says with [setVisible]. */
     private var visible = false
+
+    /** Whether the phone's map is put away while the phone shows the list of the maneuvers ahead in its place ([setAway]). */
+    private var away = false
 
     /**
      * The puck position the data source was last given outside guidance; null once the navigator's
@@ -881,7 +885,24 @@ internal class MapScene(
      */
     fun setVisible(visible: Boolean) {
         this.visible = visible
-        camera.setVisible(visible)
+        camera.setVisible(visible && !away)
+    }
+
+    /**
+     * Call with true while the phone's map is put away, its view out of the window while the phone
+     * shows the list of the maneuvers ahead in its place, and with false when it is back. In between
+     * the scene draws nothing, whatever [setVisible] says: its camera asks for no frames and starts no
+     * animation, and the camera line goes on once a second while the phone's screen is on, with "away".
+     * The routes, the progress and the data source go on as before, so the map comes back as of now;
+     * back during a drive, the camera follows the car again, from the frame of now.
+     */
+    fun setAway(away: Boolean) {
+        if (away == this.away) return
+        this.away = away
+        // Whatever the camera did before the map went away, overview or the driver's own view.
+        if (!away && guidanceState == GuidanceState.ACTIVE && _cameraMode.value != CameraMode.FOLLOWING) camera.requestFollowing()
+        camera.setAway(away)
+        camera.setVisible(visible && !away)
     }
 
     /** Stops listening to the navigator. The map itself follows the lifecycle of its host. */
@@ -1401,7 +1422,8 @@ internal class MapScene(
                 )
         }
         created.setLaneZoom(laneZoom)
-        created.setVisible(visible)
+        created.setAway(away)
+        created.setVisible(visible && !away)
         return created
     }
 
@@ -1436,9 +1458,10 @@ internal class MapScene(
                 // The own route line, with its switch on: the SDK's line again where it has no data.
                 if (ownLine.enabled) ownLine.check()
                 // Taken even when hidden, so every logged line covers one second. In the background
-                // the map draws nothing; the "activity" lines say when that was.
+                // the map draws nothing; the "activity" lines say when that was. The phone's map put
+                // away for the list writes it while its screen is on, with "away", and draws nothing.
                 val sample = cameraSample()
-                if (host.shown) debugLog.log("camera", sample)
+                if (if (away) visible else host.shown) debugLog.log("camera", sample)
             }
         }
     }
@@ -1463,7 +1486,10 @@ internal class MapScene(
      * "animatorsEnabled" is false when Android's animations are switched off.
      * "style" is the camera style in use, so drives in different styles can be compared. "capped"
      * is true while the phone's map draws at most [PhoneFrameCap.CAPPED_FPS] frames a second,
-     * because a car's surface shows the map too. The screen adds its own at the end
+     * because a car's surface shows the map too. "away" is true while the phone's map is put away,
+     * the phone showing the list of the maneuvers ahead in its place ([setAway]): its render thread
+     * is stopped, so "render.frames" is 0, and the camera's and the puck's fields are those it was
+     * left with. The screen adds its own at the end
      * ([Host.cameraFields]): the car its frame clock's ticks of the second ("clock" with "vsyncTicks"
      * and "timerTicks"), the cap on its surface's frames ("maxFps"), where the rate it was worked out
      * for came from ("capFrom": render, display or timer) and the display rate measured now
@@ -1550,6 +1576,8 @@ internal class MapScene(
             "hz" to host.refreshRate?.let { Math.round(it) },
             // Only while a car's surface shows the map too.
             "capped" to true.takeIf { phoneCap.capped },
+            // Only while the phone's map is put away for the list.
+            "away" to true.takeIf { away },
         ) + host.cameraFields()
         fixes = 0
         paddingChanges = 0

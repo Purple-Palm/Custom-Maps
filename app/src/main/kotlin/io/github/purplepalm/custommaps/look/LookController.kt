@@ -129,6 +129,9 @@ class LookController(
     private var phoneCloseView = false
     private var carCloseView = false
 
+    /** The phone's map is put away while the phone shows the list of the maneuvers ahead in its place ([onPhoneMapAway]). */
+    private var phoneMapAway = false
+
     /** How often the phone's activity and the car's session are started now ([runWhileStarted]). */
     private var phoneScreens = 0
     private var carScreens = 0
@@ -138,9 +141,15 @@ class LookController(
 
     /**
      * The close view that holds a switch: the car map's while the car's session is started and the
-     * phone's activity is not; otherwise the phone map's, as with no car.
+     * phone's map is not on the phone's screen, its activity stopped or the map put away for the list;
+     * otherwise the phone map's, as with no car, and none while that map is away: what it said last is
+     * as old as the moment it went.
      */
-    private val closeView: Boolean get() = if (carScreens > 0 && phoneScreens == 0) carCloseView else phoneCloseView
+    private val closeView: Boolean get() = when {
+        carScreens > 0 && (phoneScreens == 0 || phoneMapAway) -> carCloseView
+        phoneMapAway -> false
+        else -> phoneCloseView
+    }
 
     /** Whether a change shows somebody a map: not while Settings covers the phone's, unless the car's screen shows one. */
     private val mapOnScreen: Boolean get() = !covered || carScreens > 0
@@ -267,13 +276,24 @@ class LookController(
     /**
      * Whether the guidance camera of [screen]'s map shows a close view now, as the map works it out
      * at each progress update. The car map's holds a switch only while the phone's activity is not
-     * started ([closeView]).
+     * started or the phone's map is away ([closeView]).
      */
     override fun onCloseView(closeView: Boolean, screen: LookScreen) {
         when (screen) {
             LookScreen.PHONE -> phoneCloseView = closeView
             LookScreen.CAR -> carCloseView = closeView
         }
+    }
+
+    /**
+     * The phone's map is put away ([away] true) while the phone shows the list of the maneuvers ahead
+     * in its place, its view out of the window, or back. While it is away it takes no part in the
+     * look: the screen shows it no look ([showOn] runs for it only while it is there), its close view
+     * holds nothing, and the car map's close view holds a switch as it does while the phone's activity
+     * is stopped. Back, its first request is the look as decided meanwhile.
+     */
+    fun onPhoneMapAway(away: Boolean) {
+        phoneMapAway = away
     }
 
     /**

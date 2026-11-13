@@ -20,6 +20,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.AppGraph
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.MapsAccess
+import io.github.purplepalm.custommaps.nav.car.PhoneScreen
 import io.github.purplepalm.custommaps.ui.map.MapScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
@@ -41,6 +42,8 @@ fun CustomMapsApp(graph: AppGraph) {
     val access by graph.mapsAccess.collectAsStateWithLifecycle()
     // The map is made once the first look is decided, so it draws its first tiles in that look.
     val lookDecided by graph.lookController.decided.collectAsStateWithLifecycle()
+    // During a drive while a car's surface shows the map, the phone shows the drive without its map.
+    val phoneScreen by graph.phoneScreens.state.collectAsStateWithLifecycle()
     val tokenViewModel = viewModel { TokenViewModel(graph.tokenStore, graph.engine.navigation.guidanceState, graph.debugLog) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
@@ -68,6 +71,7 @@ fun CustomMapsApp(graph: AppGraph) {
                     debugLog = graph.debugLog,
                     network = graph.network.status,
                     onOpenSettings = { showSettings = true },
+                    listShown = phoneScreen.screen == PhoneScreen.LIST,
                 )
             }
         }

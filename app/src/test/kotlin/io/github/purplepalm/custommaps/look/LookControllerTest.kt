@@ -986,4 +986,96 @@ class LookControllerTest {
         assertFalse("keys" in rig.looks().last())
         assertEquals(4, rig.looks().size)
     }
+
+    @Test
+    fun `the car map's close view holds a switch while the phone's map is away`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        rig.onScreen()
+        rig.onCarScreen()
+        runCurrent()
+        // A drive with the car: the phone shows the list, its map put away in no close view, while
+        // the car's camera, far from any turn, is in one.
+        rig.drive(5_000.0)
+        rig.controller.onPhoneMapAway(true)
+        rig.controller.onCloseView(false, LookScreen.PHONE)
+        rig.controller.onCloseView(true, LookScreen.CAR)
+        rig.elevation = -4.0
+        rig.at(60)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookHold.CLOSE_VIEW, rig.controller.switchState.waitingFor)
+        for (second in 61L..70L) {
+            rig.at(second)
+            rig.drive(5_000.0 - (second - 60) * 30.0)
+            assertEquals(Look.DAY, rig.controller.look.value)
+        }
+        // The car's camera leaves its close view: the switch goes at the next update.
+        rig.controller.onCloseView(false, LookScreen.CAR)
+        rig.at(71)
+        rig.drive(4_670.0)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(LookHold.CLOSE_VIEW, rig.looks().last()["heldBy"])
+        assertEquals(11L, rig.looks().last()["heldS"])
+    }
+
+    @Test
+    fun `the phone map's close view from before it went away holds nothing`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        rig.onScreen()
+        val car = rig.onCarScreen()
+        runCurrent()
+        // The phone's camera was in a close view when the list came; the car's is in none.
+        rig.drive(5_000.0)
+        rig.controller.onCloseView(true, LookScreen.PHONE)
+        rig.controller.onPhoneMapAway(true)
+        rig.elevation = -4.0
+        rig.at(60)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertFalse("heldS" in rig.looks().last(), "a switch that went at once")
+        // Nor with the car's session stopped while the map is still away: no map's close view holds.
+        car.cancel()
+        runCurrent()
+        rig.controller.onCloseView(true, LookScreen.CAR)
+        rig.elevation = 10.0
+        rig.at(720)
+        rig.drive(4_000.0)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        // Back on the phone's screen, its map's close view holds again.
+        rig.controller.onPhoneMapAway(false)
+        rig.elevation = -4.0
+        rig.at(1_380)
+        rig.drive(3_000.0)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookHold.CLOSE_VIEW, rig.controller.switchState.waitingFor)
+    }
+
+    @Test
+    fun `the phone's map back from the list gets the look decided while it was away`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        rig.onScreen()
+        rig.onCarScreen()
+        runCurrent()
+        val phone = rig.showMap()
+        rig.showCarMap()
+        runCurrent()
+        // A drive with the car: the list in place of the phone's map, which is shown no look meanwhile.
+        rig.drive(5_000.0)
+        phone.cancel()
+        rig.controller.onPhoneMapAway(true)
+        runCurrent()
+        rig.controller.onChoice(LookChoice.NIGHT)
+        runCurrent()
+        // The car's map takes it, the line has its fields, and nothing waits for the map away.
+        assertEquals(listOf(LookOnMap(Look.DAY)), rig.requests)
+        assertEquals(LookOnMap(Look.NIGHT), rig.carRequests.last())
+        assertEquals(16, rig.looks().last()["keys"])
+        // The map back: its first request is the look as it is now.
+        rig.controller.onPhoneMapAway(false)
+        rig.showMap()
+        runCurrent()
+        assertEquals(listOf(LookOnMap(Look.DAY), LookOnMap(Look.NIGHT)), rig.requests)
+        assertEquals(1, rig.looks().count { it["cause"] == LookCause.CHOICE })
+    }
 }
