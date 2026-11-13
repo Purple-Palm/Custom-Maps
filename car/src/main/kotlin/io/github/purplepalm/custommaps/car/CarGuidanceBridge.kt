@@ -133,8 +133,9 @@ class CarGuidanceBridge(
     }
 
     private fun startNavigation(cause: String) {
+        // Asked before in this drive: the car is taken back after the host's stop.
+        val again = startAsked
         startAsked = true
-        val again = navigating
         if (call("navigationStarted") { port.navigationStarted() }) {
             navigating = true
             log.log(NAV_LINE, mapOf("event" to "navigationStarted", "cause" to cause, "again" to again))

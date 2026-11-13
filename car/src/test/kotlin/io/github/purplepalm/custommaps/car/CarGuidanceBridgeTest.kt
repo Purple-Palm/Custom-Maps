@@ -133,7 +133,9 @@ class CarGuidanceBridgeTest {
         bridge.onGuidance(GuidanceState.ACTIVE)
         assertEquals(listOf("setCallback", "navigationStarted"), port.calls)
         assertTrue(bridge.navigating)
-        assertEquals(CarGuidanceBridge.CAUSE_DRIVE, log.nav("navigationStarted").single()["cause"])
+        val started = log.nav("navigationStarted").single()
+        assertEquals(CarGuidanceBridge.CAUSE_DRIVE, started["cause"])
+        assertEquals(false, started["again"])
     }
 
     @Test
@@ -213,6 +215,8 @@ class CarGuidanceBridgeTest {
         bridge.onProgress(towardsExit(5.0, step = "new/0/0"))
         assertEquals(2, port.trips.size)
         assertEquals(2, log.nav("navigationStarted").size)
+        // A new drive is no taking back.
+        assertEquals(false, log.nav("navigationStarted").last()["again"])
     }
 
     @Test
@@ -252,7 +256,9 @@ class CarGuidanceBridgeTest {
         assertTrue(bridge.navigating)
         // The card's content goes to the host at once.
         assertEquals(listOf("navigationStarted", "updateTrip"), port.calls.takeLast(2))
-        assertEquals(CarGuidanceBridge.CAUSE_INTENT, log.nav("navigationStarted").last()["cause"])
+        val takenBack = log.nav("navigationStarted").last()
+        assertEquals(CarGuidanceBridge.CAUSE_INTENT, takenBack["cause"])
+        assertEquals(true, takenBack["again"])
         // The start that follows the intent asks nothing more, and nor does a start outside a drive.
         bridge.takeBack(CarGuidanceBridge.CAUSE_START)
         bridge.onGuidance(GuidanceState.IDLE)
