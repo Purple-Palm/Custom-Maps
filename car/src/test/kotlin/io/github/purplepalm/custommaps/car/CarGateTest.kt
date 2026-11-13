@@ -1,0 +1,48 @@
+package io.github.purplepalm.custommaps.car
+
+import io.github.purplepalm.custommaps.nav.MapsAccess
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
+
+/** What the car's screen may show while the phone is set up, and what its map does on each change. */
+class CarGateTest {
+
+    @Test
+    fun `the gate follows the token store and precise location`() {
+        for (precise in listOf(true, false)) {
+            assertEquals(CarGate.LOADING, CarGate.of(MapsAccess.Checking, precise))
+            assertEquals(CarGate.NO_TOKEN, CarGate.of(MapsAccess.NeedsToken, precise))
+        }
+        assertEquals(CarGate.READY, CarGate.of(MapsAccess.Ready(1), preciseLocation = true))
+        assertEquals(CarGate.NO_PRECISE_LOCATION, CarGate.of(MapsAccess.Ready(1), preciseLocation = false))
+    }
+
+    @Test
+    fun `the map is made once the gate is ready, for the token of the moment`() {
+        assertEquals(CarMapStep.Build(1), CarMapStep.next(null, MapsAccess.Ready(1), CarGate.READY))
+        assertEquals(CarMapStep.Build(3), CarMapStep.next(null, MapsAccess.Ready(3), CarGate.READY))
+    }
+
+    @Test
+    fun `the same token keeps the map`() {
+        assertEquals(CarMapStep.Keep, CarMapStep.next(2, MapsAccess.Ready(2), CarGate.READY))
+    }
+
+    @Test
+    fun `another token makes the map again`() {
+        assertEquals(CarMapStep.Rebuild(3), CarMapStep.next(2, MapsAccess.Ready(3), CarGate.READY))
+    }
+
+    @Test
+    fun `without a token the map goes, and none is made`() {
+        assertEquals(CarMapStep.Release, CarMapStep.next(2, MapsAccess.NeedsToken, CarGate.NO_TOKEN))
+        assertEquals(CarMapStep.Keep, CarMapStep.next(null, MapsAccess.NeedsToken, CarGate.NO_TOKEN))
+    }
+
+    @Test
+    fun `no map is made while the token store is read or without precise location`() {
+        assertEquals(CarMapStep.Keep, CarMapStep.next(null, MapsAccess.Checking, CarGate.LOADING))
+        assertEquals(CarMapStep.Keep, CarMapStep.next(null, MapsAccess.Ready(1), CarGate.NO_PRECISE_LOCATION))
+        assertEquals(CarMapStep.Release, CarMapStep.next(1, MapsAccess.Ready(1), CarGate.NO_PRECISE_LOCATION))
+    }
+}
