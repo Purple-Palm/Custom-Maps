@@ -275,6 +275,20 @@ class LanePlansTest {
     }
 
     @Test
+    fun `where the plan begins a run-up is found by the exit's key, in metres before its gore`() {
+        val held = requireNotNull(plan())
+        val seam = held.plan.seams.single()
+        val gore = requireNotNull(held.pointOf("route-a#0/0/0/end")).station
+        val before = requireNotNull(held.seamBefore("route-a#0/0/0/end"))
+        assertEquals(gore - seam.from, before, 1e-9)
+        assertTrue(before >= gore - seam.latchFrom - 1e-9, "no later than the card's latch on its own at the planning speed")
+        assertEquals(before, held.seamBefore("route-a#0/0/1/0"), "the exit's own key names the same gore")
+        assertNull(held.seamBefore("route-a#0/0/0/1"), "a lane point that is no exit")
+        assertNull(held.seamBefore("route-b#0/0/0/end"), "another route's key")
+        assertNull(held.seamBefore(null))
+    }
+
+    @Test
     fun `the plan's lookup at a station gives the same object anywhere in a stretch`() {
         val held = requireNotNull(plan())
         val exit = held.pointOf("route-a#0/0/0/end")!!

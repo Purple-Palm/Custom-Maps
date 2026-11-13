@@ -281,6 +281,25 @@ class CardPlanAgreementTest {
     }
 
     @Test
+    fun `the card's run-up comes in at the plan's seam, before the latch would on its own where the plan narrows lanes earlier`() {
+        val earlier = HashMap<String, Double>()
+        for (name in listOf("ia", "ia-far", "iw31", "s5", "s6", "s7", "s8", "s9", "s11", "s13", "s15", "s16", "s17", "s20")) {
+            val route = requireNotNull(freeway[name])
+            val plan = plan(route)
+            val seam = plan.seams.single()
+            val withPlan = CardDrive(route, plan = plan).drive().first { it.row.source == CardLanes.Source.RUN_UP }
+            val alone = CardDrive(route).drive().first { it.row.source == CardLanes.Source.RUN_UP }
+            assertEquals(seam.from, withPlan.station, 1.0, "$name with its plan")
+            assertEquals(seam.latchFrom, alone.station, 1.0, "$name, the latch on its own")
+            earlier[name] = seam.earlierMeters
+        }
+        // IW31's first narrowing, where its leftmost lane cannot be used, lies far before the option lane's window.
+        assertTrue(earlier.getValue("iw31") > 1_000.0)
+        // An edge point within the reach begins the run-up there on its own: the seam moves nothing.
+        for (name in listOf("s8", "s9", "s15", "s16", "s20")) assertEquals(0.0, earlier.getValue(name), name)
+    }
+
+    @Test
     fun `where no lane can be named the card's row from the plan has no words`() {
         // A left exit beyond the car-pool lane (where only the car-pool lane can be used, as in GEOM's S5, the exit is no
         // lane choice and there is no run-up).

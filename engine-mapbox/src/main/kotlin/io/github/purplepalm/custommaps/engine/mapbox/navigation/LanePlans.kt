@@ -67,6 +67,19 @@ internal class RouteLanePlan(
         val node = input.nodeOf(key) ?: return null
         return plan.rampAfter(node)
     }
+
+    /**
+     * Where the plan begins the run-up to the exit the lane choices' [key] names (its seam, [LanePlan.Seam]: the earlier of
+     * where the card's latch begins it on its own at the planning speed and the plan's first narrowing for a lane point of
+     * it, a few seconds ahead), in metres before the exit's gore; null for a key of no run-up of this route.
+     */
+    fun seamBefore(key: String?): Double? {
+        val node = input.nodeOf(key) ?: return null
+        return seamsBefore[node]
+    }
+
+    /** Each run-up's seam in metres before its gore, by the intersection of its exit: worked out once, the first time one is asked for. */
+    private val seamsBefore: Map<Int, Double> by lazy { plan.seams.associate { it.node to input.route.nodes[it.node].station - it.from } }
 }
 
 /**

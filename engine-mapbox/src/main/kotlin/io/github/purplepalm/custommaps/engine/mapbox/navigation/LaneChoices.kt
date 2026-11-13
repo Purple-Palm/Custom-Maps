@@ -56,6 +56,12 @@ internal class LaneChoices(
      * the latch, whoever moves it ([runUp]), so no caller can leave the ramp out.
      */
     private val rampOf: (routeId: String, exitKey: String) -> LanePlan.RampHold? = { _, _ -> null },
+    /**
+     * Where the lane plan of the route [routeId] begins the run-up to the exit [exitKey] (its seam, [LanePlan.Seam]), in metres
+     * before the exit's gore; null where it begins none, and while the route has no plan. Asked before each move of the latch
+     * while the step's exit is not the one it holds, whoever moves it ([runUp]): the run-up begins no later than there.
+     */
+    private val seamOf: (routeId: String, exitKey: String) -> Double? = { _, _ -> null },
     private val onError: (RuntimeException) -> Unit = {},
 ) {
 
@@ -98,6 +104,9 @@ internal class LaneChoices(
 
     /** Whether the lane plan's ramp could not be looked up during this drive; reported once. */
     private var rampFailed = false
+
+    /** Whether the lane plan's seam could not be looked up during this drive; reported once. */
+    private var seamFailed = false
 
     private var lastProgress: RouteProgress? = null
     private var lastAhead: List<LaneChoice> = emptyList()
@@ -342,9 +351,10 @@ internal class LaneChoices(
      * [metersOnStep] into the loaded step. The row it gives is also what [runUp] hands out until
      * the next move. Before it moves, the latch is given where the lane plan of the route
      * [routeId] holds the run-up on now through the ramp after its gore ([rampOf]): the next point
-     * the plan constrains there, its station after the gore, and the ramp's planning speed. On the
-     * ramp the latch holds through after a gore, the row is that of the step's own maneuver, the
-     * split's, from the gore on.
+     * the plan constrains there, its station after the gore, and the ramp's planning speed; and,
+     * while the step's exit is not the one it holds, where the plan begins that exit's run-up
+     * ([seamOf]): no later than there. On the ramp the latch holds through after a gore, the row is
+     * that of the step's own maneuver, the split's, from the gore on.
      *
      * @param onRoute false while the navigator has the car off the route
      * @param routeMeters how far the car is along the route; not a number where it is not known
@@ -360,7 +370,8 @@ internal class LaneChoices(
         routeId: String? = null,
     ): RunUpLanes? {
         val ramp = rampFor(routeId)
-        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute, routeMeters, ramp?.meters ?: Double.NaN, ramp?.planningMps ?: Double.NaN)
+        val seam = seamFor(routeId) ?: Double.NaN
+        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute, routeMeters, ramp?.meters ?: Double.NaN, ramp?.planningMps ?: Double.NaN, seam)
         val row = when {
             exit != null -> rowOf(exit.key, metersOnStep)
             latch.rampAhead >= 0.0 -> maneuverPoint?.let { rowOf(it.key, metersOnStep) }
@@ -384,6 +395,25 @@ internal class LaneChoices(
         } catch (e: RuntimeException) {
             if (!rampFailed) {
                 rampFailed = true
+                onError(e)
+            }
+            null
+        }
+    }
+
+    /**
+     * Where the lane plan of the route [routeId] begins the run-up to the step's exit, in metres before its gore, for the latch
+     * before it moves; null while the latch holds that exit already, where the plan begins none, and without the route's id. A
+     * lookup that fails costs the seam and one error line in a drive, never the drive: the latch begins as it does on its own.
+     */
+    private fun seamFor(routeId: String?): Double? {
+        val exitKey = maneuverPoint?.key ?: return null
+        if (routeId == null || exitKey == latch.exitKey) return null
+        return try {
+            seamOf(routeId, exitKey)
+        } catch (e: RuntimeException) {
+            if (!seamFailed) {
+                seamFailed = true
                 onError(e)
             }
             null
@@ -498,6 +528,7 @@ internal class LaneChoices(
     fun clear() {
         forgetStep()
         rampFailed = false
+        seamFailed = false
         // Forgotten: the time counts only for a seek.
         latch.reset(nowSeconds = 0.0)
     }

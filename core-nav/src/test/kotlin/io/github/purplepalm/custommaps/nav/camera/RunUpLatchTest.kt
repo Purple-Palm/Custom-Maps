@@ -405,4 +405,113 @@ class RunUpLatchTest {
         assertEquals("r1/0/3/end", far.exitKey)
         assertEquals(220.0, far.rampAhead, 1e-9)
     }
+
+    // ------------------------------------------------------------------ the lane plan's seam (D15)
+
+    @Test
+    fun `the plan's seam begins the run-up where it lies, also beyond the reach`() {
+        // 25 m/s: the reach is 2,125 m; the plan begins this run-up 2,600 m before the gore.
+        for ((exitAt, begins) in listOf(2_600.0 to true, 2_600.5 to false, 2_400.0 to true)) {
+            val latch = RunUpLatch(tuning)
+            val choices = listOf(exit(exitAt))
+            assertEquals(if (begins) choices[0] else null, latch.onProgress(0.0, choices, 25.0, seamMeters = 2_600.0), "exit at $exitAt m")
+            assertEquals(if (begins) "r1/0/3/end" else null, latch.exitKey)
+            assertEquals(if (begins) RunUpLatch.SEAM else null, latch.startKey)
+        }
+        // Within the reach, before the latch would begin on its own: the seam begins it too.
+        val latch = RunUpLatch(tuning)
+        assertNull(latch.onProgress(0.0, listOf(exit(1_900.0)), 25.0), "the latch alone waits for the exit's window")
+        assertEquals("r1/0/3/end", RunUpLatch(tuning).also { it.onProgress(0.0, listOf(exit(1_900.0)), 25.0, seamMeters = 1_950.0) }.exitKey)
+        // Once begun it holds as any run-up does, without the seam's number.
+        latch.onProgress(1.0, listOf(exit(1_880.0)), 25.0, seamMeters = 1_950.0)
+        assertEquals(RunUpLatch.SEAM, latch.startKey)
+        assertEquals("r1/0/3/end", latch.exitKey)
+        for ((t, speed) in listOf(2.0 to 10.0, 3.0 to null)) {
+            latch.onProgress(t, listOf(exit(1_850.0)), speed)
+            assertEquals("r1/0/3/end", latch.exitKey, "at $speed m/s")
+        }
+    }
+
+    @Test
+    fun `the seam is the start only where nothing else begins the run-up, and a later seam changes nothing`() {
+        // An edge point ahead begins it at the reach, as before, whatever seam the plan has.
+        val edge = RunUpLatch(tuning)
+        edge.onProgress(0.0, listOf(edge(1_500.0, "e"), exit(2_100.0)), 25.0, seamMeters = 2_400.0)
+        assertEquals(RunUpLatch.EDGE, edge.startKey)
+        // A counting choice in its window, likewise.
+        val window = RunUpLatch(tuning)
+        window.onProgress(0.0, listOf(point(600.0, "a"), exit(2_000.0)), 25.0, seamMeters = 2_200.0)
+        assertEquals("r1/0/3/a", window.startKey)
+        // Begun again within 3 s of an end.
+        val resumed = RunUpLatch(tuning)
+        resumed.onProgress(0.0, listOf(point(600.0, "a"), exit(2_000.0)), 25.0)
+        resumed.onProgress(1.0, emptyList(), 25.0, onRoute = false)
+        resumed.onProgress(2.0, listOf(exit(1_960.0)), 25.0, seamMeters = 2_200.0)
+        assertEquals(RunUpLatch.RESUME, resumed.startKey)
+        // A seam nearer the gore than the latch's own begin: the latch begins where it would on its own.
+        val later = RunUpLatch(tuning)
+        later.onProgress(0.0, listOf(edge(1_500.0, "e"), exit(2_100.0)), 25.0, seamMeters = 900.0)
+        assertEquals(RunUpLatch.EDGE, later.startKey)
+        // No seam, as for a route without a plan: the interim's latch.
+        assertNull(RunUpLatch(tuning).onProgress(0.0, listOf(exit(1_900.0)), 25.0, seamMeters = Double.NaN))
+    }
+
+    @Test
+    fun `a new route goes on with a run-up the seam began beyond the reach, before its own plan gives a seam`() {
+        // 25 m/s: the reach is 2,125 m; the plan of the first route begins the run-up 2,600 m before the gore.
+        fun begun() = RunUpLatch(tuning).also {
+            it.onProgress(0.0, listOf(exit(2_600.0)), 25.0, routeMeters = 1_000.0, seamMeters = 2_600.0)
+            it.onProgress(1.0, listOf(exit(2_575.0)), 25.0, routeMeters = 1_025.0)
+            assertEquals(RunUpLatch.SEAM, it.startKey)
+        }
+        // A new route at once: its exit lies within the seam the run-up began with, and no seam of its own yet.
+        val rerouted = begun()
+        assertEquals("r2/0/3/end", rerouted.onProgress(2.0, listOf(exit(2_550.0, route = "r2")), 25.0, routeMeters = 0.0)?.key)
+        assertEquals(RunUpLatch.RESUME, rerouted.startKey)
+        // And again on a second new route, still from that seam.
+        assertEquals("r2/0/3/end", rerouted.onProgress(3.0, listOf(exit(2_525.0, route = "r2")), 25.0, routeMeters = 25.0)?.key)
+        assertEquals("r3/0/3/end", rerouted.onProgress(4.0, listOf(exit(2_500.0, route = "r3")), 25.0, routeMeters = 0.0)?.key)
+        assertEquals(RunUpLatch.RESUME, rerouted.startKey)
+        // After a moment off the route, within the resume time.
+        val off = begun()
+        assertNull(off.onProgress(2.0, emptyList(), 25.0, onRoute = false, routeMeters = 1_025.0))
+        assertEquals("r2/0/3/end", off.onProgress(4.0, listOf(exit(2_500.0, route = "r2")), 25.0, routeMeters = 0.0)?.key)
+        // Not beyond that seam, nor after the resume time.
+        assertNull(begun().onProgress(2.0, listOf(exit(2_601.0, route = "r2")), 25.0, routeMeters = 0.0))
+        val late = begun()
+        late.onProgress(2.0, emptyList(), 25.0, onRoute = false, routeMeters = 1_025.0)
+        assertNull(late.onProgress(5.0, listOf(exit(2_500.0, route = "r2")), 25.0, routeMeters = 0.0))
+        // A run-up begun without a seam carries none: beyond the reach a new route waits as before.
+        val plain = RunUpLatch(tuning)
+        plain.onProgress(0.0, listOf(point(600.0, "a"), exit(2_100.0)), 25.0, routeMeters = 1_000.0)
+        assertNull(plain.onProgress(1.0, listOf(exit(2_200.0, route = "r2")), 25.0, routeMeters = 0.0))
+    }
+
+    @Test
+    fun `the seam of a run-up past its gore, or before a seek or a new drive, begins nothing for the next exit`() {
+        fun begun() = RunUpLatch(tuning).also {
+            it.onProgress(0.0, listOf(exit(2_600.0)), 25.0, routeMeters = 1_000.0, seamMeters = 2_600.0)
+            it.onProgress(104.0, listOf(exit(0.0)), 25.0, routeMeters = 3_600.0)
+        }
+        // The next step's exit, beyond the reach, right after the gore: the plan's own seam for it decides.
+        val gore = begun()
+        assertNull(gore.onProgress(105.0, emptyList(), 25.0, routeMeters = 3_625.0))
+        assertNull(gore.onProgress(106.0, listOf(exit(2_400.0, route = "r1")), 25.0, routeMeters = 3_650.0))
+        assertNull(gore.onProgress(107.0, listOf(exit(2_375.0, route = "r1")), 25.0, routeMeters = 3_675.0))
+        // A seek, and a new drive, forget the route's metres: the next update is no new route.
+        for (seek in listOf(true, false)) {
+            val reset = begun()
+            reset.reset(104.5, seek = seek)
+            assertNull(reset.onProgress(105.0, listOf(exit(2_400.0, route = "r2")), 25.0, routeMeters = 0.0), "seek $seek")
+        }
+    }
+
+    @Test
+    fun `no seam begins a run-up for an exit that does not count, nor one behind the car`() {
+        for (exit in listOf(exit(1_000.0, lanes = 2), exit(1_000.0, usable = 0), exit(1_000.0, freeway = false), exit(-5.0))) {
+            val latch = RunUpLatch(tuning)
+            assertNull(latch.onProgress(0.0, listOf(exit), 25.0, seamMeters = 2_000.0))
+            assertNull(latch.exitKey)
+        }
+    }
 }

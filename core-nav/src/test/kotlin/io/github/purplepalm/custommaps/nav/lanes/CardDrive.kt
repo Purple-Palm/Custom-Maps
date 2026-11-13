@@ -17,9 +17,10 @@ import io.github.purplepalm.custommaps.nav.model.TurnModifier
  * engine's lane choices make it (engine `LaneChoices`: the points of each step, the one run-up latch, the
  * run-up's row from [RunUpRule], a lane choice's row within its close view's window) and as [CardLanes]
  * picks one; the next maneuver's own row lights the lanes the route marks, as the navigation SDK's banner
- * does. With a [plan], as the engine has it once the route's plan is held: the latch holds through the ramps
- * the plan holds through ([LanePlan.rampAfter]), with the split's row on the ramp, and the run-up's row is read
- * from the plan ([CardPlanRow]). Keys are the route's node indices. Test code only.
+ * does. With a [plan], as the engine has it once the route's plan is held: the latch begins no later than the
+ * plan's seam ([LanePlan.seams]) and holds through the ramps the plan holds through ([LanePlan.rampAfter]), with the
+ * split's row on the ramp, and the run-up's row is read from the plan ([CardPlanRow]). Keys are the route's node
+ * indices. Test code only.
  */
 internal class CardDrive(private val route: LaneRoute, private val tuning: CameraTuning = CameraTuning.PHONE, private val plan: LanePlan? = null) {
 
@@ -59,12 +60,17 @@ internal class CardDrive(private val route: LaneRoute, private val tuning: Camer
             if (exit.isLanePoint && exit.maneuver?.viewStaysUp == true && toExit >= 0.0) {
                 choices.add(choice(exitNode, toExit, nodes[exitNode - 1].freeway, atManeuver = true, edgeLeaves = false))
             }
-            // As the engine hands the latch the ramp its plan holds through after the gore of the exit it holds.
+            // As the engine hands the latch the ramp its plan holds through after the gore of the exit it holds, and where the
+            // plan begins the step's exit's run-up.
             val ramp = latch.exitKey?.toIntOrNull()?.let { plan?.rampAfter(it) }
+            val seam = plan?.seams?.firstOrNull { it.node == exitNode }?.let { exit.station - it.from } ?: Double.NaN
             val held = if (plan == null) {
                 latch.onProgress(now, choices, speed, onRoute = true)
             } else {
-                latch.onProgress(now, choices, speed, onRoute = true, routeMeters = station, rampMeters = ramp?.meters ?: Double.NaN, rampMps = ramp?.planningMps ?: Double.NaN)
+                latch.onProgress(
+                    now, choices, speed, onRoute = true, routeMeters = station,
+                    rampMeters = ramp?.meters ?: Double.NaN, rampMps = ramp?.planningMps ?: Double.NaN, seamMeters = seam,
+                )
             }
             var source = CardLanes.Source.NONE
             var node = -1

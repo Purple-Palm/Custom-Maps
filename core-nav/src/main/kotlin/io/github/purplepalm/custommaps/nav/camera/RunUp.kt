@@ -18,6 +18,13 @@ import kotlin.math.max
  *   in reach, a moment off the route, a seek, or the gore of the run-up before, as at an exit right
  *   after a fork.
  *
+ * It begins no later than the lane plan's seam for the exit: the plan names a lane from its first
+ * narrowing for a point of the run-up, a few seconds of driving ahead (the engine hands its distance
+ * before the gore with every update), and the card, the map and both cameras go into the run-up with
+ * it, also where that lies beyond the reach ([SEAM] as [startKey]). A new route's plan is made after
+ * the route, so on a new route within [CameraTuning.runUpResumeSeconds] of a run-up's end the exit may
+ * also lie as far as the seam that run-up began with: the run-up goes on and does not wait for the plan.
+ *
  * It holds, whatever the speed does, until the exit is no longer a lane choice ahead: past the
  * gore, on a new route, off the route. Each of these records when it ended.
  *
@@ -36,7 +43,8 @@ class RunUpLatch(private val tuning: CameraTuning) {
 
     /**
      * What began the run-up, for the log: the key of the lane choice whose window did, [EDGE] when
-     * a point on the way ahead did, [RESUME] when it began again; null outside a run-up.
+     * a point on the way ahead did, [RESUME] when it began again, [SEAM] when the lane plan's seam
+     * did; null outside a run-up.
      */
     var startKey: String? = null
         private set
@@ -61,6 +69,12 @@ class RunUpLatch(private val tuning: CameraTuning) {
     /** How far along the route the car was at the last update: a new route counts from its own start. */
     private var lastRouteMeters = Double.NaN
 
+    /** The seam the run-up held now began with, in metres before its gore; not a number where it had none. */
+    private var seamHeld = Double.NaN
+
+    /** The seam of the run-up that ended last, which a new route may go on with; not a number where it had none. */
+    private var seamEnded = Double.NaN
+
     /**
      * One progress update.
      *
@@ -73,6 +87,8 @@ class RunUpLatch(private val tuning: CameraTuning) {
      *   ([exitKey]): its station after the gore, in metres; not a number where the plan has none
      * @param rampMps the planning speed of the ramp that leaves that gore, at which
      *   [CameraTuning.rampBridgeSeconds] are driven
+     * @param seamMeters where the lane plan begins the run-up to the step's exit (its seam), in
+     *   metres before the exit's gore; not a number where the plan has none
      * @return the exit the run-up is held for while it lies ahead; null outside a run-up and on its
      *   ramp
      */
@@ -84,6 +100,7 @@ class RunUpLatch(private val tuning: CameraTuning) {
         routeMeters: Double = Double.NaN,
         rampMeters: Double = Double.NaN,
         rampMps: Double = Double.NaN,
+        seamMeters: Double = Double.NaN,
     ): LaneChoice? {
         // A new route counts its metres from its own start: a ramp held on the route before says
         // nothing of it.
@@ -126,25 +143,33 @@ class RunUpLatch(private val tuning: CameraTuning) {
         }
         // Another exit than the one held for: on a new route, or the next step's.
         if (exitKey != null) end(nowSeconds)
-        if (exit.metersAhead > reachMeters(tuning, speedMps)) return null
+        // The lane plan names a lane from its seam on, so the run-up is on there whatever else holds, also beyond the reach.
+        val atSeam = exit.metersAhead <= seamMeters
+        val inReach = exit.metersAhead <= reachMeters(tuning, speedMps)
+        // A new route's plan comes after the route: meanwhile the seam of the run-up that just ended keeps it on.
+        val carried = if (newRoute) seamEnded else Double.NaN
+        val resumes = nowSeconds - endedAt < tuning.runUpResumeSeconds && (inReach || exit.metersAhead <= carried)
+        if (!inReach && !atSeam && !resumes) return null
         val window = LaneFocus.windowMeters(tuning, speedMps)
         var edgeAhead = false
         var nearest: LaneChoice? = null
         for (i in choices.indices) {
             val choice = choices[i]
-            if (!choice.isAhead) continue
+            if (!inReach || !choice.isAhead) continue
             if (!choice.atManeuver && choice.edgeLeaves) edgeAhead = true
             val opens = choice.metersAhead <= window && (choice.counts(tuning) || choice.edgeLeaves)
             if (opens && (nearest == null || choice.metersAhead < nearest.metersAhead)) nearest = choice
         }
         val start = when {
-            nowSeconds - endedAt < tuning.runUpResumeSeconds -> RESUME
+            resumes -> RESUME
             edgeAhead -> EDGE
             nearest != null -> nearest.key
+            atSeam -> SEAM
             else -> return null
         }
         exitKey = exit.key
         startKey = start
+        seamHeld = if (seamMeters.isNaN()) carried else seamMeters
         goreAt = routeMeters + exit.metersAhead
         return exit
     }
@@ -164,15 +189,22 @@ class RunUpLatch(private val tuning: CameraTuning) {
      */
     fun reset(nowSeconds: Double, seek: Boolean = false) {
         end(nowSeconds)
-        if (!seek) endedAt = Double.NEGATIVE_INFINITY
+        if (!seek) {
+            endedAt = Double.NEGATIVE_INFINITY
+            seamEnded = Double.NaN
+        }
         // The car is somewhere else now: its metres along the route start anew.
         lastRouteMeters = Double.NaN
     }
 
     private fun end(nowSeconds: Double) {
-        if (exitKey != null) endedAt = nowSeconds
+        if (exitKey != null) {
+            endedAt = nowSeconds
+            seamEnded = seamHeld
+        }
         exitKey = null
         startKey = null
+        seamHeld = Double.NaN
         goreAt = Double.NaN
         rampTo = Double.NaN
         rampAhead = Double.NaN
@@ -184,6 +216,9 @@ class RunUpLatch(private val tuning: CameraTuning) {
 
         /** [startKey] of a run-up begun again soon after one ended. */
         const val RESUME = "resume"
+
+        /** [startKey] of a run-up begun by the lane plan's seam: its first narrowing for a point of the run-up, a little ahead. */
+        const val SEAM = "seam"
 
         /** The matched position can slip back by less than this; a new route starts far below the old one. */
         private const val ROUTE_RESTART_METERS = 1.0

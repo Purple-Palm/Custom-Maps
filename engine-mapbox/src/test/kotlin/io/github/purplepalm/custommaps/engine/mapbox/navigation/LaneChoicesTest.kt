@@ -888,6 +888,82 @@ class LaneChoicesTest {
         assertEquals(LaneTarget(LaneEdge.RIGHT, 2, 0), passed.target)
     }
 
+    // ------------------------------------------------------------------ the plan's seam (D15)
+
+    /**
+     * One update of [lanes] with the exit [toExit] ahead at 25 m/s, on the route [routeId], on a step whose only lane point
+     * is its exit, so nothing on the way begins the run-up: where the car is on the step's shape reads nothing.
+     */
+    private fun seamDrive(lanes: LaneChoices, toExit: Double, t: Double, routeId: String? = "r"): RunUpLanes? {
+        val choices = lanes.update(false, "r/0/2", 0.0, toExit, "off ramp") { runUpStep(lanes, it, step = listOf(intersection(0))) }
+        return lanes.moveRunUp(choices, onRoute = true, metersOnStep = 0.0, speedMps = 25.0, nowSeconds = t, routeId = routeId)
+    }
+
+    @Test
+    fun `the plan's seam begins the run-up before the latch would on its own, and is asked until the latch holds the exit`() {
+        val asked = ArrayList<Pair<String, String>>()
+        val lanes = LaneChoices(seamOf = { routeId, exitKey -> asked += routeId to exitKey; if (routeId == "r") 1_400.0 else null })
+        assertNull(seamDrive(lanes, toExit = 1_500.0, t = 0.0), "short of the seam")
+        assertEquals(listOf("r" to "r/0/2/end"), asked, "asked with the route's id and the step's exit")
+        val row = requireNotNull(seamDrive(lanes, toExit = 1_400.0, t = 4.0))
+        assertEquals("r/0/2/end", row.key)
+        assertEquals("r/0/2/end", lanes.runUpKey)
+        assertEquals(RunUpLatch.SEAM, lanes.runUpStartKey)
+        val holding = asked.size
+        assertSame(row, seamDrive(lanes, toExit = 1_300.0, t = 8.0))
+        assertEquals(holding, asked.size, "not asked again while the latch holds the exit")
+        // Without the plan's seam, or without the route's id, the run-up waits for the exit's own window, 625 m at 25 m/s.
+        for ((other, routeId) in listOf(LaneChoices() to "r", LaneChoices(seamOf = { _, _ -> 1_400.0 }) to null)) {
+            assertNull(seamDrive(other, toExit = 1_400.0, t = 0.0, routeId = routeId))
+            assertNull(seamDrive(other, toExit = 630.0, t = 31.0, routeId = routeId))
+            assertEquals("r/0/2/end", seamDrive(other, toExit = 620.0, t = 32.0, routeId = routeId)?.key)
+            assertEquals("r/0/2/end", other.runUpStartKey)
+        }
+    }
+
+    @Test
+    fun `the plan's seam begins the run-up also beyond the latch's reach, before the edge point would`() {
+        val lanes = LaneChoices(seamOf = { _, _ -> 2_400.0 })
+        fun at(toExit: Double, t: Double): RunUpLanes? {
+            val choices = lanes.update(false, "r/0/2", 0.0, toExit, "off ramp") { runUpStep(lanes, it) }
+            return lanes.moveRunUp(choices, onRoute = true, metersOnStep = 0.0, speedMps = 25.0, nowSeconds = t, routeId = "r")
+        }
+        assertNull(at(toExit = 2_450.0, t = 0.0), "beyond the reach of 2,125 m and short of the seam")
+        assertEquals("r/0/2/2", at(toExit = 2_400.0, t = 2.0)?.key, "the edge point's row, as in a run-up the latch begins on its own")
+        assertEquals("r/0/2/end", lanes.runUpKey)
+        assertEquals(RunUpLatch.SEAM, lanes.runUpStartKey, "the edge point lies beyond the reach still")
+    }
+
+    @Test
+    fun `a new route keeps the run-up the seam began beyond the reach while the new route's plan is on its way`() {
+        // The plan of the route r begins the run-up 2,400 m before the gore, beyond the reach of 2,125 m at 25 m/s; the
+        // plan of the new route q is not held yet.
+        val lanes = LaneChoices(seamOf = { routeId, _ -> if (routeId == "r") 2_400.0 else null })
+        fun at(stepKey: String, toExit: Double, t: Double, routeMeters: Double): RunUpLanes? {
+            val choices = lanes.update(false, stepKey, 0.0, toExit, "off ramp") { runUpStep(lanes, it, step = listOf(intersection(0))) }
+            val routeId = stepKey.substringBefore('/')
+            return lanes.moveRunUp(choices, onRoute = true, metersOnStep = 0.0, speedMps = 25.0, nowSeconds = t, routeMeters = routeMeters, routeId = routeId)
+        }
+        assertEquals("r/0/2/end", at("r/0/2", toExit = 2_400.0, t = 0.0, routeMeters = 1_000.0)?.key)
+        assertEquals(RunUpLatch.SEAM, lanes.runUpStartKey)
+        assertEquals("q/0/2/end", at("q/0/2", toExit = 2_375.0, t = 1.0, routeMeters = 0.0)?.key, "the card's row goes on")
+        assertEquals("q/0/2/end", lanes.runUpKey, "and the cameras' run-up")
+        assertEquals(RunUpLatch.RESUME, lanes.runUpStartKey)
+    }
+
+    @Test
+    fun `a seam the plan cannot give costs the seam and one error line in a drive, never the drive`() {
+        val errors = ArrayList<RuntimeException>()
+        val lanes = LaneChoices(onError = { errors += it }, seamOf = { _, _ -> throw IllegalStateException("no plan") })
+        assertNull(seamDrive(lanes, toExit = 1_400.0, t = 0.0))
+        assertNull(seamDrive(lanes, toExit = 1_000.0, t = 16.0))
+        assertEquals("r/0/2/end", seamDrive(lanes, toExit = 620.0, t = 31.0)?.key, "the exit's own window, as before")
+        assertEquals(1, errors.size, "one error line in the drive")
+        lanes.clear()
+        seamDrive(lanes, toExit = 1_400.0, t = 0.0)
+        assertEquals(2, errors.size, "a new drive reports it again")
+    }
+
     // ------------------------------------------------------------------ the ramp bridge (D20)
 
     /** The split 260 m into the ramp after the exit's gore: a fork of two lanes, the left one the route's. */

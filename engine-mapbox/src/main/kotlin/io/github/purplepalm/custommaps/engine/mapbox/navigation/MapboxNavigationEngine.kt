@@ -234,12 +234,14 @@ internal class MapboxNavigationEngine(
      * The points with lanes ahead of the car, read from the route once for each step. The engine
      * owns the one copy; the map's camera reads the same list, so both see the same lane choices.
      * Its run-up latch looks up the ramp each run-up holds through in the lane plan of the
-     * update's route ([RouteLanePlan.rampAfter]) before every move, whoever moves it first: two
-     * lookups an update.
+     * update's route ([RouteLanePlan.rampAfter]) and, until it holds the step's exit, where the
+     * plan begins that exit's run-up ([RouteLanePlan.seamBefore]), before every move, whoever moves
+     * it first.
      */
     internal val laneChoices = LaneChoices(
         onError = { error -> debugLog.error("laneChoices", error) },
         rampOf = { routeId, exitKey -> lanePlans.planFor(routeId)?.rampAfter(exitKey) },
+        seamOf = { routeId, exitKey -> lanePlans.planFor(routeId)?.seamBefore(exitKey) },
     )
 
     /**
