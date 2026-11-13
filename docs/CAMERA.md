@@ -1423,9 +1423,10 @@ the lit lane of the app's own lanes begin together. A run-up the seam began says
 keeps that reason. A seam nearer the gore than the latch's own begin changes nothing. A new route
 within 3 s of a run-up's end, as after a reroute beyond the reach, may also find the exit as far
 ahead as the seam that run-up began with: the run-up goes on, and does not wait for the new route's
-plan. Not after a gore, a seek or a new drive. On invented approaches the seam begins a run-up from
-not at all to about a kilometre earlier; where an edge point within the reach begins it, nothing
-changes.
+plan. Only where that run-up ended with its gore still ahead: not after its gore, nor on the ramp
+it held through after it, nor after a seek or a new drive. On invented approaches the seam begins a
+run-up from not at all to about a kilometre earlier; where an edge point within the reach begins it,
+nothing changes.
 
 **How long it holds.** Whatever the speed does, until the exit is no longer among the points ahead:
 at the gore, when the step changes; with a new route, whose points have new keys; off the route,

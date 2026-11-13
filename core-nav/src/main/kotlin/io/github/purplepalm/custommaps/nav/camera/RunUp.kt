@@ -22,8 +22,9 @@ import kotlin.math.max
  * narrowing for a point of the run-up, a few seconds of driving ahead (the engine hands its distance
  * before the gore with every update), and the card, the map and both cameras go into the run-up with
  * it, also where that lies beyond the reach ([SEAM] as [startKey]). A new route's plan is made after
- * the route, so on a new route within [CameraTuning.runUpResumeSeconds] of a run-up's end the exit may
- * also lie as far as the seam that run-up began with: the run-up goes on and does not wait for the plan.
+ * the route, so on a new route within [CameraTuning.runUpResumeSeconds] of the end of a run-up whose
+ * gore was still ahead the exit may also lie as far as the seam that run-up began with: the run-up goes
+ * on and does not wait for the plan. Not after its gore, on the ramp after it or after a seek.
  *
  * It holds, whatever the speed does, until the exit is no longer a lane choice ahead: past the
  * gore, on a new route, off the route. Each of these records when it ended.
@@ -72,7 +73,10 @@ class RunUpLatch(private val tuning: CameraTuning) {
     /** The seam the run-up held now began with, in metres before its gore; not a number where it had none. */
     private var seamHeld = Double.NaN
 
-    /** The seam of the run-up that ended last, which a new route may go on with; not a number where it had none. */
+    /**
+     * The seam of the run-up that ended last with its gore still ahead, which a new route may go on with; not a number
+     * where it had none, where it ended at or past its gore, and after a seek or a new drive.
+     */
     private var seamEnded = Double.NaN
 
     /**
@@ -189,10 +193,9 @@ class RunUpLatch(private val tuning: CameraTuning) {
      */
     fun reset(nowSeconds: Double, seek: Boolean = false) {
         end(nowSeconds)
-        if (!seek) {
-            endedAt = Double.NEGATIVE_INFINITY
-            seamEnded = Double.NaN
-        }
+        // On its reach alone: no seam is handed on, also to a new route soon after.
+        seamEnded = Double.NaN
+        if (!seek) endedAt = Double.NEGATIVE_INFINITY
         // The car is somewhere else now: its metres along the route start anew.
         lastRouteMeters = Double.NaN
     }
@@ -200,7 +203,9 @@ class RunUpLatch(private val tuning: CameraTuning) {
     private fun end(nowSeconds: Double) {
         if (exitKey != null) {
             endedAt = nowSeconds
-            seamEnded = seamHeld
+            // Only a run-up that ends with its gore still ahead hands its seam on to a new route: past the gore, and on
+            // the ramp held through after it, the next exit's own seam decides.
+            seamEnded = if (rampTo.isNaN() && lastRouteMeters < goreAt) seamHeld else Double.NaN
         }
         exitKey = null
         startKey = null

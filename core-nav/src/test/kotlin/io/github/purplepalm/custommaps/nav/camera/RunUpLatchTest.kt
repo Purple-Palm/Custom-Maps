@@ -488,7 +488,7 @@ class RunUpLatchTest {
     }
 
     @Test
-    fun `the seam of a run-up past its gore, or before a seek or a new drive, begins nothing for the next exit`() {
+    fun `the seam of a run-up past its gore or on the ramp after it, or before a seek or a new drive, begins nothing for the next exit`() {
         fun begun() = RunUpLatch(tuning).also {
             it.onProgress(0.0, listOf(exit(2_600.0)), 25.0, routeMeters = 1_000.0, seamMeters = 2_600.0)
             it.onProgress(104.0, listOf(exit(0.0)), 25.0, routeMeters = 3_600.0)
@@ -504,6 +504,40 @@ class RunUpLatchTest {
             reset.reset(104.5, seek = seek)
             assertNull(reset.onProgress(105.0, listOf(exit(2_400.0, route = "r2")), 25.0, routeMeters = 0.0), "seek $seek")
         }
+        // At 24 m/s the reach is 2,100 m; the plan began the run-up 2,500 m before the gore. A new route right after the gore,
+        // whose exit lies beyond the reach but within that seam: nothing, the new route's own seam decides.
+        fun seamBegun(): RunUpLatch = RunUpLatch(tuning).also {
+            it.onProgress(0.0, listOf(exit(2_500.0)), 24.0, routeMeters = 1_000.0, seamMeters = 2_500.0)
+            assertEquals(RunUpLatch.SEAM, it.startKey)
+        }
+        val past = seamBegun()
+        past.onProgress(90.0, listOf(exit(0.0)), 24.0, routeMeters = 3_500.0)
+        assertNull(past.onProgress(91.0, emptyList(), 24.0, routeMeters = 3_524.0))
+        assertNull(past.onProgress(92.0, listOf(exit(2_300.0, route = "r2")), 24.0, routeMeters = 0.0))
+        assertNull(past.exitKey)
+        // Nor after a seek, also where a new route comes within the resume time.
+        val sought = seamBegun()
+        sought.reset(1.0, seek = true)
+        assertNull(sought.onProgress(1.5, listOf(exit(2_450.0)), 24.0, routeMeters = 1_050.0))
+        assertNull(sought.onProgress(2.5, listOf(exit(2_300.0, route = "r2")), 24.0, routeMeters = 0.0))
+        assertNull(sought.exitKey)
+        // On the ramp the run-up held through after its gore, at 20 m/s (a reach of 2,000 m) with a seam of 2,400 m: off the
+        // route there and then a new route, or a new route on the ramp itself, whose exit lies within that seam: nothing.
+        fun onRamp(): RunUpLatch = RunUpLatch(tuning).also {
+            it.onProgress(0.0, listOf(exit(2_400.0)), 20.0, routeMeters = 1_000.0, seamMeters = 2_400.0)
+            it.onProgress(120.0, listOf(exit(0.0)), 20.0, routeMeters = 3_400.0)
+            it.onProgress(121.0, listOf(split(240.0)), 20.0, routeMeters = 3_420.0, rampMeters = 260.0, rampMps = rampMps)
+            assertEquals(240.0, it.rampAhead, 1e-9)
+        }
+        val off = onRamp()
+        assertNull(off.onProgress(122.0, emptyList(), 20.0, onRoute = false, routeMeters = 3_440.0))
+        assertNull(off.onProgress(124.0, listOf(exit(2_200.0, route = "r2")), 20.0, routeMeters = 0.0))
+        assertNull(off.exitKey)
+        val rerouted = onRamp()
+        assertNull(rerouted.onProgress(122.0, listOf(exit(2_200.0, route = "r2")), 20.0, routeMeters = 0.0))
+        assertNull(rerouted.exitKey)
+        // Within the reach the new route's exit goes on at once, as after any end.
+        assertEquals("r2/0/3/end", onRamp().onProgress(122.0, listOf(exit(1_900.0, route = "r2")), 20.0, routeMeters = 0.0)?.key)
     }
 
     @Test
