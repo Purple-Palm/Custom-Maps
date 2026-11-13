@@ -23,15 +23,17 @@ import io.github.purplepalm.custommaps.car.routing.CarRoutingCard
 import io.github.purplepalm.custommaps.car.routing.LanesImageRenderer
 import io.github.purplepalm.custommaps.car.routing.ManeuverIconRenderer
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
+import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarLook
 import io.github.purplepalm.custommaps.nav.debug.withFields
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.look.Look
-import io.github.purplepalm.custommaps.nav.look.LookOnMap
+import io.github.purplepalm.custommaps.nav.look.LookScreen
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import java.time.ZonedDateTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +44,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -57,16 +60,21 @@ import kotlinx.coroutines.launch
  * - **The navigator** is kept alive by the session from the first token on ([CarParts.attachHost]) and
  *   let go by itself when the session is destroyed, never by hand. That starts nothing that is billed;
  *   the drive belongs to the engine and outlives the session.
- * - **The map** is made once the gate is ready, again for a new token, and let go of when the session
- *   ends ([CarMapStep]). It takes the phone's camera style, lane zoom, lane details and Debug switches,
- *   pins the destination of the preview or the drive, and follows the host's day and night.
+ * - **The map** is made once the gate is ready and the app's first look is decided, again for a new
+ *   token, and let go of when the session ends ([CarMapStep]). It takes the phone's camera style, lane
+ *   zoom, lane details and Debug switches, pins the destination of the preview or the drive, and
+ *   shows the app's one look, the phone's ([CarParts.look]): the session starts the look if no screen
+ *   has yet (the host may have started the process with no activity), keeps it deciding while the
+ *   session is started, as the phone's activity does, and hands the look to the map as the phone's
+ *   screen does; while the phone's activity is not started the map's close view holds a switch.
  * - **The screens** are the home screen and at most one message on top of it ([CarStack]), so the
  *   host's template count stays low and every flow ends on the home screen.
  * - **The drive** goes to the host through the guidance bridge ([CarGuidanceBridge]), set up first
  *   thing at ON_CREATE, and to the home screen's routing card from the same content, with the app's
- *   own images in the host's day or night look. A drive running when the session is made shows at
- *   once. Opening the app on the car's screen again during a drive takes the car back. At ON_DESTROY
- *   the bridge lets go before the map does; the drive goes on on the phone.
+ *   own images in the host's day or night look: they sit on the host's card, not on the map. A drive
+ *   running when the session is made shows at once. Opening the app on the car's screen again during
+ *   a drive takes the car back. At ON_DESTROY the bridge lets go before the map does; the drive goes
+ *   on on the phone.
  *
  * The car, the phone and the drive share one process, and car-app rethrows an exception of the app's
  * code on the main thread, which would end the phone's guidance too. So every way in catches it,
@@ -105,6 +113,9 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
     private var mapJobs: Job? = null
 
     private var preciseWatch: Job? = null
+
+    /** Keeps the app's look deciding while the session is started; null while it is not. */
+    private var lookWhileStarted: Job? = null
 
     /** The camera of the map there is now, for the home screen's buttons; idle without a map. */
     private val cameraMode = MutableStateFlow(CameraMode.IDLE)
@@ -204,16 +215,17 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
     }
 
     /**
-     * The host's day and night: the map takes the light and the colours at once and the basemap's theme
-     * once the mode has held ([CarLook]), and the home screen's template is built again for it.
+     * The host's day and night: the routing card's images take its look and the home screen's
+     * template is built again for them. The map keeps the app's look ([CarLook]); a "car_look" line
+     * says the host's mode beside it.
      */
     override fun onCarConfigurationChanged(newConfiguration: Configuration) {
         guard("onCarConfigurationChanged") {
             val dark = carContext.isDarkMode
             log.log(SESSION_LINE, mapOf("event" to "configuration", "dark" to dark))
+            log.log(LOOK_LINE, CarLook.fields(dark, CarLook.CAUSE_HOST, parts.look.lookOnMap.value))
             // The routing card's images take the host's look at once; each is drawn once in it.
             imageLook = CarLook.lookOf(dark)
-            map?.setLook(LookOnMap(CarLook.lookOf(dark)))
             home?.refresh()
         }
     }
@@ -226,6 +238,15 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
                 guard("startGuidance") { startGuidance() }
                 log.log(SESSION_LINE, fields + hostFields() + ("access" to parts.mapsAccess.value.toString()))
                 guard("watchConnection") { watchConnection() }
+                // The app's first look, when the car's host started the process and no activity has yet:
+                // the map waits for it, so that its first tiles are drawn in it, as the phone's do.
+                guard("lookStart") { parts.look.start() }
+                if (!parts.look.decided.value) {
+                    scope.launch {
+                        parts.look.decided.first { it }
+                        guard("look") { evaluate("look") }
+                    }
+                }
                 scope.launch { parts.mapsAccess.collect { guard("access") { evaluate("access") } } }
                 // The drive's state before its progress, so that a drive running now shows at once.
                 scope.launch {
@@ -238,10 +259,19 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             }
             Lifecycle.Event.ON_START -> {
                 log.log(SESSION_LINE, fields)
+                // The look decides while the car's screen shows the app, as while the phone's does; one
+                // loop for both when both are started.
+                lookWhileStarted?.cancel()
+                lookWhileStarted = scope.launch { keepLookDeciding() }
                 // Back on the car's screen: precise location may have been allowed meanwhile.
                 guard("start") { evaluate("start") }
                 // And during a drive another app may have been shown meanwhile: the app takes the car back.
                 guard("takeBack") { bridge?.takeBack(CarGuidanceBridge.CAUSE_START) }
+            }
+            Lifecycle.Event.ON_STOP -> {
+                log.log(SESSION_LINE, fields)
+                lookWhileStarted?.cancel()
+                lookWhileStarted = null
             }
             Lifecycle.Event.ON_DESTROY -> {
                 log.log(SESSION_LINE, fields)
@@ -264,6 +294,7 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         scope.cancel()
         mapJobs = null
         preciseWatch = null
+        lookWhileStarted = null
         releaseMap("destroy")
         home = null
     }
@@ -274,7 +305,9 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         val access = parts.mapsAccess.value
         val next = CarGate.of(access, preciseLocation())
         if (access is MapsAccess.Ready) attachHost()
-        applyMap(CarMapStep.next(mapGeneration, access, next), cause)
+        val step = CarMapStep.next(mapGeneration, access, next)
+        // A map waits for the app's first look; it is decided within a moment of the session's start.
+        applyMap(if (step is CarMapStep.Build && !parts.look.decided.value) CarMapStep.Keep else step, cause)
         if (next != gate || !gateLogged) {
             gate = next
             gateLogged = true
@@ -305,14 +338,14 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
 
     private fun buildMap(generation: Int, action: String, cause: String) {
         val created = try {
-            parts.createMap(carContext)
+            // Made with the app's look, so its first tiles are drawn in it.
+            parts.createMap(carContext, parts.look.lookOnMap.value)
         } catch (e: RuntimeException) {
             failed("createCarMap", e)
             return
         }
         map = created
         mapGeneration = generation
-        guard("setLook") { created.setLook(LookOnMap(CarLook.lookOf(carContext.isDarkMode))) }
         val settings = parts.mapSettings
         mapJobs = scope.launch {
             follow(settings.cameraStyle, "setCameraStyle", created::setCameraStyle)
@@ -323,6 +356,10 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             // The place of the preview, the drive and the arrival, as the phone pins it.
             follow(parts.navigation.destination, "showPlace", created::showPlace)
             follow(created.cameraMode, "cameraMode") { cameraMode.value = it }
+            // Every later look of the app at once, as on the phone's map; what the map did goes into the look's line.
+            launch { showLook(created) }
+            // Whether the camera shows a close view, which holds a look switch while the phone's activity is not started.
+            launch { feedCloseView(created) }
         }
         log.log(SESSION_LINE, mapOf("event" to "map", "action" to action, "generation" to generation, "cause" to cause))
     }
@@ -340,6 +377,47 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
 
     private fun <T> CoroutineScope.follow(values: Flow<T>, call: String, apply: (T) -> Unit) {
         launch { values.collect { guard(call) { apply(it) } } }
+    }
+
+    /** Keeps the app's look deciding until cancelled, at ON_STOP; a failure is written down, not thrown. */
+    private suspend fun keepLookDeciding() {
+        try {
+            parts.look.runWhileStarted(LookScreen.CAR)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            failed("lookWhileStarted", e)
+        }
+    }
+
+    /**
+     * Hands the app's look to [map] until the map goes: each request goes to it as it comes. A map
+     * that fails keeps the look it had.
+     */
+    private suspend fun showLook(map: CarMapRenderer) {
+        try {
+            parts.look.showOn { request, onSettled ->
+                try {
+                    map.setLook(request, onSettled)
+                } catch (e: RuntimeException) {
+                    failed("setLook", e)
+                    LookApplied()
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            failed("showLook", e)
+        }
+    }
+
+    /** [map]'s close view for the look until the map goes, and none after it. */
+    private suspend fun feedCloseView(map: CarMapRenderer) {
+        try {
+            map.closeView.collect { closeView -> guard("closeView") { parts.look.onCloseView(closeView, LookScreen.CAR) } }
+        } finally {
+            guard("closeView") { parts.look.onCloseView(false, LookScreen.CAR) }
+        }
     }
 
     /** One step of the screens towards what the gate and the drive ask for. */
@@ -490,6 +568,7 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         const val SCREEN = "screen"
         const val CAR = "car"
         const val SESSION_LINE = "car_session"
+        const val LOOK_LINE = "car_look"
         const val ERROR_LINE = "car_error"
 
         const val MAP_BUILD = "build"

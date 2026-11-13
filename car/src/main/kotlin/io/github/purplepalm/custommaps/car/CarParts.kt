@@ -6,6 +6,8 @@ import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.look.LookOnMap
+import io.github.purplepalm.custommaps.nav.look.SharedLook
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import kotlinx.coroutines.flow.Flow
@@ -21,8 +23,11 @@ class CarParts(
     val navigation: NavigationEngine,
     /** Whether maps may be shown yet, and for which token. */
     val mapsAccess: StateFlow<MapsAccess>,
-    /** Makes the map on the car's surface for a session's car context; one per session at a time. */
-    val createMap: (CarContext) -> CarMapRenderer,
+    /**
+     * Makes the map on the car's surface for a session's car context, showing the given look from its
+     * first tile on; one per session at a time.
+     */
+    val createMap: (CarContext, LookOnMap) -> CarMapRenderer,
     /**
      * Keeps the navigator alive while the given session is at least created. Never undone by hand:
      * the navigator lets the session go by itself when it is destroyed. Starts nothing that is billed.
@@ -30,6 +35,8 @@ class CarParts(
     val attachHost: (LifecycleOwner) -> Unit,
     /** The settings the car's map follows, as the phone's does. */
     val mapSettings: CarMapSettings,
+    /** The app's one look, the phone's, which the car's map shows too (the owner's choice). */
+    val look: SharedLook,
     val debugLog: DebugLog,
 )
 

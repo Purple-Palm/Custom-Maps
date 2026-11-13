@@ -148,7 +148,8 @@ class AppGraph(private val application: Application) {
 
     /**
      * What every car session is made from: the drive and the car's side of the engine, the access to
-     * maps, and the settings the car's map follows as the phone's does.
+     * maps, the settings the car's map follows as the phone's does, and the app's look, which it shows
+     * as the phone does.
      */
     private val carParts = CarParts(
         navigation = engine.navigation,
@@ -162,6 +163,7 @@ class AppGraph(private val application: Application) {
             ownRouteLine = settings.ownRouteLine,
             drawOwnLanes = settings.drawOwnLanes,
         ),
+        look = lookController,
         debugLog = debugLog,
     )
 

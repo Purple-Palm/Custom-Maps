@@ -87,11 +87,13 @@ class MapboxEngine private constructor(
 
     /**
      * The map for the car's screen of the session whose context is [carContext], showing the same scene
-     * as the phone's map on the surface the car's host gives. One per car session; call
-     * [CarMapRenderer.release] when the session ends. Make it once the session is created and maps may
-     * be shown. Nothing it does starts a trip session, ends one or asks Mapbox for anything billed.
+     * as the phone's map on the surface the car's host gives, in [lookOnMap] from its first tile on.
+     * One per car session; call [CarMapRenderer.release] when the session ends. Make it once the
+     * session is created, maps may be shown and the app's first look is decided. Nothing it does
+     * starts a trip session, ends one or asks Mapbox for anything billed.
      */
-    fun createCarMap(carContext: CarContext): CarMapRenderer = CarNavigationMap(carContext, navigationEngine, debugLog)
+    fun createCarMap(carContext: CarContext, lookOnMap: LookOnMap): CarMapRenderer =
+        CarNavigationMap(carContext, navigationEngine, debugLog, lookOnMap)
 
     /**
      * What the maneuver card did with the words of a run-up's lane row: [shown] false when they did

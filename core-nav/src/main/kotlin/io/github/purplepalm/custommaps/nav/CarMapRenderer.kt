@@ -5,10 +5,10 @@ package io.github.purplepalm.custommaps.nav
  * car's host gives the app. One per car session; the host's areas set its padding by themselves, so
  * [setViewportPadding] does nothing here.
  *
- * Its look comes through [setLook], as the phone's does, with the look the car's host asks for (day or
- * night). The car map writes the light and the colours of that look at once and lets the basemap's
- * theme follow only once the host has held its mode for a while, so a flip in a tunnel redraws no
- * tiles ([io.github.purplepalm.custommaps.nav.car.CarLook]).
+ * Its look comes through [setLook], as the phone's does: the app's one look, the phone's
+ * ([io.github.purplepalm.custommaps.nav.look.SharedLook]), with a basemap's theme that waits for a quiet
+ * moment of the drive on both maps alike. The host's own day and night colour only the images on its
+ * routing card ([io.github.purplepalm.custommaps.nav.car.CarLook]).
  */
 interface CarMapRenderer : MapRenderer {
 

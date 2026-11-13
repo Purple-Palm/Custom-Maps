@@ -7,6 +7,7 @@ import io.github.purplepalm.custommaps.nav.look.LookCause
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.look.LookHold
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
+import io.github.purplepalm.custommaps.nav.look.LookScreen
 import io.github.purplepalm.custommaps.nav.look.PlaceSource
 import io.github.purplepalm.custommaps.nav.look.SunElevation
 import io.github.purplepalm.custommaps.nav.look.SunPlace
@@ -66,6 +67,10 @@ class LookControllerTest {
         }
 
         val lines = mutableListOf<Pair<String, Map<String, Any?>>>()
+
+        /** Decisions taken: each one reads the clock once. */
+        var decisions = 0
+
         private val log = object : DebugLog {
             override fun log(type: String, fields: Map<String, Any?>) {
                 lines += type to fields
@@ -79,7 +84,10 @@ class LookControllerTest {
             choices = choices,
             debugLog = log,
             scope = test.backgroundScope,
-            now = { t0.plusMillis(test.testScheduler.currentTime) },
+            now = {
+                decisions += 1
+                t0.plusMillis(test.testScheduler.currentTime)
+            },
             elapsedMillis = { test.testScheduler.currentTime },
             driveContext = EmptyCoroutineContext,
             sun = sun,
@@ -89,8 +97,17 @@ class LookControllerTest {
         val requests = mutableListOf<LookOnMap>()
         val settles = mutableListOf<(Long?) -> Unit>()
 
+        /** The same for the car's map. */
+        val carRequests = mutableListOf<LookOnMap>()
+        val carSettles = mutableListOf<(Long?) -> Unit>()
+
         /** A map on screen that writes the whole basemap for a change and the theme alone for a theme. */
-        fun showMap(): Job = test.backgroundScope.launch {
+        fun showMap(): Job = showMap(requests, settles)
+
+        /** The car's map, a map of the same kind on the car's screen. */
+        fun showCarMap(): Job = showMap(carRequests, carSettles)
+
+        private fun showMap(requests: MutableList<LookOnMap>, settles: MutableList<(Long?) -> Unit>): Job = test.backgroundScope.launch {
             controller.showOn { request, onSettled ->
                 val first = requests.isEmpty()
                 val before = requests.lastOrNull()
@@ -114,6 +131,9 @@ class LookControllerTest {
 
         /** The app on screen, from now until the job is cancelled. */
         fun onScreen(): Job = test.backgroundScope.launch { controller.runWhileStarted() }
+
+        /** The car's session started, from now until the job is cancelled. */
+        fun onCarScreen(): Job = test.backgroundScope.launch { controller.runWhileStarted(LookScreen.CAR) }
 
         fun startAndShow(): Job {
             controller.start()
@@ -722,5 +742,201 @@ class LookControllerTest {
         val written = rig.lines.joinToString { it.toString() }
         assertFalse("0.4" in written || "0.7" in written || "SunPlace" in written)
         assertNull(rig.lines.firstOrNull { it.first == "look" && it.second["cause"] == LookCause.SUN && it.second["guidance"] == false })
+    }
+    @Test
+    fun `a car session started with no activity decides the first look`() = runTest {
+        val rig = Rig(this)
+        // The car's host started the process after dusk: no activity, the car's session starts the look.
+        rig.elevation = -10.0
+        rig.controller.start()
+        val car = rig.onCarScreen()
+        runCurrent()
+        assertTrue(rig.controller.decided.value)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(LookOnMap(Look.NIGHT), rig.controller.lookOnMap.value)
+        assertEquals(LookCause.START, rig.looks().single()["cause"])
+        // The car's map is made with it and is asked for nothing new.
+        rig.showCarMap()
+        runCurrent()
+        assertEquals(listOf(LookOnMap(Look.NIGHT)), rig.carRequests)
+        // The phone's activity made later finds the look decided.
+        rig.controller.start()
+        runCurrent()
+        assertEquals(1, rig.looks().size)
+        // With only the car's screen on, the look goes on deciding by the sun, and the car's map takes it.
+        rig.elevation = 10.0
+        rig.at(60)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookOnMap(Look.DAY), rig.carRequests.last())
+        car.cancel()
+    }
+
+    @Test
+    fun `one loop with both screens started`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        rig.onCarScreen()
+        runCurrent()
+        // The first look and the car's coming on screen.
+        assertEquals(2, rig.decisions)
+        val sunReads = rig.sunReads
+        // The phone's activity starts while the car's session is: it joins the loop and decides nothing.
+        rig.onScreen()
+        runCurrent()
+        assertEquals(2, rig.decisions)
+        assertEquals(sunReads, rig.sunReads)
+        // Each minute the sun is computed once, not once for each screen.
+        rig.at(60)
+        assertEquals(sunReads + 1, rig.sunReads)
+        rig.at(120)
+        assertEquals(sunReads + 2, rig.sunReads)
+        // Each progress update of a drive is one decision, not two.
+        rig.drive(2_000.0)
+        val before = rig.decisions
+        repeat(5) { rig.drive(1_990.0 - it * 13.0) }
+        assertEquals(before + 5, rig.decisions)
+        // A switch decided once: the night at the next minute, one look line.
+        rig.elevation = -4.0
+        rig.at(180)
+        rig.drive(1_900.0)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(1, rig.looks().count { it["cause"] == LookCause.SUN })
+    }
+
+    @Test
+    fun `the loop ends when the last screen stops`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        val car = rig.onCarScreen()
+        val phone = rig.onScreen()
+        runCurrent()
+        rig.showCarMap()
+        runCurrent()
+        // The phone's activity stops: the car's session keeps the look deciding by the sun.
+        phone.cancel()
+        runCurrent()
+        rig.elevation = -4.0
+        rig.at(60)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(LookOnMap(Look.NIGHT), rig.carRequests.last())
+        // The car's session stops too: nothing decides any more, by the sun or by a drive.
+        car.cancel()
+        runCurrent()
+        val decisions = rig.decisions
+        rig.elevation = 10.0
+        rig.drive(3_000.0)
+        rig.at(3_600)
+        assertEquals(decisions, rig.decisions)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        // A screen that starts again starts the loop again, and it decides at once.
+        rig.onCarScreen()
+        runCurrent()
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookCause.RESUME, rig.looks().last()["cause"])
+    }
+
+    @Test
+    fun `the car map's close view holds a switch while the phone's activity is not started`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        rig.onCarScreen()
+        runCurrent()
+        // Far from any turn, the car's camera in a close view; the phone's map, in the background, in none.
+        rig.drive(5_000.0)
+        rig.controller.onCloseView(true, LookScreen.CAR)
+        rig.elevation = -4.0
+        rig.at(60)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookHold.CLOSE_VIEW, rig.controller.switchState.waitingFor)
+        // The phone's activity starts: its map's close view counts now, and it has none.
+        val phone = rig.onScreen()
+        runCurrent()
+        rig.at(61)
+        rig.drive(4_990.0)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(LookHold.CLOSE_VIEW, rig.looks().last()["heldBy"])
+        // The other way round: the phone's close view holds the next switch while it is started, the
+        // first tick past the ten minutes in which a switch by the sun does not go back.
+        rig.controller.onCloseView(false, LookScreen.CAR)
+        rig.controller.onCloseView(true, LookScreen.PHONE)
+        rig.elevation = 10.0
+        rig.at(720)
+        rig.drive(4_000.0)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+        assertEquals(LookHold.CLOSE_VIEW, rig.controller.switchState.waitingFor)
+        // It stops: the car's map, in no close view, is the one that counts, and the switch goes.
+        phone.cancel()
+        runCurrent()
+        rig.at(721)
+        rig.drive(3_990.0)
+        assertEquals(Look.DAY, rig.controller.look.value)
+    }
+
+    @Test
+    fun `Settings over the phone's map lets nothing go while the car's screen shows the map`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        rig.onScreen()
+        val car = rig.onCarScreen()
+        runCurrent()
+        rig.drive(2_000.0)
+        rig.elevation = -4.0
+        rig.at(59)
+        rig.drive(100.0)
+        rig.at(60)
+        assertEquals(Look.NIGHT, rig.controller.switchState.waiting)
+        // Settings covers the phone's map, but the car's screen still shows one: the switch waits.
+        rig.at(62)
+        rig.controller.onCovered(true)
+        rig.drive(74.0)
+        assertEquals(Look.DAY, rig.controller.look.value)
+        assertEquals(LookHold.MANEUVER, rig.controller.switchState.waitingFor)
+        // The car's screen goes: nobody sees a map, and the switch goes at the next update.
+        car.cancel()
+        runCurrent()
+        rig.at(63)
+        rig.drive(61.0)
+        assertEquals(Look.NIGHT, rig.controller.look.value)
+    }
+
+    @Test
+    fun `a theme that waits for a quiet moment waits on both maps alike`() = runTest {
+        val rig = Rig(this)
+        rig.controller.start()
+        runCurrent()
+        rig.showMap()
+        rig.showCarMap()
+        runCurrent()
+        // A drive, the phone in the background and the car's screen showing another app, after dusk.
+        rig.drive(100.0)
+        rig.elevation = -10.0
+        rig.at(3_600)
+        // Back on the car's screen 100 m before a turn: the night at once on both maps, the theme left.
+        rig.onCarScreen()
+        runCurrent()
+        assertEquals(LookOnMap(Look.NIGHT, Look.DAY), rig.requests.last())
+        assertEquals(LookOnMap(Look.NIGHT, Look.DAY), rig.carRequests.last())
+        assertEquals(LookCause.RESUME, rig.looks().last()["cause"])
+        assertEquals(true, rig.looks().last()["themeDeferred"])
+        // The phone's activity starts on the way: nothing new.
+        rig.onScreen()
+        runCurrent()
+        assertEquals(LookOnMap(Look.NIGHT, Look.DAY), rig.carRequests.last())
+        // Six seconds after the turn the theme goes, to both maps at once, with one look_theme line.
+        rig.at(3_605)
+        rig.drive(800.0, step = "route-a/0/2")
+        for (second in 3_606L..3_610L) {
+            rig.at(second)
+            rig.drive(800.0 - (second - 3_605) * 13.0, step = "route-a/0/2")
+        }
+        assertEquals(LookOnMap(Look.NIGHT, Look.DAY), rig.carRequests.last())
+        rig.at(3_611)
+        rig.drive(722.0, step = "route-a/0/2")
+        assertEquals(LookOnMap(Look.NIGHT), rig.requests.last())
+        assertEquals(LookOnMap(Look.NIGHT), rig.carRequests.last())
+        assertEquals(1, rig.types().count { it == "look_theme" })
+        assertEquals(1, rig.looks().count { it["cause"] == LookCause.RESUME })
+        // The line has one map's fields: what the first map to take the request did.
+        assertEquals(15, rig.looks().last()["keys"])
     }
 }

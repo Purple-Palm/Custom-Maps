@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
-import android.os.SystemClock
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.core.graphics.createBitmap
@@ -40,8 +39,6 @@ import io.github.purplepalm.custommaps.nav.car.CarAreas
 import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.car.CarLook
-import io.github.purplepalm.custommaps.nav.car.CarLookStep
-import io.github.purplepalm.custommaps.nav.car.CarLookTuning
 import io.github.purplepalm.custommaps.nav.car.CarOverview
 import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -94,9 +91,11 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   handler lets the camera go first ([MapScene.onDriverMoved]); a pinch past the zoom limits is
  *   dropped ([CarZoom]). The zoom buttons come through [zoomBy]. A gesture and a zoom button both
  *   leave the overview, also for the next surface.
- * - **Day and night** follow the host ([CarContext.isDarkMode]) in two stages ([CarLook]): a
- *   [setLook] with the host's mode writes the light and colours at once and the basemap's theme once
- *   the mode has held for [CarLookTuning.themeHoldMillis]. A "car_look" line says each change.
+ * - **Day and night** are the app's one look, the phone's, which the car's session hands on through
+ *   [setLook] as the phone's screen does for its map: the car's map shows what the phone shows, and a
+ *   basemap's theme that waits for a quiet moment of the drive waits here too. The host's own mode
+ *   ([CarContext.isDarkMode]) colours only the images of its routing card; a "car_look" line says it
+ *   beside the look the map shows ([CarLook]), as the map is made and with each look it takes.
  * - **Frames.** Each surface has its frame clock ([CarFrames]), started as the surface comes and
  *   stopped as it goes: the display's frames while the main thread gets them, a timer's while it
  *   gets none, a "frame_clock" line at each switch and the ticks of each second in the camera line.
@@ -118,7 +117,8 @@ internal class CarNavigationMap(
     private val carContext: CarContext,
     private val engine: MapboxNavigationEngine,
     debugLog: DebugLog,
-    lookTuning: CarLookTuning = CarLookTuning(),
+    /** The app's look as the map is made, which its first tiles are drawn in; [setLook] brings every later one. */
+    lookOnMap: LookOnMap,
 ) : CarMapRenderer {
 
     /** The shared debug log, each line marked as the car's. */
@@ -152,11 +152,8 @@ internal class CarNavigationMap(
     private var stable: CarArea? = null
     private var visible: CarArea? = null
 
-    /** The look the car map shows, after the host's day and night mode. */
-    private val look = CarLook(dark = hostIsDark(), lookTuning)
-
-    /** The wait for the basemap's theme to follow the host's mode. */
-    private var themeWait: Job? = null
+    /** The app's look as last asked for, kept from one surface to the next: each new map is made with it. */
+    private var lookRequest: LookOnMap = lookOnMap
 
     // What belongs to the surface attached now.
     private var carSurface: MapboxCarMapSurface? = null
@@ -274,7 +271,7 @@ internal class CarNavigationMap(
     }
 
     init {
-        log.log(LOOK_LINE, look.start())
+        log.log(LOOK_LINE, CarLook.fields(hostDark(), CarLook.CAUSE_START, lookRequest))
         guard("setup") {
             val callback = carMap.prepareSurfaceCallback(carContext, initOptions())
             carMap.registerObserver(observer)
@@ -327,17 +324,18 @@ internal class CarNavigationMap(
     }
 
     /**
-     * The host's day or night mode, as [LookOnMap.look]; its theme is the car map's to decide
-     * ([CarLook]): the light and colours go at once, the basemap's theme once the mode has held. The
-     * same mode again writes nothing. [onSettled] is not called: no theme is written within this call.
+     * The app's look, the one the phone's map shows ([LookOnMap]), with a theme that waits as on the
+     * phone: written on the map of the surface there is, and kept for every later surface. The same
+     * request again writes nothing. A "car_look" line says what the map did with it.
      */
     override fun setLook(request: LookOnMap, onSettled: (idleMs: Long?) -> Unit): LookApplied {
-        if (released) return LookApplied()
+        if (released || request == lookRequest) return LookApplied()
+        lookRequest = request
         var applied = LookApplied()
         guard("setLook") {
-            val step = look.onHost(dark = request.look == Look.NIGHT, nowMillis = now()) ?: return@guard
-            applied = show(step)
-            waitForTheme()
+            val shown = scene?.setLook(request, onSettled)
+            applied = shown ?: LookApplied()
+            log.log(LOOK_LINE, CarLook.fields(hostDark(), CarLook.CAUSE_APP, request) + writeFields(shown))
         }
         return applied
     }
@@ -353,7 +351,6 @@ internal class CarNavigationMap(
     override fun release() {
         if (released) return
         released = true
-        themeWait?.cancel()
         // The surface's scene goes while its map is still there.
         guard("releaseObserver") { carMap.unregisterObserver(observer) }
         // The library has no teardown, and the host sends nothing after the session ended: the map
@@ -387,11 +384,6 @@ internal class CarNavigationMap(
         // cap for the display rate measured on the surface before, until this one's is measured.
         maxFps = CarFrameRate.maxFps(capHz ?: CarFrameRate.ASSUMED_HZ)
         mapSurface.setMaximumFps(maxFps)
-        // A configuration change of the host may come with the new surface.
-        look.onHost(hostIsDark(), now())?.let { log.log(LOOK_LINE, it.fields + mapOf("onMap" to false)) }
-        // The new map draws its first tiles in the whole look; no theme waits after that.
-        look.onNewMap()
-        themeWait?.cancel()
         // Where the driver left the last surface's map, else where the car was last seen; without
         // either the map waits for the car's first position.
         (leftCamera ?: lastPositionCamera())?.let(mapSurface.mapboxMap::setCamera)
@@ -405,7 +397,8 @@ internal class CarNavigationMap(
             // The phone's map keeps the same style ahead, in the same tile store; a second map of it
             // would load the same tiles again.
             offlineData = null,
-            lookOnMap = look.request,
+            // The app's look: the new map draws its first tiles in the whole of it, theme and all.
+            lookOnMap = lookRequest,
             mapboxMap = mapSurface.mapboxMap,
             plugins = mapSurface,
             controllable = mapSurface,
@@ -504,12 +497,12 @@ internal class CarNavigationMap(
         val logoWidget = LogoWidget(carContext)
         mapSurface.addWidget(logoWidget)
         logo = logoWidget
-        val text = attributionBitmap(look.request.look)
+        val text = attributionBitmap(lookRequest.look)
         attributionHeightPx = text.height
         val textWidget = BitmapWidget(text, bottomLeft(0, 0))
         mapSurface.addWidget(textWidget)
         attribution = textWidget
-        attributionLook = look.request.look
+        attributionLook = lookRequest.look
     }
 
     private fun removeWidgets(surface: MapboxCarMapSurface) {
@@ -554,33 +547,19 @@ internal class CarNavigationMap(
         return bitmap
     }
 
-    /** What [step] of the look asks for, written on the map there is, and its "car_look" line. */
-    private fun show(step: CarLookStep): LookApplied {
-        val shown = scene?.setLook(step.request)
-        val applied = shown ?: LookApplied()
-        log.log(
-            LOOK_LINE,
-            step.fields + mapOf(
-                "onMap" to (shown != null),
-                "keys" to applied.keys.takeIf { shown != null },
-                "errors" to applied.errors.takeIf { it > 0 },
-                "failedKeys" to applied.failedKeys.takeIf { it.isNotEmpty() },
-                "writeMs" to applied.writeMs.takeIf { shown != null },
-                "theme" to applied.theme.takeIf { shown != null },
-            ).filterValues { it != null },
-        )
-        return applied
-    }
-
-    /** Lets the basemap's theme follow the host's mode once the mode has held long enough. */
-    private fun waitForTheme() {
-        themeWait?.cancel()
-        val due = look.themeDueAtMillis ?: return
-        themeWait = scope.launch {
-            delay((due - now()).coerceAtLeast(0L))
-            guard("themeDue") { look.onTime(now())?.let(::show) }
-        }
-    }
+    /**
+     * What the map of the surface did with a look, for its "car_look" line: whether there was one
+     * ([shown] null without a surface, when the next surface's map takes the look as it is made), the
+     * style's settings written, the errors, how long the write took and whether it wrote the theme.
+     */
+    private fun writeFields(shown: LookApplied?): Map<String, Any?> = mapOf(
+        "onMap" to (shown != null),
+        "keys" to shown?.keys,
+        "errors" to shown?.errors?.takeIf { it > 0 },
+        "failedKeys" to shown?.failedKeys?.takeIf { it.isNotEmpty() },
+        "writeMs" to shown?.writeMs,
+        "theme" to shown?.theme,
+    ).filterValues { it != null }
 
     /**
      * During a drive, the overview the driver asked for in it and has not left, again on a new
@@ -690,18 +669,15 @@ internal class CarNavigationMap(
     )
 
     /**
-     * Whether the host asks for the dark map now. A context that cannot say yet (it is asked as the
-     * car map is made) gives the day map, which the next look from the session or the next surface
-     * puts right, instead of an exception in the car's code.
+     * The host's day or night mode now, for the "car_look" lines; the map does not follow it. Null,
+     * with a "car_error" line, when the context cannot say (it is asked as the car map is made).
      */
-    private fun hostIsDark(): Boolean = try {
+    private fun hostDark(): Boolean? = try {
         carContext.isDarkMode
     } catch (e: RuntimeException) {
         failed("isDarkMode", e)
-        false
+        null
     }
-
-    private fun now(): Long = SystemClock.elapsedRealtime()
 
     /** Runs [block], and writes a "car_error" line instead of letting an exception reach the host. */
     private inline fun guard(call: String, block: () -> Unit) {
