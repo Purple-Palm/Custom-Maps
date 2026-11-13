@@ -390,6 +390,10 @@ the owner compare 30 and 60 frames a second on the car's screen.
   lines over ten minutes).
 - Whether 60 frames a second look smoother than 30 on the car's screen, and what they cost.
 - How the list reads from a phone mount by day and at night.
+- Whether the car's host keeps the map's surface while another app is on the car's screen during a
+  drive (step 1b's open question): the list follows the surface (`carMapShown`), so if the host keeps
+  it, the phone stays on the list then, with **Map** one tap away; if it lets the surface go, the
+  phone shows its map until the car shows the map again (`car_surface` and `phone_screen` lines).
 - The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1c.
 
 ## Modules and dependencies

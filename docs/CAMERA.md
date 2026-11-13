@@ -704,8 +704,9 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   map, the phone's map draws at most 60 frames a second (`setMaximumFps(60)`, which its pacing knows
   the phone's real rate for), and as before once the surface goes.
 - **Frame target (step 1c).** **Settings → Debug → Car map frames** sets what the car's map aims
-  at: 30 frames a second, the default, or 60, at once, also during a drive and on the surface there
-  is. The cap is then `round(target × 60 / rate)`, within 1 and 60, and the band that holds a cap is
+  at: 30 frames a second, the default, or 60, at once on the surface there is, and on every later
+  one. Settings opens before Start and after the arrival, so a drive keeps the target it started
+  with. The cap is then `round(target × 60 / rate)`, within 1 and 60, and the band that holds a cap is
   a tenth of the target either way (54 to 66 at 60): at 60 the cap is 30 at 120 Hz, 40 at 90 Hz and
   60 at 60 Hz and on the timer. Every `car_surface` line and the car's camera line carry `targetFps`,
   and a new target writes a `car_surface` line with `event` `fps` while a surface is there. The car's

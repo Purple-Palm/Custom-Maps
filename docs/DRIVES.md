@@ -90,7 +90,9 @@ Since step 1c the phone shows the list in place of its map during a drive with t
     phone's map comes back as of that moment (`phone_screen` `map`, `car`); plug it in and open
     Custom Maps in the car: the list again (`list`, `car`). Then **Map**, and pull and plug the cable
     again: the map stays, with no `phone_screen` line, and **List** shows only while the car shows
-    the map. A new drive starts with the list again.
+    the map. A new drive starts with the list again. On the list, open another app on the car's
+    screen for a minute and come back: note whether the phone stays on the list meanwhile (the
+    `car_surface` and `phone_screen` lines say whether the car let its map's surface go).
 17. **Heat on the list.** Ten minutes of a drive with the car and the phone app in front, on the list:
     the `thermal` lines and the `device` lines' `thermal`, against check 11's ten minutes with both
     maps on step 1b's build.
