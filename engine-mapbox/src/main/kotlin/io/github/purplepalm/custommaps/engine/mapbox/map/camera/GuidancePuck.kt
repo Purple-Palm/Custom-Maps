@@ -12,11 +12,14 @@ import io.github.purplepalm.custommaps.nav.camera.PuckGlide
 
 /**
  * The puck during guidance: it glides to each matched position of the navigator, through the points
- * the navigator sends with it. Give it to the map's location component as its location provider.
+ * the navigator sends with it. Give it to the map's location component as its location provider. The
+ * engine has one, which it feeds once with each position, and every map draws it: the phone's and the
+ * car's move the same way with each fix.
  *
  * Every drive gets a fresh [NavigationLocationProvider] inside. A provider replays its last fix to a
  * consumer that registers, so one kept from the drive before would first put the puck where that
- * drive ended. Main thread only.
+ * drive ended; within a drive that replay is what lets a map made meanwhile draw the car at once.
+ * Main thread only.
  */
 internal class GuidancePuck : LocationProvider {
 

@@ -41,6 +41,7 @@ import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.tripdata.maneuver.api.MapboxManeuverApi
 import com.mapbox.navigation.tripdata.maneuver.model.Maneuver as MapboxManeuver
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
@@ -272,6 +273,17 @@ internal class MapboxNavigationEngine(
 
     /** What the maneuver card's lane row drew at the last "lane_row" line; every drive starts it over. */
     private val laneRowLog = LaneRowLog()
+
+    /**
+     * The puck of every map during guidance, the phone's and the car's: fed once with each matched
+     * position of the drive that the screen does not leave alone ([carriesOldPosition]), and started
+     * afresh as each drive begins, so it never first shows where the last one ended. A map made during
+     * a drive draws it at once where the car is. Main thread.
+     */
+    internal val guidancePuck = GuidancePuck()
+
+    /** The seeks of a simulated drive the puck has been moved for; the first position after another one is a jump. */
+    private var puckSeeks = 0
 
     /** The phone's motion sensors, listened to only while guidance runs on a freeway ([motionField]). */
     private val motionSensors = MotionSensors(appContext, debugLog)
@@ -956,6 +968,8 @@ internal class MapboxNavigationEngine(
         )
         // The state changes first, so SDK callbacks that fire while the commands run already see it.
         _guidanceState.value = transition.state
+        // A drive begins: the puck forgets where the last one ended before any map draws it.
+        if (transition.state == GuidanceState.ACTIVE && from != GuidanceState.ACTIVE) guidancePuck.newDrive()
         if (transition.state == GuidanceState.IDLE) _destination.value = null
         // A drive that ends, by End or at the destination; a start whose routes were refused goes
         // back to the preview, whose download goes on.
@@ -1483,6 +1497,14 @@ internal class MapboxNavigationEngine(
             lastMatch = locationMatcherResult
             // Once for each matched position, for every line until the next.
             lastRawOffset = lastRawFix?.rawOffsetFields(locationMatcherResult.enhancedLocation, SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis())
+            // The drawn car of every map, once for this position. One the screen leaves alone, as the
+            // position the trip before left the car at, moves it nowhere; the first one after a seek
+            // of a simulated drive puts it at the new place at once.
+            if (_guidanceState.value == GuidanceState.ACTIVE && !carriesOldPosition(locationMatcherResult)) {
+                val seek = seekHold.seeks != puckSeeks
+                puckSeeks = seekHold.seeks
+                guidancePuck.onFix(locationMatcherResult, jump = seek)
+            }
             if (tripTally.running && !carriesOldPosition(locationMatcherResult)) {
                 val location = locationMatcherResult.enhancedLocation
                 // The first position after a seek is where the car was put, not a stretch it drove.

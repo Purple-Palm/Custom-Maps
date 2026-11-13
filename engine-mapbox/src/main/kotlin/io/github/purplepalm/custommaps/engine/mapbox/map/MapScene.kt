@@ -142,6 +142,11 @@ internal class MapScene(
     private val controllable: MapControllable,
     /** The constants of the camera, for the screen the map is on. */
     private val tuning: CameraTuning,
+    /**
+     * The puck during guidance: the engine's one puck, which the engine feeds with each matched
+     * position and starts afresh for every drive, and which every map draws.
+     */
+    private val guidancePuck: GuidancePuck,
     private val host: Host,
 ) : MapRenderer {
 
@@ -171,9 +176,6 @@ internal class MapScene(
 
     /** The puck's positions outside guidance: the phone's own location, without a trip session. */
     private val platformPuck = PlatformPuck(context) { lastPuck }
-
-    /** The puck's positions during guidance, from the navigator. */
-    private val guidancePuck = GuidancePuck()
 
     /** The navigator's routes; they change on reroute and are empty outside guidance. */
     private var navigatorRoutes: List<NavigationRoute> = emptyList()
@@ -431,10 +433,10 @@ internal class MapScene(
             fixes += 1
             lastFixAt = SystemClock.elapsedRealtimeNanos()
             lastKeyPoints = locationMatcherResult.keyPoints.size
-            // A seek put the car here: the camera lets go of the road it was on, and both go there
-            // at once and glide on from the new place, like after a jump of the navigator's.
+            // A seek put the car here: the camera lets go of the road it was on, and goes there at
+            // once and glides on from the new place, like after a jump of the navigator's. The
+            // engine has put the drawn car there already, for every map.
             if (seek) camera.onJump()
-            guidancePuck.onFix(locationMatcherResult, jump = seek)
             camera.onLocation(locationMatcherResult.enhancedLocation, locationMatcherResult.isTeleport || seek)
         }
     }
@@ -1180,10 +1182,13 @@ internal class MapScene(
         }
     }
 
+    /**
+     * The puck of the map: the engine's guidance puck during guidance, which a map that comes during a
+     * drive draws at once where the car is, and the platform's location otherwise. The engine starts
+     * the guidance puck afresh for every drive, so it never first shows where the last drive ended.
+     */
     private fun useLocationProvider(guidance: Boolean) {
         val current = plugins.location.getLocationProvider()
-        // Guidance starts: without this the puck would first jump to where the last drive ended.
-        if (guidance && current !== guidancePuck) guidancePuck.newDrive()
         val wanted = if (guidance) guidancePuck else platformPuck
         if (current !== wanted) plugins.location.setLocationProvider(wanted)
     }

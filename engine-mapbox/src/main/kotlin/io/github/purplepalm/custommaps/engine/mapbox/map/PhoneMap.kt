@@ -103,6 +103,7 @@ class PhoneMap internal constructor(
             plugins = mapView,
             controllable = mapView,
             tuning = CameraTuning.PHONE,
+            guidancePuck = engine.guidancePuck,
             host = host,
         )
         mapView.gestures.addOnMapClickListener(mapClickListener)
