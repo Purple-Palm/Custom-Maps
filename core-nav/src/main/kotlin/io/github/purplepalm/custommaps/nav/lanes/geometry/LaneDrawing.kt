@@ -68,7 +68,10 @@ import kotlin.math.sin
  * - **The lit lane** ([Kind.LIT], 2.2 and 4.3), inside card windows only, wherever the plan names a lane: that lane's full
  *   width about the route's path, square to it, so it moves from lane to lane with the path's S and follows a lane
  *   entered along its taper; its two edges ([Kind.LIT_EDGE], [LIT_EDGE_METERS]). Never a designated lane, never on an
- *   approach where no lane is named.
+ *   approach where no lane is named. Only where it is that lane: where the path lies within half a lane of the lane's
+ *   drawn middle (or in its feeder along its taper) or moves, and the lit lane lies on the drawn lanes ([LIT_FIT_METERS]);
+ *   elsewhere, as where the path waits on the road's line beside a lane still opening or keeps to it around a fold, the
+ *   route line shows instead.
  * - **The tints** ([Kind.TINT]): in the same windows, where a lane is lit, each other lane of the plan's band as it is
  *   drawn, where the data gives the lanes (not in a zone), never a designated lane or one only possible. Where its lane
  *   stops working (it leaves the band while it is still there, or in a zone that begins where the tint ends) its far edge
@@ -317,6 +320,12 @@ class LaneDrawing private constructor(
         const val LIT_EDGE_METERS = 0.22
 
         /**
+         * The lit lane is drawn only where it reaches no farther than this past the drawn carriageway's outer edges, where its own
+         * edge line, centred on its side, still lies on the carriageway's edge line.
+         */
+        const val LIT_FIT_METERS = LIT_EDGE_METERS / 2.0
+
+        /**
          * The lit lane and the tints are cut into pieces this long, at its multiples from the route's start: the map changes
          * a piece by feature state (a tint behind the car hidden, a lit piece's traffic) under an id that stays the same
          * across windows ([litId], [tintId]).
@@ -533,6 +542,13 @@ class LaneDrawing private constructor(
          */
         private val bare = ArrayList<Pair<Double, Double>>()
 
+        /**
+         * Where the plan names a lane in a card window but the lit lane, that lane's width about the path, would not be that lane:
+         * the path lies outside it and no move takes it there, or the lit lane would leave the lanes drawn there ([lightable]).
+         * Nothing is lit or tinted there ([litLane]).
+         */
+        private val dark: List<Pair<Double, Double>>
+
         /** Stations where something drawn changes: the samples take each of them and a station just before it. */
         private val events: DoubleArray
 
@@ -603,6 +619,14 @@ class LaneDrawing private constructor(
                 e.add(seg.to)
             }
             for ((a, b) in bare) {
+                e.add(a)
+                e.add(b)
+            }
+            val base = e.filter { it.isFinite() }.sorted().distinct().toDoubleArray()
+            // Where the named lane cannot be lit about the path, found on the samples of the rest: its ends are events too, so a
+            // tint begins or ends with the lit lane.
+            dark = darkSpans(base)
+            for ((a, b) in dark) {
                 e.add(a)
                 e.add(b)
             }
@@ -1267,9 +1291,12 @@ class LaneDrawing private constructor(
             return out
         }
 
-        /** Stations to sample the lit lane and the tints at from [s0] to [s1]: [samples], each piece's start and the path's moves' ends. */
-        private fun litSamples(s0: Double, s1: Double): List<Double> {
-            val all = ArrayList<Double>(samples(s0, s1))
+        /**
+         * Stations to sample the lit lane and the tints at from [s0] to [s1]: [samples] about the events [at], each piece's start
+         * and the path's moves' ends.
+         */
+        private fun litSamples(s0: Double, s1: Double, at: DoubleArray = events): List<Double> {
+            val all = ArrayList<Double>(samples(s0, s1, at))
             var k = pieceOf(s0) + 1
             while (k * PIECE_METERS < s1 - SAME_STATION) {
                 all.add(k * PIECE_METERS)
@@ -1292,15 +1319,65 @@ class LaneDrawing private constructor(
             return if (topology.lanes[named].designated) null else named
         }
 
-        /** The lane lit at [s]: the one the plan names ([namedAt]), but not where the carriageway is bare ([bare]), where the path crosses the lanes. */
+        /**
+         * The lane lit at [s]: the one the plan names ([namedAt]), but not where the carriageway is bare ([bare]), where the path
+         * crosses the lanes, and not where it cannot be lit about the path ([dark]).
+         */
         private fun litLane(s: Double): Int? {
             val named = namedAt(s) ?: return null
-            if (onBare(s)) return null
+            if (onBare(s) || dark.any { s >= it.first && s < it.second }) return null
             return named
         }
 
         /** Whether [s] lies where the route's carriageway is drawn bare ([bare]). */
         private fun onBare(s: Double): Boolean = bare.any { s >= it.first && s < it.second }
+
+        /**
+         * Whether [named] can be lit at [s] of the drawing [i] as its full width about the path: the path lies within half that
+         * lane's width of its drawn middle (to the path's own [RoutePath.TOLERANCE_METERS]), or in its feeder while a lane its
+         * neighbour feeds opens along its taper, or a move of the path is under way there; and the lit lane lies on the lanes
+         * drawn there, its edges no farther than [LIT_FIT_METERS] past the outer edges of the drawn carriageway.
+         */
+        private fun lightable(i: Int, s: Double, named: Int): Boolean {
+            val places = placesAt(drawings[i], ends[i], s, axisAt(s))
+            if (places.isEmpty()) return false
+            val t = path.offsetAt(s)
+            val lane = topology.lanes[named]
+            val half = CrossSection.laneMeters(roadAt(s), lane.kinds) / 2.0
+            if (t + half > places.first().left + LIT_FIT_METERS || t - half < places.last().right - LIT_FIT_METERS) return false
+            if (path.moves.any { s >= it.from && s <= it.to }) return true
+            val place = places.firstOrNull { it.lane == named }
+            if (place != null && abs(t - place.centre) <= half + RoutePath.TOLERANCE_METERS) return true
+            val feeder = lane.fedBy?.let { f -> places.firstOrNull { it.lane == f } } ?: return false
+            if (place != null && place.width >= 2.0 * half - NO_WIDTH) return false
+            val left = max(place?.left ?: feeder.left, feeder.left)
+            val right = min(place?.right ?: feeder.right, feeder.right)
+            return t <= left + RoutePath.TOLERANCE_METERS && t >= right - RoutePath.TOLERANCE_METERS
+        }
+
+        /**
+         * The stretches inside card windows and drawings where the plan names a lane, off the bare stretches, but it cannot be lit
+         * about the path ([lightable]), found at the samples about the events [at]: each from its first such sample to the next
+         * where it can again. So where the path keeps to the road's line beside a lane that is still opening, the lane is lit from
+         * where it lies about the path, and where the path reaches a drawing on the road's line, from where it moves into the lane.
+         */
+        private fun darkSpans(at: DoubleArray): List<Pair<Double, Double>> {
+            val out = ArrayList<Pair<Double, Double>>()
+            for ((s0, s1, i) in litRanges(Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY)) {
+                var from = Double.NaN
+                for (s in litSamples(s0, s1, at)) {
+                    val named = namedAt(s)
+                    val off = named != null && !onBare(s) && !lightable(i, s, named)
+                    if (off && from.isNaN()) from = s
+                    if (!off && !from.isNaN()) {
+                        out.add(from to s)
+                        from = Double.NaN
+                    }
+                }
+                if (!from.isNaN()) out.add(from to s1)
+            }
+            return out
+        }
 
         /**
          * The lit lane between [a] and [b], inside card windows and drawings wherever the plan names a lane: [named]'s full
@@ -1524,16 +1601,16 @@ class LaneDrawing private constructor(
             return pathAxes.minByOrNull { abs(it.from - s) } ?: extraAxes.first()
         }
 
-        /** Stations to sample [s0] to [s1] at: both ends, every axis sample between them, and each event with one just before it. */
-        private fun samples(s0: Double, s1: Double): List<Double> {
+        /** Stations to sample [s0] to [s1] at: both ends, every axis sample between them, and each of the events [at] with one just before it. */
+        private fun samples(s0: Double, s1: Double, at: DoubleArray = events): List<Double> {
             // The ends and the events exactly, each event with a station just before it; and the axes' samples that do not
             // fall on one of them, so a change at an event is never moved to an axis sample a hair before it.
             val exact = ArrayList<Double>()
             exact.add(s0)
             exact.add(s1)
-            var k = lowerBound(events, s0)
-            while (k < events.size && events[k] < s1) {
-                val e = events[k]
+            var k = lowerBound(at, s0)
+            while (k < at.size && at[k] < s1) {
+                val e = at[k]
                 if (e > s0) {
                     exact.add(e)
                     if (e - SAME_STATION > s0) exact.add(e - SAME_STATION)

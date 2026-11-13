@@ -72,7 +72,7 @@ class LaneTrustTest {
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "bareGore", "bareRamp")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp")
     }
 
     @Test
@@ -84,7 +84,7 @@ class LaneTrustTest {
             check(build("random-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
         }
         assertSeen("line", "paint", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane")
     }
 
     @Test
@@ -102,7 +102,39 @@ class LaneTrustTest {
         // careful reading of a few of these routes; never on the scenes or the approaches above.
         assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "bareGore", "bareRamp")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp")
+    }
+
+    @Test
+    fun `every trust property holds on seeded random approaches where a conflict ends beside a lane still opening`() {
+        // A second seed of the approaches: among them conflicts that end where the lane the plan names next still opens beside
+        // the path on the road's line, and approaches where no lane is named before a ramp with lanes.
+        val rng = Random(OPENING_SEED)
+        var waited = 0
+        repeat(OPENING_ROUTES) { k ->
+            val route = RandomRoutes.approach(rng, "opening-$k")
+            val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
+            val built = build("opening-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first }))
+            if (litFromLater(built)) waited++
+            check(built)
+        }
+        assertTrue(waited > 0, "no lane lit only from where it lies about the path")
+        assertSeen("line", "paint", "named", "toward", "opens", "lit", "tint", "litOnLanes", "litInLane")
+    }
+
+    /**
+     * Whether [b] names a lane in a card window, the path neither moving nor in the lane, and lights it only farther on: the
+     * path on the road's line beside a lane still opening, or reaching the drawing so, as the plan's lane begins.
+     */
+    private fun litFromLater(b: Built): Boolean {
+        val lit = b.drawing.litStretches()
+        return b.plan.segments.any { seg ->
+            val named = seg.named ?: return@any false
+            val x = seg.from + 1.0
+            seg.inWindow && seg.noLane == null && !b.plan.topology.lanes[named].designated &&
+                b.path.drawings.any { x > it.from && x < it.to } && lit.none { x >= it.start && x <= it.endInclusive } &&
+                lit.any { it.start > x && it.start < seg.to }
+        }
     }
 
     @Test
@@ -144,6 +176,7 @@ class LaneTrustTest {
         neverAwayFromTheExit(b)
         notTheEdgeLaneWhileOneMayBeBeyond(b)
         litAndTints(b)
+        litOnTheNamedLane(b)
         bareWhereReachedOnTheLine(b)
     }
 
@@ -239,7 +272,12 @@ class LaneTrustTest {
                 // whatever the features it comes in.
                 val axis = b.path.axisAt(x) ?: continue
                 val paint = here.filter { it.kind == Kind.LANE_LINE || it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE }
-                val crossings = DrawingProbe.across(axis, x, paint.flatMap { it.parts })
+                // Each part once where it crosses: a line that folds over itself on an arc too tight for its offset crosses the
+                // normal there two or three times within a few millimetres, and is still one line.
+                val crossings = paint.flatMap { it.parts }.flatMap { part ->
+                    val cuts = DrawingProbe.across(axis, x, listOf(part))
+                    cuts.filterIndexed { k, c -> k == 0 || c - cuts[k - 1] >= DOUBLE_LINE_METERS }
+                }.sorted()
                 for ((a, c) in crossings.zipWithNext()) {
                     assertTrue(c - a >= DOUBLE_LINE_METERS, "${b.name} at $x: two lines ${c - a} m apart, at $a and $c")
                     saw("paint")
@@ -714,6 +752,45 @@ class LaneTrustTest {
         return out
     }
 
+    // ------------------------------------------------------------------ 4, 10: the lit lane is the named lane, on our lanes
+
+    /**
+     * Wherever a lane is lit, the lit lane lies on the drawn lanes, and outside the path's moves its middle, the path, lies
+     * within half a lane of the named lane's drawn middle (in its feeder while a lane its neighbour feeds opens): at a ramp's
+     * start too, where the lanes go on straight, and at a gore. Sampled a metre apart inside each lit stretch.
+     */
+    private fun litOnTheNamedLane(b: Built) {
+        val lanes = b.plan.topology.lanes
+        val moving = b.path.moves.map { it.from - 1e-6 to it.to + 1e-6 }
+        for (run in b.drawing.litStretches()) {
+            for (x in along(run.start + LIT_END_METERS, run.endInclusive - LIT_END_METERS, 1.0)) {
+                val named = requireNotNull(b.plan.segmentAt(x)?.named) { "${b.name}: lit at $x where no lane is named" }
+                val places = b.drawing.lanesAt(x)
+                assertTrue(places.isNotEmpty(), "${b.name}: lit at $x where no lane is drawn")
+                val road = b.section.roadAt(x) ?: b.route.nodes.last { it.station <= x }.road
+                val half = CrossSection.laneMeters(road, lanes[named].kinds) / 2.0
+                val t = b.path.offsetAt(x)
+                val beyond = maxOf(t + half - places.first().left, places.last().right - (t - half))
+                assertTrue(beyond <= LaneDrawing.LIT_FIT_METERS + LIT_SLACK_METERS, "${b.name} at $x: the lit lane $beyond m past the drawn lanes")
+                saw("litOnLanes")
+                if (moving.any { x >= it.first && x <= it.second }) continue
+                val place = places.firstOrNull { it.lane == named }
+                val feeder = lanes[named].fedBy?.let { f -> places.firstOrNull { it.lane == f } }
+                if (feeder != null && (place == null || place.width < 2.0 * half - 1e-6)) {
+                    // Along a lane's taper, from its feeder.
+                    val left = maxOf(place?.left ?: feeder.left, feeder.left)
+                    val right = minOf(place?.right ?: feeder.right, feeder.right)
+                    assertTrue(t <= left + LIT_SLACK_METERS && t >= right - LIT_SLACK_METERS, "${b.name} at $x: the lit lane off lane $named and its feeder")
+                    continue
+                }
+                assertTrue(place != null, "${b.name}: lane $named lit at $x, not drawn there")
+                val off = abs(t - requireNotNull(place).centre)
+                assertTrue(off <= half + RoutePath.TOLERANCE_METERS + LIT_SLACK_METERS, "${b.name} at $x: the lit lane's middle $off m from lane $named's")
+                saw("litInLane")
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ 1, 2: a gore reached on the road's line is bare
 
     /**
@@ -867,6 +944,16 @@ class LaneTrustTest {
 
         /** Kept-lane routes of [KEPT_SEED] whose plan flags a move back itself, on the careful reading of the card. */
         const val KEPT_FLAGGED_BACK = 2
+
+        /** A second seed of approaches, and how many. */
+        const val OPENING_SEED = 232
+        const val OPENING_ROUTES = 100
+
+        /** A lit stretch is sampled from this far inside each of its ends: they lie where the light is checked a metre apart. */
+        const val LIT_END_METERS = 1.0
+
+        /** The lit lane is checked between the stations it was made at: it may move this much more there. */
+        const val LIT_SLACK_METERS = 0.05
 
         /** Two lines cross where each one's ends lie at least this far off the other: not where they run on together. */
         const val CROSS_CLEAR_METERS = 0.11

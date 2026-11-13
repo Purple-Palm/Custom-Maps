@@ -254,6 +254,37 @@ class LaneDrawingTest {
     }
 
     @Test
+    fun `where the path waits on the road's line beside a lane still opening, the lane is lit from where it lies about the path`() {
+        // A made-up approach of the trust tests' second seed: the plan flags a conflict, and from its end names a lane that opens
+        // beside the road's line, where the path waits for it.
+        val rng = kotlin.random.Random(232)
+        var built: Drawn? = null
+        repeat(93) { k ->
+            val route = RandomRoutes.approach(rng, "opening-$k")
+            val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
+            if (k == 92) built = draw(route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first }))
+        }
+        val d = requireNotNull(built)
+        val seg = d.plan.segments.first { it.named != null && it.inWindow && d.plan.flags.any { f -> f.kind == LanePlan.Flag.Kind.CONFLICT && abs(f.to - it.from) < 1e-6 } }
+        val named = requireNotNull(seg.named)
+        val lane = d.plan.topology.lanes[named]
+        assertTrue(abs(lane.opens - seg.from) < LANE_GRID && lane.fedBy == null, "lane $named opens at ${lane.opens}")
+        val lit = d.drawing.litStretches().first { it.endInclusive > seg.from }
+        assertTrue(lit.start > seg.from + 10.0, "lit from ${lit.start}, named from ${seg.from}")
+        // Before it the lit lane would leave the drawn lanes by more than the edge's half; from there it lies on them.
+        val half = LaneTopology.FREEWAY_LANE_METERS / 2.0
+        fun beyond(x: Double): Double {
+            val places = d.drawing.lanesAt(x)
+            val t = d.path.offsetAt(x)
+            return max(t + half - places.first().left, places.last().right - (t - half))
+        }
+        assertTrue(beyond(seg.from + 5.0) > LaneDrawing.LIT_FIT_METERS)
+        assertTrue(beyond(lit.start) <= LaneDrawing.LIT_FIT_METERS + 1e-6)
+        assertTrue(beyond(lit.start + 5.0) <= LaneDrawing.LIT_FIT_METERS + 1e-6)
+        assertEquals(0.11, LaneDrawing.LIT_FIT_METERS, 1e-12)
+    }
+
+    @Test
     fun `a lane kept for buses is drawn darker with a solid line beside it and no symbol`() {
         val d = draw(LaneScenes.rightLaneForBuses())
         val kept = d.of(Kind.KEPT_LANE).single()
