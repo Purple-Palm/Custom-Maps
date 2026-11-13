@@ -16,6 +16,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.purplepalm.custommaps.look.LookController
+import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.ui.CustomMapsApp
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme

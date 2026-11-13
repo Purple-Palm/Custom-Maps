@@ -22,6 +22,7 @@ import io.github.purplepalm.custommaps.look.LastKnownPosition
 import io.github.purplepalm.custommaps.look.LookController
 import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.look.SunPlaces
+import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.nav.debug.JsonLines
@@ -56,16 +57,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** Whether maps can be shown: only once a valid token has been handed to the SDKs. */
-sealed interface MapsAccess {
-    data object Checking : MapsAccess
-
-    data object NeedsToken : MapsAccess
-
-    /** [generation] grows every time a different token is applied. */
-    data class Ready(val generation: Int) : MapsAccess
-}
 
 /** Creates the app's long-lived objects once per process. Each DataStore file has exactly one instance. */
 class AppGraph(private val application: Application) {

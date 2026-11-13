@@ -18,8 +18,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.purplepalm.custommaps.AppGraph
-import io.github.purplepalm.custommaps.MapsAccess
 import io.github.purplepalm.custommaps.R
+import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.ui.map.MapScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
