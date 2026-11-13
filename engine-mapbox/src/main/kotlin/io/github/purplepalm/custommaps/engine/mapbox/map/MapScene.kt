@@ -513,6 +513,8 @@ internal class MapScene(
             seenSeeks = engine.replaySeeks
             fixes += 1
             lastFixAt = SystemClock.elapsedRealtimeNanos()
+            // The engine has given the drawn car this position: the car layer's watchdog waits for the map to hand it on.
+            carLayer.onFix()
             lastKeyPoints = locationMatcherResult.keyPoints.size
             // A seek put the car here: the camera lets go of the road it was on, and goes there at
             // once and glides on from the new place, like after a jump of the navigator's. The

@@ -62,8 +62,9 @@ class CarLayerTest {
     }
 
     /**
-     * Positions on longitude 0 every frame of [seconds] at [SPEED] from [fromMeters] north, the clock moving with them, and the
-     * watchdog's check about once a second where [check]; how many frames.
+     * Positions on longitude 0 every frame of [seconds] at [SPEED] from [fromMeters] north, the clock moving with them, a fix of
+     * the puck about once a second as the engine gives it, and the watchdog's check about once a second where [check]; how many
+     * frames.
      */
     private fun frames(seconds: Double, fromMeters: Double = 0.0, bar: CarBar? = null, check: Boolean = true): Int {
         val metersPerDegree = Math.toRadians(1.0) * Geo.EARTH_RADIUS_METERS
@@ -73,6 +74,7 @@ class CarLayerTest {
             now += FRAME
             t += FRAME / 1e9
             count++
+            if (now % SECOND < FRAME) layer.onFix()
             layer.onPosition((fromMeters + SPEED * t) / metersPerDegree, 0.0, 12.0, bar)
             if (check && now % SECOND < FRAME) layer.check(onScreen = true, speedMps = SPEED)
         }
@@ -177,10 +179,12 @@ class CarLayerTest {
         ready()
         layer.onGuidance(true)
         frames(3.0)
-        // No positions from here on: the screen off, a cover, a stop. Ten minutes of each, and nothing changes.
+        // A fix every second and no positions from here on: the screen off, a cover, a stop. Ten minutes of each, and nothing
+        // changes.
         for ((onScreen, speed) in listOf(false to SPEED, true to 0.0, true to 2.0, true to null)) {
             repeat(600) {
                 now += SECOND
+                layer.onFix()
                 layer.check(onScreen = onScreen, speedMps = speed)
             }
         }
@@ -205,6 +209,44 @@ class CarLayerTest {
         layer.onGuidance(false)
         layer.onGuidance(true)
         assertEquals(listOf("hidePuck", "showPuck", "hidePuck"), port.puckSettings())
+    }
+
+    @Test
+    fun `with Android's animations off a position comes only with each fix, and the car stays the app's`() {
+        layer.setDrawing(true)
+        ready()
+        layer.onGuidance(true)
+        port.calls.clear()
+        // Ten minutes of fixes about a second apart, up to 30 ms early or 90 ms late: the puck jumps to each one, so a position
+        // comes on the frame after it and one more on the next, and none in between. A check every 1.003 s.
+        val random = kotlin.random.Random(11)
+        val start = now
+        var nextCheck = start + SECOND / 2
+        for (k in 1..600) {
+            val fix = start + k * SECOND + (random.nextDouble(-0.03, 0.09) * SECOND).toLong()
+            while (nextCheck < fix) {
+                now = nextCheck
+                layer.check(onScreen = true, speedMps = SPEED)
+                nextCheck += SECOND + SECOND * 3 / 1_000
+            }
+            now = fix
+            layer.onFix()
+            for (f in 1..2) {
+                now = fix + f * FRAME
+                layer.onPosition(0.001 * k, 0.0, 12.0, null)
+            }
+        }
+        assertEquals(emptyList<String>(), port.puckSettings(), "never given back")
+        assertTrue(carLines().none { it["reason"] == "fallback" })
+        // A fix the map hands on no position after: a second later the car goes back to the SDK's puck.
+        layer.onFix()
+        now += SECOND - 1
+        layer.check(onScreen = true, speedMps = SPEED)
+        assertEquals(emptyList<String>(), port.puckSettings())
+        now += 1
+        layer.check(onScreen = true, speedMps = SPEED)
+        assertEquals(listOf("showPuck"), port.puckSettings())
+        assertEquals(mapOf("drawer" to "sdk", "reason" to "fallback", "carLayerFallback" to "no_position"), carLines().last())
     }
 
     @Test

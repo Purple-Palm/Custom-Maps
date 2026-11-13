@@ -39,11 +39,12 @@ import kotlin.math.ceil
  *
  * While the map is not on screen, or put away for the list of the turns, nothing here changes a setting, adds a layer or
  * draws: what is due waits for the map to be back ([setShown]), when the puck's newest place comes with its first frame.
- * A watchdog ([CarLayerWatch]) gives the car back to the SDK's puck when no position has come for a second while the layer
- * draws the car, the map is on screen and drawing frames and the car moves ([check]): the puck visible again once, the only
- * setting change of the drive, the own layer gone for the rest of it, and one "car_layer" line with the reason. A style that
- * refuses a call costs the own car the same way, with one error line. A "car_layer" line says each change of who draws the
- * car: counts and words only. Main thread only.
+ * A watchdog ([CarLayerWatch]) gives the car back to the SDK's puck when a fix the puck was given ([onFix]) has had no position
+ * after it for a second while the layer draws the car, the map is on screen and drawing frames and the car moves ([check]):
+ * the puck visible again once, the only setting change of the drive, the own layer gone for the rest of it, and one
+ * "car_layer" line with the reason. Measured from the fixes, it holds with Android's animations off too, where the puck jumps
+ * to each fix and a position comes only with it. A style that refuses a call costs the own car the same way, with one error
+ * line. A "car_layer" line says each change of who draws the car: counts and words only. Main thread only.
  */
 internal class CarLayer(
     private val port: Port,
@@ -173,7 +174,7 @@ internal class CarLayer(
     fun onPosition(latitude: Double, longitude: Double, puckBearing: Double, bar: CarBar?) {
         // With the switch off, or the car given back, nothing but these reads.
         if (!live || !shown) return
-        watch.onPosition(nanos())
+        watch.onPosition()
         try {
             if (bar != null && bar.place(latitude, longitude)) {
                 if (mark != Mark.BAR || bar.twoWay != barTwoWay || CarBar.widthChanged(barWidth, bar.width) || LaneDrawing.stopsStale(barLatitude, bar.latitude)) {
@@ -198,6 +199,15 @@ internal class CarLayer(
             failed = true
             later { fallBack(Fallback.EXCEPTION) }
         }
+    }
+
+    /**
+     * The puck was given a matched position of the drive, as the engine's one guidance puck gives every map's: the watchdog
+     * waits for the map to hand a position on. Nothing with the switch off or the car given back.
+     */
+    fun onFix() {
+        if (!live || !shown) return
+        watch.onFix(nanos())
     }
 
     /**
