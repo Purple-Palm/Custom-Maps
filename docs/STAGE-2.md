@@ -372,10 +372,11 @@ the owner compare 30 and 60 frames a second on the car's screen.
 ### The frame target
 
 - **Settings → Debug → Car map frames**, 30 a second, the default, or 60, sets what the car's map
-  aims at, at once, also during a drive ([CAMERA.md](CAMERA.md), Frame target). The car's host may
-  show fewer frames than the map draws, at a rate of its own that the app cannot read: the switch is
-  there to compare the two on the car's screen, with the car's camera line's `render.drawnFps` and
-  the `thermal` lines.
+  aims at, at once on the surface there is and on every later one ([CAMERA.md](CAMERA.md), Frame
+  target). Settings opens before Start and after the arrival, so a drive keeps the target it
+  started with. The car's host may show fewer frames than the map draws, at a rate of its own that
+  the app cannot read: the switch is there to compare the two on the car's screen, with the car's
+  camera line's `render.drawnFps` and the `thermal` lines.
 
 ### Lines
 
