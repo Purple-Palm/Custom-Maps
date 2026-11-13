@@ -226,6 +226,23 @@ class LanePlannerTest {
     }
 
     @Test
+    fun `P6 counts the latest changes where only they meet every point, and never names a lane it must leave backward`() {
+        // The fork's run-up is TIGHT: with comfortable changes no lane meets the exit beyond it, so every lane would count
+        // as many changes and the lane at the fork's edge, which ends just past the fork, would be named and left for its
+        // neighbour, away from the edge. Counted by the latest changes, a lane that reaches the exit's lane is named from
+        // the window's start and kept to the fork.
+        val plan = plan(LaneScenes.tightForkBeforeExit())
+        val fork = 2_600.0
+        val window = plan.windows.first { it.to == fork }
+        assertTrue(plan.flags.any { it.kind == LanePlan.Flag.Kind.TIGHT && it.from <= window.from && it.to >= fork }, "${plan.flags}")
+        assertTrue(plan.moves.none { it.back }, "${plan.moves}")
+        val named = plan.segments.filter { it.inWindow && it.to > window.from && it.from < fork }.map { it.named }.distinct()
+        assertEquals(1, named.size, "$named")
+        val lane = requireNotNull(named.single())
+        assertTrue(plan.topology.lanes[lane].closes > fork + 400.0, "lane $lane goes on past the fork")
+    }
+
+    @Test
     fun `P6 names the lane nearest the maneuver's edge among equal ones`() {
         assertEquals(4, plan(LaneScenes.s6()).at(GORE - 100.0).named, "a right exit: the right lane")
         assertEquals(0, plan(LaneScenes.s7()).at(GORE - 100.0).named, "a left fork: the left lane")

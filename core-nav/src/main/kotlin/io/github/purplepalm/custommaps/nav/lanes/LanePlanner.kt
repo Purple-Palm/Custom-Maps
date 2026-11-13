@@ -48,7 +48,8 @@ import kotlin.math.min
  *   in the band and moves early, but only to a lane no farther from the maneuver's edge that comes
  *   first by that order, with fewer changes or as few and preferred: never back, and never to a lane
  *   that needs more changes. Outside card windows no lane is named (P3): the band is kept and the
- *   path follows it.
+ *   path follows it. Changes are counted as the band was taken: the latest ones where only they meet
+ *   every point (a [LanePlan.Flag.Kind.TIGHT] stretch).
  * - **Unknown exits** (P7): before a road without lane data that leaves on the side of the next exit,
  *   the lane at that edge where the road leaves may be the road's own lane, so it is not named before
  *   the road (also while another lane still lies beyond it) unless it is the only lane of the band;
@@ -293,8 +294,10 @@ class LanePlan internal constructor(
     /**
      * The named lane moves from lane [from] to lane [to] at [station]; [fromEdge] and [toEdge] count it
      * from the exit's edge just before and at the move, lanes that are there only. [back]: [to] lies
-     * farther from the edge than [from] across the road, with no maneuver between, which the plan should
-     * never do; a lane that opens or ends at the move changes the counts, never this.
+     * farther from the edge than [from] across the road, with no maneuver between, which the plan does
+     * only where the road leaves no other way (the named lane leaves the band, and no lane the band held
+     * where it was named could have got there without such a move); a lane that opens or ends at the
+     * move changes the counts, never this.
      */
     data class Move(val station: Double, val from: Int, val to: Int, val fromEdge: Int?, val toEdge: Int?, val back: Boolean)
 
@@ -620,7 +623,7 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
         val last = n - 1
         val everyRule = allowedAt(last)
         val comfortable = costs(LanePlanner.COMFORTABLE_CHANGE_SECONDS, everyRule, last)
-        // Needed only while the bands are made: dropped with this block.
+        // Kept past this block only where a band was taken from it.
         val latest = costs(LanePlanner.LATEST_CHANGE_SECONDS, everyRule, last)
         val maneuvers = rules.filter { it.maneuver }
         // The nearer maneuver's own plan, for a stretch where no lane meets every point ahead.
@@ -629,7 +632,10 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
             var band = comfortableBand(i, comfortable, last)
             var source = comfortable
             if (band.isEmpty() && order[i].any { !lanes[it].designated }) {
+                // The named lane is ranked by the changes the band was taken from: with comfortable changes no lane meets
+                // every point here, so every lane would count as many.
                 band = latestBand(i, latest)
+                source = latest
                 flags[i] = LanePlan.Flag.Kind.TIGHT
                 if (band.isEmpty()) {
                     flags[i] = LanePlan.Flag.Kind.CONFLICT
@@ -642,7 +648,10 @@ private class RunPlanner(val topology: LaneTopology, val run: LaneTopology.Run, 
                         }
                         band = comfortableBand(i, show, maneuver.index)
                         source = show
-                        if (band.isEmpty()) band = latestBand(i, late)
+                        if (band.isEmpty()) {
+                            band = latestBand(i, late)
+                            source = late
+                        }
                     }
                 }
             }

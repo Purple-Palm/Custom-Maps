@@ -473,6 +473,27 @@ internal object LaneScenes {
     )
 
     /**
+     * A left fork whose run-up only the latest lane changes can meet, for the exit beyond it: six lanes; the fork at
+     * 2,600 m takes the left three, of which the left one ends just past it; two lanes go on, a third joins on the right,
+     * the two old ones end where a car-pool lane takes the left one's place, and a left exit at 4,900 m leaves from the
+     * lane that joined. Planned at 24 m/s. No lane meets every point with comfortable changes, so the plan names by the
+     * latest ones. For the planner's tests, not among [all].
+     */
+    fun tightForkBeforeExit() = route(
+        node(0.0, maneuver = DEPART, planMps = 24.0),
+        node(700.0, s(), s(), s(), s(), s(), s(), planMps = 24.0),
+        node(1_000.0, s(), s(), s(), s(), s(), s(), planMps = 24.0),
+        node(2_600.0, sl(), sl(), sl(), sr(false), sr(false), sr(false), roads = EXIT_RIGHT, maneuver = FORK_LEFT, planMps = 24.0),
+        node(3_500.0, s(), s(), roads = JOIN_RIGHT, planMps = 24.0),
+        node(4_150.0, s(), s(), s(), roads = JOIN_RIGHT, planMps = 24.0),
+        node(4_550.0, hov(), s(), roads = EXIT_LEFT, planMps = 24.0),
+        node(4_900.0, sl(), option(), road = RoadKind.RAMP, maneuver = OFF_LEFT, planMps = 20.0),
+        node(5_400.0, road = RoadKind.STREET, maneuver = TURN_LEFT, planMps = 15.0),
+        node(5_500.0, road = RoadKind.STREET, maneuver = ARRIVE, planMps = 15.0),
+        id = "tight-fork-before-exit",
+    )
+
+    /**
      * A street into a roundabout: two lanes 150 m before it, both of which the route can be followed from; the
      * route leaves the roundabout 60 m on. 35 mph planned. With [turnInstead] a plain right turn takes its place.
      */

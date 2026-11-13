@@ -90,17 +90,13 @@ class LaneTrustTest {
     @Test
     fun `every trust property holds where lanes are kept for car pools or buses, on seeded random routes`() {
         val rng = Random(KEPT_SEED)
-        var flagged = 0
         repeat(KEPT_ROUTES) { k ->
             val route = RandomRoutes.keptLane(rng, "kept-$k")
             val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
-            val built = build("kept-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first }))
-            if (built.plan.moves.any { it.back }) flagged++
-            check(built)
+            check(build("kept-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
         }
-        // 6: the plan names a lane farther from the exit's edge than the one before only where it flags that itself, on the
-        // careful reading of a few of these routes; never on the scenes or the approaches above.
-        assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
+        // 6: two of these routes move the named lane away from the exit's edge, where the road leaves no other way.
+        assertSeen("forcedBack")
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
         assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
     }
@@ -466,9 +462,12 @@ class LaneTrustTest {
     // ------------------------------------------------------------------ 6: never back between maneuvers
 
     private fun neverBack(b: Built) {
-        // The kept-lane routes count their flagged plans in their own test.
-        if (!b.name.startsWith("kept-")) {
-            assertTrue(b.plan.moves.none { it.back }, "${b.name}: the plan moves back at ${b.plan.moves.filter { it.back }.map { it.station }}")
+        // The named lane moves away from the exit's edge only where the road leaves no other way: where it leaves the band
+        // and no lane the band held where the lane was named could have got there without such a move (the only lane
+        // leaves at an earlier exit on the exit's side, or a fork just past the gore needs the lane that opens beyond it).
+        for (move in b.plan.moves.filter { it.back }) {
+            assertTrue(forcedBack(b, move), "${b.name}: the plan moves back at ${move.station} (${move.from} -> ${move.to}), where it need not")
+            saw("forcedBack")
         }
         // While the named lane stays the same, its count from the exit's edge grows only where a lane opens, or may begin,
         // between it and that edge.
@@ -480,6 +479,39 @@ class LaneTrustTest {
             if (seg.named != before.named || seg.edge != before.edge || seg.run != before.run || !sameRoad(b, before.from, seg.from)) continue
             assertTrue(count <= last || laneBeginsBetween(b, seg), "${b.name} at ${seg.from}: lane ${seg.named} counts $count from the edge after $last")
         }
+    }
+
+    /**
+     * Whether the move [move] away from the exit's edge is one the road forces: from where the plan began naming lanes for
+     * the maneuver ahead (its card window, or the maneuver before), the lanes a plan could hold without ever moving away
+     * from the edge, stretch by stretch of the band, run out by the move's station.
+     */
+    private fun forcedBack(b: Built, move: LanePlan.Move): Boolean {
+        val lanes = b.plan.topology.lanes
+        val window = b.plan.windows.firstOrNull { move.station >= it.from && move.station <= it.to } ?: return false
+        val turned = b.plan.topology.points.filter { it.turns && it.station < move.station }.maxOfOrNull { it.station } ?: Double.NEGATIVE_INFINITY
+        val from = maxOf(window.from, turned)
+        var held: Set<Int>? = null
+        for (seg in b.plan.segments) {
+            if (seg.to <= from || seg.from > move.station || !seg.inWindow || seg.noLane != null) continue
+            val band = seg.band.toSet()
+            val before = held
+            held = if (before == null) {
+                band
+            } else {
+                band.filter { l ->
+                    before.any { r ->
+                        r == l || when (seg.edge) {
+                            LaneEdge.RIGHT -> lanes[l].slot >= lanes[r].slot
+                            LaneEdge.LEFT -> lanes[l].slot <= lanes[r].slot
+                            null -> true
+                        }
+                    }
+                }.toSet()
+            }
+            if (held.isEmpty()) return true
+        }
+        return false
     }
 
     /** Whether at the start of [seg] a lane open to every car opens, or may begin, between its named lane and the exit's edge. */
@@ -986,7 +1018,7 @@ class LaneTrustTest {
 
     /**
      * Scenes of the geometry's tests beyond [LaneScenes.all]: lanes whose kinds change, possible lanes beside an edge, a bicycle
-     * lane, a lane that leaves at the edge while the path moves out of it.
+     * lane, a lane that leaves at the edge while the path moves out of it, a fork's run-up only the latest changes meet.
      */
     private fun extraScenes(): Map<String, LaneRoute> = linkedMapOf(
         "right-lane-for-buses" to LaneScenes.rightLaneForBuses(),
@@ -997,6 +1029,7 @@ class LaneTrustTest {
         "carpool-beyond-split" to carpoolBeyondSplit(200.0),
         "carpool-beyond-split-far" to carpoolBeyondSplit(450.0),
         "edge-leaves-mid-move" to LaneScenes.edgeLeavesMidMove(),
+        "tight-fork-before-exit" to LaneScenes.tightForkBeforeExit(),
     )
 
     /**
@@ -1028,9 +1061,6 @@ class LaneTrustTest {
         const val RANDOM_ROUTES = 60
         const val KEPT_SEED = 7
         const val KEPT_ROUTES = 200
-
-        /** Kept-lane routes of [KEPT_SEED] whose plan flags a move back itself, on the careful reading of the card. */
-        const val KEPT_FLAGGED_BACK = 2
 
         /** A second seed of approaches, and how many. */
         const val OPENING_SEED = 232
