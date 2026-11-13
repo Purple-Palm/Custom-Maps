@@ -1252,8 +1252,11 @@ data ([CAMERA.md](CAMERA.md), The app's own lanes):
     properly.
 
 The measuring drive, with **Settings → Debug → Measure the drawn lanes** on as well: a real drive with
-Large and Smooth follow, with several freeway exits and turns, by day or at night
-([CAMERA.md](CAMERA.md), Measuring the drawn lanes):
+Large and Smooth follow, with several freeway exits and turns, by day or at night, on the phone alone
+([CAMERA.md](CAMERA.md), Measuring the drawn lanes). Only the phone's map measures, and only while it
+is on screen: while the car's screen shows the map the phone shows the list and measures nothing,
+and with **Map** pressed on the phone its map draws at most 60 frames a second, which would mix two
+kinds of frames into the gate.
 
 67. **Every other close view drawn.** The first close view of the drive with the lanes, the next
     without them (the app's route line in its lane, no lanes and no lit lane), and so on, run-ups and
