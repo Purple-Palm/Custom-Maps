@@ -775,6 +775,23 @@ class RoutePathTest {
         }
     }
 
+    @Test
+    fun `a move under way where a lane leaves at the edge it moves from ends where that lane ends`() {
+        // The path moves from the left lane into the lane opening on the right while the left lane is about to leave by a
+        // road at the left edge with no taper: it is in the new lane by where the left lane ends, so it never lies off the
+        // asphalt and the lane lit about it goes on.
+        val built = build(LaneScenes.edgeLeavesMidMove())
+        val path = built.path
+        val leaving = built.plan.topology.lanes.single { it.closes > gore - 1_200.0 && it.closes < gore - 1_000.0 }
+        val move = path.moves.single { it.kind == RoutePath.Move.Kind.LANE && it.from < leaving.closes && it.to > leaving.closes - 150.0 }
+        assertTrue(move.to <= leaving.closes + 1e-9, "the move ends at ${move.to - gore}, the lane at ${leaving.closes - gore}")
+        assertTrue(move.to - move.from >= RoutePath.RAMP_MOVE_MIN_METERS)
+        // Where the lane is gone, the path lies half a lane inside the asphalt that is left.
+        val after = built.section.lanes(leaving.closes + 1e-6, requireNotNull(path.axisAt(leaving.closes)))
+        val offset = path.offsetAt(leaving.closes)
+        assertTrue(offset + w / 2.0 <= after.first().left + 1e-6 && offset - w / 2.0 >= after.last().right - 1e-6, "the path at $offset")
+    }
+
     // ------------------------------------------------------------------ the design's properties (10.1, LaneTrust 4, 5, 8, 9)
 
     @Test

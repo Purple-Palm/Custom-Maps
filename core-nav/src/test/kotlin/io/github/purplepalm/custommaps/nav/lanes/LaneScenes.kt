@@ -459,6 +459,20 @@ internal object LaneScenes {
     )
 
     /**
+     * A left exit where the left lane leaves twice by a road at the left edge with no taper: two lanes; 2,100 m before the
+     * gore the left one leaves and a lane opens on the right before a point 1,100 m before, where the left one leaves again.
+     * The plan names the new right lane while the left one is still there, so the path moves out of a lane that leaves at
+     * the edge it moves from. The exit takes the left two of the three lanes at its gore. For the geometry's tests, not
+     * among [all].
+     */
+    fun edgeLeavesMidMove() = approach(
+        listOf(at(2_100.0, s(false), s(), roads = EXIT_LEFT), at(1_100.0, s(false), s(), roads = EXIT_LEFT)),
+        exit = listOf(sl(), sl(), s(false)),
+        maneuver = OFF_LEFT,
+        id = "edge-leaves-mid-move",
+    )
+
+    /**
      * A street into a roundabout: two lanes 150 m before it, both of which the route can be followed from; the
      * route leaves the roundabout 60 m on. 35 mph planned. With [turnInstead] a plain right turn takes its place.
      */

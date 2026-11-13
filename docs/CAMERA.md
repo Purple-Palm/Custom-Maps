@@ -1761,10 +1761,12 @@ drawn yet. Before Start, in the preview, nothing changes.
   that lane onto the ramp instead of across the gore. Where no lane can be named before an exit (its
   lanes lie beyond a lane kept for car pools or buses), the line keeps to the road's line to the gore
   and, onto a ramp with lane data, until the ramp's lanes lie on the ramp, and moves into the ramp's
-  lane only from there. Where the road's line bends on an arc tighter than the line's distance from
-  it (a bend of a few degrees between two close points of the road's line), the line keeps its lane
-  and turns where it would cross itself; only around a corner of more than 40 degrees does it keep
-  to the road's line there, blending to it and back over 60 m on each side. A move still under way
+  lane only from there. A move out of a lane that leaves by a road at the edge it moves from, with no
+  taper, is done by where that lane ends (but takes at least 15 m a lane), so the line never runs off
+  the lanes there. Where the road's line bends on an arc tighter than the line's distance from it (a
+  bend of a few degrees between two close points of the road's line), the line keeps its lane and
+  turns where it would cross itself; only around a corner of more than 40 degrees does it keep to
+  the road's line there, blending to it and back over 60 m on each side. A move still under way
   where the drawn lanes end, as when the plan names the exit's lane only shortly before the gore,
   ends with them: at the gore the line goes on straight from where it is onto the ramp's line, and
   where the lane data stops it goes back to the road's line from where it is. The lanes' places are

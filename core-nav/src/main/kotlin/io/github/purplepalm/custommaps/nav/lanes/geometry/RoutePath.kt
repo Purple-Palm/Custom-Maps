@@ -34,7 +34,9 @@ import kotlin.math.min
  *   the path goes no farther toward it than where it begins. A move blends from where the path would be without it
  *   toward its lane as that lane lies along the way, so the path moves with lanes that move together (at a ramp's start,
  *   in a zone); a move into a lane still opening sets off only the way that lane lies where the move ends, so it waits
- *   for the lane rather than set off the wrong way and come back.
+ *   for the lane rather than set off the wrong way and come back. A move out of a lane that leaves with no taper at the
+ *   edge the path moves from (by a road at that edge) is done by where that lane ends, in no less than
+ *   [RAMP_MOVE_MIN_METERS] per lane crossed ([lengthBeforeRampStart]), so the path never lies off the lanes there.
  * - **No lane named (C1).** Ahead of an approach where no lane can be named (only a lane kept for car pools or buses
  *   can be used, or the lanes to use lie beyond one), the plan heads for the road's line, where the path runs on that
  *   approach: the band's middle before it leads the path toward the road's line and never past it, so the path reaches
@@ -213,6 +215,9 @@ class RoutePath private constructor(
 
         /** Offsets that differ by less than this are the same: no move. */
         private const val SAME_OFFSET_METERS = 1e-6
+
+        /** Stations closer than this are one: where a lane ends, it is there just before and gone just after. */
+        private const val SAME_STATION = 1e-6
 
         /** A fold is at a sharp bend where an arc turning by more than [FOLD_KEEP_DEGREES] lies within this of it. */
         private const val SHARP_REACH_METERS = 12.0
@@ -655,7 +660,12 @@ class RoutePath private constructor(
                                 returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
-                            val length = if (kind == Move.Kind.RETURN) RETURN_METERS else beforeRampStart(region, station, jump, moveLength(station, jump))
+                            val length = if (kind == Move.Kind.RETURN) {
+                                RETURN_METERS
+                            } else {
+                                val full = beforeRampStart(region, station, jump, moveLength(station, jump))
+                                beforeEdgeLeaves(region, station, axes, axis, next, drawn, value, full)
+                            }
                             val end = station + length
                             // A move toward a named lane, the only one under way, sets off only the way that lane lies from the
                             // path where the move ends.
@@ -843,6 +853,45 @@ class RoutePath private constructor(
                     region.drawings.any { rs.station > it.from && rs.station < it.to }
             } ?: return length
             return lengthBeforeRampStart(length, start.station - station, jump, section.roadAt(station) ?: RoadKind.FREEWAY)
+        }
+
+        /**
+         * How far a move from [drawn] toward [next] (worth [value] where it begins), from [station] and [length] long, runs where a
+         * lane at the drawn carriageway's edge ends there with no taper (it leaves by a road at that edge) before the move would
+         * have the path half a lane inside the edge that is left: to where that lane ends, but at least [RAMP_MOVE_MIN_METERS]
+         * per lane crossed ([lengthBeforeRampStart]), so the path and the lane lit about it do not lie off the asphalt there.
+         */
+        private fun beforeEdgeLeaves(
+            region: Region,
+            station: Double,
+            axes: List<RoadAxis>,
+            axis: RoadAxis,
+            next: Piece,
+            drawn: Double,
+            value: Double,
+            length: Double,
+        ): Double {
+            val road = section.roadAt(station) ?: RoadKind.FREEWAY
+            val half = LaneTopology.laneMeters(road) / 2.0
+            for (lane in topology.lanes.sortedBy { it.closes }) {
+                val at = lane.closes
+                if (at <= station + SAME_STATION || at >= station + length) continue
+                if (region.drawings.none { at > it.from && at < it.to }) continue
+                val there = axes.lastOrNull { it.from <= at } ?: axis
+                val before = section.lanes(at - SAME_STATION, there).filter { it.width > SAME_OFFSET_METERS }
+                val after = section.lanes(at + SAME_STATION, there).filter { it.width > SAME_OFFSET_METERS }
+                if (after.isEmpty() || after.any { it.lane == lane.id }) continue
+                // At the edge of the lanes that are there: a lane only possible beyond it is not there yet.
+                val present = before.filter { it.state != CrossSection.State.POSSIBLE }
+                val gone = present.indexOfFirst { it.lane == lane.id }
+                if (gone != 0 && gone != present.size - 1) continue
+                // Where the move would have the path when the lane ends.
+                val target = valueOf(next, at, there, value)
+                val path = drawn + (target - drawn) * CrossSection.ramp(at, station, station + length)
+                if (path + half <= after.first().left + TOLERANCE_METERS && path - half >= after.last().right - TOLERANCE_METERS) continue
+                return lengthBeforeRampStart(length, at - station, value - drawn, road)
+            }
+            return length
         }
 
         /**

@@ -72,7 +72,7 @@ class LaneTrustTest {
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
+        assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore", "litPastEdge")
     }
 
     @Test
@@ -850,7 +850,8 @@ class LaneTrustTest {
 
     /**
      * Between two lit stretches inside one card window and one drawing, where the plan names one lane all along, nothing is
-     * dark: across a fold the path keeps its lane and the lit lane goes on with it.
+     * dark: across a fold the path keeps its lane and the lit lane goes on with it, and a move out of a lane that leaves at
+     * the edge with no taper is done by where it leaves, so the path never lies off the asphalt there.
      */
     private fun litGoesOn(b: Built) {
         val windows = merged(b.plan.windows.map { it.from to it.to })
@@ -867,6 +868,9 @@ class LaneTrustTest {
         }
         for (fold in b.path.folds.filter { !it.toLine }) {
             if (lit.any { fold.from > it.start && fold.to < it.endInclusive }) saw("litOverFold")
+        }
+        for (move in b.path.moves.filter { it.kind == RoutePath.Move.Kind.LANE }) {
+            if (b.plan.topology.lanes.any { abs(it.closes - move.to) < 1e-6 } && lit.any { move.to > it.start && move.to < it.endInclusive }) saw("litPastEdge")
         }
     }
 
@@ -980,7 +984,10 @@ class LaneTrustTest {
         return (q.x - place.point.x) * place.nx + (q.y - place.point.y) * place.ny
     }
 
-    /** Scenes of the geometry's tests beyond [LaneScenes.all]: lanes whose kinds change, possible lanes beside an edge, a bicycle lane. */
+    /**
+     * Scenes of the geometry's tests beyond [LaneScenes.all]: lanes whose kinds change, possible lanes beside an edge, a bicycle
+     * lane, a lane that leaves at the edge while the path moves out of it.
+     */
     private fun extraScenes(): Map<String, LaneRoute> = linkedMapOf(
         "right-lane-for-buses" to LaneScenes.rightLaneForBuses(),
         "third-lane-for-car-pools" to LaneScenes.thirdLaneForCarPools(),
@@ -989,6 +996,7 @@ class LaneTrustTest {
         "bicycle-lane" to bicycleLane(),
         "carpool-beyond-split" to carpoolBeyondSplit(200.0),
         "carpool-beyond-split-far" to carpoolBeyondSplit(450.0),
+        "edge-leaves-mid-move" to LaneScenes.edgeLeavesMidMove(),
     )
 
     /**
