@@ -48,6 +48,14 @@ class MapboxEngine private constructor(
 
     val search: SearchProvider = MapboxSearchProvider(debugLog)
 
+    /**
+     * True while a car's surface shows the map, as the car maps count their surfaces: during a drive
+     * the phone then shows the list of the maneuvers ahead in place of its map
+     * ([io.github.purplepalm.custommaps.nav.car.PhoneScreenRule]), and its map draws at most 60 frames
+     * a second. Main thread.
+     */
+    val carMapShown: StateFlow<Boolean> get() = navigationEngine.carMapShown
+
     /** The screens that keep the navigator alive: the phone's and each car session's ([NavigatorHosts]). */
     private val hosts = NavigatorHosts(
         attach = { owner -> MapboxNavigationApp.attach(owner) },

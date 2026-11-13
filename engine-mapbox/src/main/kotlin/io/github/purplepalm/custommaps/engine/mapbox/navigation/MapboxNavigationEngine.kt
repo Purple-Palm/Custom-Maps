@@ -341,7 +341,8 @@ internal class MapboxNavigationEngine(
 
     /**
      * True while a car's surface shows the map: the phone's map then draws at most 60 frames a
-     * second, since two maps draw at once. Main thread.
+     * second, since two maps draw at once, and during a drive the phone shows the list of the
+     * maneuvers ahead in place of its map. Main thread.
      */
     internal val carMapShown: StateFlow<Boolean> = _carMapShown.asStateFlow()
 

@@ -42,6 +42,7 @@ import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenStore
 import io.github.purplepalm.custommaps.trip.DataStoreTripLogStore
 import io.github.purplepalm.custommaps.trip.TokenTaggedTripLog
+import io.github.purplepalm.custommaps.ui.map.PhoneScreens
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -143,6 +144,13 @@ class AppGraph(private val application: Application) {
     fun nextLook(choice: LookChoice, shown: Look): NextLook? =
         NextLook.of(choice, shown, sunPlaces.current(), Instant.now(), ZoneId.systemDefault())
 
+    /**
+     * What the phone shows during a drive: the list of the maneuvers ahead in place of its map while a
+     * car's surface shows the map, unless the driver chose the map in this drive. For the process, as
+     * the drive is; with no car it never changes.
+     */
+    val phoneScreens = PhoneScreens(engine.navigation.guidanceState, engine.carMapShown, debugLog)
+
     private val _mapsAccess = MutableStateFlow<MapsAccess>(MapsAccess.Checking)
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()
 
@@ -223,6 +231,8 @@ class AppGraph(private val application: Application) {
         }
         deviceLog.start()
         network.start()
+        // What the phone shows during a drive, from the drive and the car's surfaces; a line at each change.
+        phoneScreens.start(applicationScope)
         network.logPolicy("app start")
         // Back from system settings the driver may have changed what the app may use.
         deviceLog.onActivityResumed = { network.logPolicy("resume") }
