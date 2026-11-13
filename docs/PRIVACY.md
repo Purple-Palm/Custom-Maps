@@ -32,28 +32,31 @@ Last updated: 2026-11-13. It describes the app as it is today; see [Changes](#ch
   Settings. Each token names the Mapbox account that is billed for what the app does with it. They
   are stored only in the app's private storage, never in backups or device transfers, and never in
   the debug log, which names the token in use only by its place in the list and its name.
-- **Settings:** day and night, camera style, lane zoom, lane details, and the switches for the
-  simulated drive, for the app's own route line, for drawing the app's own lanes and for how many
-  frames a second the car's map draws under Debug.
+- **Settings:** day and night, camera style, lane zoom, lanes on the map (off, Mapbox's lane details
+  or drawn by the app), and the switches for the simulated drive, for the app's own route line, for
+  measuring the drawn lanes and for how many frames a second the car's map draws under Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads with the lanes the app would
   take on them and how it drew the route line and its own lanes (counts, sizes and times only: the
-  drawing itself stays in memory with its route and is never stored), the position, speed and road
-  every second of guidance (on freeways also the phone's turn rate and acceleration from its motion
-  sensors, summarised as a few numbers each second; the sensors are read only then, and no reading
-  itself is kept), a summary of each drive (how it ended, its length and time, and the data and
-  battery it used), what was searched and found, settings changes, the phone's state (model, Android
-  version, battery, heat, memory, network, and whether its screen is on, off or dozing and its
-  refresh rate), what the car screen did (when Android Auto connected and disconnected, which
-  Android Auto app it was by its package name and the version of the car interface it speaks, the
-  car screen's size and look, and what it showed, in states and numbers), whether the phone showed
-  its map or the list of the turns during a drive with the car, and crashes. It never
-  holds a token. Days that are over are kept compressed on the phone, and when
-  the log grows past 50 MB the oldest days are deleted. It leaves the phone only when you tap **Share debug log** in Settings and pick an app,
-  which gets it as plain text; from then on that app's own terms apply.
+  drawing itself stays in memory with its route and is never stored), whether the app or Mapbox drew
+  the car and why that changed (in words only), with the switch for measuring the drawn lanes the
+  frame times of each close view and whether the drawing kept within its budget (numbers only), the
+  position, speed and road every second of guidance (on freeways also the phone's turn rate and
+  acceleration from its motion sensors, summarised as a few numbers each second; the sensors are
+  read only then, and no reading itself is kept), a summary of each drive (how it ended, its length
+  and time, and the data and battery it used), what was searched and found, settings changes, the
+  phone's state (model, Android version, battery, heat, memory, network, and whether its screen is
+  on, off or dozing and its refresh rate), what the car screen did (when Android Auto connected and
+  disconnected, which Android Auto app it was by its package name and the version of the car
+  interface it speaks, the car screen's size and look, and what it showed, in states and numbers),
+  whether the phone showed its map or the list of the turns during a drive with the car, and
+  crashes. It never holds a token. Days that are over are kept compressed on the phone, and when the
+  log grows past 50 MB the oldest days are deleted. It leaves the phone only when you tap
+  **Share debug log** in Settings and pick an app, which gets it as plain text; from then on that
+  app's own terms apply.
 - **Map and road data** that the Mapbox software saves so the map and guidance keep working without
   a connection, including the area along the routes you last previewed.
 - The app keeps no search history.
@@ -184,7 +187,9 @@ Before a version that changes what the app keeps or sends is published, for exam
 location or the trip history planned in the [roadmap](ROADMAP.md), this policy is updated. Its full
 history is in the repository. 2026-11-13: the car screen through Android Auto; whether the phone's
 screen is on, and its refresh rate, in the debug log; the car map's frames among the settings, and
-whether the phone showed its map or the list during a drive with the car, in the debug log.
+whether the phone showed its map or the list during a drive with the car, in the debug log; lanes
+on the map in place of the lane details switch, and the switch for measuring the drawn lanes, among
+the settings; who drew the car, and the measured frames of the drawn lanes, in the debug log.
 
 ## Contact
 

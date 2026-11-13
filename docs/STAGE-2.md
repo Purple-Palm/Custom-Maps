@@ -81,7 +81,7 @@ screen", with no separate screens for now. Step 1 is that screen.
   parked, and the map once both are there; a new token builds the car map again.
 - **The map.** `MapScene` (`:engine-mapbox`, `map/MapScene.kt`) is everything of the phone's map
   that is not tied to a view, as of stage 1.1 and the app's own lanes: the look and `MapPalette`,
-  the lane zoom and lane details, the SDK route line and the app's own route line with its
+  the lane zoom and Lanes on the map, the SDK route line and the app's own route line with its
   watchdog and swap, the drawing of the app's lanes with its eraser and arrow, the U-turn arrow, the
   place pin, the camera of the chosen style with a data source for each map, and the navigator
   observer. `PhoneMap` keeps the view parts. `CarNavigationMap` draws the same scene on the car's
@@ -801,9 +801,9 @@ Other notes:
 - `setStyleImportConfigProperties` is not used. It replaces the import's whole config and resets
   every key it does not name to the style default (Maps 11.34.1). One such key is the Navigation
   SDK's `showHdRoads=false`, which `MapHdRoadsVisibilityController` (ui-maps 3.34.1) sets only when a
-  style loads. Since stage 1.1 it is also the app's own setting for lane details on the map
-  ([DECISIONS.md](DECISIONS.md), 39). The car map will set it the way the phone map does:
-  `MapRenderer` has `setLaneZoom` and `setLaneDetails` for both.
+  style loads. Since stage 1.1 it is also the app's own setting for Mapbox's lane details, a choice
+  of Lanes on the map ([DECISIONS.md](DECISIONS.md), 39). The car map sets it the way the phone map
+  does: `MapRenderer` has `setLaneZoom` and `setLanesOnMap` for both.
 - The first look is applied in the STYLE data-loaded callback, from the app's look as the map is
   made, so there is no frame in the wrong look.
 - Unverified: whether the light preset change animates. Check with Day and Night in the phone's

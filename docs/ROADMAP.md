@@ -61,10 +61,17 @@ zoom setting and the trip history with prediction.
 - The map follows the car before Start too, until the driver moves the map.
 - **Lane zoom** in Settings: **Default** (today's zoom, what a phone starts with) and **Large**, a
   very close view where the junction fills the screen and the lanes are clearly visible; Large also
-  zooms in on freeways where lanes leave the route, also where it goes straight on. Lane markings on
-  the map where Mapbox has them, behind a switch that is off unless turned on. The car stays on the
-  road line: the phone cannot tell which lane it is in. Built; not yet on a drive
-  ([CAMERA.md](CAMERA.md), Lane zoom).
+  zooms in on freeways where lanes leave the route, also where it goes straight on. **Lanes on the
+  map** in Settings: Mapbox's lane markings where Mapbox has them, or lanes the app draws itself on
+  freeways with lane data, with the route line in the lane the card names and that lane lit close in;
+  Off is what a phone starts with until the owner has checked the app's drawing on a drive. The car
+  shows where it is along the road, never in a lane: the phone cannot tell which lane it is in. Built;
+  not yet on a drive ([CAMERA.md](CAMERA.md), Lane zoom and The app's own lanes).
+- **The lane the car is in, as research only.** The owner would like to see the lane he is in and
+  his lane changes. The phone's positions alone cannot tell lanes, so on freeways the debug log has
+  kept the phone's own motion beside its position against the matched one since the lane data was
+  first logged ([DRIVES.md](DRIVES.md), checks 44 and 45); nothing on the screen shows or claims a
+  lane until those logs show that lane changes can be told reliably ([DECISIONS.md](DECISIONS.md), 39).
 - A **Then** chip that slides out under the maneuver card on the approach, with the arrow of the
   maneuver after the next one.
 - Routes end where a car stops for the place: Mapbox Search's stop point for cars is the route's
@@ -240,11 +247,11 @@ Mapbox logo and attribution rules apply in every view.
 - **Lane details in the map:** Mapbox's detailed lane markings (Standard "lane details", HD roads)
   are off by default and cover about 70 major cities. Navigation SDK 3.34's camera data source
   switches them off on every style load unless Mapbox's non-public coordination module is attached.
-  The app now shows them behind a switch, off unless turned on: it sets them after the style load,
-  when the SDK has already looked, and checks once a second during guidance. With each SDK upgrade,
-  check that the SDK still turns them off only at a style load (the debug log's `hdRoadsReapplied`
-  stays 0), and whether the route line follows 3D bridges, which would allow the switch to be on
-  for everyone.
+  The app shows them as a choice of **Lanes on the map**, off unless chosen: it sets them after the
+  style load, when the SDK has already looked, and checks once a second during guidance. With each SDK
+  upgrade, check that the SDK still turns them off only at a style load (the debug log's
+  `hdRoadsReapplied` stays 0), and whether the route line follows 3D bridges, which would allow them
+  to be on for everyone.
 
 - **Sideloading:** Android developer verification will require apps installed outside Google Play to be
   registered to a verified developer. Enforcement starts outside the US in 2026 and worldwide in 2027;

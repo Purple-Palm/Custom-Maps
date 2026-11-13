@@ -334,18 +334,23 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Why:** the lanes are large exactly where a lane has to be chosen, and nowhere else.
 - **Cost:** at a junction the view is only about 55 m wide, wider where the road bends well after the maneuver point; what comes after the turn is left to the Then chip (37). None of it has been on a drive yet; the numbers are in [CAMERA.md](CAMERA.md), Lane zoom.
 
-## 39. Lane details on the map, no lane position
+## 39. Lanes on the map, no lane position for the car
 
-- **Chosen:** Settings, Guidance has a switch **Lane details on the map**, off unless turned on. It turns on Mapbox Standard's lane details: lane lines, the arrows painted in each lane, stop lines and crosswalks, where Mapbox has them, which is on major highways and in some cities.
+- **Chosen:** Settings, Guidance has **Lanes on the map** with three choices: **Off**, **Mapbox's lane details** and **Drawn by the app**. A phone starts with Off; a phone that had the earlier switch **Lane details on the map** keeps what it chose, on as Mapbox's lane details and off as Off.
+  - **Mapbox's lane details** turn on Mapbox Standard's lane details: lane lines, the arrows painted in each lane, stop lines and crosswalks, where Mapbox has them, which is on major highways and in some cities. Everything about them is as it was under the old switch, the thin held route line included.
+  - **Drawn by the app:** on freeways with lane data, during guidance, the app draws the lanes itself, with its own route line in the lane to take and that lane lit close in (52, 53).
+  - **Off:** neither. The card's lane row, its words and the close views are the same with every choice.
+  - **The owner's answer of 2026-11-11:** yes to the app's drawing as what a phone starts with, once he has looked at it, on a simulated drive at home and on a real drive with the measuring switch on (52), with Mapbox's lane details one tap away. Until then it is a choice, not the default.
 - **The navigation SDK turns lane details off** at every style load. The app sets them after the style load, in a later message of the main thread, so nothing turns them off again and nothing fades out and in. It looks once a second during guidance and sets them again if something changed them; the debug log counts that. Only the public style setting is used.
-- **The car is never drawn in a lane, and nothing moves its icon sideways.** Phone GPS is typically within about 5 m and a lane is 3.5 to 3.7 m wide. The navigator's position lies on the line of the road and has no lane. The public SDK has no lane geometry: the route says which lanes can be used, not where they are on the map. An icon drawn in the lane the route needs would show the driver in the right lane whether they are in it or not.
-- **What the driver gets in its place:** the close view of the Large lane zoom (38), lane markings on the map where Mapbox has them, and the lane arrows in the maneuver card, also at lane choices where the route goes straight on. The switch's text says that the car shows where it is on the road, not which lane it is in.
-- **While the switch is on, the route line stays thin close in,** at the width it has at zoom 16.5. The SDK's line grows to about a lane's width at the junction zoom and would cover a lane's markings and read as "this lane".
-- **Off unless turned on,** because two things could not be checked without a device in an area that has lane details: whether the route line and the maneuver arrow, which have no height, hide under a bridge drawn in 3D, and the frame rate. The switch's text says the route line can hide under bridges. Turning it on for everyone later is a one-line change.
+- **The car is never drawn in a lane, and nothing moves its icon sideways.** Phone GPS is typically within about 5 m and a lane is 3.5 to 3.7 m wide. The navigator's position lies on the line of the road and has no lane. The public SDK has no lane geometry: the route says which lanes can be used, not where they are on the map. An icon drawn in the lane the route needs would show the driver in the right lane whether they are in it or not. With the app's drawing, over drawn lanes in a close view the car is a bar across the road at its place along it, which says nothing about the lane; elsewhere it is the usual dot. The owner answered yes to the bar on 2026-11-11.
+- **The route line goes into a lane only in the app's own drawing.** There the line, and close in the lit lane, are drawn by the app in the lane the lane plan names, in the same drawing as the lane lines, so the two agree by construction; neither claims where the paint is on the ground. Mapbox's lane details stay under the app's drawing only where a phone check has shown that they draw below it; until then they are off while the app draws, as two lane truths would disagree by up to a lane. The measuring drive turns them on under the drawing for that check (52).
+- **What the driver gets in place of a lane position:** the close view of the Large lane zoom (38), the lanes on the map, Mapbox's or the app's, and the lane arrows in the maneuver card, also at lane choices where the route goes straight on. The setting's text says that the car shows where it is along the road, not which lane it is in.
+- **With Mapbox's lane details the route line stays thin close in,** at the width it has at zoom 16.5. The SDK's line grows to about a lane's width at the junction zoom and would cover a lane's markings and read as "this lane". The app's own line keeps the same widths.
+- **Off unless chosen,** because two things could not be checked without a device in an area that has lane details: whether the route line and the maneuver arrow, which have no height, hide under a bridge drawn in 3D, and the frame rate. The setting's text says the route line can hide under bridges. The app's drawing gets its own frame check, the measuring switch (52). Making a choice the default is a one-line change.
 - **Alternatives:**
   - The SDK's own switch that stops it from turning lane details off. It is restricted to Mapbox's modules; calling it would claim a module that is not there.
   - Setting them within the style load. The SDK turns them off again, with a visible fade.
-  - Moving the car's icon or the route line into a lane. There is no lane position to move it by.
+  - Moving the car's icon or the route line into the lane the car is in. There is no lane position to move it by. That stays true for the icon and for Mapbox's surveyed lanes; the app's own line lies in the lane the plan names, which is the lane to take, not the lane the car is in.
 - **Why:** public, reversible and honest about what the phone knows.
 - **Cost:** the order of events the setting relies on is read from the SDK's source, not promised by it. Check it with each SDK upgrade ([ROADMAP.md](ROADMAP.md), watch list).
 
@@ -529,12 +534,12 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - A reroute started by the app when the car stays on the freeway past its exit: it would race the navigator's own, which starts in native code, and a wrong one shows a wrong route at the moment the driver is right. The new lines first show whether a rule could find such a car sooner without false alarms.
 - **Why:** one decision before an exit gets one approach, one row with one lit lane and its words, and enough road ahead to see the exit coming.
 - **Cost:**
-  - **The route line's lane means nothing.** The line still follows the road's centre line, which on a freeway runs along one of its lanes, and at the gore it still cuts across every lane; a run-up holds the close view, with its line about a lane wide, for up to about 85 s. Until the app draws the lanes itself, the lane the line lies in means nothing, and the card's words are the instruction. The next drive asks at each exit which of the two was followed.
+  - **The route line's lane.** Where the app draws the lanes (Lanes on the map, Drawn by the app; 39, 52, 53), the line is in the lane the card names. With Off or Mapbox's lane details the line still follows the road's centre line, which on a freeway runs along one of its lanes, and at the gore it still cuts across every lane; a run-up holds the close view, with its line about a lane wide, for up to about 85 s. There the lane the line lies in means nothing, and the card's words are the instruction. The next drive asks at each exit which of the two was followed.
   - Where lanes are added between two edge points, a row lights a more careful lane than needed and has no words.
   - One switch from the exit's own lanes to the run-up's row, at least about a minute and a half before the exit.
   - Off the route for longer than the camera's hold before the new route: two approaches.
   - The tilt draws more map far ahead: more data and frame time, no new bill.
-  - The lane that serves a split right after the exit is not shown; that is for the app's own drawing of the lanes.
+  - The lane that serves a split right after the exit: since the lane plan (53), where the plan constrains the split within 15 s of driving after the gore, the card shows the split's row from the gore on and with Large the close view stays to it; a split farther on is not shown before the gore.
   - None of it has run on a phone yet.
 
 ## 47. Spare tokens, switched by hand
@@ -617,3 +622,52 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The phone's screen off during a drive with the car: the phone's own setting, not the app's; the screen may still lock by itself, which is the best case for the car.
 - **Why:** the car's screen is where the driver looks; on the phone the next turns read at a glance cost a fraction of what a second map costs, and the map is there with one tap.
 - **Cost:** the phone's map is not on its screen during a drive with the car unless asked for; the list's rows do not show lanes or the turn's shape on the map, which the card above them and the car's map do. The heat saved is not measured yet (DRIVES, the car screen after step 1c).
+
+## 52. The app draws the lanes itself
+
+- **Chosen (owner):** with **Lanes on the map → Drawn by the app** (39) the app draws the lanes on freeways itself, under the route line, as seen from above, and the route line runs in the lane to take, moving early and never back; nothing on the map is faded or removed. The owner asked for it after the drive with the missed exit, where the route line lay in a lane that meant nothing (46).
+  - **Only what the route's own data supports.** The lanes come from the lane lists the route already carries, with no request: how many lanes reach each point, their arrows, and the vehicles a lane is kept for. Every drawn element is that data, a rule with a named constant that errs to the safe side (lane widths, where a lane begins or ends, tapers, gores), or not drawn. Where nothing is known the map's own road shows. Inside a card window a stretch without lane data between two drawn ones is a zone, asphalt without lane lines, with the named lane lit through it; an exit-side lane that may already be there before the point that first lists it is drawn as a possible lane, with no line between it and its neighbour, and is never lit. Nothing is invented.
+  - **The lit lane and the tints, inside card windows only.** In the run-up to an exit the lane the lane plan names (53) is lit amber from lane line to lane line, under the paint, with dark edges; lanes that still work are tinted, each ending in a wedge toward it; a lane for car pools or buses is never lit. Outside card windows nothing is lit, and the route is the usual line on the plan's path.
+  - **The swap on the camera's state, as a step.** While the close view or the junction view holds and a drawn lane is at least 10.4 dp wide, the lit lane takes the route line's place over the lit stretches; when the view lets go, or a lane is under 9.6 dp, the line is back. Never a fade. In Mapbox tuned, at peak speeds of about 34 m/s and over, and with Default, the opaque line stays in the named lane.
+  - **The app's own route line,** with Mapbox's line hidden under it, shown again by itself when the app's fails (a watchdog), and shown during every change of route until the new path has loaded.
+  - **The car as a bar across the road** over drawn lanes in a close view, at its place along the road; elsewhere the usual dot (39).
+  - **Freeways first;** streets come in a later step.
+  - **What the picture says:** dark asphalt with white lines, the route's data says how many lanes there are here, and their places are schematic; Mapbox's plain road, the app knows nothing of the lanes here; asphalt without lines, a zone; a lane with no line between it and the next, a possible lane; one lane lit and others tinted, drive in the lit one, the tinted ones still work; a wedge, this lane stops working here; a blue bar across the road, where the car is along the road, not in which lane.
+  - **A frame gate before it becomes the default.** The Debug switch **Measure the drawn lanes** shows the drawing at every other close view of a drive and compares their frames ([CAMERA.md](CAMERA.md), Measuring the drawn lanes); the trip summary says whether the drawing passed.
+- **Alternatives:**
+  - An aerial photo under the route: withdrawn by the owner.
+  - Lane markings from OpenStreetMap: another source with its own terms and gaps, and nothing that ties its lanes to the route's.
+  - Mapbox's lane details alone: their lanes are not the route's, so the route line could not be put into the lane to take consistently.
+  - Lane counts between points from Mapbox's electronic horizon: a beta whose terms allow internal evaluation only (38).
+  - Drawing the app's road above Mapbox's route line: the line would lie under the lanes.
+  - A stripe for each usable lane, or a thinner line in the lane: busier, and a line in one lane reads as a claim.
+  - Handing over from the line to the lit lane along a zoom ramp: a view that rests at such a zoom rests half-transparent.
+  - An accuracy ring around the car: centred on the road's line, it leaves out the lit lane.
+- **Why:** the missed exit came with a route line in a lane that meant nothing and a card whose rows changed; drawn by the app, the line, the lit lane, the card and its words name the same lane (53).
+- **Cost:**
+  - Only where the route has lane points: on Mapbox's public examples most of a freeway has none, and there the map is as before.
+  - Lane widths and where lanes begin are rules, metres off the paint on the ground.
+  - A possible lane keeps the lit lane one lane careful where the real lane begins late.
+  - The flat asphalt draws over a bridge that crosses the route, as the route line already does, until a later step draws bridge decks back.
+  - Mapbox's line is hidden under the app's, and the swap and the watchdogs are the app's to keep right.
+  - The frame cost is not known yet; the measuring drive measures it.
+
+## 53. One lane plan for the map, the card and the words
+
+- **Chosen:** for each route the app works out one lane plan, off the main thread with the route, kept in memory with it and never stored, and it decides the lane to take for the app's drawing, the card's run-up row and the row's words. This changes the one approach per freeway exit (46):
+  - **The card reads the plan.** On a run-up the card's row lights the lane the plan names at the row's point, or the lanes that still work there where the row lights the exit's lanes. The interim rule (`RunUpRule`) still composes the row and its words; the plan calls it. A lane of the row's point that the map does not draw at the car yet, an exit-side lane still to open, is drawn hollow, as an outline, never lit and with no bar. The plan names a lane only inside a card window, so the card never lights one before the run-up. This holds with every choice of Lanes on the map.
+  - **The words wait.** They show only while the lit lane counts the same from the exit's edge at the car as at the row's point, no exit-side lane opens or may begin between the car and that point, and no road without lane data leaves on the exit's side ahead on the step. Where the plan names no lane, as before an exit whose lanes lie beyond a lane for car pools, the row has no words.
+  - **A road without lane data that leaves before the exit, on its side (the owner's answer of 2026-11-11):** the lit lane keeps one lane in from the edge until that road is passed, since it may take the edge lane with it, and moves to the edge once after it. Where the road comes less than about 12 s of driving before the exit, the lane reaches the edge before the road, and the card's words wait until the road is passed.
+  - **The run-up begins at the plan's seam:** no later than 6 s of driving before the plan's lanes first narrow for a point within its reach, also where that lies beyond the reach, so the close view, the card's row and the lit lane begin together. A new route right after a run-up ended goes on with the seam that run-up began with.
+  - **The ramp bridge:** past the gore the run-up holds on through the ramp to the next point the plan constrains there, a fork or a split with lane data, or a ramp step's maneuver it names a lane for, when that lies within 15 s of driving at the ramp's planning speed. The card shows that point's row from the gore on, the lit lane stays on the ramp's lane for it, and with Large the close view stays to it.
+- **46's residual risk is replaced:** where the app draws the lanes, the line is in the lane the card names.
+- **Alternatives:**
+  - The card's own composition beside a plan for the map: two readings of the same lanes would light different lanes wherever the data leaves doubt, the conflicting orders of the missed exit again.
+  - Naming a lane outside card windows: the lane was lit before its run-up began.
+  - Words as soon as the counts leave no doubt at the row's point: a driver counting from the edge could take an exit-only lane that opens later for one that is already there.
+- **Why:** one decision before an exit gets one lane, the same on the map, in the card and in its words.
+- **Cost:**
+  - The card loses words where the plan names no lane, as before an exit beyond a lane for car pools, and they wait for a lane that opens ahead.
+  - A run-up can begin earlier, on invented approaches from not at all to about a kilometre: the close view for longer.
+  - The row needs the route's plan: while a new route's plan is on its way the row has no words; where no plan could be made it is the interim rule's row.
+  - None of it has run on a phone yet.
