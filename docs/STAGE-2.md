@@ -349,6 +349,15 @@ the owner compare 30 and 60 frames a second on the car's screen.
   scene is invisible meanwhile (`MapScene.setAway`): the Smooth follow camera asks for no frames,
   the two Mapbox camera styles start no animation, and the routes, the progress and the camera's data
   go on as before, once a second.
+- **Made only when it is to show.** The phone's map is made in the composition that first shows it,
+  with its view in the window at once (`PhoneMapSlot`): Mapbox takes the activity's lifecycle for a
+  map's view only on the view's first attach, so a map made while the list shows would never be
+  stopped or destroyed: its render thread would run and its puck would glide to every position of
+  the drive. A phone screen that starts on the list, as one made again mid-drive while the car shows
+  the map (the app swiped away and opened again), has no map until the map is to show: **Map**, the
+  car gone or the drive's end makes it then, with its style load as at the app's start, and it is
+  kept from then on. A released map's location component is turned off as well
+  (`MapScene.release`), so no released map stays a listener of the engine's puck.
 - **No part in the look.** No look is shown on the map while it is away; its close view holds
   nothing, and the car map's close view holds a switch, as while the phone's activity is stopped
   (`LookController.onPhoneMapAway`). A theme never waits on the stopped map.
@@ -357,7 +366,8 @@ the owner compare 30 and 60 frames a second on the car's screen.
   guidance puck gives a returning map its newest position at once), the route line as driven, and the
   camera following the car, whatever it did before the map went away.
 - **The camera line** goes on once a second while the phone's screen is on, with `away` true and
-  `render.frames` 0, which shows that the map drew nothing.
+  `render.frames` 0, which shows that the map drew nothing. A screen that started on the list has no
+  map yet, and so no phone camera line, until the map shows.
 
 ### The frame target
 

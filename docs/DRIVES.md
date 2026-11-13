@@ -86,6 +86,10 @@ Since step 1c the phone shows the list in place of its map during a drive with t
     car; `phone_screen` `map`, `button`, and the camera lines without `away` and with frames again.
     The guidance bar has **List** then: it goes back to the list, `phone_screen` `list`, `button`.
     Note how long the map takes to show the car and whether a frame of the old place shows first.
+    Then, on the list, swipe Custom Maps away from the recent apps and open it again from the trip
+    notification while the drive goes on in the car: the list again, and no phone camera line;
+    **Map** makes the phone's map then (`map_style_loaded`, as at the app's start) and its camera
+    lines start.
 16. **The car unplugged and plugged in on the list.** Pull the cable during a drive on the list: the
     phone's map comes back as of that moment (`phone_screen` `map`, `car`); plug it in and open
     Custom Maps in the car: the list again (`list`, `car`). Then **Map**, and pull and plug the cable

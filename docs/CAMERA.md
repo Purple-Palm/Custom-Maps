@@ -722,15 +722,19 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   frames do not reach the navigation camera then. The data source goes on taking the positions and
   the progress, so when the map comes back the camera follows the car from the frame of now: Smooth
   follow snaps to it on its first frame, the Mapbox styles go to it at once; a camera that was in the
-  overview or left to the driver before follows the car again.
+  overview or left to the driver before follows the car again. A phone screen that starts on the
+  list, as one made again mid-drive, makes its map only when the map is to show: Mapbox stops a map's
+  view with the activity only once the view has been in the window, so a map made for the list would
+  keep its render thread and its puck's animators going, unseen. The new map then starts as at the
+  app's start, style load and all.
 
 ### Logging
 
 A **camera** line once a second during guidance. The map scene writes it, in every camera style, and
 on the phone only while its map view is shown; the `activity` and `screen` lines show when it was
 not. While the phone's map is put away for the list of the maneuvers ahead (stage 2's step 1c), the
-phone's line goes on while its screen is on, with `away`. The car's map writes its own, with
-`screen` `car`.
+phone's line goes on while its screen is on, with `away`; a phone screen that started on the list
+has no map, and so no line, until the map shows. The car's map writes its own, with `screen` `car`.
 
 | Field | Meaning | Expected |
 |---|---|---|
