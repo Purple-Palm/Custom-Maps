@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav
 
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -37,24 +38,23 @@ interface MapRenderer {
     fun setLaneZoom(mode: LaneZoom)
 
     /**
-     * Whether the map draws lane markings, painted arrows and crosswalks where the map data has
-     * them. A change applies at once. The car is drawn where it is on the road, never in a lane.
+     * Who draws the lanes on the map ([LanesOnMap]): Mapbox's lane markings, painted arrows and
+     * crosswalks where the map data has them, with the route line thin close in; the app's own
+     * drawing of the freeway lanes during guidance, with its own route line in the lane the lane
+     * plan names and, over the drawn lanes in a close view, the car as a bar across the road; or
+     * neither. A change applies at once, also during a drive, and touches no trip: the card's lane
+     * row, the run-up and its close view are the same with every choice. The car is drawn where it
+     * is along the road, never in a lane.
      */
-    fun setLaneDetails(enabled: Boolean)
+    fun setLanesOnMap(choice: LanesOnMap)
 
     /**
      * Debug: whether the route line of a drive is drawn by the app itself, along the lanes of the
      * route's lane plan, in place of the navigation SDK's, which comes back by itself if the app's
-     * fails. Off, nothing changes. A change applies at once, also during a drive.
+     * fails. Off, nothing changes, unless the app draws the lanes ([setLanesOnMap]), which draws
+     * its own route line too. A change applies at once, also during a drive.
      */
     fun setOwnRouteLine(enabled: Boolean)
-
-    /**
-     * Debug: whether the app draws the freeway lanes of a drive under the route line where the route's lane data has
-     * them, with the route line its own whatever [setOwnRouteLine] says. Off, nothing of them shows. A change applies at
-     * once, also during a drive.
-     */
-    fun setDrawOwnLanes(enabled: Boolean)
 
     /**
      * Marks [place] on the map with a pin at the place itself, such as the building, wherever a

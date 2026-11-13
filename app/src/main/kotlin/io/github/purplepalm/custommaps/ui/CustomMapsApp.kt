@@ -116,10 +116,9 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                 onDayNightChange = settingsViewModel::setDayNight,
                 onCameraStyleChange = settingsViewModel::setCameraStyle,
                 onLaneZoomChange = settingsViewModel::setLaneZoom,
-                onLaneDetailsChange = settingsViewModel::setLaneDetails,
+                onLanesOnMapChange = settingsViewModel::setLanesOnMap,
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
-                onDrawOwnLanesChange = settingsViewModel::setDrawOwnLanes,
                 onCarMapFpsChange = settingsViewModel::setCarMapFps,
                 onShareLog = {
                     scope.launch {

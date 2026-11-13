@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.car
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.look.LookScreen
@@ -185,9 +186,8 @@ class CarLookSessionTest {
         override fun setViewportPadding(padding: ViewportPadding) = Unit
         override fun setCameraStyle(style: CameraStyle) = Unit
         override fun setLaneZoom(mode: LaneZoom) = Unit
-        override fun setLaneDetails(enabled: Boolean) = Unit
+        override fun setLanesOnMap(choice: LanesOnMap) = Unit
         override fun setOwnRouteLine(enabled: Boolean) = Unit
-        override fun setDrawOwnLanes(enabled: Boolean) = Unit
         override fun showPlace(place: Place?) = Unit
         override fun zoomBy(delta: Double) = Unit
         override fun setFrameTarget(fps: Int) = Unit

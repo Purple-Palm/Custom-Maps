@@ -406,6 +406,9 @@ class CarLayerTest {
         assertTrue(hasStatement(scene, "private fun onPuckMoved(point: Point)", frame))
         // Each matched position the engine gave the drawn car, for the watchdog.
         assertTrue(hasStatement(scene, "override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult)", "carLayer.onFix()"))
+        // Lanes on the map: the car is the app's with Drawn by the app, the SDK's puck with Off and Mapbox's lane details.
+        assertTrue(hasStatement(scene, "override fun setLanesOnMap(choice: LanesOnMap)", "appDrawsLanes = choice.appDraws"))
+        assertTrue(hasStatement(scene, "override fun setLanesOnMap(choice: LanesOnMap)", "carLayer.setDrawing(appDrawsLanes)"))
     }
 
     @Test

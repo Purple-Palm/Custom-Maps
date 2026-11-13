@@ -196,12 +196,10 @@ fun MapScreen(
         LaunchedEffect(phoneMap) { settings.cameraStyle.collect(phoneMap::setCameraStyle) }
         // The same for the lane zoom: how close the camera goes before turns and lane choices.
         LaunchedEffect(phoneMap) { settings.laneZoom.collect(phoneMap::setLaneZoom) }
-        // And for lane markings on the map, where the map has them.
-        LaunchedEffect(phoneMap) { settings.laneDetails.collect(phoneMap::setLaneDetails) }
+        // And for who draws the lanes on the map: Mapbox's lane details, the app, or neither.
+        LaunchedEffect(phoneMap) { settings.lanesOnMap.collect(phoneMap::setLanesOnMap) }
         // And for the Debug switch that has the app draw the route line itself.
         LaunchedEffect(phoneMap) { settings.ownRouteLine.collect(phoneMap::setOwnRouteLine) }
-        // And for the one that has it draw the freeway lanes itself.
-        LaunchedEffect(phoneMap) { settings.drawOwnLanes.collect(phoneMap::setDrawOwnLanes) }
         LaunchedEffect(phoneMap, pinnedPlace) { phoneMap.showPlace(pinnedPlace) }
     }
 

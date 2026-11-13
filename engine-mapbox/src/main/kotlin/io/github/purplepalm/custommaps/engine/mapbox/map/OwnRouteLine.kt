@@ -34,9 +34,10 @@ import kotlin.math.max
 
 /**
  * The route line drawn by the app itself (the design's 5.3), behind the Debug switch App's own route line, which is
- * off unless turned on. With the switch off nothing here touches the style or the navigation SDK's line.
+ * off unless turned on, and with Lanes on the map's Drawn by the app. Otherwise nothing here touches the style or the
+ * navigation SDK's line.
  *
- * With the switch on, during guidance, the route's path is drawn from the app's own GeoJSON source: the route's own
+ * Turned on, during guidance, the route's path is drawn from the app's own GeoJSON source: the route's own
  * line, moved into the lanes the route's lane plan names, as a line and its casing with the SDK's widths
  * ([RouteLineWidths], held from zoom 16.5 as with lane details on), the route line's colours of the look
  * ([MapPalette.routeLine]) and the SDK's traffic levels. The SDK's primary line is hidden meanwhile
@@ -70,9 +71,9 @@ import kotlin.math.max
  * The debug log gets a "route_line" line at each change of who draws the line, with the swap's times where the own
  * line took over, and the camera line a "routeLine" object once a second ([diagnostics]): numbers and words only.
  *
- * Behind a second Debug switch, Draw the app's lanes ([setLanes]), the own line draws the app's own lanes with the route
+ * With Lanes on the map's Drawn by the app ([setLanes]) the own line draws the app's own lanes with the route
  * ([OwnLanes]): their layers ([LaneLayers]) are in the style with the own line's, added after them, empty, at every
- * style load and when either switch is turned on, in the look's colours. Each path is built with its drawing, and the
+ * style load and when either is turned on, in the look's colours. Each path is built with its drawing, and the
  * drawing's source holds one window of it at a time ([DrawingWindows]): the first goes with the path, and the swap from
  * the SDK's line waits for both to load; the next ones are built off the main thread and sent while the car drives,
  * never inside a card window ([onProgress]), each with a "lane_drawing" line of its size and of how long it took. With
@@ -202,12 +203,12 @@ internal class OwnRouteLine(
         NO_DATA("no_data"),
     }
 
-    /** Whether the Debug switch is on. */
+    /** Whether the own line is on: its Debug switch, or the lanes drawn by the app. */
     var enabled = false
         private set
 
     /**
-     * Whether the app's own lanes are drawn with the own line (the Debug switch Draw the app's lanes): their layers are in
+     * Whether the app's own lanes are drawn with the own line (Lanes on the map's Drawn by the app): their layers are in
      * the style whenever the own line's are, added after them at every style load ([LaneLayers]).
      */
     var lanes = false
@@ -308,7 +309,7 @@ internal class OwnRouteLine(
     private var puckLongitude = Double.NaN
     private var tracking = false
 
-    /** The Debug switch: on, the own line is drawn during guidance from now on; off, the SDK's line is shown and the own layers leave the style. */
+    /** On, the own line is drawn during guidance from now on; off, the SDK's line is shown and the own layers leave the style. */
     fun setEnabled(on: Boolean) {
         if (on == enabled) return
         enabled = on
@@ -336,7 +337,7 @@ internal class OwnRouteLine(
     }
 
     /**
-     * The Debug switch Draw the app's lanes: on, the app's own lanes are drawn with the own line from now on; off, they
+     * Lanes on the map's Drawn by the app: on, the app's own lanes are drawn with the own line from now on; off, they
      * leave the style. Nothing of them is added while the own line is off. During a drive the route's own line is built
      * and drawn anew, with or without them, and the SDK's line shows until it is.
      */

@@ -22,10 +22,11 @@ import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 import kotlin.math.ceil
 
 /**
- * The car drawn by the app itself (the own lanes' design 5.4; T2, E4, R3, R20), with the Debug switch Draw the app's lanes
- * on; with it off nothing here touches the style or the location component, and the puck is the navigation SDK's, as ever.
+ * The car drawn by the app itself (the own lanes' design 5.4; T2, E4, R3, R20), with Lanes on the map's Drawn by the app;
+ * with any other choice nothing here touches the style or the location component, and the puck is the navigation SDK's, as
+ * ever.
  *
- * With the switch on, from Start to the end of guidance, the location component's puck is invisible ([Port.hidePuck]): set
+ * With the app drawing the lanes, from Start to the end of guidance, the location component's puck is invisible ([Port.hidePuck]): set
  * once at Start, or once as a map is made during such a drive, which is its first setting, and back at guidance end
  * ([Port.showPuck]). In between no setting of the location component changes, whatever the camera style, the lane zoom or
  * anything else does: every change rebuilds the puck and cancels its glide. The camera still follows the SDK's puck, which
@@ -121,7 +122,7 @@ internal class CarLayer(
     /** Whether the app draws the car now: the puck is invisible and the own layer in the style of a map that is there. */
     val live: Boolean get() = puckHidden && layerAdded && !failed && !released
 
-    /** The Debug switch Draw the app's lanes: on, the app draws the car during guidance from now on; off, the SDK's puck again. */
+    /** Lanes on the map's Drawn by the app: on, the app draws the car during guidance from now on; off, the SDK's puck again. */
     fun setDrawing(on: Boolean) {
         if (on == drawing) return
         drawing = on

@@ -86,6 +86,7 @@ import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.guidance.UTurnArrow
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
@@ -125,18 +126,18 @@ import kotlinx.coroutines.withContext
  * second: where the camera is and where the viewport data source wants it, how smoothly the camera
  * and the puck moved, and how fast the map rendered (see [cameraSample]).
  *
- * Lane details, the lane markings Mapbox Standard can draw, are off unless [setLaneDetails] turns
- * them on ([LaneDetails]). The puck stays where the navigator puts the car, on the line of the
- * road: nothing here moves it sideways into a lane, since no position the phone has says which
- * lane the car is in.
+ * Who draws the lanes is Settings' Lanes on the map ([setLanesOnMap]). With Mapbox's lane details,
+ * the lane markings Mapbox Standard can draw are on ([LaneDetails]) and the route line stays thin
+ * close in. With Drawn by the app the app draws the freeway lanes during guidance ([OwnLanes]) with
+ * its own route line ([OwnRouteLine]), and the car itself, from the puck's place every frame, the
+ * location component's puck invisible from Start to the drive's end ([CarLayer]): over the drawn
+ * lanes in a close view a bar across them, elsewhere the usual dot. With Off neither. The puck stays
+ * where the navigator puts the car, on the line of the road: nothing here moves it sideways into a
+ * lane, since no position the phone has says which lane the car is in.
  *
  * Behind a Debug switch ([setOwnRouteLine]) the route line of a drive is the app's own, drawn along
- * the lanes of the route's lane plan in place of the navigation SDK's primary line ([OwnRouteLine]).
- * Behind another ([setDrawOwnLanes]) the app draws the freeway lanes under it too ([OwnLanes]), and
- * the route line is the app's own whatever the first switch says; and during guidance the app draws
- * the car itself, from the puck's place every frame, the location component's puck invisible from
- * Start to the drive's end ([CarLayer]): over the drawn lanes in a close view a bar across them,
- * elsewhere the usual dot.
+ * the lanes of the route's lane plan in place of the navigation SDK's primary line, whatever Lanes on
+ * the map says.
  *
  * While the scene exists, the style it shows is among what is kept ahead of the car during guidance
  * for stretches without a connection ([OfflineData]).
@@ -225,8 +226,8 @@ internal class MapScene(
     private val puck = createDefault2DPuck(withBearing = true).copy(shadowImage = ImageHolder.from(R.drawable.puck_ring))
 
     /**
-     * The car drawn by the app itself during guidance, with Draw the app's lanes on; with it off it
-     * touches nothing. Its fallback runs on the main thread after the frame that failed.
+     * The car drawn by the app itself during guidance, with Lanes on the map's Drawn by the app; with
+     * any other choice it touches nothing. Its fallback runs on the main thread after the frame that failed.
      */
     private val carLayer = CarLayer(CarLayer.on(context, mapboxMap, plugins.location, puck), debugLog, later = { block -> scope.launch { block() } })
 
@@ -286,8 +287,8 @@ internal class MapScene(
     private val ownLineWorker = Dispatchers.Default.limitedParallelism(1)
 
     /**
-     * The route line drawn by the app itself, behind the Debug switch; with the switch off it touches
-     * nothing. The SDK's route line is fed as always either way.
+     * The route line drawn by the app itself, behind the Debug switch or with the lanes drawn by the
+     * app; otherwise it touches nothing. The SDK's route line is fed as always either way.
      */
     private val ownLine: OwnRouteLine = OwnRouteLine(
         // The map's word that the own source's data loaded, for the swap from the SDK's line to the own one.
@@ -318,13 +319,16 @@ internal class MapScene(
             }
         },
         debugLog = debugLog,
-        // The app's own lanes' layers, with their Debug switch on, and the map's word that a window of them loaded.
+        // The app's own lanes' layers, while the app draws the lanes, and the map's word that a window of them loaded.
         lanePort = LaneLayers.on(mapboxMap) { dataId -> ownLine.onSourceLoaded(dataId) },
     )
 
-    // The two Debug switches the own route line follows: its own, and Draw the app's lanes, which draws it too.
+    // What the own route line follows: its own Debug switch, and Lanes on the map's Drawn by the app, which draws it too.
     private var ownLineSwitch = false
-    private var ownLanesSwitch = false
+    private var appDrawsLanes = false
+
+    /** Who draws the lanes on the map, as Settings says; Off until it says otherwise. */
+    private var lanesOnMap = LanesOnMap.OFF
 
     /** The lane plan of the drive's route, answered on the route lines' worker: the own line's path is built from it. */
     private val planListener: (String, RouteLanePlan?) -> Unit = { routeId, plan ->
@@ -342,7 +346,7 @@ internal class MapScene(
      */
     private var shapedArrow: ManeuverArrow? = null
 
-    /** Lane markings on the map where Mapbox has them; off until Settings says otherwise. */
+    /** Lane markings on the map where Mapbox has them; off until Lanes on the map says otherwise. */
     private val laneDetails = LaneDetails.on(mapboxMap, debugLog)
 
     /** Whether the route line view was told to stay thin close in; that follows [laneDetails]. */
@@ -832,9 +836,20 @@ internal class MapScene(
         viewportDataSource.evaluate()
     }
 
-    override fun setLaneDetails(enabled: Boolean) {
-        laneDetails.setEnabled(enabled)
+    /**
+     * Lanes on the map: Mapbox's lane details on or off, with the route line's widths that go with them; the app's own
+     * lanes with its own route line; and the car drawn by the app with them. At once, also during a drive: the map's
+     * layers, its own line and its car change, never the trip.
+     */
+    override fun setLanesOnMap(choice: LanesOnMap) {
+        if (choice == lanesOnMap) return
+        lanesOnMap = choice
+        laneDetails.setEnabled(choice.mapboxDetails)
         applyRouteLineWidths()
+        appDrawsLanes = choice.appDraws
+        applyOwnLine()
+        // The car drawn by the app goes with the lanes.
+        carLayer.setDrawing(appDrawsLanes)
     }
 
     override fun setOwnRouteLine(enabled: Boolean) {
@@ -842,21 +857,14 @@ internal class MapScene(
         applyOwnLine()
     }
 
-    override fun setDrawOwnLanes(enabled: Boolean) {
-        ownLanesSwitch = enabled
-        applyOwnLine()
-        // The car drawn by the app goes with the lanes.
-        carLayer.setDrawing(enabled)
-    }
-
-    /** The own route line on while either switch is, with the lanes while theirs is. */
+    /** The own route line on while its switch is on or the app draws the lanes, with the lanes while it does. */
     private fun applyOwnLine() {
-        val on = ownLineSwitch || ownLanesSwitch
+        val on = ownLineSwitch || appDrawsLanes
         val was = ownLine.enabled
-        if (on == was && ownLanesSwitch == ownLine.lanes) return
+        if (on == was && appDrawsLanes == ownLine.lanes) return
         if (on) {
             // The lanes first: a line turned on draws them from the start, and one that is on draws itself anew.
-            ownLine.setLanes(ownLanesSwitch)
+            ownLine.setLanes(appDrawsLanes)
             ownLine.setEnabled(true)
         } else {
             ownLine.setEnabled(false)
@@ -1572,14 +1580,15 @@ internal class MapScene(
      * counts), "laneChoice" (the one that holds the view) and "centerLeadS" (how many seconds ahead
      * of the car the center aims).
      *
-     * "laneDetails" is the switch for lane markings on the map, "hdRoads" what the style says about
-     * them, and "hdRoadsReapplied" how often they had to be set again since the map was made: 0
-     * unless something keeps turning them off.
+     * "laneDetails" is whether Lanes on the map wants Mapbox's lane markings on the map, "hdRoads"
+     * what the style says about them, and "hdRoadsReapplied" how often they had to be set again since
+     * the map was made: 0 unless something keeps turning them off.
      *
-     * "routeLine", only with the Debug switch for the app's own route line on, says whether the own
-     * line is drawn ("own"), how often its trim was set that second ("trims"), how far at most its
-     * trimmed end lay from the SDK's vanishing point along the route ("trimLagM", in meters) and how
-     * long its part of a puck update took at most on the main thread ("trimMaxMs").
+     * "routeLine", only while the app draws its own route line (its Debug switch, or the lanes drawn
+     * by the app), says whether the own line is drawn ("own"), how often its trim was set that second
+     * ("trims"), how far at most its trimmed end lay from the SDK's vanishing point along the route
+     * ("trimLagM", in meters) and how long its part of a puck update took at most on the main thread
+     * ("trimMaxMs").
      *
      * "aheadM", while the camera follows the car, is how much road the camera as shown has clear
      * above the car, in meters, by the look-ahead model ([LookAhead]): from the car's row, the
@@ -1628,7 +1637,7 @@ internal class MapScene(
             "fixes" to fixes,
             "keyPoints" to lastKeyPoints.takeIf { hasFix },
         ) + camera.diagnostics() + junctionPoints.diagnostics() + laneDetails.diagnostics() +
-            // With the Debug switch on: who draws the route line, and how its trim keeps up.
+            // While the app draws its own route line: who draws it, and how its trim keeps up.
             (if (ownLine.enabled) ownLine.diagnostics() else emptyMap()) + mapOf(
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "paddingChanges" to paddingChanges.takeIf { it > 0 },

@@ -51,6 +51,7 @@ import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -110,10 +111,9 @@ fun SettingsScreen(
     onDayNightChange: (LookChoice) -> Unit,
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
-    onLaneDetailsChange: (Boolean) -> Unit,
+    onLanesOnMapChange: (LanesOnMap) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
-    onDrawOwnLanesChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -157,13 +157,12 @@ fun SettingsScreen(
             SectionDivider()
             DayNightSection(look, onDayNightChange)
             SectionDivider()
-            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLaneDetailsChange)
+            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLanesOnMapChange)
             SectionDivider()
             DebugSection(
                 debug,
                 onSimulateDriveChange,
                 onOwnRouteLineChange,
-                onDrawOwnLanesChange,
                 onCarMapFpsChange,
                 onShareLog,
                 onClearLog,
@@ -280,7 +279,7 @@ private fun GuidanceSection(
     guidance: GuidanceSettings,
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
-    onLaneDetailsChange: (Boolean) -> Unit,
+    onLanesOnMapChange: (LanesOnMap) -> Unit,
 ) {
     SectionTitle(R.string.guidance_title)
     Text(
@@ -321,28 +320,67 @@ private fun GuidanceSection(
         style = MaterialTheme.typography.bodySmall,
         color = LookTheme.tokens.onCardMuted,
     )
+    if (guidance.lanesOnMap.appDraws) {
+        // Where the app's lit lane does not take the line's place, the line stays in the lane to take.
+        Text(
+            text = stringResource(R.string.camera_style_app_lanes_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = LookTheme.tokens.onCard,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
 
     Spacer(Modifier.height(16.dp))
     LaneZoomBlock(guidance, onLaneZoomChange)
 
-    // Lane markings on the map. The text says what they are not: the car's lane.
     Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.lane_details_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.lane_details_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
+    LanesOnMapBlock(guidance.lanesOnMap, onLanesOnMapChange)
+}
+
+/**
+ * Who draws the lanes on the map: one of three, each row the whole button, with a line that says what it draws. The
+ * note under them says what none of them is: the car's lane.
+ */
+@Composable
+private fun LanesOnMapBlock(choice: LanesOnMap, onLanesOnMapChange: (LanesOnMap) -> Unit) {
+    Text(
+        text = stringResource(R.string.lanes_on_map_title),
+        style = MaterialTheme.typography.titleSmall,
+        color = LookTheme.tokens.onCard,
+    )
+    Column(Modifier.selectableGroup()) {
+        LanesOnMap.entries.forEach { option ->
+            val selected = option == choice
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onLanesOnMapChange(option) })
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The whole row is the button.
+                RadioButton(selected = selected, onClick = null)
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = stringResource(option.titleRes()),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = LookTheme.tokens.onCard,
+                    )
+                    Text(
+                        text = stringResource(option.noteRes()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LookTheme.tokens.onCardMuted,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = guidance.laneDetails, onCheckedChange = onLaneDetailsChange)
     }
+    Text(
+        text = stringResource(R.string.lanes_on_map_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = LookTheme.tokens.onCardMuted,
+    )
 }
 
 /** How close the camera goes before turns and lane choices: one of two, each with a line that says what it does. */
@@ -393,7 +431,6 @@ private fun DebugSection(
     debug: DebugState,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
-    onDrawOwnLanesChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -490,25 +527,6 @@ private fun DebugSection(
         }
         Spacer(Modifier.width(16.dp))
         AppSwitch(checked = debug.ownRouteLine, onCheckedChange = onOwnRouteLineChange)
-    }
-
-    // A test of the freeway lanes the app draws itself, with its own route line.
-    Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.debug_draw_own_lanes),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.debug_draw_own_lanes_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = debug.drawOwnLanes, onCheckedChange = onDrawOwnLanesChange)
     }
 
     // The car's map at 30 or 60 frames a second, to compare what the car shows of each.
@@ -676,6 +694,20 @@ private fun CameraStyle.noteRes(): Int = when (this) {
 }
 
 @StringRes
+private fun LanesOnMap.titleRes(): Int = when (this) {
+    LanesOnMap.OFF -> R.string.lanes_on_map_off
+    LanesOnMap.MAPBOX -> R.string.lanes_on_map_mapbox
+    LanesOnMap.APP -> R.string.lanes_on_map_app
+}
+
+@StringRes
+private fun LanesOnMap.noteRes(): Int = when (this) {
+    LanesOnMap.OFF -> R.string.lanes_on_map_off_note
+    LanesOnMap.MAPBOX -> R.string.lanes_on_map_mapbox_note
+    LanesOnMap.APP -> R.string.lanes_on_map_app_note
+}
+
+@StringRes
 private fun LookChoice.titleRes(): Int = when (this) {
     LookChoice.AUTO -> R.string.day_night_auto
     LookChoice.DAY -> R.string.day_night_day
@@ -733,7 +765,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             ),
             // An invented time.
             look = LookSettings(LookChoice.AUTO, NextLook(Look.NIGHT, LocalTime.of(18, 5))),
-            guidance = GuidanceSettings(),
+            guidance = GuidanceSettings(lanesOnMap = LanesOnMap.APP),
             debug = DebugState(
                 trips = MonthCount(3, partialSince = LocalDate.of(2000, 1, 15), began = LogBegan.INSTALLATION),
                 tripsByToken = listOf(
@@ -756,10 +788,9 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onDayNightChange = {},
             onCameraStyleChange = {},
             onLaneZoomChange = {},
-            onLaneDetailsChange = {},
+            onLanesOnMapChange = {},
             onSimulateDriveChange = {},
             onOwnRouteLineChange = {},
-            onDrawOwnLanesChange = {},
             onCarMapFpsChange = {},
             onShareLog = {},
             onClearLog = {},
@@ -787,6 +818,26 @@ private fun DayNightSectionPreview(@PreviewParameter(LookParameter::class) look:
                 DayNightSection(LookSettings(LookChoice.AUTO, NextLook(Look.DAY, LocalTime.of(6, 20))), onDayNightChange = {})
                 SectionDivider()
                 DayNightSection(LookSettings(LookChoice.NIGHT), onDayNightChange = {})
+            }
+        }
+    }
+}
+
+/**
+ * The Guidance group on a narrow phone with every font size: Drawn by the app, with the note under the camera style it
+ * brings, and Mapbox's lane details, without it.
+ */
+@Preview(name = "guidance, lanes drawn by the app", widthDp = 360)
+@Preview(name = "guidance, lanes drawn by the app, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "guidance, lanes drawn by the app, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun GuidanceSectionPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    CustomMapsTheme(look) {
+        Surface(color = LookTheme.tokens.screen) {
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                GuidanceSection(GuidanceSettings(lanesOnMap = LanesOnMap.APP), onCameraStyleChange = {}, onLaneZoomChange = {}, onLanesOnMapChange = {})
+                SectionDivider()
+                GuidanceSection(GuidanceSettings(lanesOnMap = LanesOnMap.MAPBOX), onCameraStyleChange = {}, onLaneZoomChange = {}, onLanesOnMapChange = {})
             }
         }
     }

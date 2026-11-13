@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.settings
 
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
@@ -14,10 +15,9 @@ class FakeAppSettings(
     simulateDrive: Boolean = false,
     cameraStyle: CameraStyle = CameraStyle.DEFAULT,
     laneZoom: LaneZoom = LaneZoom.DEFAULT,
-    laneDetails: Boolean = false,
+    lanesOnMap: LanesOnMap = LanesOnMap.DEFAULT,
     dayNight: LookChoice = LookChoice.DEFAULT,
     ownRouteLine: Boolean = false,
-    drawOwnLanes: Boolean = false,
     carMapFps: Int = 30,
 ) : AppSettings {
 
@@ -36,9 +36,9 @@ class FakeAppSettings(
 
     override suspend fun setLaneZoom(mode: LaneZoom) = store { laneZoom.value = mode }
 
-    override val laneDetails = MutableStateFlow(laneDetails)
+    override val lanesOnMap = MutableStateFlow(lanesOnMap)
 
-    override suspend fun setLaneDetails(enabled: Boolean) = store { laneDetails.value = enabled }
+    override suspend fun setLanesOnMap(choice: LanesOnMap) = store { lanesOnMap.value = choice }
 
     override val dayNight = MutableStateFlow(dayNight)
 
@@ -47,10 +47,6 @@ class FakeAppSettings(
     override val ownRouteLine = MutableStateFlow(ownRouteLine)
 
     override suspend fun setOwnRouteLine(enabled: Boolean) = store { ownRouteLine.value = enabled }
-
-    override val drawOwnLanes = MutableStateFlow(drawOwnLanes)
-
-    override suspend fun setDrawOwnLanes(enabled: Boolean) = store { drawOwnLanes.value = enabled }
 
     override val carMapFps = MutableStateFlow(carMapFps)
 

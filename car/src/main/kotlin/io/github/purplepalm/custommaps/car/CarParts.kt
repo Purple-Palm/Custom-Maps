@@ -6,6 +6,7 @@ import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.look.SharedLook
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -44,9 +45,9 @@ class CarParts(
 class CarMapSettings(
     val cameraStyle: Flow<CameraStyle>,
     val laneZoom: Flow<LaneZoom>,
-    val laneDetails: Flow<Boolean>,
+    /** Who draws the lanes on the map: Mapbox's lane details, the app, or neither. */
+    val lanesOnMap: Flow<LanesOnMap>,
     val ownRouteLine: Flow<Boolean>,
-    val drawOwnLanes: Flow<Boolean>,
     /** Debug: the frames a second the car's map draws, 30 or 60, for the car's map alone. */
     val frameTarget: Flow<Int>,
 )

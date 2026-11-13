@@ -167,9 +167,8 @@ class AppGraph(private val application: Application) {
         mapSettings = CarMapSettings(
             cameraStyle = settings.cameraStyle,
             laneZoom = settings.laneZoom,
-            laneDetails = settings.laneDetails,
+            lanesOnMap = settings.lanesOnMap,
             ownRouteLine = settings.ownRouteLine,
-            drawOwnLanes = settings.drawOwnLanes,
             frameTarget = settings.carMapFps,
         ),
         look = lookController,

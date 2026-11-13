@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
  *   the drive belongs to the engine and outlives the session.
  * - **The map** is made once the gate is ready and the app's first look is decided, again for a new
  *   token, and let go of when the session ends ([CarMapStep]). It takes the phone's camera style, lane
- *   zoom, lane details and Debug switches, pins the destination of the preview or the drive, and
+ *   zoom, Lanes on the map and Debug switches, pins the destination of the preview or the drive, and
  *   shows the app's one look, the phone's ([CarParts.look]): the session starts the look if no screen
  *   has yet (the host may have started the process with no activity), keeps it deciding while the
  *   session is started, as the phone's activity does, and hands the look to the map as the phone's
@@ -337,9 +337,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         mapJobs = scope.launch {
             follow(settings.cameraStyle, "setCameraStyle", created::setCameraStyle)
             follow(settings.laneZoom, "setLaneZoom", created::setLaneZoom)
-            follow(settings.laneDetails, "setLaneDetails", created::setLaneDetails)
+            follow(settings.lanesOnMap, "setLanesOnMap", created::setLanesOnMap)
             follow(settings.ownRouteLine, "setOwnRouteLine", created::setOwnRouteLine)
-            follow(settings.drawOwnLanes, "setDrawOwnLanes", created::setDrawOwnLanes)
             // The car's map alone: 30 or 60 frames a second, from the Debug switch.
             follow(settings.frameTarget, "setFrameTarget", created::setFrameTarget)
             // The place of the preview, the drive and the arrival, as the phone pins it.

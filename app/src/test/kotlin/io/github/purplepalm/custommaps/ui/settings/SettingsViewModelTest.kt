@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.settings
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -269,34 +270,47 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `lane details are off until switched on, and the switch is stored`() = runTest(dispatcher) {
+    fun `no lanes are on the map until chosen, and each of the three choices is stored and shown`() = runTest(dispatcher) {
         val viewModel = viewModel()
-        assertFalse(viewModel.guidance.value.laneDetails)
-        viewModel.setLaneDetails(true)
-        runCurrent()
-        assertTrue(settings.laneDetails.value)
-        assertEquals(GuidanceSettings(CameraStyle.SMOOTH_FOLLOW, LaneZoom.DEFAULT, laneDetails = true), viewModel.guidance.value)
-        viewModel.setLaneDetails(false)
-        runCurrent()
-        assertFalse(viewModel.guidance.value.laneDetails)
+        assertEquals(LanesOnMap.OFF, viewModel.guidance.value.lanesOnMap)
+        // Off last, after the other two, so each one is a change.
+        for (choice in listOf(LanesOnMap.MAPBOX, LanesOnMap.APP, LanesOnMap.OFF)) {
+            viewModel.setLanesOnMap(choice)
+            runCurrent()
+            assertEquals(choice, settings.lanesOnMap.value)
+            assertEquals(GuidanceSettings(CameraStyle.SMOOTH_FOLLOW, LaneZoom.DEFAULT, lanesOnMap = choice), viewModel.guidance.value)
+        }
+        assertEquals(emptyList<String>(), archive.logged)
     }
 
     @Test
-    fun `shows the stored lane details switch`() = runTest(dispatcher) {
-        settings.laneDetails.value = true
-        val viewModel = viewModel()
-        assertTrue(viewModel.guidance.value.laneDetails)
+    fun `shows the stored choice of Lanes on the map, whichever it is`() = runTest(dispatcher) {
+        for (choice in LanesOnMap.entries) {
+            settings.lanesOnMap.value = choice
+            val viewModel = viewModel()
+            assertEquals(choice, viewModel.guidance.value.lanesOnMap)
+        }
     }
 
     @Test
-    fun `a lane details switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+    fun `a choice of Lanes on the map that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.lanesOnMap.value = LanesOnMap.MAPBOX
         settings.storageFull = true
         val viewModel = viewModel()
-        viewModel.setLaneDetails(true)
+        viewModel.setLanesOnMap(LanesOnMap.APP)
         runCurrent()
-        assertFalse(settings.laneDetails.value)
-        assertFalse(viewModel.guidance.value.laneDetails)
+        assertEquals(LanesOnMap.MAPBOX, settings.lanesOnMap.value)
+        assertEquals(LanesOnMap.MAPBOX, viewModel.guidance.value.lanesOnMap)
         assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
+    fun `a migrated choice shows as stored, the old switch's on as Mapbox's lane details`() = runTest(dispatcher) {
+        // What the settings give after carrying the old switch over (DataStoreAppSettingsTest has the move itself).
+        settings.lanesOnMap.value = LanesOnMap.fromLaneDetails(true)
+        assertEquals(LanesOnMap.MAPBOX, viewModel().guidance.value.lanesOnMap)
+        settings.lanesOnMap.value = LanesOnMap.fromLaneDetails(false)
+        assertEquals(LanesOnMap.OFF, viewModel().guidance.value.lanesOnMap)
     }
 
     @Test
@@ -345,30 +359,6 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `the own lanes are off until switched on, and the switch is stored`() = runTest(dispatcher) {
-        val viewModel = viewModel()
-        runCurrent()
-        assertFalse(viewModel.debug.value.drawOwnLanes)
-        viewModel.setDrawOwnLanes(true)
-        runCurrent()
-        assertTrue(settings.drawOwnLanes.value)
-        assertTrue(viewModel.debug.value.drawOwnLanes)
-        assertFalse(viewModel.debug.value.ownRouteLine, "the own route line's switch is its own")
-        assertFalse(viewModel.debug.value.simulateDrive)
-    }
-
-    @Test
-    fun `an own lanes switch that cannot be stored stays as it was`() = runTest(dispatcher) {
-        settings.storageFull = true
-        val viewModel = viewModel()
-        viewModel.setDrawOwnLanes(true)
-        runCurrent()
-        assertFalse(viewModel.debug.value.drawOwnLanes)
-        assertFalse(settings.drawOwnLanes.value)
-        assertEquals(listOf("error"), archive.logged)
-    }
-
-    @Test
     fun `the car's map draws 30 frames a second until 60 is chosen, and the choice is stored`() = runTest(dispatcher) {
         val viewModel = viewModel()
         runCurrent()
@@ -377,7 +367,7 @@ class SettingsViewModelTest {
         runCurrent()
         assertEquals(60, settings.carMapFps.value)
         assertEquals(60, viewModel.debug.value.carMapFps)
-        assertFalse(viewModel.debug.value.drawOwnLanes, "the other Debug switches are their own")
+        assertFalse(viewModel.debug.value.ownRouteLine, "the other Debug switches are their own")
         viewModel.setCarMapFps(30)
         runCurrent()
         assertEquals(30, viewModel.debug.value.carMapFps)

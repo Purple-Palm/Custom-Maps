@@ -45,6 +45,7 @@ import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.withFields
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
@@ -76,8 +77,8 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   surface callback reaches the host through a wrapper that catches every exception: the car, the
  *   phone and the drive share one process, and car-app rethrows an exception of a surface callback on
  *   the main thread. Each surface the host sends ([MapboxCarMapObserver.onAttached]) is a new map:
- *   the car map keeps what it was asked for (the look, the camera style, the lane zoom and details,
- *   the Debug switches, the place, and an overview the driver asked for during the drive under way
+ *   the car map keeps what it was asked for (the look, the camera style, the lane zoom, who draws
+ *   the lanes, the Debug switches, the place, and an overview the driver asked for during the drive under way
  *   and has not left, [CarOverview]) and gives it to the new scene, with the camera where the driver
  *   left the old one.
  * - **The host's areas.** The padding comes from the stable and the visible area and the surface's
@@ -139,9 +140,8 @@ internal class CarNavigationMap(
     // What the car map is asked for, kept from one surface to the next.
     private var cameraStyle = CameraStyle.DEFAULT
     private var laneZoom = LaneZoom.DEFAULT
-    private var laneDetails = false
+    private var lanesOnMap = LanesOnMap.DEFAULT
     private var ownRouteLine = false
-    private var drawOwnLanes = false
     private var place: Place? = null
 
     /** Whether a new surface during the drive shows the overview again: only one the driver asked for in it and has not left. */
@@ -316,19 +316,14 @@ internal class CarNavigationMap(
         guard("setLaneZoom") { scene?.setLaneZoom(mode) }
     }
 
-    override fun setLaneDetails(enabled: Boolean) {
-        laneDetails = enabled
-        guard("setLaneDetails") { scene?.setLaneDetails(enabled) }
+    override fun setLanesOnMap(choice: LanesOnMap) {
+        lanesOnMap = choice
+        guard("setLanesOnMap") { scene?.setLanesOnMap(choice) }
     }
 
     override fun setOwnRouteLine(enabled: Boolean) {
         ownRouteLine = enabled
         guard("setOwnRouteLine") { scene?.setOwnRouteLine(enabled) }
-    }
-
-    override fun setDrawOwnLanes(enabled: Boolean) {
-        drawOwnLanes = enabled
-        guard("setDrawOwnLanes") { scene?.setDrawOwnLanes(enabled) }
     }
 
     override fun showPlace(place: Place?) {
@@ -440,9 +435,8 @@ internal class CarNavigationMap(
         scene = created
         created.setCameraStyle(cameraStyle)
         created.setLaneZoom(laneZoom)
-        created.setLaneDetails(laneDetails)
+        created.setLanesOnMap(lanesOnMap)
         created.setOwnRouteLine(ownRouteLine)
-        created.setDrawOwnLanes(drawOwnLanes)
         created.showPlace(place)
         created.setVisible(true)
         // The library keeps the areas the host reported, also one that came before any surface, but

@@ -20,6 +20,7 @@ import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
@@ -133,11 +134,9 @@ class PhoneMap internal constructor(
 
     override fun setLaneZoom(mode: LaneZoom) = scene.setLaneZoom(mode)
 
-    override fun setLaneDetails(enabled: Boolean) = scene.setLaneDetails(enabled)
+    override fun setLanesOnMap(choice: LanesOnMap) = scene.setLanesOnMap(choice)
 
     override fun setOwnRouteLine(enabled: Boolean) = scene.setOwnRouteLine(enabled)
-
-    override fun setDrawOwnLanes(enabled: Boolean) = scene.setDrawOwnLanes(enabled)
 
     override fun showPlace(place: Place?) = scene.showPlace(place)
 
