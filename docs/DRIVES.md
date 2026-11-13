@@ -10,6 +10,49 @@ Drive logs never go into this repository. These notes leave out addresses, stree
 coordinates and times of day. Places are described ("a big-box store"), positions are distances,
 and times are durations from Start or End.
 
+## Next: the car screen (stage 2, step 1)
+
+What the first drives with the car screen check, on the Desktop Head Unit with the debug APK or in
+the car with the build from Google Play's internal testing ([README](../README.md), On the car
+screen). Screenshots in the car come from a passenger or a parked car, never from the driver. The
+lines named are in the debug log; every car line has `screen` `car`.
+
+1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
+   the map, or first with a message while the phone has no token or no precise location (the setup
+   is done on the phone, parked). `car_session` lines: `ON_CREATE` with the Android Auto app's
+   package and its Car API level, then `gate` `READY` and `map` `build`.
+2. **The map, with the logo and the attribution, day and night with the car.** The same map as the
+   phone's, the Mapbox logo and "© Mapbox © OpenStreetMap" in the bottom left corner, clear of the
+   buttons and the routing card, and not moving when they come and go. Day and night follow the car
+   (the DHU's `day` and `night`): light and colours at once, the map's whole look after a minute of
+   the same mode; a flip back within the minute changes nothing more (`car_look`). The routing
+   card's arrows and lanes in both looks: note how they read on the card the car draws behind them.
+3. **A drive started on the phone, shown in the car.** Start on the phone with the car connected:
+   the car shows the routing card at once, with the phone's turn, arrow, distance and road, the
+   lanes to take (on a freeway's run-up the same row the phone's card shows, lit lanes and all), the
+   turn after it exactly when the phone shows **Then**, and the arrival time, time and distance left.
+   The card follows every second; a new turn shows at once. Leaving the route: the card shows that
+   it is loading until the new route's first turn. The car's map shows the route and the car
+   moving. `car_nav` `navigationStarted` with `cause` `drive`.
+4. **End in the car.** End in the car ends the drive on both screens, as the phone's End does: one
+   trip in Settings → Debug, a `ui_end` line with `screen` `car`, `car_nav` `navigationEnded`. At the
+   destination the car says "You have arrived" until Done on the phone.
+5. **The cable pulled during a drive, then plugged in.** The phone goes on guiding, with its
+   notification; the trip session log keeps one entry for the drive. `car_session` `ON_DESTROY`, a
+   `car_nav` `gone` line, no stop of the drive. Plugged in again: note whether Android Auto opens
+   Custom Maps by itself or shows its launcher (not known yet); once Custom Maps is open, the routing
+   card and the route show at once (`navigationStarted` again).
+6. **Another navigation app, and back.** During a drive, start another navigation app in the car (or
+   the DHU's `focus nav off`): `car_nav` `onStopNavigation` with the lifecycle and the connection,
+   the phone goes on guiding, no error line. Open Custom Maps in the car again: the routing card is
+   back, `navigationStarted` with `cause` `intent` or `start`. Note whether the other app stopped.
+7. **The phone locked during a drive.** The car's map keeps moving smoothly; the camera lines with
+   `screen` `car` keep `camFps` near the car's frame rate. Before a drive, with the phone locked,
+   note whether the car's map shows the position (`car_location` says whether positions arrive).
+
+Anything wrong on the car screen writes `car_error` or `car_template` with the call and the class of
+what failed; the phone's guidance must go on through all of it. Share the debug log after the drive.
+
 ## 2026-11-03, two drives
 
 Both drives: the owner's Samsung phone with Android 15, a stage 1 build.

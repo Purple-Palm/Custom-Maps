@@ -427,9 +427,10 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport, from where it glides on for one glide along its heading at its speed (`PuckGlide`); for Mapbox standard it glides 1.0 s and slides also on a teleport. In every style, Mapbox standard included, the first position after a seek of a simulated drive (`onFix(jump = true)`) puts it at the new place at once, and it glides on from there in the same way. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
 | `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
 | `LaneDetails`, `RouteLineWidths` | `:engine-mapbox`, `map/LaneDetails.kt`, `map/RouteLineWidths.kt` | Lane markings on the map, set after the SDK has turned them off, and the route line that stays thin close in while they are on. |
-| `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | Creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log. |
+| `MapScene` | `:engine-mapbox`, `map/MapScene.kt` | Everything of a map that is not tied to a view, the same on the phone and in the car: creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log (in the car with `screen` `car`). |
+| `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | The phone's map view around its `MapScene`: the logo and attribution strip, the compass, the look's (i) dialog, the fade-in and the tap that picks a route. |
 | `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, the lane zoom and the lane details switch, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
-| `CarNavigationMap` (stage 2) | `:engine-mapbox`, `car/CarNavigationMap.kt` | The same camera on the car's map surface. |
+| `CarNavigationMap` | `:engine-mapbox`, `car/CarNavigationMap.kt` | The car's map (stage 2, step 1): a `MapScene` with `CameraTuning.CAR` on the car's surface, with its padding, gestures, zoom buttons, logo and attribution, and day and night. |
 
 The math is pure Kotlin on the Java 8 API in `:core-nav` (DECISIONS 4) and is tested on the JVM.
 Everything that touches Mapbox types stays in `:engine-mapbox` (DECISIONS 12).
@@ -611,15 +612,17 @@ instead of jumping.
 
 ### The car map (stage 2)
 
-`CarNavigationMap` is a `MapboxCarMapObserver` (maps-androidauto 11.34.1), registered with
-`registerObserver(...).setGestureHandler(...)`. The style chosen in Settings applies to the car
-screen too (DECISIONS 26); this section covers Smooth follow, the default and the only style
-designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE-2.md).
+Built in stage 2's step 1. `CarNavigationMap` is a `MapboxCarMapObserver` (maps-androidauto
+11.34.1), registered with `registerObserver(...).setGestureHandler(...)`. The style chosen in
+Settings applies to the car screen too (DECISIONS 26); this section covers Smooth follow, the
+default and the only style designed for the car so far. The rest of the car screen is in
+[STAGE-2.md](STAGE-2.md).
 
-- **On attach:** the same puck settings as the phone, its own `MapboxNavigationViewportDataSource`,
-  and a `SmoothNavigationCamera` with `CameraTuning.CAR`. `MapboxCarMap` builds a new map surface
-  whenever the host sends a new one, for example after a size change, so each attach starts a new
-  data source and controller.
+- **On attach:** a new `MapScene` on the car's map surface: the same puck settings as the phone,
+  its own `MapboxNavigationViewportDataSource`, and a `SmoothNavigationCamera` with
+  `CameraTuning.CAR`. `MapboxCarMap` builds a new map surface whenever the host sends a new one, for
+  example after a size change, so each attach starts a new data source and controller; the camera
+  starts where it was on the surface before, or else at the newest position the app has.
 - **Location:** as on the phone, the platform provider before Start (DECISIONS 14) and the engine's
   `GuidancePuck` during guidance.
 - **Padding:** following padding comes from the stable area, which does not change when the action
@@ -634,14 +637,18 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   eases with an animator, which the hand-over rule catches anyway, and Mapbox's default handler
   does nothing on a fling. The gesture handler calls `requestIdle()` before passing on scroll,
   fling and scale. **Recenter** comes from the map's action strip.
-- **One puck for both maps:** `GuidancePuck` and the navigator feed move into the engine. Each fix
-  then reaches the phone and car maps once, and `newDrive()` runs when guidance starts. Mapbox's
+- **One puck for both maps:** `GuidancePuck` and the navigator feed are the engine's. Each fix
+  reaches the phone and car maps once, and `newDrive()` runs when guidance starts. Mapbox's
   `CarLocationProvider` is not used: it keeps the 1000 ms glide.
+- **Zoom buttons** in the map's action strip step by 0.5 between 6 and 20 and hand the camera to
+  the driver, as a gesture does; a pinch past the limits is dropped.
+- **Frames:** the car's surface draws at most 30 frames a second (`setMaximumFps(30)`).
 
 ### Logging
 
-A **camera** line once a second during guidance. `PhoneMap` writes it, in every camera style, and
-only while its map view is shown; the `activity` and `screen` lines show when it was not.
+A **camera** line once a second during guidance. The map scene writes it, in every camera style, and
+on the phone only while its map view is shown; the `activity` and `screen` lines show when it was
+not. The car's map writes its own, with `screen` `car`.
 
 | Field | Meaning | Expected |
 |---|---|---|

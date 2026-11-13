@@ -3,10 +3,12 @@
 A personal navigation app for Android Auto, built on Mapbox. The phone app uses Jetpack Compose;
 the car app uses the Android for Cars App Library with the navigation template.
 
-**Status: stage 1 done, navigation on the phone.** The phone app shows a map with your location,
-light by day and dark at night, finds addresses and places, offers routes with traffic and
-alternatives, and guides turn by turn with lanes and arrival time. The car screen arrives in stage
-2; the plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status: stage 1 done, navigation on the phone; stage 2 step 1 built, the car screen.** The phone
+app shows a map with your location, light by day and dark at night, finds addresses and places,
+offers routes with traffic and alternatives, and guides turn by turn with lanes and arrival time.
+In the car, Android Auto shows the same map and the drive started on the phone, with the next turn,
+its lanes and the arrival time (see [On the car screen](#on-the-car-screen)); the rest of stage 2
+follows in steps. The plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Modules
 
@@ -14,8 +16,8 @@ alternatives, and guides turn by turn with lanes and arrival time. The car scree
 |---|---|
 | `:core-nav` | Pure Kotlin: domain models (maneuvers, lanes, route progress, camera mode, distances) and the `NavigationEngine`, `MapRenderer`, `SearchProvider` and `GuidanceAudio` interfaces. No Android dependencies. |
 | `:engine-mapbox` | Android library that implements those interfaces with the Mapbox Navigation SDK. Mapbox types never leave this module. |
-| `:app` | The phone app: Compose UI, settings and the wiring of all modules. The car app service will live here too. |
-| `:car` (stage 2) | Car screens built on the navigation template. |
+| `:app` | The phone app: Compose UI, settings and the wiring of all modules, and the car app service that Android Auto binds to. |
+| `:car` | The car screen: its session, its screens on the navigation template, the bridge that tells Android Auto about the drive, and the routing card's own images. It knows Mapbox only through `:engine-mapbox`'s map for the car. |
 
 Progress by stage is tracked in [docs/ROADMAP.md](docs/ROADMAP.md); design decisions and their
 alternatives are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
@@ -112,6 +114,33 @@ Auto is picked again. During a drive a change by the sun waits until no turn is 
 comes in a tunnel or while the camera is close in on a junction or a lane choice; a car that stands
 takes it at once. The phone's own dark theme and Power saving change nothing. Until the maneuver
 card gets a gear of its own, Settings opens only before Start and after arrival.
+
+### On the car screen
+
+Android Auto shows Custom Maps in its launcher, among the navigation apps. In a real car it runs
+only the build from Google Play (see [Release through Google Play](#release-through-google-play));
+the debug APK runs on the Desktop Head Unit. Once, before the first car drive, the app needs the
+Android Auto form factor in Play Console: in the **Form factors** section of **Advanced settings**,
+**Add form factor → Android Auto**. Google asks for a build with the car screen on a testing track
+first, and every green build of `main` puts one on internal testing, which has no review of the
+car's quality guidelines.
+
+1. Connect the phone to the car, or start the DHU, and open Custom Maps from Android Auto's
+   launcher. The car shows the app's map, light or dark as the car says, with the Mapbox logo and
+   the © Mapbox © OpenStreetMap attribution in its bottom left corner. Until the phone has a token
+   and precise location, the car says what is missing; set it up on the phone when parked.
+2. Choose the destination and press **Start on the phone**, when parked. **Start on phone** in the
+   car says so. The routes the phone shows are on the car's map as well.
+3. During the drive the car shows what the phone's card shows: the next turn with its arrow,
+   distance and road, the lanes to take, the turn after it when the phone shows **Then**, and the
+   arrival time, the time and the distance left. **End** in the car ends the drive on both screens,
+   as the phone's End does. At the destination the car says so until **Done** on the phone.
+4. The map's buttons in the car: pan, zoom in and out, and **Recenter** or the overview.
+
+The drive belongs to the phone: when the car disconnects, guidance goes on there, and when another
+navigation app starts in the car, Custom Maps keeps guiding on the phone; opening Custom Maps in the
+car again shows the drive there again. Whether Android Auto reopens Custom Maps by itself when the
+car connects again during a drive is not known yet; open it from the launcher if it does not.
 
 ### Simulated drive
 
@@ -425,8 +454,8 @@ the store listing, the content rating, the Data safety form and the link to the
 
 ## Desktop Head Unit (DHU)
 
-The car screens arrive in stage 2. Until then the DHU connects, but Android Auto does not list this
-app yet. To prepare:
+The DHU shows the car screen of the debug APK (see [On the car screen](#on-the-car-screen)). To set
+it up:
 
 1. On the phone, enable the developer options and USB debugging, and update Android Auto. Then turn
    on Android Auto developer mode: open the Android Auto settings (on Android 10 and newer:
@@ -454,8 +483,9 @@ app yet. To prepare:
    ./desktop-head-unit
    ```
 
-4. Screen profiles for 800×480 and 1280×720 head units will be added under `dhu/` in stage 2 and
-   used with `-c`, for example `./desktop-head-unit --usb -c /path/to/repo/dhu/800x480.ini`.
+4. Screen profiles for 800×480 and 1280×720 head units will be added under `dhu/` in a later step
+   of stage 2 and used with `-c`, for example
+   `./desktop-head-unit --usb -c /path/to/repo/dhu/800x480.ini`.
 5. Switch between day and night with the `day` and `night` console commands, or Shift+N and Ctrl+N.
 
 In a real car, a navigation app built with the Car App Library has to come from Google Play: the
@@ -480,10 +510,10 @@ all signing secrets are optional.
   [mapbox.com/pricing](https://www.mapbox.com/pricing)). Free drive counts as a trip too.
 - The app starts a trip session only when you press Start, once the navigator has the route, so a
   drive is one active guidance session and never a free drive first. It stops the session on
-  arrival and on End. From stage 2, when the car disconnects mid-drive, guidance continues on the
-  phone, so the session keeps running until arrival or End. Every start is logged with the token it
-  ran on, and **Settings → Debug** shows the count for the month, for each token too, the latest
-  starts and a link to the
+  arrival and on End. When the car disconnects mid-drive, guidance continues on the phone, so the
+  session keeps running until arrival or End; the car screen starts, stops and asks for nothing of
+  its own. Every start is logged with the token it ran on, and **Settings → Debug** shows the count
+  for the month, for each token too, the latest starts and a link to the
   [Mapbox statistics page](https://console.mapbox.com/account/statistics/), which has the billed numbers.
   The log starts empty with each installation, so after one during the month the count says since
   which day it runs.
@@ -496,4 +526,6 @@ Maps from Mapbox must show the Mapbox logo and the © Mapbox © OpenStreetMap at
 (i) button. This applies to every map made with Mapbox, free or paid, commercial or not. Mapbox
 allows moving the logo but not resizing, recolouring or fading it. On the phone the logo and the (i)
 button keep a fixed strip at the bottom left, above the navigation bar or the keyboard, and the
-panels stay above it; the car screen gets the same rule in stage 2.
+panels stay above it. On the car screen the Mapbox logo and the text attribution sit in the bottom
+left corner of the area Android Auto never covers, so its buttons and cards never cover them or
+move them.

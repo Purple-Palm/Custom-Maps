@@ -8,7 +8,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
 | 1.1 | Guidance polish after the first drives, trip history and prediction (next build) | In progress |
-| 2 | Android Auto: car screen on the navigation template | Designed; after stage 1.1 |
+| 2 | Android Auto: car screen on the navigation template | Step 1 built: the map and the drive in the car, Start on the phone; the rest in steps |
 | 3 | Signed release build and Google Play: internal testing, later production | Internal testing built (2026-11-11); production later |
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
@@ -88,32 +88,44 @@ zoom setting and the trip history with prediction.
   No End or Cancel within the first minute counts as a successful prediction. Each automatic start
   is a billed trip, so daily limits apply.
 
-## Stage 2: Android Auto (designed)
+## Stage 2: Android Auto (step 1 built)
 
-The full design is in [STAGE-2.md](STAGE-2.md).
+The full design is in [STAGE-2.md](STAGE-2.md). It is built in steps ([DECISIONS.md](DECISIONS.md),
+49). **Step 1 is built**: Android Auto lists the app; the car shows the app's map, the same scene as
+the phone, light or dark with the car, with the Mapbox logo and attribution; a drive started on the
+phone shows in the car with the phone card's turn, arrow, lanes, Then step and arrival estimate, and
+End; the arrival; a disconnect, another navigation app and the host's stop leave the drive running
+on the phone, and opening the app in the car again takes the car back. Start stays on the phone.
+What step 1 settled is in STAGE-2's [Step 1 (built)](STAGE-2.md#step-1-built).
 
-- Car app service (navigation category) and screens on the navigation template, on Car App Library
+Owner checks for step 1, on the DHU or in the car with the internal testing build:
+[DRIVES.md](DRIVES.md), The car screen.
+
+The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
+
+- [x] Car app service (navigation category) and screens on the navigation template, on Car App Library
   1.8.0-rc01: 1.7.0 lets any app on the phone that holds the template-renderer permission pose as
   Android Auto. Move to 1.8.0 when it is released.
-- Map drawn on the car surface, camera padding from the visible and stable areas.
-- Maneuver card with distance and lanes, ETA, action strips.
-- A bright, colourful map by day and the dark map at night, following the car (`isDarkMode`).
-- Turn-by-turn notifications on the car screen while another app is in front.
-- Mapbox logo and © attribution visible on the car map.
-- Start a route on the phone and continue in the car: with the car connected, the phone is the
-  search input and the route appears in the car.
-- One drive across phone and car: when the car disconnects mid-drive, guidance continues on the
+- [x] Map drawn on the car surface, camera padding from the visible and stable areas.
+- [x] Maneuver card with distance and lanes, ETA, action strips.
+- [x] A bright, colourful map by day and the dark map at night, following the car (`isDarkMode`).
+- [ ] Turn-by-turn notifications on the car screen while another app is in front.
+- [x] Mapbox logo and © attribution visible on the car map.
+- [x] Start a route on the phone and continue in the car: with the car connected, the phone is the
+  search input and the route appears in the car. Search, the route preview and Start in the car
+  itself come later.
+- [x] One drive across phone and car: when the car disconnects mid-drive, guidance continues on the
   phone; when the car connects again, it continues on the car screen. Arrival or End in either
   place ends the drive. If another navigation app starts guiding in the car, this app keeps
-  guiding too.
-- Location "Allow all the time", asked for after precise location, so Start works from the car with
+  guiding too. Whether Android Auto opens the app again by itself on reconnect is still to be seen.
+- [ ] Location "Allow all the time", asked for after precise location, so Start works from the car with
   the phone locked and the car map shows the position before Start. While this stage is built only
   the debug build declares it; at its end one bundle with it is rolled out by hand on internal
   testing together with Google Play's background location declaration and its video, and Play
   updates pause during the review ([DECISIONS.md](DECISIONS.md), 42).
-- If the app stops mid-drive (crash or system kill), the phone and the car offer to resume to the
+- [ ] If the app stops mid-drive (crash or system kill), the phone and the car offer to resume to the
   same destination.
-- Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
+- [ ] Links shared into the app: Google Maps, Apple Maps and Waze links and `geo:` addresses, from the
   share menu and as the default app for those links (Android settings: **Open by default → Add
   links**). The link becomes a place, and routes to it are offered on the phone and in the car.
   Coordinates in the link are used as they are. A Google Maps link with only a name and address
@@ -124,10 +136,10 @@ The full design is in [STAGE-2.md](STAGE-2.md).
   now, which changes the destination of the running drive.
   Short links (`maps.app.goo.gl`, `maps.apple/p`) are expanded with one request to Google's or
   Apple's link server; Waze short links decode on the phone.
-- Debug log upload: each trip's log goes to a private GitHub repository when the trip ends, with a
+- [ ] Debug log upload: each trip's log goes to a private GitHub repository when the trip ends, with a
   fine-grained token (one repository, 366 days, reminder before it expires) that the owner pastes
   on the phone and that stays only there. The public code repository never gets logs.
-- Desktop Head Unit profiles for 800×480 and 1280×720 head units.
+- [ ] Desktop Head Unit profiles for 800×480 and 1280×720 head units.
 
 ## Stage 3: release and Google Play (internal testing built, production later)
 

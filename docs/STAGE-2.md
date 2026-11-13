@@ -5,8 +5,11 @@ in [ROADMAP.md](ROADMAP.md)), which brings the Smooth follow camera, the stop po
 diagnostics that this stage builds on. The owner's choices and their reasons are decisions 30 to 36
 in [DECISIONS.md](DECISIONS.md); the car camera is in [CAMERA.md](CAMERA.md).
 
-Nothing here is built yet. **Unverified** marks behaviour that no document or library source
-settles; it is checked on the Desktop Head Unit (DHU) or on the phone before code depends on it.
+The stage is built in steps (DECISIONS 49). Step 1, the car screen, is built: the app's map and the
+running drive in the car, with Start on the phone; [Step 1 (built)](#step-1-built) says what it has
+and where it settled or changed what follows. The rest is the design as decided so far.
+**Unverified** marks behaviour that no document or library source settles; it is checked on the
+Desktop Head Unit (DHU) or on the phone before code depends on it.
 
 Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 11.34.1, Navigation
 3.34.1 and Search 2.34.1; WorkManager 2.12.0.
@@ -36,6 +39,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 
 | Choice | Where | Decision |
 |---|---|---|
+| The stage in steps, the car screen first: the map and the running drive in the car, Start on the phone | [Step 1 (built)](#step-1-built) | 49 |
 | Car App Library 1.8.0-rc01 now, 1.8.0 when it is released | [Car App Library 1.8.0-rc01](#car-app-library-180-rc01) | 30 |
 | Mapbox's map surface only, not its car components | [Modules and dependencies](#modules-and-dependencies) | 31 |
 | The car disconnects mid-drive: guidance continues on the phone, and in the car again when it reconnects | [One drive, two screens](#one-drive-two-screens) | 32 |
@@ -50,6 +54,117 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | A bright, colourful day map in the car, the existing dark map at night, following the host; the phone follows its own choice | [Day and night](#day-and-night) | 36, 48 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
+
+## Step 1 (built)
+
+The owner asked on 2026-11-12 for the car screen "just like on the phone but on the Android Auto
+screen", with no separate screens for now. Step 1 is that screen.
+
+### What it has
+
+- **The car app.** `CustomMapsCarAppService` in `:app`, in the navigation category, with the
+  library's sample allow-list as its host check in every build type; the `:car` module with
+  `CarSession`, `CarHomeScreen`, `CarMessageScreen`, `CarGuidanceBridge`, the mappers
+  (`ManeuverToCar`, `LanesToCar`, `DistanceToCar`, `EstimateToCar`) and the two image renderers
+  (`ManeuverIconRenderer`, `LanesImageRenderer`). Two of the three artifacts of
+  [Dependencies](#dependencies): car-app 1.8.0-rc01 and maps-androidauto 11.34.1. The
+  [Manifest](#manifest) as designed, without `ACCESS_BACKGROUND_LOCATION` and without the link
+  entry.
+- **The setup gate.** The car waits for the token as the phone does: a loading message while the
+  token store is read, a message to add the token or to allow precise location on the phone when
+  parked, and the map once both are there; a new token builds the car map again.
+- **The map.** `MapScene` (`:engine-mapbox`, `map/MapScene.kt`) is everything of the phone's map
+  that is not tied to a view, as of stage 1.1 and the app's own lanes: the look and `MapPalette`,
+  the lane zoom and lane details, the SDK route line and the app's own route line with its
+  watchdog and swap, the drawing of the app's lanes with its eraser and arrow, the U-turn arrow, the
+  place pin, the camera of the chosen style with a data source for each map, and the navigator
+  observer. `PhoneMap` keeps the view parts. `CarNavigationMap` draws the same scene on the car's
+  surface ([The car map](#the-car-map)), with the Mapbox logo and the text attribution in the bottom
+  left of the stable area, the zoom limits 6 to 20 with steps of 0.5, the host's day and night in
+  two stages, at most 30 frames a second, and one `GuidancePuck`, owned by the engine, for both
+  maps. The Debug switches apply to both maps.
+- **The screens.** `CarHomeScreen` is the root, always a navigation template over the map. Before
+  a drive and while the phone shows routes, its action is **Start on phone** (a phone icon), which
+  opens a message: "Choose a destination and press Start on the phone when you are parked. The
+  drive then shows here.", or in the route preview "Press Start on the phone when you are parked.",
+  with Back. The routes the phone shows are on the car's map. During a drive: the routing card, the
+  arrival estimate and **End**, which ends the drive as the phone's End does. At the arrival the card
+  says "You have arrived" with the destination's name, until the phone's arrival card goes; then the
+  idle screen. The map's action strip: Pan, zoom in, zoom out, and Recenter while the camera is idle,
+  otherwise the switch between following and the overview. At most two templates are ever on the
+  stack.
+- **The routing card** ([below](#the-routing-card)) is made from the phone card's own content: the
+  maneuver with the phone's arrow, its distance in feet and miles as the phone shows them, its
+  words as the card has them, the card's lane row with the lanes to take, the Then step exactly
+  while the phone's Then chip shows, and the arrival time, time and distance left. It loads while
+  the car is off the route and until a new route has its first instruction. It and the trip the
+  host gets change at once when the maneuver, the Then step, the lane row or loading changes, and
+  otherwise at most once a second.
+- **The bridge** ([below](#the-guidance-bridge-to-navigationmanager)) as designed, without
+  AUTO_DRIVE: the callback first at the session's ON_CREATE, `navigationStarted()` for a drive and
+  for a session made during one, trips while the bridge's own flag is set, `navigationEnded()` at
+  the end of the drive, every call caught, `onStopNavigation` logged with the session's lifecycle
+  and CarConnection's type while the drive goes on, and the car taken back when the driver opens the
+  app on the car screen again.
+- **One drive, two screens** as designed: the car session is navigator owner B, never detached by
+  hand; a disconnect, the host's stop or another navigation app never ends the drive, and only End,
+  End Navigation in the notification and the arrival do, through the existing stop sequence.
+  Nothing in the car starts, stops or restarts a trip session or asks for anything of its own.
+- **Logs**, with `screen` `car` and numbers and states only: `car_session` (the host's package
+  and Car API level, the lifecycle, the gate, the map, the screens, the connection), `car_surface`,
+  `car_look`, `car_nav`, `car_template`, `car_location`, `car_error`, and the camera line.
+
+### Where it settled or changed the design
+
+- **Start stays on the phone** in this step. The action strip's idle action is Start on phone, not
+  Search.
+- **Surface callback.** The car map registers `MapboxCarMap`'s callback itself, from
+  `prepareSurfaceCallback`, inside one that catches every host call: car-app rethrows a surface
+  callback's exception on the main thread, Mapbox's own map creation included. Still one callback
+  for the app; `:car` never calls `setSurfaceCallback`.
+- **The attribution** is a `BitmapWidget` the car map keeps, not a class of its own.
+- **Car theme:** amber and dark amber, platinum and graphite.
+- **Maneuvers:** besides Mapbox's rules, a U-turn is a left U-turn also where the route calls it
+  going on along the road, as the phone's card draws it; an off-ramp or a fork with no turn at all
+  leaves on the near side, and a roundabout with no turn is still a roundabout.
+- **The images.** One source of the arrows' shapes, `GlyphShapes` in `:core-nav`, which the phone
+  draws with Compose and the car on a canvas, so an arrow added there reaches both. The lanes image
+  is the card's row without its words or a lane choice's distance: a distance changes with every
+  update and would draw the image again each time, and the host shows the image too small for
+  words. The host draws the card behind the images in its own colour, dark on the Android Auto
+  versions read: every arrow and bar is bright, amber for what the driver does now, grey for the
+  other lanes, platinum for the Then step, with a thin dark edge that keeps it readable on a light
+  card too. Unverified: the card's colour by day.
+- **The trip** holds the routing card's steps, the Then step only while it shows, and the
+  destination by its name.
+- **The arrival** has no Done in the car: the phone's Done ends it on both screens.
+- **The phone** does not watch `CarConnection` yet; the car session does, for its log.
+
+### Still to come
+
+Later steps, with clear seams left for them: `CarSearchScreen` and `CarRoutePreviewScreen` (pushed
+on the home screen's navigation template), Start in the car with the start guard
+(`TripStartPolicy`, `StartResult`, `StartBlocked`, `startProblem`; the phone and car hosts are
+already split for it), "Allow all the time" and `ACCESS_BACKGROUND_LOCATION`, the debug switch to
+start without the guard, the foreground service check (`trip_service`), the turn-by-turn
+notification extender (`CarTurnNotification`, `setTripNotificationExtender`; it can reuse the
+arrows' shapes and the bridge's routing content), AUTO_DRIVE, the reconnect fallback notification,
+resume after a crash and the drive marker, shared links, the GitHub log upload and WorkManager, and
+the DHU profiles. The next steps of the app's own lanes and arrows draw into `MapScene` and
+`GlyphShapes`, so they reach the car with no change there.
+
+### Unverified, for the DHU and the car
+
+- Whether Android Auto opens the app again by itself when the car reconnects during a drive; the
+  `car_session` lines show what happens.
+- Whether `navigationStarted()` after the driver opened the app again makes it the active navigation
+  app in the car, and whether the host then stops the other app.
+- The colour the host draws the routing card in by day, behind the images.
+- Whether the host sends a surface to a car map built again in one session (a token change).
+- Whether the car's puck gets positions before Start with the phone locked and location only while
+  in use (`car_location`); no request and no workaround in this step.
+- The frame rate the host streams, and the camera's `camFps` with the phone locked.
+- Whether the light preset's change animates.
 
 ## Modules and dependencies
 
@@ -76,7 +191,9 @@ The `:car` classes, wired by hand in `AppGraph`:
 Its inputs: a car map factory `(CarContext) -> CarMapRenderer`, `NavigationEngine`, `SearchProvider`,
 `MapsAccess`, the car host attach, the shared places and the drive marker. The notification
 extender is not one of them: `AppGraph` sets it once for every drive, not per car Session (see
-[Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car)).
+[Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car)). Step 1 has them in
+`CarParts`: the engine, `MapsAccess` (moved to `:core-nav`), the car map factory, the car host attach,
+the settings the car map follows and the debug log; the others come with their steps.
 
 ### Dependencies
 
@@ -165,8 +282,9 @@ Other notes:
   - `androidx.car.app.minCarApiLevel` = 7;
   - `com.google.android.gms.car.application` pointing to `@xml/automotive_app_desc`, which holds
     `<automotiveApp><uses name="template"/></automotiveApp>`;
-  - optionally `androidx.car.app.theme`, with amber and graphite `carColorPrimary`,
-    `carColorPrimaryDark`, `carColorSecondary` and `carColorSecondaryDark`.
+  - optionally `androidx.car.app.theme`, with `carColorPrimary`, `carColorPrimaryDark`,
+    `carColorSecondary` and `carColorSecondaryDark` (built: amber and dark amber, platinum and
+    graphite).
 - Permissions: `androidx.car.app.NAVIGATION_TEMPLATES`; `androidx.car.app.ACCESS_SURFACE` (also merged
   from maps-androidauto; registering a surface callback without it throws `SecurityException`);
   `ACCESS_BACKGROUND_LOCATION`, in the debug manifest only while this stage is built (see
@@ -239,6 +357,7 @@ Other notes:
 - The engine splits `attachHost` into `attachPhoneHost` and `attachCarHost`, so the start guard knows
   whether the phone screen is visible.
 - The phone watches `CarConnection(context).type`; `CONNECTION_TYPE_PROJECTION` (2) means Android Auto.
+  Step 1: only the car session watches it, for the log of the host's stop.
 
 ### What happens when
 
@@ -330,6 +449,9 @@ Other notes:
   and location component plugins, and `styleUri = null`.
   - `MapboxCarMap.setup` registers the surface callback itself (`AppManager.setSurfaceCallback`), and an
     app has one. `:car` never calls `setSurfaceCallback`, and there is never a second `MapboxCarMap`.
+    Built: the car map takes the callback from `prepareSurfaceCallback` and registers it inside one
+    that catches every host call, as car-app rethrows a surface callback's exception on the main
+    thread; still one callback.
   - `ContextMode.SHARED`: widgets throw without it, and Mapbox's own installer forces it, logging that
     UNIQUE "leads to graphical artifacts and crashes". The phone's `MapView` stays UNIQUE.
   - `styleUri = null`: the default would load Standard by itself as soon as the surface starts; the
@@ -364,10 +486,11 @@ Other notes:
   covers them and they do not move when the strips come and go. This is DECISIONS 25 for the car.
   - The logo is Mapbox's `LogoWidget` (the SDK's own logo drawable, 85×21 px at mdpi), placed with
     `BitmapWidget.setPosition`, never resized or recoloured.
-  - The attribution is `CarAttributionWidget`, a `BitmapWidget` with "© Mapbox © OpenStreetMap" drawn
-    on a canvas at the car's density, in a day colour and a night colour, redrawn with `updateBitmap`
-    when the mode changes. The car has no (i) button to tap, so the text itself shows. Mapbox allows
-    changing its colour and size as long as it stays legible.
+  - The attribution is a `BitmapWidget` with "© Mapbox © OpenStreetMap" drawn on a canvas at the
+    car's density, in a day colour and a night colour, redrawn with `updateBitmap` when the mode
+    changes (built inside `CarNavigationMap`, not as a class of its own). The car has no (i) button
+    to tap, so the text itself shows. Mapbox allows changing its colour and size as long as it stays
+    legible.
   - View plugins (logo, attribution, compass, scale bar) cannot attach to a `MapSurface`. Without
     widgets the car map would show neither logo nor attribution.
   - The widget API is `@MapboxExperimental` and may change between Maps releases.
@@ -477,7 +600,7 @@ Other notes:
 
 | Strip | Idle | Guidance |
 |---|---|---|
-| Action strip, up to 4 actions | Search | End |
+| Action strip, up to 4 actions | Search (step 1: Start on phone, which opens a message) | End |
 | Map action strip, up to 4 icons | Pan, zoom in, zoom out, Recenter or Overview | the same |
 
 - `NavigationTemplate.Builder.build()` throws without an action strip.
@@ -528,6 +651,13 @@ Other notes:
   mainly the image; the `Lane` data feeds the cluster and the head-up display.
 - The surface shows only the map (NF-2): directions, lanes and the arrival estimate go in the
   template, and the host draws them.
+- Built in step 1: the card is made from the phone card's own content (`CarRouting`): the lane row
+  is `CardLanes`' (the run-up's row first, then a lane choice ahead, then the maneuver's own), the
+  Then step is `thenManeuver`, the words are the card's ("Exit 24: Oak Street · Office", and the
+  road alone where the host has less room), and the arrows are the phone's shapes (`GlyphShapes`).
+  The lanes image is the row without its words or distance. Lanes whose image could not be drawn
+  are left out with it. The images have a day and a night version, with a thin dark edge round
+  every arrow and bar ([Step 1](#where-it-settled-or-changed-the-design)).
 - `RouteProgressSnapshot` has what the car needs beyond the phone's card, since the Then chip was
   built ([DECISIONS.md](DECISIONS.md), 37): the step after the next one for
   `RoutingInfo.setNextStep` (`thenManeuver`, set when the Then rule shows it, so the car shows the
@@ -557,7 +687,13 @@ notifications continue while another app is in front.
 The library's rules, read in its 1.7.0 source: every call on the main thread; `navigationStarted()`
 throws without a callback; `updateTrip()` throws when navigation has not started;
 `clearNavigationManagerCallback()` throws while navigating; a second `navigationStarted()` or
-`navigationEnded()` does nothing.
+`navigationEnded()` does nothing. The same in 1.8.0-rc01.
+
+Built in step 1, without AUTO_DRIVE. A held-back update goes out when its second is over, with the
+newest content, so the navigator's update a second all reaches the host. A drive that ends after a
+start the navigator refused (back to the preview) ends navigation too. The library calls its own
+`onStopNavigation()` at the session's ON_DESTROY, before the app's own ON_DESTROY observers run, so
+the bridge clears its callback there without the refusal; the posted callback then finds none.
 
 ### try/catch around every call
 
@@ -590,9 +726,10 @@ throws without a callback; `updateTrip()` throws when navigation has not started
   drive now, the drive no longer depends on telling them apart. At ON_DESTROY the bridge marks itself
   gone and clears its callback inside a try/catch; a posted callback that still arrives only logs.
 - Taking the car back (the owner's choice): when the driver opens Custom Maps on the car screen again
-  during the drive, the bridge calls `navigationStarted()` again. Unverified: whether that makes this
-  app the active navigation app in the car again, and whether the host then asks the other app to
-  stop, as it asked this one; check on the DHU.
+  during the drive, the bridge calls `navigationStarted()` again (built: the host's new intent and
+  the session's start both ask, once, while the bridge is not navigating). Unverified: whether that
+  makes this app the active navigation app in the car again, and whether the host then asks the
+  other app to stop, as it asked this one; check on the DHU.
 - NF-5 blocks a release only on the open testing and production tracks. Closed testing is reviewed
   without blocking, and internal testing is not reviewed.
 
@@ -1427,7 +1564,10 @@ Debug build, phone on USB, Android Auto developer mode. Unlock the phone to star
 
 ## Order of work
 
-Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then:
+Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then the work below. Step 1 built 4, 6, 7 without
+the reconnect fallback, and 10, with the parts of 2 and 3 they need (the stop reasons,
+`CarMapRenderer`, the routing card's data, the phone and car hosts, `MapScene`), and the README,
+DECISIONS and ROADMAP updates of 14.
 
 | # | Work | Checked by |
 |---|---|---|

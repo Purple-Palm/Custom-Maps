@@ -582,3 +582,13 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - The phone and the car can show different looks for some minutes at dusk, each following its own.
   - Until the maneuver card gets its own gear for Settings, the look can be chosen only before Start and after arrival.
   - None of it has run on a phone yet.
+
+## 49. Android Auto in steps, the car screen first
+
+- **Chosen (owner, 2026-11-12):** stage 2 is built in steps, and the first is the car screen "just like on the phone but on the Android Auto screen; no separate screens needed now". Step 1 shows the app's own map in the car, with the same scene as the phone (31), and the running drive on it: the phone card's maneuver, arrow, words and lane row, the Then step while the phone shows it, the arrival time, time and distance left, and End. A drive is still started on the phone, and the car says so when asked. Search and the route preview in the car, Start in the car with its guard (33), the turn notifications in the car, resume after a crash, shared links, the log upload and the Desktop Head Unit profiles come in later steps ([STAGE-2.md](STAGE-2.md), Step 1).
+  - **One content, two screens.** The routing card is made from what the phone's card shows: the same lane row (`CardLanes`), the same Then rule, the same words, distances in feet and miles as the phone rounds them, and the same arrow shapes, which now live in `:core-nav` for both screens. What the car shows can never disagree with the phone.
+  - **The car home screen is a navigation template in every state,** so that a later step pushes its search and preview screens on it and every flow ends on it.
+  - **Every call into or out of the car code is caught** (32): one exception on the main thread would end the phone's guidance with the car's.
+- **Alternative:** the whole stage at once, as designed. It would put Start in the car, with its open start problem on Android 14 and 15 (33), before the owner had seen the car screen at all, and the log upload and links before either.
+- **Why:** the owner can drive with the car screen now, through the internal testing build (42), while the parts that need the first device test wait for it.
+- **Cost:** in the car the next drive is chosen and started on the phone, when parked. The car's puck before Start may be missing or old with the phone locked and location only while in use, until "Allow all the time" comes.
