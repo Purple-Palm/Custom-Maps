@@ -6,9 +6,9 @@ import kotlin.math.roundToInt
 /**
  * The cap on the car map's frame rate. Mapbox paces the frames of the map on the car's surface
  * against the display rate it believes that surface has, 60 Hz (the car app library's own virtual
- * display), while the map's render thread is called at the phone's display rate. A cap of 30 so drew
- * 60 frames a second on a phone at 120 Hz on the first car test, and Mapbox's own estimate still read
- * 30. So the cap the car map sets is scaled by the rate at which the display's frames really come:
+ * display), while the map's render thread is called at the phone's display rate. A cap of 30 so draws
+ * 60 frames a second on a phone at 120 Hz, while Mapbox's own estimate still reads 30. So the cap
+ * the car map sets is scaled by the rate at which the display's frames really come:
  * `round(30 x 60 / rate)`, within 1 and 60, for a real 30 frames a second. While the frame clock runs
  * on its timer the main thread has no display rate to measure, and 60 is taken. The cap is set again
  * only when the rate moves by more than a tenth.

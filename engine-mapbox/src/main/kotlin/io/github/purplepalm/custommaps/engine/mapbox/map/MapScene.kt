@@ -639,8 +639,8 @@ internal class MapScene(
 
     /**
      * The phone's map draws at most [PHONE_FPS_WITH_CAR] frames a second while a car's surface shows
-     * the map too: on the first car test the two maps at once, the phone's at its display's 120 Hz,
-     * made the phone hot within minutes. The cap goes again when the car's surface does.
+     * the map too: two maps at once, the phone's at its display's full rate, make the phone hot
+     * quickly. The cap goes again when the car's surface does.
      */
     private fun capForCar(carShown: Boolean) {
         if (carShown == cappedForCar) return

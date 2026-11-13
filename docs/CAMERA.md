@@ -659,12 +659,12 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
 - **Frames (step 1b).** The car's map takes its frames from a clock of its own (`CarFrameClock`, run
   for each surface by `CarFrames`): the main thread's display frames while they come, and once none
   has come for 50 ms while a frame is wanted, a main-thread timer every 16 ms, until two display
-  frames come less than 25 ms apart again. Two ticks are never closer than 15 ms, so there are at most
-  about 60 a second, also on a phone at 120 Hz. Each tick has a `System.nanoTime` time,
+  frames come less than 25 ms apart again. Two ticks are never closer than 15 ms, so there are at
+  most about 60 a second, also on a phone at 120 Hz. Each tick has a `System.nanoTime` time,
   Choreographer's own clock. The clock runs only from a surface's attach to its detach, and only
   while something wants a frame. Smooth follow, the zoom buttons' ease and the puck move on it: on
-  the first car test the main thread got no display frames for 18 s with the phone app in the
-  background, and the car's map stood still.
+  the first car test the main thread got no display frames for many seconds with the phone app in
+  the background, and the car's map stood still.
 - **The puck on the clock (step 1b).** The car's location component takes `CarPuck` as its provider,
   which follows the platform's location before Start and the guidance puck during a drive. It takes
   each update with its points and its glide time (the options' duration; without options the
@@ -977,18 +977,19 @@ Stage 5, 3D:
   like breathing.
 - **Labels** update less eagerly while the camera moves (`setUserAnimationInProgress`).
 - **Chase distance.** If 2τ × speed reads as lag, lower the centre τ to 0.15 s. It is one constant.
-- **Phone locked in the car.** On the first car test the main thread got no display frames for 18 s
-  with the phone app in the background, and the car's camera and puck, which moved on them, stood
-  still. Built in stage 2's step 1b: the car's camera, its zoom buttons' ease and its puck take their
-  frames from the car's frame clock, which falls back to a main-thread timer then. Still waiting for
-  the main thread's frames on the car: the two Mapbox camera styles and the double tap's zoom. And
-  the map's render thread draws only on display callbacks of its own: whether it still gets them
-  while the main thread gets none is not known yet (the car's camera lines, `render.frames` and
-  `drawn`, say it). While the clock is on its timer, each puck update leaves a cleared entry in
-  Android's animation list until the next display frame, since an animator of no duration still
-  registers there: a few MB and a few percent of a core after an hour, gone at the first frame. The
-  app's own puck layer of a later step ends it. `AnimationThreadController.useBackgroundThread()`,
-  experimental and for every Mapbox animation in the app, is not used.
+- **Phone locked in the car.** On the first car test the main thread got no display frames for many
+  seconds with the phone app in the background, and the car's camera and puck, which moved on them,
+  stood still. Built in stage 2's step 1b: the car's camera, its zoom buttons' ease and its puck
+  take their frames from the car's frame clock, which falls back to a main-thread timer then. Still
+  waiting for the main thread's frames on the car: the two Mapbox camera styles and the double tap's
+  zoom. And the map's render thread draws only on display callbacks of its own: whether it still
+  gets them while the main thread gets none is not known yet (the car's camera lines,
+  `render.frames` and `drawn`, say it). While the clock is on its timer, each puck update leaves a
+  cleared entry in Android's animation list until the next display frame, since an animator of no
+  duration still registers there: a few MB and a few percent of a core after an hour, gone at the
+  first frame. The app's own puck layer of a later step ends it.
+  `AnimationThreadController.useBackgroundThread()`, experimental and for every Mapbox animation in
+  the app, is not used.
 - **Two maps at once.** With the phone app open and the car connected, two loops and two renderers
   run. The phone loop stops with the activity, but Settings drawn over the map keeps it running, as
   map rendering does today. Since step 1b the phone's map draws at most 60 frames a second while a

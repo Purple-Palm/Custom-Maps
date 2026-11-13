@@ -175,8 +175,8 @@ the DHU profiles. The next steps of the app's own lanes and arrows draw into `Ma
   in use (`car_location`); no request and no workaround in this step. The first car test: none
   with the phone app in the background after the drive ([Location before Start](#location-before-start)).
 - The frame rate the host streams, and the camera's `camFps` with the phone locked. The first car
-  test: with the phone app in the background the main thread got no display frames for 18 s and the
-  car's map stood still; step 1b's frame clock is the answer.
+  test: with the phone app in the background the main thread got no display frames for many seconds
+  and the car's map stood still; step 1b's frame clock is the answer.
 - Whether the light preset's change animates.
 
 ## Step 1b (built)
@@ -187,23 +187,22 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
 
 ### What the first car test showed
 
-- **A freeze.** With the phone app in the background, the car's camera stopped for 18 s: no camera
-  update and no write, while positions and progress kept coming once a second and the car's session
-  stayed resumed. The drawn puck stood still and fell behind the car by its speed each second, to
-  about 600 m. The car map's render thread drew a few more frames and then none, with nothing left
-  to draw. In two earlier stretches in the background the car's map kept moving at 55 to 59 camera
-  updates a second. No screen on or off broadcast came during the whole car session, though the
-  phone was locked and unlocked, so whether its display was off is not known.
-- **Two maps at the phone's 120 Hz, and heat.** With the phone app in front the phone's map drew at
-  up to 118 frames a second and the car map's render thread was called 70 to 96 times a second,
-  while the car's `renderFps` read 30 throughout. The phone went from thermal LIGHT to MODERATE 20 s
-  into the drive and to SEVERE within three minutes; a drive with the phone alone had stayed LIGHT
-  for an hour. Frame times on the car: 8 to 18 ms at the median, 13 to 28 ms at the 95th percentile,
-  with spikes of 100 to 220 ms.
+- **A freeze.** With the phone app in the background, the car's camera stopped for many seconds: no
+  camera update and no write, while positions and progress kept coming and the car's session stayed
+  resumed. The drawn puck stood still and fell further behind the car with every second. The car
+  map's render thread drew a few more frames and then none, with nothing left to draw. In earlier
+  stretches in the background the car's map kept moving. No screen on or off broadcast came during
+  the whole car session, though the phone was locked and unlocked, so whether its display was off is
+  not known.
+- **Two maps at the phone's display rate, and heat.** With the phone app in front the phone's map
+  drew at the phone's full display rate, and the car map's render thread was called far more often
+  than its cap of 30 a second suggests, while the car's `renderFps` read 30 throughout. The phone
+  grew hot quickly, much sooner than on drives with the phone alone. Frame times on the car had long
+  spikes now and then.
 - **The day map at night.** The phone showed the night look (Auto, by the sun); the car's host said
   day, and the car's map loaded in the day look and stayed in it.
 - **No position after the drive.** With the drive over and the phone app in the background, the car
-  map's platform location brought no fix within about a minute (`car_location`): the known limit of
+  map's platform location brought no fix (`car_location`): the known limit of
   [Location before Start](#location-before-start), which "Allow all the time" lifts in a later step.
 
 ### Why
@@ -693,7 +692,7 @@ Other notes:
 
 - The phone map and the car map render separately, each with its own render thread and GL context.
   With the phone app open and the car connected, the GPU work and the heat add up: on the first car
-  test both maps drew at the phone's 120 Hz and the phone was hot within minutes. The phone map
+  test both maps drew far more frames than they needed and the phone grew hot quickly. The phone map
   stops drawing when its activity stops.
 - Built in step 1b ([Step 1b](#step-1b-built)): the car's surface draws a real 30 frames a second,
   its cap scaled by the rate the display's frames come at, since Mapbox paces it against 60 Hz while
@@ -1034,7 +1033,7 @@ the bridge clears its callback there without the refusal; the posted callback th
   stale, and a route asked for in the car can fail for lack of a position or start from an old one
   (`previewRoutes` falls back to the last known fix or the last puck position).
 - Seen in the first car test: after the drive ended, with the phone app in the background, the car
-  map's platform location brought no fix within about a minute (`car_location` with `fixes` 0).
+  map's platform location brought no fix (`car_location` with `fixes` 0).
 - "Allow all the time" covers this too. Free drive is not an option: it is billed (DECISIONS 13).
 
 ### The first device test
@@ -1741,7 +1740,7 @@ and puck of 6 a frame clock of their own ([Step 1b](#step-1b-built)).
 | A car that stays in day mode | The car's map follows the phone's look since step 1b (DECISIONS 50); the host's mode, logged, colours only the card's images |
 | Google's quality guidelines expect a dark map when the car says night (MR-1), and the car's map follows the phone | Internal testing is not reviewed; looked at again before any closed or open testing (DECISIONS 50) |
 | Two maps double the GPU work and the heat | Step 1b: a real 30 frames a second on the car's surface, the phone's map at most 60 while the car shows the map; the `thermal` lines over ten minutes with the car (DRIVES.md); stage 5 measures heat too |
-| Main-thread frames may stop with the phone locked or the app in the background (18 s in the first car test) | Step 1b: the car's frame clock with its timer, Smooth follow, the zoom buttons and the puck on it; the two Mapbox camera styles and the double tap still wait for display frames |
+| Main-thread frames may stop with the phone locked or the app in the background (as in the first car test) | Step 1b: the car's frame clock with its timer, Smooth follow, the zoom buttons and the puck on it; the two Mapbox camera styles and the double tap still wait for display frames |
 | The notification interceptor runs on a background thread and has one slot | The engine owns the slot; the extender's state is behind a lock |
 | Notifications refused: no rail and no heads-up in the car | Asked for during setup; both screens say so |
 | Before Start, with "while in use" and the phone locked, no puck and no route origin in the car | "Allow all the time"; case (b) |

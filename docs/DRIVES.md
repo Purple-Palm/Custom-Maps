@@ -63,7 +63,7 @@ with day and night now following the phone; 7 to 13 are step 1b's
    the same lines.
 10. **The zoom buttons with the phone locked:** the map zooms.
 11. **Heat.** Ten minutes with the car and the phone app in front: the `thermal` lines and the
-    `device` lines' `thermal`, against a drive with the phone alone, which stayed LIGHT for an hour.
+    `device` lines' `thermal`, against a drive with the phone alone.
 12. **The cable pulled and plugged in during a drive:** `car_surface` `detach` and `attach`; the
     phone's camera line loses `capped` while the car is gone and has it again after.
 13. **Before a drive, with the phone locked:** note whether the car's map shows the position
@@ -82,25 +82,25 @@ simulated drive with the car screen.
   map in the day look while the phone showed the night; the car's map stopping when the app was left
   on the phone.
 - **What the log shows:**
-  - With the phone app in the background, the car's camera stood still for 18 s: no camera update
-    and no write, while positions and progress kept coming once a second and the car's session stayed
-    resumed. The drawn car stood still too and fell behind by the drive's speed each second, to about
-    600 m. In two earlier stretches in the background the car's map kept moving, at 55 to 59 camera
-    updates a second. No screen on or off broadcast was logged during the car session, though the
-    phone was locked and unlocked.
-  - With the phone app in front both maps drew at the phone's 120 Hz: the phone's map at up to 118
-    frames a second, the car map's render thread called 70 to 96 times a second, while the car's
-    `renderFps` read 30 throughout. The phone went from thermal LIGHT to MODERATE 20 s into the drive
-    and to SEVERE within three minutes; a drive with the phone alone had stayed LIGHT for an hour.
+  - With the phone app in the background, the car's camera stood still for many seconds: no camera
+    update and no write, while positions and progress kept coming and the car's session stayed
+    resumed. The drawn car stood still too and fell further behind with every second. In earlier
+    stretches in the background the car's map kept moving. No screen on or off broadcast was logged
+    during the car session, though the phone was locked and unlocked.
+  - With the phone app in front the phone's map drew at the phone's full display rate, and the car
+    map's render thread was called far more often than its cap of 30 a second suggests, while the
+    car's `renderFps` read 30 throughout. The phone grew hot quickly, much sooner than on drives with
+    the phone alone.
   - The phone's look was the night's (Auto, by the sun); the car's first `car_look` line said `dark`
     false, and the car's map loaded in the day look and stayed in it.
-  - After the drive, with the phone app in the background, the car's map got no position within
-    about a minute (`car_location`, `fixes` 0).
+  - After the drive, with the phone app in the background, the car's map got no position
+    (`car_location`, `fixes` 0).
 - **Causes:** the car's camera and its car icon moved on the main thread's display frames, through
   Choreographer and Android's animators, and those stopped with the app in the background; Mapbox
-  paced the car's surface against a believed 60 Hz while drawing at the phone's 120, so its cap of 30
-  drew 60 frames a second; and the car's map followed its host's day and night by design (DECISIONS
-  36). The missing position is the known limit before Start (STAGE-2, Location before Start).
+  paced the car's surface against a believed 60 Hz while its render thread was called at the phone's
+  own, higher display rate, so its cap of 30 drew far more than 30 frames a second (60 on a phone at
+  120 Hz); and the car's map followed its host's day and night by design (DECISIONS 36). The missing
+  position is the known limit before Start (STAGE-2, Location before Start).
 - **Changes (stage 2, step 1b):** a frame clock of the car's own, with a timer while the display sends
   the main thread no frames, for its Smooth follow camera, its zoom buttons and its car icon; a real
   30 frames a second on the car and at most 60 on the phone while the car shows the map; the phone's

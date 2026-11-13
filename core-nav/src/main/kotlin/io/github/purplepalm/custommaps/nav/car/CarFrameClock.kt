@@ -3,12 +3,12 @@ package io.github.purplepalm.custommaps.nav.car
 /**
  * When the car map's camera and puck get their frames. Both move on the main thread, once a frame,
  * and Android gives the main thread its frames from the phone's display ("vsync", through
- * Choreographer). On the first car test those stopped for 18 s while the app was in the background
- * and the car's screen still showed the map: the camera and the puck stood still although the drive
- * went on. So the car's map takes its frames from this clock: from the display while it sends them
- * ([Source.VSYNC]), and, once none has come for [quietNanos] while frames are wanted, from a timer
- * every [timerNanos] ([Source.TIMER]) until the display's frames come back: two of them less than
- * [returnNanos] apart. A single frame now and then, as from a display that has slowed down to save
+ * Choreographer). On the first car test those stopped for many seconds while the app was in the
+ * background and the car's screen still showed the map: the camera and the puck stood still although
+ * the drive went on. So the car's map takes its frames from this clock: from the display while it
+ * sends them ([Source.VSYNC]), and, once none has come for [quietNanos] while frames are wanted, from
+ * a timer every [timerNanos] ([Source.TIMER]) until the display's frames come back: two of them less
+ * than [returnNanos] apart. A single frame now and then, as from a display that has slowed down to save
  * power, keeps the timer, which would otherwise hand over and take back on every frame. Two ticks
  * are never closer than [minGapNanos]: at most about 60 a second, also on a display at 120 Hz.
  *
