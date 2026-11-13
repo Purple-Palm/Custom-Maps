@@ -806,9 +806,12 @@ Other lines:
   had to be written back from what the style said as it loaded), `transitionMs` (the style's
   transition for the light change) and `routeLine` (the route line took the look's colours). On
   `START` also `startMs`, how long the first frame waited; a `START` line has no fields from the
-  map, whose first tiles are drawn in the look, and nor has a line while no map is on screen. A
-  change by the sun outside guidance writes no line: its time alone would be the local dusk or dawn.
-  Enums, whole seconds and booleans; no position, no sun angle, no time of the sun, no time zone.
+  map, whose first tiles are drawn in the look, and nor has a line while no map is on screen. With
+  the phone's map and the car's both showing the look, the fields are those of the first map that
+  wrote it, and a car's map between two surfaces leaves the line to the other; one that no map
+  showing could write goes without them. A change by the sun outside guidance writes no line: its
+  time alone would be the local dusk or dawn. Enums, whole seconds and booleans; no position, no sun
+  angle, no time of the sun, no time zone.
 - A **look_theme** line when a theme left for a quiet moment goes: `themeHeldS`, `heldBy` (what
   held it last) and the map's `writeMs`. A map made while it waited drew its tiles with the whole
   look, so it then writes nothing.
