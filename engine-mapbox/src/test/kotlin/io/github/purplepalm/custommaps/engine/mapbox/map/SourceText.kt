@@ -21,6 +21,19 @@ internal object SourceText {
         return false
     }
 
+    /**
+     * The lines of the body of [declaration] in [text], without comments: from the line after it up to, not with, the first
+     * line that is back at its indent or farther out, its closing brace or parenthesis. Every block and condition in it
+     * included, for the tests that pin a line anywhere in the body or the order of two.
+     */
+    fun body(text: String, declaration: String): List<String> {
+        val lines = code(text).lines()
+        val at = lines.indexOfFirst { it.trim().startsWith(declaration) }
+        require(at >= 0) { "No $declaration" }
+        val indent = lines[at].takeWhile { it == ' ' }.length
+        return lines.drop(at + 1).takeWhile { it.isBlank() || it.takeWhile { c -> c == ' ' }.length > indent }
+    }
+
     /** [text] without its comments: what the compiler reads. */
     fun code(text: String): String =
         text.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), " ").replace(Regex("//[^\n]*"), " ")
