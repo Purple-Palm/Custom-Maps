@@ -30,6 +30,7 @@ import kotlin.math.cos
 import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.random.Random
 
 /**
  * The app's own freeway lanes drawn on the made-up routes of [LaneScenes], along made-up lines at sea that run due north
@@ -118,6 +119,27 @@ class LaneDrawingTest {
         assertNull(d.drawing.asphaltAt(first.asphaltTo + 0.01).takeIf { first.asphaltTo + 0.01 < d.path.drawings[1].asphaltFrom })
         // No line runs on past the drawing's end.
         for (f in d.features.filter { !it.kind.polygon && it.from < end }) assertTrue(f.to <= end + 1e-6, "${f.kind} ${f.between} runs to ${f.to}")
+    }
+
+    @Test
+    fun `a drawing that begins inside the turn the drawing before ends at has its own asphalt there`() {
+        // A route of the sweeps' two-maneuver family: the second run's drawing begins so soon past the fork's gore that its taper
+        // out of the map's band begins where the first drawing's lanes beyond the fork still taper into it.
+        val (route, line) = RandomRoutes.nth(Random(4_013), 110, "t4", RandomRoutes::twoManeuvers) { it.nodes.last().station - 800.0 }
+        val d = draw(route, line)
+        val first = d.path.drawings[0]
+        val second = d.path.drawings[1]
+        assertTrue(first.turnsAtEnd)
+        assertTrue(second.asphaltFrom < first.asphaltTo, "the second taper begins at ${second.asphaltFrom}, the first asphalt ends at ${first.asphaltTo}")
+        // The second drawing's own asphalt, as its feature draws it: the map's band where its taper begins, its lanes at its start.
+        val own = d.of(Kind.ASPHALT).single { abs(it.from - second.asphaltFrom) < 1e-6 }
+        assertTrue(own.to > second.from)
+        assertEquals(LaneDrawing.STANDARD_FREEWAY_BAND_METERS, width(d.drawing.asphaltAt(second.asphaltFrom)), 1e-9)
+        val lanes = d.drawing.lanesAt(second.from)
+        assertEquals(lanes.first().left - lanes.last().right + 2.0 * apron, width(d.drawing.asphaltAt(second.from)), 1e-9)
+        // Past the turn's arc and before that taper the stub and the lanes beyond hold the asphalt: none of the route's own.
+        assertNull(d.drawing.asphaltAt(second.asphaltFrom - 1.0))
+        assertTrue(d.of(Kind.ASPHALT, Part.BEYOND).any { covers(it, second.asphaltFrom) })
     }
 
     @Test

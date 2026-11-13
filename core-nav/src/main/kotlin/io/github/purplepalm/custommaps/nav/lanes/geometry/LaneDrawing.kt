@@ -726,11 +726,16 @@ class LaneDrawing private constructor(
         }
 
         fun asphaltAt(station: Double): Pair<Double, Double>? {
-            val k = drawings.indexOfFirst { station >= max(0.0, it.asphaltFrom) && station <= it.asphaltTo }
-            if (k < 0) return null
-            val end = ends[k]
-            if (end != null && station > end.begin) return null
-            return asphaltEdges(drawings[k], end, station)
+            for (k in drawings.indices) {
+                val d = drawings[k]
+                if (station < max(0.0, d.asphaltFrom) || station > d.asphaltTo) continue
+                val end = ends[k]
+                // Past the arc of the turn a drawing ends at, its stub and the lanes beyond hold the asphalt: the route's
+                // carriageway there is the next drawing's, where one begins that soon after the turn.
+                if (end != null && station > end.begin) continue
+                return asphaltEdges(d, end, station)
+            }
+            return null
         }
 
         fun noses(): List<Pair<Double, Double>> = gores.filter { it.stub.isNotEmpty() }.map { it.stubNose to it.routeNose }

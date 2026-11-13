@@ -135,13 +135,12 @@ class LaneTrustTest {
             assertTrue(built.plan.noLane.isNotEmpty(), "${route.routeId}: an approach where no lane is named")
             check(built)
         }
-        // Through a fork into a stretch where no lane can be named, a drawing beginning just past the fork's gore: this property
-        // alone, as the asphalt's taper where that drawing begins lies inside the fork's turn, which tapersAtEveryEnd does not
-        // read.
+        // Through a fork into a stretch where no lane can be named, a drawing beginning just past the fork's gore, its asphalt's
+        // taper inside the fork's turn: every property, the tapers at every end among them.
         val (route, line) = RandomRoutes.nth(Random(4_013), 110, "t4", RandomRoutes::twoManeuvers) { it.nodes.last().station - 800.0 }
         val built = build(route.routeId, route, line)
         assertEquals(2, built.plan.noLane.size)
-        roadLineInsideWhereNoLaneIsNamed(built)
+        check(built)
         assertSeen("roadLineInside")
     }
 
