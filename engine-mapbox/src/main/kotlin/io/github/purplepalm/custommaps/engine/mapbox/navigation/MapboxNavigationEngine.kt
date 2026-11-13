@@ -69,7 +69,6 @@ import io.github.purplepalm.custommaps.nav.lanes.CardPlanAgreement
 import io.github.purplepalm.custommaps.nav.lanes.LaneAgreeLine
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
-import io.github.purplepalm.custommaps.nav.lanes.LanePlan
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.model.Distance
@@ -232,8 +231,14 @@ internal class MapboxNavigationEngine(
     /**
      * The points with lanes ahead of the car, read from the route once for each step. The engine
      * owns the one copy; the map's camera reads the same list, so both see the same lane choices.
+     * Its run-up latch looks up the ramp each run-up holds through in the lane plan of the
+     * update's route ([RouteLanePlan.rampAfter]) before every move, whoever moves it first: two
+     * lookups an update.
      */
-    internal val laneChoices = LaneChoices(onError = { error -> debugLog.error("laneChoices", error) })
+    internal val laneChoices = LaneChoices(
+        onError = { error -> debugLog.error("laneChoices", error) },
+        rampOf = { routeId, exitKey -> lanePlans.planFor(routeId)?.rampAfter(exitKey) },
+    )
 
     /**
      * Where the debug lines that describe whole routes are put together: off the main thread, since
@@ -1332,18 +1337,10 @@ internal class MapboxNavigationEngine(
      */
     internal fun runUpKey(progress: RouteProgress): String? {
         if (_guidanceState.value == GuidanceState.ACTIVE && !latestHeld()) {
-            laneChoices.runUp(progress, lastMatch?.enhancedLocation?.speed, nowSeconds(), rampOf(progress))
+            laneChoices.runUp(progress, lastMatch?.enhancedLocation?.speed, nowSeconds())
         }
         return laneChoices.runUpKey
     }
-
-    /**
-     * Where the lane plan of [progress]'s route holds the run-up on now through the ramp after its gore, for the latch
-     * before it moves for [progress] ([RouteLanePlan.rampAfter]): two lookups. Null outside a run-up, where the plan
-     * holds through none, and while the route has no plan.
-     */
-    private fun rampOf(progress: RouteProgress): LanePlan.RampHold? =
-        laneChoices.runUpKey?.let { lanePlans.planFor(progress.navigationRoute.id)?.rampAfter(it) }
 
     /**
      * Whether the progress update that comes with the latest matched position is one the screen
@@ -1505,7 +1502,7 @@ internal class MapboxNavigationEngine(
         // The leg's maneuvers after the next one: the same list for every update of the step.
         val decided = thenTracker.decide(progress.toSnapshot(next, speed, upcoming.of(progress)))
         // The latch moved for this update already; this is its row.
-        val runUp = laneChoices.runUp(progress, speed, nowSeconds(), rampOf(progress))
+        val runUp = laneChoices.runUp(progress, speed, nowSeconds())
         // None on a run-up: its row stands in for a lane choice's, and nothing of one is kept.
         val lanes = laneChoices.lanesAhead(laneChoices.ahead(progress), speed)
         // Added onto what the tracker decided: a copy of a fresh snapshot would lose the rule's

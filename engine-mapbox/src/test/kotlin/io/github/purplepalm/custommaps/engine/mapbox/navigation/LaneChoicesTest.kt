@@ -13,6 +13,7 @@ import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.DivergeWatch
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
+import io.github.purplepalm.custommaps.nav.lanes.LanePlan
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.LaneTarget
@@ -895,39 +896,55 @@ class LaneChoicesTest {
     /** The ramp's planning speed. */
     private val rampMps = 21.0
 
+    /** One move of the run-up's latch per update and what it gives: the card's row, the run-up's exit, the metres to the ramp's point. */
+    private class RampDrive(val lanes: LaneChoices) {
+        val out = ArrayList<Triple<RunUpLanes?, String?, Double>>()
+
+        /**
+         * One update, as the engine moves the latch: its own progress observer first, then the map's camera asking for the
+         * same update ([LaneChoices.runUp]); both move it with the route's id, and only the first moves it.
+         */
+        fun move(choices: List<LaneChoice>, onStep: Double, routeMeters: Double, t: Double) {
+            val update = Any()
+            val engine = lanes.runUpOnce(update) {
+                lanes.moveRunUp(choices, onRoute = true, metersOnStep = onStep, speedMps = 20.0, nowSeconds = t, routeMeters = routeMeters, routeId = "r")
+            }
+            val camera = lanes.runUpOnce(update) { error("the latch moves once an update") }
+            assertSame(engine, camera)
+            assertNull(lanes.lanesAhead(choices, 20.0), "no lane choice's row on a run-up or its ramp")
+            out.add(Triple(engine, lanes.runUpKey, lanes.rampAhead))
+        }
+    }
+
+    /**
+     * The run-up to the exit whose gore lies 2,000 m along the route, with an update at each of [runUp] (metres into the step,
+     * seconds), then the ramp step to its split, 260 m past the gore.
+     */
+    private fun RampDrive.toTheSplit(runUp: List<Pair<Double, Double>> = listOf(0.0 to 0.0, 1_990.0 to 80.0)): List<Triple<RunUpLanes?, String?, Double>> {
+        for ((onStep, t) in runUp) {
+            move(lanes.update(false, "r/0/2", onStep, 2_000.0 - onStep, "off ramp") { runUpStep(lanes, it) }, onStep, onStep, t)
+        }
+        for ((onStep, t) in listOf(20.0 to 81.0, 60.0 to 83.0, 240.0 to 92.0, 260.0 to 93.0)) {
+            val choices = lanes.update(false, "r/0/3", onStep, 260.0 - onStep, "fork") { key ->
+                lanes.load(key, listOf(intersection(0), intersection(1)), points, maneuver = intersection(3, split), exitModifier = "slight left")
+            }
+            move(choices, onStep, 2_000.0 + onStep, t)
+        }
+        return out
+    }
+
     @Test
     fun `through the ramp the card shows the split's row from the gore on, and the latch lets go at the split`() {
+        val asked = ArrayList<Pair<String, String>>()
         fun run(planHolds: Boolean): List<Triple<RunUpLanes?, String?, Double>> {
-            val lanes = LaneChoices()
-            val out = ArrayList<Triple<RunUpLanes?, String?, Double>>()
-            // The engine hands the plan's point past the gore while the run-up to that exit is on ([LanePlan.rampAfter]).
-            fun move(choices: List<LaneChoice>, onStep: Double, routeMeters: Double, t: Double) {
-                val handed = planHolds && lanes.runUpKey == "r/0/2/end"
-                val row = lanes.moveRunUp(
-                    choices,
-                    onRoute = true,
-                    metersOnStep = onStep,
-                    speedMps = 20.0,
-                    nowSeconds = t,
-                    routeMeters = routeMeters,
-                    rampMeters = if (handed) 260.0 else Double.NaN,
-                    rampMps = if (handed) rampMps else Double.NaN,
-                )
-                assertNull(lanes.lanesAhead(choices, 20.0), "no lane choice's row on a run-up or its ramp")
-                out.add(Triple(row, lanes.runUpKey, lanes.rampAhead))
-            }
-            // The run-up to the exit, whose gore lies 2,000 m along the route.
-            for ((onStep, t) in listOf(0.0 to 0.0, 1_990.0 to 80.0)) {
-                move(lanes.update(false, "r/0/2", onStep, 2_000.0 - onStep, "off ramp") { runUpStep(lanes, it) }, onStep, onStep, t)
-            }
-            // Past the gore, the ramp step to the split.
-            for ((onStep, t) in listOf(20.0 to 81.0, 60.0 to 83.0, 240.0 to 92.0, 260.0 to 93.0)) {
-                val choices = lanes.update(false, "r/0/3", onStep, 260.0 - onStep, "fork") { key ->
-                    lanes.load(key, listOf(intersection(0), intersection(1)), points, maneuver = intersection(3, split), exitModifier = "slight left")
-                }
-                move(choices, onStep, 2_000.0 + onStep, t)
-            }
-            return out
+            // The lane plan of the route holds the run-up to its exit through the ramp to the split ([LanePlan.rampAfter]).
+            val lanes = LaneChoices(
+                rampOf = { routeId, exitKey ->
+                    asked += routeId to exitKey
+                    if (planHolds && routeId == "r" && exitKey == "r/0/2/end") LanePlan.RampHold(260.0, rampMps) else null
+                },
+            )
+            return RampDrive(lanes).toTheSplit()
         }
         val held = run(planHolds = true)
         assertEquals("r/0/2/end", held[1].first?.key, "the exit's own row up to the gore")
@@ -946,10 +963,37 @@ class LaneChoicesTest {
         assertNull(held.last().first)
         assertNull(held.last().second)
         assertTrue(held.last().third.isNaN())
+        // The plan was asked for the run-up on now, with the route's id, before each move of a run-up: never outside one.
+        assertTrue(asked.isNotEmpty())
+        assertTrue(asked.all { it == ("r" to "r/0/2/end") }, "$asked")
         // Where the plan holds through no ramp, the run-up ends at the gore as before.
         val interim = run(planHolds = false)
         assertEquals("r/0/2/end", interim[1].first?.key)
         assertTrue(interim.drop(2).all { it.first == null && it.second == null && it.third.isNaN() })
+    }
+
+    @Test
+    fun `a ramp the plan cannot give costs its hold and one error line, never the drive`() {
+        val errors = ArrayList<RuntimeException>()
+        var asked = 0
+        val lanes = LaneChoices(
+            onError = { errors += it },
+            rampOf = { _, _ ->
+                asked++
+                throw IllegalStateException("no plan")
+            },
+        )
+        // A run-up of four updates: the plan is asked before each move of it after the first, and once past the gore.
+        val runUp = listOf(1_600.0 to 61.0, 1_700.0 to 66.0, 1_800.0 to 71.0, 1_990.0 to 80.0)
+        val drive = RampDrive(lanes).toTheSplit(runUp)
+        assertTrue(drive.take(4).all { it.first?.key == "r/0/2/end" }, "the run-up as before")
+        assertTrue(drive.drop(4).all { it.first == null && it.second == null && it.third.isNaN() }, "it ends at the gore")
+        assertEquals(4, asked)
+        assertEquals(1, errors.size, "one error line in the drive")
+        // A new drive reports it again.
+        lanes.clear()
+        RampDrive(lanes).toTheSplit(runUp)
+        assertEquals(2, errors.size)
     }
 
     @Test

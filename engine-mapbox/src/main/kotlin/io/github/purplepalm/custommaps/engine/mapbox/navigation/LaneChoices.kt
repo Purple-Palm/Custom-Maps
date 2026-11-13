@@ -50,6 +50,12 @@ import io.github.purplepalm.custommaps.nav.model.RunUpLanes
  */
 internal class LaneChoices(
     private val tuning: CameraTuning = CameraTuning.PHONE,
+    /**
+     * Where the lane plan of the route [routeId] holds the run-up to the exit [exitKey] on through the ramp after its gore
+     * ([LanePlan.rampAfter]); null where it holds through none, and while the route has no plan. Asked before each move of
+     * the latch, whoever moves it ([runUp]), so no caller can leave the ramp out.
+     */
+    private val rampOf: (routeId: String, exitKey: String) -> LanePlan.RampHold? = { _, _ -> null },
     private val onError: (RuntimeException) -> Unit = {},
 ) {
 
@@ -89,6 +95,9 @@ internal class LaneChoices(
 
     /** Whether the run-up's row could not be made on this step; reported once. */
     private var rowFailed = false
+
+    /** Whether the lane plan's ramp could not be looked up during this drive; reported once. */
+    private var rampFailed = false
 
     private var lastProgress: RouteProgress? = null
     private var lastAhead: List<LaneChoice> = emptyList()
@@ -297,12 +306,13 @@ internal class LaneChoices(
      * reads once: the engine's own observer and the map's cameras get the same answer. The row is
      * the same object for as long as it does not change.
      *
+     * Past the gore the latch holds on through the ramp where the lane plan of [progress]'s route says so,
+     * which it looks up itself ([rampOf]).
+     *
      * @param speedMps the car's speed, the one the card's lanes and the cameras get
      * @param nowSeconds the engine's clock, which a resume and a seek are timed on
-     * @param ramp where the lane plan of [progress]'s route holds the run-up on now ([runUpKey]) through
-     *   the ramp after its gore ([LanePlan.rampAfter]); null where it holds through none
      */
-    fun runUp(progress: RouteProgress, speedMps: Double?, nowSeconds: Double, ramp: LanePlan.RampHold? = null): RunUpLanes? = runUpOnce(progress) {
+    fun runUp(progress: RouteProgress, speedMps: Double?, nowSeconds: Double): RunUpLanes? = runUpOnce(progress) {
         val metersOnStep = progress.currentLegProgress?.currentStepProgress?.distanceTraveled?.toDouble() ?: 0.0
         moveRunUp(
             ahead(progress),
@@ -311,8 +321,7 @@ internal class LaneChoices(
             speedMps,
             nowSeconds,
             routeMeters = progress.distanceTraveled.toDouble(),
-            rampMeters = ramp?.meters ?: Double.NaN,
-            rampMps = ramp?.planningMps ?: Double.NaN,
+            routeId = progress.navigationRoute.id,
         )
     }
 
@@ -331,14 +340,15 @@ internal class LaneChoices(
     /**
      * One move of the latch, in plain values: [choices] as [ahead] gave them for a car
      * [metersOnStep] into the loaded step. The row it gives is also what [runUp] hands out until
-     * the next move. On the ramp the latch holds through after a gore, the row is that of the
-     * step's own maneuver, the split's, from the gore on.
+     * the next move. Before it moves, the latch is given where the lane plan of the route
+     * [routeId] holds the run-up on now through the ramp after its gore ([rampOf]): the next point
+     * the plan constrains there, its station after the gore, and the ramp's planning speed. On the
+     * ramp the latch holds through after a gore, the row is that of the step's own maneuver, the
+     * split's, from the gore on.
      *
      * @param onRoute false while the navigator has the car off the route
      * @param routeMeters how far the car is along the route; not a number where it is not known
-     * @param rampMeters the next point the lane plan constrains after the gore of the run-up on now,
-     *   its station after the gore, in metres; not a number where the plan has none
-     * @param rampMps the planning speed of that ramp
+     * @param routeId the navigator's id of the route; null where it is not known, and no ramp is held through
      */
     fun moveRunUp(
         choices: List<LaneChoice>,
@@ -347,10 +357,10 @@ internal class LaneChoices(
         speedMps: Double?,
         nowSeconds: Double,
         routeMeters: Double = Double.NaN,
-        rampMeters: Double = Double.NaN,
-        rampMps: Double = Double.NaN,
+        routeId: String? = null,
     ): RunUpLanes? {
-        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute, routeMeters, rampMeters, rampMps)
+        val ramp = rampFor(routeId)
+        val exit = latch.onProgress(nowSeconds, choices, speedMps, onRoute, routeMeters, ramp?.meters ?: Double.NaN, ramp?.planningMps ?: Double.NaN)
         val row = when {
             exit != null -> rowOf(exit.key, metersOnStep)
             latch.rampAhead >= 0.0 -> maneuverPoint?.let { rowOf(it.key, metersOnStep) }
@@ -359,6 +369,25 @@ internal class LaneChoices(
         // The object stays the same while the row does, so a screen skips it.
         if (row != runUpRow) runUpRow = row
         return runUpRow
+    }
+
+    /**
+     * Where the lane plan of the route [routeId] holds the run-up on now through the ramp after its gore, for the latch
+     * before it moves; null outside a run-up and where the plan holds through none. A lookup that fails costs the ramp's
+     * hold and one error line in a drive, never the drive.
+     */
+    private fun rampFor(routeId: String?): LanePlan.RampHold? {
+        val exitKey = latch.exitKey ?: return null
+        if (routeId == null) return null
+        return try {
+            rampOf(routeId, exitKey)
+        } catch (e: RuntimeException) {
+            if (!rampFailed) {
+                rampFailed = true
+                onError(e)
+            }
+            null
+        }
     }
 
     /** The exit of the run-up on now ([RunUpLatch.exitKey]); null outside a run-up. */
@@ -468,6 +497,7 @@ internal class LaneChoices(
     /** A drive ended or a new one begins: nothing is kept of the last step, nor of a run-up. */
     fun clear() {
         forgetStep()
+        rampFailed = false
         // Forgotten: the time counts only for a seek.
         latch.reset(nowSeconds = 0.0)
     }
