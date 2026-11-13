@@ -448,6 +448,8 @@ internal class CarNavigationMap(
         if (surface !== carSurface) return
         sceneJobs?.cancel()
         sceneJobs = null
+        // No camera shows a close view without a surface: a switch of the app's look waits for none.
+        _closeView.value = false
         val map = surface.mapSurface.mapboxMap
         val mapThere = map.isValid()
         leftCamera = null
