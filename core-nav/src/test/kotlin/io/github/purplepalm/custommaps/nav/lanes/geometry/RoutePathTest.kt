@@ -145,6 +145,9 @@ class RoutePathTest {
         for (station in listOf(fillet.from, gore, gore + 10.0)) {
             assertEquals(1.5 * w, axis.offset(station, path.offsetAt(station)).x, 1e-6, "at $station")
         }
+        // It reaches the ramp's start in its lane, not on the road's line: no diagonal.
+        assertEquals(gore, iw31.section.rampStarts.single().station, 1e-9)
+        assertTrue(path.diagonals.isEmpty())
         // At the split it goes on straight in its lane and onto the left branch's line.
         val turn = path.moves.last()
         assertEquals(RoutePath.Move.Kind.TURN, turn.kind)
@@ -286,6 +289,8 @@ class RoutePathTest {
             assertTrue(abs(beyond.centre) > w, "$name: the band's lane at ${beyond.centre}")
             // The path heads for the road's line, where it runs on the approach: it never leaves it before the turn at the gore.
             assertEquals(listOf(RoutePath.Move.Kind.TURN), path.moves.map { it.kind }, name)
+            // The drawing ends at that turn: no ramp's start for the path to follow the line's diagonal past.
+            assertTrue(path.diagonals.isEmpty(), name)
             val turn = path.moves.single()
             var station = path.drawings.single().from
             while (station < turn.from) {
@@ -324,6 +329,9 @@ class RoutePathTest {
             assertEquals(0.0, path.offsetAt(station), 1e-12, "at $station")
             station += 1.0
         }
+        // Past the gore that is the line's diagonal across the lanes, which go on straight: from the ramp's start to where the
+        // path leaves the line.
+        assertEquals(listOf(RoutePath.Diagonal(gore, enter.from)), path.diagonals)
         station = ramp.from
         while (station < ramp.to) {
             val offset = path.offsetAt(station)

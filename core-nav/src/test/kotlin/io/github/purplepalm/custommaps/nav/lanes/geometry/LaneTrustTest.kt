@@ -72,7 +72,7 @@ class LaneTrustTest {
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "bareGore", "bareRamp")
     }
 
     @Test
@@ -102,7 +102,7 @@ class LaneTrustTest {
         // careful reading of a few of these routes; never on the scenes or the approaches above.
         assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "bareGore", "bareRamp")
     }
 
     @Test
@@ -144,6 +144,7 @@ class LaneTrustTest {
         neverAwayFromTheExit(b)
         notTheEdgeLaneWhileOneMayBeBeyond(b)
         litAndTints(b)
+        bareWhereReachedOnTheLine(b)
     }
 
     // ------------------------------------------------------------------ 1: lane lines only where the data gives the count
@@ -713,6 +714,59 @@ class LaneTrustTest {
         return out
     }
 
+    // ------------------------------------------------------------------ 1, 2: a gore reached on the road's line is bare
+
+    /**
+     * Where the path reaches a gore on the road's line (no lane named on the approach, C1), the route geometry's diagonal runs
+     * across the old road's lanes: past the gore no line of ours is drawn on the stub or the lanes beyond, none on the route's
+     * carriageway along the path's diagonal past a ramp's start, nothing is lit there, the app lays no maneuver arrow of its
+     * own there, and the path crosses none of our lines from the gore to the stub's end.
+     */
+    private fun bareWhereReachedOnTheLine(b: Built) {
+        val lines = b.features.filter { it.kind == Kind.LANE_LINE || it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE }
+        val gores = b.section.rampStarts.map { it.station } + b.path.drawings.filter { it.turnsAtEnd }.map { it.to }
+        for (g in gores) {
+            if (b.plan.segmentAt(g - 1e-6)?.noLane == null || b.path.drawings.none { g > it.from && g <= it.to }) continue
+            assertTrue(b.drawing.gores().none { abs(it - g) < GoreArrow.SAME_PLACE_METERS }, "${b.name}: the app's own arrow at the gore at $g")
+            val stubEnd = g + LaneDrawing.STUB_METERS + RoutePath.ASPHALT_TAPER_METERS
+            for (f in lines) {
+                if (f.part != Part.ROUTE) assertFalse(f.from >= g - 1e-6 && f.from <= stubEnd, "${b.name}: a ${f.part} ${f.kind} at the gore at $g")
+            }
+            val diagonal = b.path.diagonals.firstOrNull { abs(it.from - g) < 1e-6 }
+            if (diagonal != null) {
+                for (f in lines.filter { it.part == Part.ROUTE }) {
+                    assertFalse(f.to > diagonal.from + 1e-6 && f.from < diagonal.to - 1e-6, "${b.name}: a ${f.kind} ${f.between ?: f.side} on the diagonal ${diagonal.from}..${diagonal.to}")
+                }
+                assertTrue(b.drawing.litStretches().none { it.endInclusive > diagonal.from + 1e-6 && it.start < diagonal.to - 1e-6 }, "${b.name}: lit on the diagonal")
+                saw("bareRamp")
+            }
+            // The path from the gore on, against every line of ours there.
+            val path = b.path.points.indices.filter { b.path.stations[it] >= g && b.path.stations[it] <= maxOf(stubEnd, diagonal?.to ?: g) }
+                .map { SceneLines.local(b.path.points[it]) }
+            for (f in lines) {
+                for (part in f.parts) {
+                    assertFalse(crosses(path, part.map { SceneLines.local(it) }), "${b.name}: the path crosses a ${f.part} ${f.kind} ${f.between ?: f.side} past the gore at $g")
+                }
+            }
+            saw("bareGore")
+        }
+    }
+
+    /** Whether the polylines [a] and [b] cross, each segment's ends at least [CROSS_CLEAR_METERS] off the other's line. */
+    private fun crosses(a: List<LocalPoint>, b: List<LocalPoint>): Boolean {
+        fun side(p: LocalPoint, q: LocalPoint, r: LocalPoint): Double {
+            val len = p.distanceTo(q)
+            return if (len < 1e-9) 0.0 else ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)) / len
+        }
+        fun opposite(u: Double, v: Double) = (u > CROSS_CLEAR_METERS && v < -CROSS_CLEAR_METERS) || (u < -CROSS_CLEAR_METERS && v > CROSS_CLEAR_METERS)
+        for (i in 0 until a.size - 1) {
+            for (j in 0 until b.size - 1) {
+                if (opposite(side(b[j], b[j + 1], a[i]), side(b[j], b[j + 1], a[i + 1])) && opposite(side(a[i], a[i + 1], b[j]), side(a[i], a[i + 1], b[j + 1]))) return true
+            }
+        }
+        return false
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /** Stations from [from] to [to] every [step] metres, and one just before [to]. */
@@ -777,6 +831,22 @@ class LaneTrustTest {
         "exit-side-gain" to LaneScenes.exitSideGain(),
         "leaves-beside-possible" to LaneScenes.leavesBesidePossible(),
         "bicycle-lane" to bicycleLane(),
+        "carpool-beyond-split" to carpoolBeyondSplit(200.0),
+        "carpool-beyond-split-far" to carpoolBeyondSplit(450.0),
+    )
+
+    /**
+     * [LaneScenes.carpoolBeyond]'s left exit beyond a car-pool lane, no lane named on its approach, with lane data on its ramp:
+     * two lanes the ramp splits into [split] metres past the gore, the route keeping left. Within its run-up's reach of the
+     * gore, the split's card window names the ramp's left lane from the gore on.
+     */
+    private fun carpoolBeyondSplit(split: Double): LaneRoute = LaneScenes.approach(
+        listOf(LaneScenes.at(1_500.0, LaneScenes.hov(), s(), s(), s())),
+        exit = listOf(LaneScenes.sl(), LaneScenes.hov(), s(false), s(false), s(false)),
+        maneuver = LaneScenes.OFF_LEFT,
+        rampPoints = listOf(split to LaneScenes.NodeAndLanes(listOf(LaneScenes.sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT)),
+        rampMeters = split + 400.0,
+        id = "carpool-beyond-split",
     )
 
     /** Three lanes and, on their left, a lane only for bicycles, 1,600 and 900 m before a right exit from the right lane. */
@@ -797,6 +867,9 @@ class LaneTrustTest {
 
         /** Kept-lane routes of [KEPT_SEED] whose plan flags a move back itself, on the careful reading of the card. */
         const val KEPT_FLAGGED_BACK = 2
+
+        /** Two lines cross where each one's ends lie at least this far off the other: not where they run on together. */
+        const val CROSS_CLEAR_METERS = 0.11
 
         /** A lane line is checked this often along its run. */
         const val LINE_SAMPLE_METERS = 2.0

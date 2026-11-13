@@ -208,8 +208,49 @@ class LaneDrawingTest {
         val zone = beyond.evidence.zones.single { it.cause == LaneEvidence.Zone.Cause.NO_LANE }
         assertTrue(beyond.of(Kind.DIAMOND).none { it.to > zone.from && it.from < zone.to })
         assertTrue(beyond.of(Kind.LANE_LINE).none { it.to > zone.from + 1e-6 && it.from < zone.to - 1e-6 })
-        // Edge lines are kept there.
-        assertTrue(beyond.of(Kind.EDGE_LINE).any { it.side == LaneEdge.LEFT && it.from < zone.from + 1.0 && it.to > zone.to - 1.0 })
+        // Edge lines are kept there, to where the turn's arc begins at the gore: from there the route's line turns off across
+        // the lanes, which go on straight, and the gore is bare asphalt.
+        val arc = beyond.of(Kind.ASPHALT, Part.STUB).single().from
+        assertTrue(arc < gore && arc > gore - 10.0, "the arc begins at $arc")
+        val left = beyond.of(Kind.EDGE_LINE).filter { it.side == LaneEdge.LEFT }
+        assertTrue(left.any { it.from < zone.from + 1.0 && abs(it.to - arc) < UM }, "${left.map { it.from to it.to }}, the arc at $arc")
+        assertTrue(beyond.features.none { !it.kind.polygon && it.to > arc + UM && it.from < gore + LaneDrawing.STUB_METERS }, "a line past $arc")
+    }
+
+    @Test
+    fun `where the path reaches a ramp's start on the road's line the gore is bare until it moves into the ramp's lane`() {
+        // A left exit beyond a car-pool lane, no lane named on its approach (C1), onto a ramp that splits 200 m past the gore:
+        // the split's card window names the ramp's left lane from the gore on, while the path keeps to the road's line until
+        // the ramp's lanes lie on the ramp.
+        val d = draw(carpoolBeyondSplit(200.0))
+        val diagonal = d.path.diagonals.single()
+        assertEquals(gore, diagonal.from, 1e-9)
+        val enter = d.path.moves.first()
+        assertEquals(RoutePath.Move.Kind.ENTER, enter.kind)
+        assertEquals(enter.from, diagonal.to, 1e-9)
+        assertTrue(d.plan.segments.any { it.named != null && it.inWindow && it.from < diagonal.to - 1.0 && it.to > gore })
+        // From where the turn's arc begins to where the path leaves the line: no line, symbol, lit lane or tint of ours, on the
+        // route's carriageway, on the stub or beyond; the asphalt is there.
+        val arc = d.of(Kind.ASPHALT, Part.STUB).minOf { it.from }
+        assertTrue(arc < gore)
+        for (f in d.features.filter { it.kind != Kind.ASPHALT }) {
+            if (f.part == Part.STUB) assertFalse(f.from < gore + LaneDrawing.STUB_METERS, "a ${f.kind} on the stub at ${f.from}")
+            if (f.part == Part.ROUTE) assertFalse(f.to > arc + 1e-6 && f.from < diagonal.to - 1e-6, "a ${f.kind} ${f.between ?: f.side} over ${f.from}..${f.to}")
+        }
+        assertNotNull(d.drawing.asphaltAt(gore + 10.0))
+        // The ramp's lines from there on, and its lane lit from where the path moves into it, a lane wide about the path.
+        assertTrue(d.of(Kind.EDGE_LINE).any { abs(it.from - diagonal.to) < 1e-6 })
+        assertEquals(diagonal.to, d.drawing.litStretches().single().start, 1e-6)
+        // The maneuver arrow at the gore is the SDK's, along the same line; the split's is the app's.
+        assertEquals(listOf(gore + 200.0), d.drawing.gores().map { Math.round(it * 1e3) / 1e3 })
+        // 450 m on, the ramp has no card window at the gore: nothing is lit, and the gore is bare all the same.
+        val far = draw(carpoolBeyondSplit(450.0))
+        val farDiagonal = far.path.diagonals.single()
+        assertTrue(far.drawing.litStretches().none { it.start < gore + 250.0 })
+        for (f in far.features.filter { !it.kind.polygon }) {
+            if (f.part == Part.STUB) assertFalse(f.from < gore + LaneDrawing.STUB_METERS, "a ${f.kind} on the stub at ${f.from}")
+            if (f.part == Part.ROUTE) assertFalse(f.to > gore + 1e-6 && f.from < farDiagonal.to - 1e-6, "a ${f.kind} ${f.between ?: f.side} over ${f.from}..${f.to}")
+        }
     }
 
     @Test
@@ -817,6 +858,19 @@ class LaneDrawingTest {
         listOf(At(1_200.0, listOf(s(), s(), s(), s()))),
         exit = listOf(s(false), s(false), s(false), sr()),
         id = "drop-at-exit",
+    )
+
+    /**
+     * [LaneScenes.carpoolBeyond]'s left exit beyond a car-pool lane, no lane named on its approach, with lane data on its ramp:
+     * two lanes the ramp splits into [split] metres past the gore, the route keeping left.
+     */
+    private fun carpoolBeyondSplit(split: Double): LaneRoute = LaneScenes.approach(
+        listOf(LaneScenes.at(1_500.0, LaneScenes.hov(), s(), s(), s())),
+        exit = listOf(LaneScenes.sl(), LaneScenes.hov(), s(false), s(false), s(false)),
+        maneuver = LaneScenes.OFF_LEFT,
+        rampPoints = listOf(split to LaneScenes.NodeAndLanes(listOf(LaneScenes.sl(true, true), sr(false)), maneuver = LaneScenes.FORK_LEFT)),
+        rampMeters = split + 400.0,
+        id = "carpool-beyond-split",
     )
 
     /** Four lanes at two points [apart] metres apart, the second 1,000 m before a right exit that takes the right lane. */

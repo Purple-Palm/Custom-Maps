@@ -79,6 +79,8 @@ class RoutePath private constructor(
     val moves: List<Move>,
     /** The stretches where the path's offset would fold, and it keeps to the road's line. */
     val folds: List<Fold>,
+    /** The stretches past a ramp's start where the path keeps to the road's line, having reached the turn on it. */
+    val diagonals: List<Diagonal>,
     private val windows: List<Window>,
 ) {
 
@@ -113,6 +115,14 @@ class RoutePath private constructor(
     data class Fold(val from: Double, val to: Double) {
         val meters: Double get() = to - from
     }
+
+    /**
+     * A stretch from a ramp's start at [from] to [to] that the path follows on the road's line, having reached the turn on
+     * it (no lane is named on the approach, C1): the route geometry's diagonal across the old road's lanes, which go on
+     * straight there, until the ramp's lanes lie on the new road or the path moves into one of them. The drawing draws no
+     * line and lights no lane there, so the diagonal crosses no line of the app's.
+     */
+    data class Diagonal(val from: Double, val to: Double)
 
     /** One drawing window: its axis and the path's offset at each of its samples. */
     internal class Window(val axis: RoadAxis, val stations: DoubleArray, val offsets: DoubleArray)
@@ -331,11 +341,12 @@ class RoutePath private constructor(
 
         private val moves = ArrayList<Move>()
         private val folds = ArrayList<Fold>()
+        private val diagonals = ArrayList<Diagonal>()
 
         fun build(): RoutePath {
             val routeId = route.routeId
             if (line.size < 2 || length <= 0.0) {
-                return RoutePath(routeId, version, line, lineStations, line, lineStations, emptyList(), emptyList(), emptyList(), emptyList())
+                return RoutePath(routeId, version, line, lineStations, line, lineStations, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
             }
             val regions = regions()
             val windows = ArrayList<Window>()
@@ -365,7 +376,7 @@ class RoutePath private constructor(
                 stations.add(lineStations[next])
                 next++
             }
-            return RoutePath(routeId, version, line, lineStations, points, stations.toDoubleArray(), drawings, moves, folds, windows)
+            return RoutePath(routeId, version, line, lineStations, points, stations.toDoubleArray(), drawings, moves, folds, diagonals, windows)
         }
 
         /** The stretches the app draws lanes on, merged, and the regions they need with their returns. */
@@ -413,10 +424,12 @@ class RoutePath private constructor(
             var windowSamples = samplesOf(axes, events)
             val movesBefore = moves.size
             val foldsBefore = folds.size
+            val diagonalsBefore = diagonals.size
             solve(region, axes, windowSamples)
             val ends = moves.subList(movesBefore, moves.size).map { it.to }
             while (moves.size > movesBefore) moves.removeAt(moves.size - 1)
             while (folds.size > foldsBefore) folds.removeAt(folds.size - 1)
+            while (diagonals.size > diagonalsBefore) diagonals.removeAt(diagonals.size - 1)
             windowSamples = samplesOf(axes, events + ends)
             val offsets = solve(region, axes, windowSamples)
             // Trim the end to where the path is back on the line, on a straight piece, and build the points.
@@ -567,6 +580,12 @@ class RoutePath private constructor(
             // the path follows now.
             val layers = arrayListOf(Layer(Piece.Middle, 0.0, 0.0, 0.0, 0, false))
             val settled = HashSet<Double>()
+            // The ramps' starts inside the region's drawings, the next one the path has not reached, and the one whose
+            // diagonal it follows on the road's line, with where that diagonal ends at the latest.
+            val starts = section.rampStarts.filter { rs -> region.drawings.any { rs.station > it.from && rs.station < it.to } }
+            var nextStart = 0
+            var diagonal: CrossSection.RampStart? = null
+            var diagonalTo = 0.0
             var last = region.from
             for ((k, axis) in axes.withIndex()) {
                 val s = samples[k]
@@ -644,9 +663,27 @@ class RoutePath private constructor(
                     for (layer in layers) layer.hold = layer.value
                     out[k][j] = pathOf(layers, station)
                     settle(layers, station)
+                    // A ramp's start the path reaches on the road's line, with no move under way: its diagonal runs from the
+                    // turn to where the path leaves the line, or the ramp's lanes lie on the new road.
+                    val onLine = layers.size == 1 && layers[0].piece == Piece.Middle
+                    diagonal?.let { rs ->
+                        if (!onLine || station >= diagonalTo) {
+                            diagonals.add(Diagonal(rs.station, if (onLine) diagonalTo else station))
+                            diagonal = null
+                        }
+                    }
+                    while (nextStart < starts.size && station >= starts[nextStart].station) {
+                        val rs = starts[nextStart++]
+                        val to = settledAt(rs, axis)
+                        if (diagonal == null && onLine && station < to) {
+                            diagonal = rs
+                            diagonalTo = to
+                        }
+                    }
                     last = station
                 }
             }
+            diagonal?.let { diagonals.add(Diagonal(it.station, min(diagonalTo, last))) }
             foldsOf(axes, samples, out)
             return out
         }
@@ -715,12 +752,19 @@ class RoutePath private constructor(
 
         /**
          * Whether [station] lies where a ramp's start keeps the lanes on their straight-on lines along [axis]: from the turn to
-         * where they have blended onto the new road, [CrossSection.RAMP_BLEND_METERS] past where its line lies farther out.
+         * where they have blended onto the new road ([settledAt]).
          */
         private fun onRampStart(station: Double, axis: RoadAxis): Boolean = section.rampStarts.any {
-            if (station < it.station || station >= it.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS) return@any false
-            val crossing = max(it.station, CrossSection.crossing(axis, it.begin(axis), it.station, it.shift))
-            station < crossing + CrossSection.RAMP_BLEND_METERS
+            station >= it.station && station < it.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS && station < settledAt(it, axis)
+        }
+
+        /**
+         * Where the lanes past the ramp's start [start] have blended onto the new road along [axis]: [CrossSection.RAMP_BLEND_METERS]
+         * past where its line lies farther out, and no farther than the ramp's start reaches.
+         */
+        private fun settledAt(start: CrossSection.RampStart, axis: RoadAxis): Double {
+            val crossing = max(start.station, CrossSection.crossing(axis, start.begin(axis), start.station, start.shift))
+            return min(start.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS, crossing + CrossSection.RAMP_BLEND_METERS)
         }
 
         /** What [piece] puts the path at, at [station], [hold] being where it was. */

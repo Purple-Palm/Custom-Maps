@@ -61,14 +61,19 @@ import kotlin.math.sin
  *   where the two carriageways' aprons part ([NOSE_GAP_METERS]); no chevrons. Where the route's data has no lanes past
  *   the turn, the lanes it takes go on beside the path, without lane lines between them, to where the path is back on
  *   the new road's line, and from there taper into the map's band ([Part.BEYOND]).
+ * - **A gore the path reaches on the road's line** (no lane named on the approach, C1): the route geometry's diagonal runs
+ *   across the old road's lanes there, as they go on straight, so from where the turn's arc begins, and past a ramp's start
+ *   to where the path leaves the line for the ramp's lanes ([RoutePath.Diagonal]), the carriageway is bare asphalt, as is
+ *   the stub and the lanes beyond: no line, symbol, lit lane or tint, and the maneuver arrow is the navigation SDK's.
  * - **The lit lane** ([Kind.LIT], 2.2 and 4.3), inside card windows only, wherever the plan names a lane: that lane's full
  *   width about the route's path, square to it, so it moves from lane to lane with the path's S and follows a lane
  *   entered along its taper; its two edges ([Kind.LIT_EDGE], [LIT_EDGE_METERS]). Never a designated lane, never on an
  *   approach where no lane is named.
- * - **The tints** ([Kind.TINT]): in the same windows, each other lane of the plan's band as it is drawn, where the data
- *   gives the lanes (not in a zone), never a designated lane or one only possible. Where its lane stops working (it leaves
- *   the band while it is still there, or in a zone that begins where the tint ends) its far edge from the lit lane slides
- *   onto its near edge over [WEDGE_METERS], or the whole tint where it is shorter: a wedge pointing at the lit lane.
+ * - **The tints** ([Kind.TINT]): in the same windows, where a lane is lit, each other lane of the plan's band as it is
+ *   drawn, where the data gives the lanes (not in a zone), never a designated lane or one only possible. Where its lane
+ *   stops working (it leaves the band while it is still there, or in a zone that begins where the tint ends) its far edge
+ *   from the lit lane slides onto its near edge over [WEDGE_METERS], or the whole tint where it is shorter: a wedge
+ *   pointing at the lit lane.
  * - Both are cut into pieces at multiples of [PIECE_METERS] from the route's start, with ids that stay the same in every
  *   window ([litId], [tintId]): the map hides a tint behind the car and gives a lit piece its traffic by feature state.
  *
@@ -207,7 +212,9 @@ class LaneDrawing private constructor(
 
     /**
      * The route stations of the drawing's gores, in route order: where the route leaves its road and lanes of that road go
-     * on beside it, drawn with a gore. The map lays the arrow of a maneuver there along the path ([GoreArrow]).
+     * on beside it, drawn with a gore, and the path reaches it in a lane. The map lays the arrow of a maneuver there along the
+     * path ([GoreArrow]). Not a gore the path reaches on the road's line, where no lane is named before it: the navigation
+     * SDK's own arrow follows that same line.
      */
     fun gores(): List<Double> = builder.goreStations()
 
@@ -448,7 +455,8 @@ class LaneDrawing private constructor(
      * on along the old road (the route takes none of them), as they lie at [begin]. [beyond]: where the drawing ends here
      * and the route's data has no lanes past the turn, the lanes it takes, [beyondLeft] to [beyondRight] metres from the
      * path where the turn's arc begins (the path lies [pathAtBegin] from the axis there), to [back], where the path is on
-     * the new road's line.
+     * the new road's line. [onLine]: the path reaches the gore on the road's line, no lane named before it (C1); past a
+     * ramp's start it follows the line's diagonal across the gore ([RoutePath.Diagonal]).
      */
     private class Gore(
         val node: Int,
@@ -466,6 +474,7 @@ class LaneDrawing private constructor(
         val pathAtBegin: Double,
         val back: Double,
         val rampRoad: RoadKind,
+        val onLine: Boolean,
     ) {
         private val place = axis.at(begin)
 
@@ -512,6 +521,18 @@ class LaneDrawing private constructor(
         /** For each drawing, its gore at its end where it ends at a turn. */
         private val ends = arrayOfNulls<Gore>(drawings.size)
 
+        /**
+         * Where the path follows the road's line past a ramp's start it reached on that line ([RoutePath.Diagonal]): it crosses
+         * the lanes there, so no line, symbol or lit lane of ours is drawn, as in the zone before the gore.
+         */
+        private val diagonals = path.diagonals
+
+        /**
+         * Where the route's carriageway is drawn bare, asphalt only: the diagonals, and at each gore the path reaches on the
+         * road's line the turn's arc, where the lanes go on straight while the line turns off; half open, in route order.
+         */
+        private val bare = ArrayList<Pair<Double, Double>>()
+
         /** Stations where something drawn changes: the samples take each of them and a station just before it. */
         private val events: DoubleArray
 
@@ -546,6 +567,9 @@ class LaneDrawing private constructor(
             }
             gores.sortBy { it.station }
             for (gore in gores) noseOf(gore)
+            for (diagonal in diagonals) bare.add(diagonal.from to diagonal.to)
+            for (gore in gores) if (gore.onLine && gore.begin < gore.station) bare.add(gore.begin to gore.station + SAME_STATION)
+            bare.sortBy { it.first }
             val e = ArrayList<Double>()
             for (s in stretches) {
                 e.add(s.from)
@@ -577,6 +601,10 @@ class LaneDrawing private constructor(
             for (seg in plan.segments) {
                 e.add(seg.from)
                 e.add(seg.to)
+            }
+            for ((a, b) in bare) {
+                e.add(a)
+                e.add(b)
             }
             events = e.filter { it.isFinite() }.sorted().distinct().toDoubleArray()
             spans = drawings.indices.map { i ->
@@ -645,7 +673,7 @@ class LaneDrawing private constructor(
 
         fun noses(): List<Pair<Double, Double>> = gores.filter { it.stub.isNotEmpty() }.map { it.stubNose to it.routeNose }
 
-        fun goreStations(): List<Double> = gores.filter { it.stub.isNotEmpty() }.map { it.station }
+        fun goreStations(): List<Double> = gores.filter { it.stub.isNotEmpty() && !it.onLine }.map { it.station }
 
         /** Each run of the lit lane, from its edges, which run where it does; runs that meet are one. */
         fun litStretches(): List<ClosedFloatingPointRange<Double>> {
@@ -729,20 +757,23 @@ class LaneDrawing private constructor(
             if (to <= from) return
             val runs = LinkedHashMap<Any, Run>()
             val kept = LinkedHashMap<Int, Strip>()
-            val starts = gores.filter { !it.beyond && it.station > d.from && it.station < d.to }
+            // The ramps' starts the path reaches in a lane: a gore reached on the road's line has no channelizing lines.
+            val starts = gores.filter { !it.beyond && !it.onLine && it.station > d.from && it.station < d.to }
             for (s in samples(from, to)) {
                 val axis = axisAt(s)
                 val places = placesAt(d, end, s, axis)
                 val stretch = if (s < d.to) stretchAt(s) else null
                 val road = roadAt(s)
                 val here = LinkedHashMap<Any, Pair<Style, Double>>()
-                for (k in 0 until places.size - 1) {
+                // Where the carriageway is bare the path crosses the lanes, which still go on straight along the old road: no line.
+                val bareHere = onBare(s)
+                if (!bareHere) for (k in 0 until places.size - 1) {
                     val l = places[k]
                     val r = places[k + 1]
                     val style = laneLine(l, r, stretch, road) ?: continue
                     here[Pair(l.lane, r.lane)] = style to l.right
                 }
-                if (places.isNotEmpty()) {
+                if (places.isNotEmpty() && !bareHere) {
                     // A ramp start's side toward the road it leaves: the gore's channelizing line up to the nose.
                     val gore = starts.firstOrNull { s >= it.station && s <= it.routeNose }
                     for (side in listOf(LaneEdge.LEFT, LaneEdge.RIGHT)) {
@@ -753,8 +784,8 @@ class LaneDrawing private constructor(
                     }
                 }
                 advance(runs, here, s, axis, out, Part.ROUTE)
-                // Lanes kept for other vehicles, darker, where the data holds and outside zones.
-                val known = stretch != null && (stretch.kind == LaneEvidence.Kind.KNOWN || stretch.kind == LaneEvidence.Kind.BRIDGED)
+                // Lanes kept for other vehicles, darker, where the data holds and outside zones and bare stretches.
+                val known = !bareHere && stretch != null && (stretch.kind == LaneEvidence.Kind.KNOWN || stretch.kind == LaneEvidence.Kind.BRIDGED)
                 val keptHere = HashSet<Int>()
                 if (known) {
                     for (p in places) {
@@ -909,6 +940,7 @@ class LaneDrawing private constructor(
                 pathAtBegin = pathAtBegin,
                 back = max(station, d.back),
                 rampRoad = nodes[node].road,
+                onLine = if (end) plan.segmentAt(station - SAME_STATION)?.noLane != null else diagonals.any { abs(it.from - station) < SAME_STATION },
             )
         }
 
@@ -1020,6 +1052,9 @@ class LaneDrawing private constructor(
             }
             polygon(strip, Kind.ASPHALT, Part.STUB, null)?.let { out.add(it) }
             // The lines: between its lanes as their kinds say, the far edge, and the gore's side, a channelizing line to the nose.
+            // Where the path reaches the gore on the road's line, it crosses the stub and the gore on the line's diagonal: as in
+            // the zone before it, the stub is asphalt only.
+            if (gore.onLine) return
             val runs = LinkedHashMap<Any, Run>()
             val nose = gore.stubNose
             val end = gore.station + STUB_METERS
@@ -1072,7 +1107,8 @@ class LaneDrawing private constructor(
                     strip.stations.add(s)
                     strip.left.add(gore.axis.toGeo(beside(gore, s, true, apron)))
                     strip.right.add(gore.axis.toGeo(beside(gore, s, false, -apron)))
-                    if (s < gore.station - SAME_STATION) continue
+                    // Reached on the road's line, the path crosses them on the line's diagonal: asphalt only.
+                    if (s < gore.station - SAME_STATION || gore.onLine) continue
                     val here = LinkedHashMap<Any, Pair<Style, Double>>()
                     val goreSide = if (gore.right) LaneEdge.LEFT else LaneEdge.RIGHT
                     for (side in listOf(LaneEdge.LEFT, LaneEdge.RIGHT)) {
@@ -1134,6 +1170,8 @@ class LaneDrawing private constructor(
          */
         private fun fullAt(d: RoutePath.Drawing, s: Double, lane: Int, length: Double): Middle? {
             if (s < d.from || s + length > d.to) return null
+            // Never where the carriageway is bare, where the path crosses the lanes.
+            if (bare.any { it.first < s + length && it.second > s }) return null
             val centres = DoubleArray(3)
             for ((i, x) in listOf(s, s + length / 2.0, s + length).withIndex()) {
                 val stretch = stretchAt(min(x, d.to - SAME_STATION)) ?: return null
@@ -1254,6 +1292,16 @@ class LaneDrawing private constructor(
             return if (topology.lanes[named].designated) null else named
         }
 
+        /** The lane lit at [s]: the one the plan names ([namedAt]), but not where the carriageway is bare ([bare]), where the path crosses the lanes. */
+        private fun litLane(s: Double): Int? {
+            val named = namedAt(s) ?: return null
+            if (onBare(s)) return null
+            return named
+        }
+
+        /** Whether [s] lies where the route's carriageway is drawn bare ([bare]). */
+        private fun onBare(s: Double): Boolean = bare.any { s >= it.first && s < it.second }
+
         /**
          * The lit lane between [a] and [b], inside card windows and drawings wherever the plan names a lane: [named]'s full
          * width about the route's path, square to the path's own way ([ribbonAt]), so it moves with the path from lane to lane
@@ -1265,7 +1313,7 @@ class LaneDrawing private constructor(
                 val edges = Strip()
                 var lane: Int? = null
                 for (s in litSamples(s0, s1)) {
-                    val named = namedAt(s)
+                    val named = litLane(s)
                     if (named == null) {
                         pieces.close()
                         litEdges(edges, lane, out)
@@ -1363,7 +1411,7 @@ class LaneDrawing private constructor(
          * in a zone); never a designated lane, never one that is only possible.
          */
         private fun tintedAt(i: Int, s: Double): Set<Int> {
-            val named = namedAt(s) ?: return emptySet()
+            val named = litLane(s) ?: return emptySet()
             val stretch = stretchAt(s) ?: return emptySet()
             if (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED) return emptySet()
             val band = plan.segmentAt(s)?.band ?: return emptySet()
