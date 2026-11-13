@@ -113,7 +113,8 @@ from about ..." or "Light from about ..."). Day or Night by hand applies at once
 Auto is picked again. During a drive a change by the sun waits until no turn is close, and never
 comes in a tunnel or while the camera is close in on a junction or a lane choice; a car that stands
 takes it at once. The phone's own dark theme and Power saving change nothing. Until the maneuver
-card gets a gear of its own, Settings opens only before Start and after arrival.
+card gets a gear of its own, Settings opens only before Start and after arrival. The car's map shows
+the same look ([On the car screen](#on-the-car-screen)).
 
 ### On the car screen
 
@@ -126,9 +127,9 @@ first, and every green build of `main` puts one on internal testing, which has n
 car's quality guidelines.
 
 1. Connect the phone to the car, or start the DHU, and open Custom Maps from Android Auto's
-   launcher. The car shows the app's map, light or dark as the car says, with the Mapbox logo and
-   the © Mapbox © OpenStreetMap attribution in its bottom left corner. Until the phone has a token
-   and precise location, the car says what is missing; set it up on the phone when parked.
+   launcher. The car shows the app's map, with the Mapbox logo and the © Mapbox © OpenStreetMap
+   attribution in its bottom left corner. Until the phone has a token and precise location, the car
+   says what is missing; set it up on the phone when parked.
 2. Choose the destination and press **Start on the phone**, when parked. **Start on phone** in the
    car says so. The routes the phone shows are on the car's map as well.
 3. During the drive the car shows what the phone's card shows: the next turn with its arrow,
@@ -136,6 +137,14 @@ car's quality guidelines.
    arrival time, the time and the distance left. **End** in the car ends the drive on both screens,
    as the phone's End does. At the destination the car says so until **Done** on the phone.
 4. The map's buttons in the car: pan, zoom in and out, and **Recenter** or the overview.
+
+Day and night on the car's map follow the phone: the same look as on the phone, Auto by the sun or
+Day or Night from **Settings → Day and night**, changing at the same moment on both screens. The
+car's own day and night setting colours only the turn arrow and the lanes on the car's card. The
+car's map keeps moving with the phone locked or with the app in the background on the phone. Before
+a drive, with the phone locked, the car icon on the car's map may be missing or stand still until a
+drive starts: the phone gives the app no position in the background until a later step asks for
+location all the time.
 
 The drive belongs to the phone: when the car disconnects, guidance goes on there, and when another
 navigation app starts in the car, Custom Maps keeps guiding on the phone; opening Custom Maps in the
@@ -187,14 +196,15 @@ The app records a detailed log on the phone, so a drive can be examined afterwar
 - off-route moments and reroutes, searches, trip sessions and errors;
 - crashes, written before the app closes, and at each start how earlier runs ended as Android
   recorded it (a crash, the system freeing memory, a swipe from Recents) and why this one started;
-- the phone's state: on screen or not, the screen, charging, Power saving, heat and memory, with a
-  sample once a minute during guidance that also has the bytes the app has received, and whether
-  Android's animations run;
+- the phone's state: on screen or not, the screen, whether its display is on, off or dozing and its
+  refresh rate, charging, Power saving, heat and memory, with a sample once a minute during guidance
+  that also has the bytes the app has received, and whether Android's animations run;
 - the app's network on every change, and the phone settings that can keep only this app offline;
 - what is saved for stretches without a connection: each download along the shown routes with its
   size and the bytes it loaded, and when the offline chip showed;
 - one camera line a second during guidance while the map is on screen: where the camera is and
-  where it is heading, how smoothly the camera and the car move, and the map's frame rate;
+  where it is heading, how smoothly the camera and the car move, and the map's frame rate (on the
+  car screen also where its frames came from);
 - one summary line at the end of each drive: how it ended, how long and how far, reroutes, the
   time without internet, and the data and battery it took;
 - when the app changed between its day and night looks, and why;
@@ -486,7 +496,9 @@ it up:
 4. Screen profiles for 800×480 and 1280×720 head units will be added under `dhu/` in a later step
    of stage 2 and used with `-c`, for example
    `./desktop-head-unit --usb -c /path/to/repo/dhu/800x480.ini`.
-5. Switch between day and night with the `day` and `night` console commands, or Shift+N and Ctrl+N.
+5. The `day` and `night` console commands, or Shift+N and Ctrl+N, switch the car between day and
+   night. In Custom Maps they change only the routing card's images: the car's map follows the
+   phone's look.
 
 In a real car, a navigation app built with the Car App Library has to come from Google Play: the
 build from the internal testing track does (see

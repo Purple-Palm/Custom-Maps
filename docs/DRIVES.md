@@ -10,23 +10,27 @@ Drive logs never go into this repository. These notes leave out addresses, stree
 coordinates and times of day. Places are described ("a big-box store"), positions are distances,
 and times are durations from Start or End.
 
-## Next: the car screen (stage 2, step 1)
+## Next: the car screen after step 1b (stage 2)
 
-What the first drives with the car screen check, on the Desktop Head Unit with the debug APK or in
+What the next drives with the car screen check, on the Desktop Head Unit with the debug APK or in
 the car with the build from Google Play's internal testing ([README](../README.md), On the car
 screen). Screenshots in the car come from a passenger or a parked car, never from the driver. The
-lines named are in the debug log; every car line has `screen` `car`.
+lines named are in the debug log; every car line has `screen` `car`. Checks 1 to 6 are step 1's,
+with day and night now following the phone; 7 to 13 are step 1b's
+([STAGE-2.md](STAGE-2.md), Step 1b).
 
 1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
    the map, or first with a message while the phone has no token or no precise location (the setup
    is done on the phone, parked). `car_session` lines: `ON_CREATE` with the Android Auto app's
    package and its Car API level, then `gate` `READY` and `map` `build`.
-2. **The map, with the logo and the attribution, day and night with the car.** The same map as the
+2. **The map, with the logo and the attribution, in the phone's look.** The same map as the
    phone's, the Mapbox logo and "© Mapbox © OpenStreetMap" in the bottom left corner, clear of the
-   buttons and the routing card, and not moving when they come and go. Day and night follow the car
-   (the DHU's `day` and `night`): light and colours at once, the map's whole look after a minute of
-   the same mode; a flip back within the minute changes nothing more (`car_look`). The routing
-   card's arrows and lanes in both looks: note how they read on the card the car draws behind them.
+   buttons and the routing card, and not moving when they come and go. The car's map shows the
+   phone's look: night on the phone, night in the car, whatever the car says; Day or Night in the
+   phone's Settings changes both screens at once (`car_look` with `cause` `APP` and the map's
+   `look`). The car's own day and night (the DHU's `day` and `night`) change only the routing
+   card's arrows and lanes (`car_look` with `cause` `HOST`): note how they read on the card the car
+   draws behind them.
 3. **A drive started on the phone, shown in the car.** Start on the phone with the car connected:
    the car shows the routing card at once, with the phone's turn, arrow, distance and road, the
    lanes to take (on a freeway's run-up the same row the phone's card shows, lit lanes and all), the
@@ -46,12 +50,65 @@ lines named are in the debug log; every car line has `screen` `car`.
    the DHU's `focus nav off`): `car_nav` `onStopNavigation` with the lifecycle and the connection,
    the phone goes on guiding, no error line. Open Custom Maps in the car again: the routing card is
    back, `navigationStarted` with `cause` `intent` or `start`. Note whether the other app stopped.
-7. **The phone locked during a drive.** The car's map keeps moving smoothly; the camera lines with
-   `screen` `car` keep `camFps` near the car's frame rate. Before a drive, with the phone locked,
-   note whether the car's map shows the position (`car_location` says whether positions arrive).
+7. **Frames with the phone app in front.** A simulated drive with the car connected and the phone
+   app in front, for a minute: the car's map moves smoothly. The car's camera lines: `render.drawnFps`
+   about 30, `maxFps` 15 on a phone at 120 Hz, `clock.vsyncTicks` about 60; the phone's: `capped`
+   true and `renderFps` about 60; a `car_surface` line with `event` `fps`.
+8. **The phone locked during a drive.** Lock the phone for a few minutes, then unlock it: the car's
+   map and its car icon keep moving. The `display_state` lines (OFF or DOZE while locked?), every
+   `frame_clock` line (`source` `timer`, then `vsync` again, with `quietMs` and `timerTicks`), and
+   the car's camera lines of those minutes: `clock.timerTicks`, `camWrites` about 60, `puckUpdates`,
+   a small `puckLagM`, and `render.frames` and `drawn`, which say whether Mapbox still drew.
+9. **The app left during a drive.** Home on the phone for a few minutes: the car's map keeps moving;
+   the same lines.
+10. **The zoom buttons with the phone locked:** the map zooms.
+11. **Heat.** Ten minutes with the car and the phone app in front: the `thermal` lines and the
+    `device` lines' `thermal`, against a drive with the phone alone, which stayed LIGHT for an hour.
+12. **The cable pulled and plugged in during a drive:** `car_surface` `detach` and `attach`; the
+    phone's camera line loses `capped` while the car is gone and has it again after.
+13. **Before a drive, with the phone locked:** note whether the car's map shows the position
+    (`car_location` says whether positions arrive). With location while in use it may not, until
+    "Allow all the time" comes in a later step.
 
 Anything wrong on the car screen writes `car_error` or `car_template` with the call and the class of
 what failed; the phone's guidance must go on through all of it. Share the debug log after the drive.
+
+## The first car test, a simulated drive (stage 2, step 1)
+
+The owner's Samsung phone with Android 15, build 0.1.34 from Google Play's internal testing, a
+simulated drive with the car screen.
+
+- **What the owner reported:** few frames a second on the car screen, freezing and lag; the car's
+  map in the day look while the phone showed the night; the car's map stopping when the app was left
+  on the phone.
+- **What the log shows:**
+  - With the phone app in the background, the car's camera stood still for 18 s: no camera update
+    and no write, while positions and progress kept coming once a second and the car's session stayed
+    resumed. The drawn car stood still too and fell behind by the drive's speed each second, to about
+    600 m. In two earlier stretches in the background the car's map kept moving, at 55 to 59 camera
+    updates a second. No screen on or off broadcast was logged during the car session, though the
+    phone was locked and unlocked.
+  - With the phone app in front both maps drew at the phone's 120 Hz: the phone's map at up to 118
+    frames a second, the car map's render thread called 70 to 96 times a second, while the car's
+    `renderFps` read 30 throughout. The phone went from thermal LIGHT to MODERATE 20 s into the drive
+    and to SEVERE within three minutes; a drive with the phone alone had stayed LIGHT for an hour.
+  - The phone's look was the night's (Auto, by the sun); the car's first `car_look` line said `dark`
+    false, and the car's map loaded in the day look and stayed in it.
+  - After the drive, with the phone app in the background, the car's map got no position within
+    about a minute (`car_location`, `fixes` 0).
+- **Causes:** the car's camera and its car icon moved on the main thread's display frames, through
+  Choreographer and Android's animators, and those stopped with the app in the background; Mapbox
+  paced the car's surface against a believed 60 Hz while drawing at the phone's 120, so its cap of 30
+  drew 60 frames a second; and the car's map followed its host's day and night by design (DECISIONS
+  36). The missing position is the known limit before Start (STAGE-2, Location before Start).
+- **Changes (stage 2, step 1b):** a frame clock of the car's own, with a timer while the display sends
+  the main thread no frames, for its Smooth follow camera, its zoom buttons and its car icon; a real
+  30 frames a second on the car and at most 60 on the phone while the car shows the map; the phone's
+  look on the car (DECISIONS 50); `display_state` and `frame_clock` lines and the camera line's new
+  frame fields ([STAGE-2.md](STAGE-2.md), Step 1b).
+- **Not changed:** the position before a drive with the app in the background, until "Allow all the
+  time".
+- **What the next drive tests:** checks 7 to 13 above.
 
 ## 2026-11-03, two drives
 

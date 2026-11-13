@@ -296,7 +296,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 36. A bright day map in the car and on the phone
 
-- **Chosen (owner):** a bright, colourful day map by day and the existing dark map at night. The route stays amber. In the car the map follows the car's day and night setting; on the phone, since the owner asked for the light version of the app too, the sun at the phone's position or the driver's choice (48).
+- **Chosen (owner):** a bright, colourful day map by day and the existing dark map at night. The route stays amber. In the car the map followed the car's day and night setting until stage 2's step 1b, and since then it follows the phone (50); on the phone, since the owner asked for the light version of the app too, the sun at the phone's position or the driver's choice (48).
 - **Alternative:** a pale or faded day theme, which the owner rejected.
 
 ## 37. The Then chip
@@ -554,7 +554,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 
 ## 48. Day and night
 
-- **Chosen (owner):** the app is light by day and keeps today's dark look at night, on the phone: a bright Mapbox map with white panels and dark ink by day, the dark map with graphite panels at night (15, 36). The car follows its host (STAGE-2, Day and night).
+- **Chosen (owner):** the app is light by day and keeps today's dark look at night, on the phone: a bright Mapbox map with white panels and dark ink by day, the dark map with graphite panels at night (15, 36). The car followed its host until stage 2's step 1b; since then the car's map shows this same look (50).
   - **Auto by the sun at the phone's position,** the default: the day look when the sun's centre is 2.5 degrees below the horizon or higher, the night look at 3.5 degrees below or lower, and in between the look on screen stays, so it cannot flicker. That is a little after sunset and a little before sunrise. After a switch by the sun nothing switches back for 10 minutes. The sun is worked out for the newest position the app has: the car's, then the location service's last known one, and without any the meridian of the phone's time zone, where the darkest of five latitudes on it decides, since a dark screen by day can be read and a light one at night blinds. A better position arriving later can switch once. **Day** and **Night** by hand in **Settings → Day and night**, at once, until Auto is picked again. The phone's own dark theme, battery saver and the car's setting are no inputs.
   - **During guidance a switch by the sun waits for a quiet moment:** never in a tunnel, never in a close view of a junction or a lane choice, never within 300 m or 20 s before a maneuver or 6 s after one. After 10 minutes of waiting, tunnels included, the window narrows to 150 m or 10 s before and 3 s after, never to nothing; a standing car takes the switch at once outside a tunnel and a close view ([CAMERA.md](CAMERA.md), Day and night during guidance). The driver's own choice goes at once.
   - **Coming back on screen,** the look goes at once; near a turn, in a tunnel or a close view only the basemap's theme, the one write that redraws its tiles, waits for the next quiet moment.
@@ -579,7 +579,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - A cold start may wait up to 300 ms for its first frame; by day a start shows the graphite splash, and a start from Recents a graphite frame, before the light screen.
   - Recents shows a graphite tile instead of the map.
   - With location off for a long time, a summer afternoon can stay dark until a position arrives; Day by hand helps.
-  - The phone and the car can show different looks for some minutes at dusk, each following its own.
+  - Until stage 2's step 1b the phone and the car could show different looks for some minutes at dusk, each following its own; since then they show one (50).
   - Until the maneuver card gets its own gear for Settings, the look can be chosen only before Start and after arrival.
   - None of it has run on a phone yet.
 
@@ -592,3 +592,14 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Alternative:** the whole stage at once, as designed. It would put Start in the car, with its open start problem on Android 14 and 15 (33), before the owner had seen the car screen at all, and the log upload and links before either.
 - **Why:** the owner can drive with the car screen now, through the internal testing build (42), while the parts that need the first device test wait for it.
 - **Cost:** in the car the next drive is chosen and started on the phone, when parked. The car's puck before Start may be missing or old with the phone locked and location only while in use, until "Allow all the time" comes.
+
+## 50. The car's map follows the phone's look
+
+- **Chosen (owner, 2026-11-13):** the car's map shows the app's one look, the phone's: Auto by the sun at the phone's position, or Day or Night by hand in Settings, switched at the same moments on both screens (48). On the first test with the car screen the phone showed the night look while the car's map, following its host, showed the day look; the owner wants the car to follow the phone. The host's own day and night (`CarContext.isDarkMode`) colour only the images the app draws for the host's routing card, the maneuver icon and the lanes image, which sit on the host's card; the debug log keeps the host's mode beside the map's look (`car_look`).
+  - **One look, one loop.** The look is decided once for the process (`LookController`). The phone's activity and the car's session each keep it deciding while they are started, one loop when both are, and the car's session starts it when the car's host started the process with no activity. Both maps take every change through the same path, so a basemap's theme that waits for a quiet moment of the drive waits on both, and the car's map is made once the first look is decided, with that look.
+  - **The car's view counts while the phone's is not on screen.** While the phone's activity is not started, the car camera's close view holds a switch as the phone camera's does; and Settings open over the phone's map lets nothing go early while the car's screen shows the map.
+- **Alternatives:**
+  - The host's mode, as step 1 had it (36), with its two stages against tunnel flips: what Google's car quality guidelines ask for, but the two screens differ at dusk, and whenever the car's own setting or light sensor says otherwise.
+  - The host's mode, with Day or Night chosen by hand on the phone as an override.
+  - The darker of the two.
+- **Cost:** Google's car quality guidelines expect a dark map when the car says night (MR-1): a car that says night while the sun at the phone's position is still above the band, as in a garage, shows the day map. Internal testing is not reviewed against the guidelines (42), so this choice is to be looked at again before any closed or open testing of the car screen. The car's map switches by the phone's rules, at a quiet moment of the drive, not with the car's lights.

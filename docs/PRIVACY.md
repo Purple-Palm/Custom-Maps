@@ -45,10 +45,11 @@ Last updated: 2026-11-13. It describes the app as it is today; see [Changes](#ch
   sensors, summarised as a few numbers each second; the sensors are read only then, and no reading
   itself is kept), a summary of each drive (how it ended, its length and time, and the data and
   battery it used), what was searched and found, settings changes, the phone's state (model, Android
-  version, battery, heat, memory, network), what the car screen did (when Android Auto connected and
-  disconnected, which Android Auto app it was by its package name and the version of the car
-  interface it speaks, the car screen's size and look, and what it showed, in states and numbers)
-  and crashes. It never holds a token. Days that are over are kept compressed on the phone, and when
+  version, battery, heat, memory, network, and whether its screen is on, off or dozing and its
+  refresh rate), what the car screen did (when Android Auto connected and disconnected, which
+  Android Auto app it was by its package name and the version of the car interface it speaks, the
+  car screen's size and look, and what it showed, in states and numbers) and crashes. It never
+  holds a token. Days that are over are kept compressed on the phone, and when
   the log grows past 50 MB the oldest days are deleted. It leaves the phone only when you tap **Share debug log** in Settings and pick an app,
   which gets it as plain text; from then on that app's own terms apply.
 - **Map and road data** that the Mapbox software saves so the map and guidance keep working without
@@ -117,10 +118,11 @@ the phone shows the app on the car's display. The app gives Android Auto, and no
 - whether the app is navigating, so that Android Auto knows which navigation app guides.
 
 Android Auto sends back your taps on the car's screen and whether the car wants the light or the
-dark map. The app answers only Android Auto, and the templates host of cars that run Android
-themselves, each checked by the signature of its app. What Android Auto and the car do with what
-they show is under Google's terms and the car's own. Nothing else leaves the phone for the car: no
-account, no copy of the logs, and nothing to the developer.
+dark map; the app uses that only for the images on the car's routing card, as the car's map shows
+the phone's day or night look. The app answers only Android Auto, and the templates host of cars
+that run Android themselves, each checked by the signature of its app. What Android Auto and the car
+do with what they show is under Google's terms and the car's own. Nothing else leaves the phone for
+the car: no account, no copy of the logs, and nothing to the developer.
 
 ## Permissions
 
@@ -178,7 +180,8 @@ The app is meant for adult drivers and is not directed to children.
 
 Before a version that changes what the app keeps or sends is published, for example background
 location or the trip history planned in the [roadmap](ROADMAP.md), this policy is updated. Its full
-history is in the repository. 2026-11-13: the car screen through Android Auto.
+history is in the repository. 2026-11-13: the car screen through Android Auto; whether the phone's
+screen is on, and its refresh rate, in the debug log.
 
 ## Contact
 

@@ -7,7 +7,10 @@ in [DECISIONS.md](DECISIONS.md); the car camera is in [CAMERA.md](CAMERA.md).
 
 The stage is built in steps (DECISIONS 49). Step 1, the car screen, is built: the app's map and the
 running drive in the car, with Start on the phone; [Step 1 (built)](#step-1-built) says what it has
-and where it settled or changed what follows. The rest is the design as decided so far.
+and where it settled or changed what follows. Step 1b, the fixes after the owner's first test with
+the car screen, is built too: the car map's own frame clock, its puck on that clock, real frame
+rates, and the phone's look on the car ([Step 1b (built)](#step-1b-built)). The rest is the design
+as decided so far.
 **Unverified** marks behaviour that no document or library source settles; it is checked on the
 Desktop Head Unit (DHU) or on the phone before code depends on it.
 
@@ -51,7 +54,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | Opening Custom Maps on the car screen again during a drive takes the car back from another navigation app | [onStopNavigation](#onstopnavigation) | 32 |
 | The real car runs the build from Google Play's internal testing, which came forward from stage 3 on 2026-11-11, instead of Internal App Sharing | [The real car](#the-real-car) | 42 |
 | Trip logs go to a private GitHub repository: a fine-grained token for that repository only, 366 days, a reminder two weeks before it expires, an upload after every trip and Upload now | [GitHub log upload](#github-log-upload) | 35 |
-| A bright, colourful day map in the car, the existing dark map at night, following the host; the phone follows its own choice | [Day and night](#day-and-night) | 36, 48 |
+| A bright, colourful day map in the car, the existing dark map at night; since step 1b the car's map shows the phone's look, Auto by the sun or the driver's choice | [Day and night](#day-and-night) | 36, 48, 50 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -82,7 +85,9 @@ screen", with no separate screens for now. Step 1 is that screen.
   surface ([The car map](#the-car-map)), with the Mapbox logo and the text attribution in the bottom
   left of the stable area, the zoom limits 6 to 20 with steps of 0.5, the host's day and night in
   two stages, at most 30 frames a second, and one `GuidancePuck`, owned by the engine, for both
-  maps. The Debug switches apply to both maps.
+  maps. The Debug switches apply to both maps. Step 1b replaced the two stages with the phone's
+  look and the cap with a real 30 frames a second, and gave the car's map a frame clock of its
+  own ([Step 1b](#step-1b-built)).
 - **The screens.** `CarHomeScreen` is the root, always a navigation template over the map. Before
   a drive and while the phone shows routes, its action is **Start on phone** (a phone icon), which
   opens a message: "Choose a destination and press Start on the phone when you are parked. The
@@ -167,9 +172,118 @@ the DHU profiles. The next steps of the app's own lanes and arrows draw into `Ma
 - The colour the host draws the routing card in by day, behind the images.
 - Whether the host sends a surface to a car map built again in one session (a token change).
 - Whether the car's puck gets positions before Start with the phone locked and location only while
-  in use (`car_location`); no request and no workaround in this step.
-- The frame rate the host streams, and the camera's `camFps` with the phone locked.
+  in use (`car_location`); no request and no workaround in this step. The first car test: none
+  with the phone app in the background after the drive ([Location before Start](#location-before-start)).
+- The frame rate the host streams, and the camera's `camFps` with the phone locked. The first car
+  test: with the phone app in the background the main thread got no display frames for 18 s and the
+  car's map stood still; step 1b's frame clock is the answer.
 - Whether the light preset's change animates.
+
+## Step 1b (built)
+
+The owner's first test with the car screen, a simulated drive on build 0.1.34, found the car's map
+slow, freezing now and then, and in the day look while the phone showed the night. Step 1b fixes
+both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sources.
+
+### What the first car test showed
+
+- **A freeze.** With the phone app in the background, the car's camera stopped for 18 s: no camera
+  update and no write, while positions and progress kept coming once a second and the car's session
+  stayed resumed. The drawn puck stood still and fell behind the car by its speed each second, to
+  about 600 m. The car map's render thread drew a few more frames and then none, with nothing left
+  to draw. In two earlier stretches in the background the car's map kept moving at 55 to 59 camera
+  updates a second. No screen on or off broadcast came during the whole car session, though the
+  phone was locked and unlocked, so whether its display was off is not known.
+- **Two maps at the phone's 120 Hz, and heat.** With the phone app in front the phone's map drew at
+  up to 118 frames a second and the car map's render thread was called 70 to 96 times a second,
+  while the car's `renderFps` read 30 throughout. The phone went from thermal LIGHT to MODERATE 20 s
+  into the drive and to SEVERE within three minutes; a drive with the phone alone had stayed LIGHT
+  for an hour. Frame times on the car: 8 to 18 ms at the median, 13 to 28 ms at the 95th percentile,
+  with spikes of 100 to 220 ms.
+- **The day map at night.** The phone showed the night look (Auto, by the sun); the car's host said
+  day, and the car's map loaded in the day look and stayed in it.
+- **No position after the drive.** With the drive over and the phone app in the background, the car
+  map's platform location brought no fix within about a minute (`car_location`): the known limit of
+  [Location before Start](#location-before-start), which "Allow all the time" lifts in a later step.
+
+### Why
+
+- **The main thread's frames.** Mapbox's map draws only on Choreographer callbacks of its render
+  thread. The puck's glide is a `ValueAnimator` for each position on the main thread, and the
+  Smooth follow camera asks the main thread's Choreographer for its next frame only while something
+  moves. When the main thread got no display frames, the glide stayed at its first value, the camera
+  saw nothing move and stopped asking, and the car's map stood still although its render thread
+  could still draw. Whether the display was off, dozing or held back for another reason, the fix does
+  not depend on it.
+- **A believed 60 Hz.** Mapbox paces the car's surface against the refresh rate of the display its
+  context names, car-app's own virtual display (60 Hz by Android's sources; Mapbox's fallback is 60
+  too), while the surface's render thread is called at the phone's display rate: `setMaximumFps(30)`
+  drew every second call, 60 frames a second at 120 Hz, and Mapbox's own estimate said 30 whatever
+  the real rate.
+
+### What it has
+
+- **The car's frame clock.** `CarFrameClock` (`:core-nav`, its decisions) and `CarFrames`
+  (`:engine-mapbox`, on Android): the main thread's display frames while they come; once none has
+  come for 50 ms while a frame is wanted, a main-thread timer every 16 ms, until two display frames
+  come less than 25 ms apart again; never two ticks within 15 ms, so at most about 60 a second, at
+  120 Hz too. It runs only from a surface's attach to its detach, and only while something wants a
+  frame ([CAMERA.md](CAMERA.md), The car map).
+- **On the clock:** the car's Smooth follow camera (through a `FrameSource`; the phone's is the
+  display's Choreographer, as before), the zoom buttons' ease, and the puck. `CarPuck`, the car's
+  location provider, takes each update of the platform's location or of the guidance puck with its
+  points and glide time, works out the puck's place and bearing for each tick (`PuckTrack`: one
+  speed through the points, the short way round, a new update from where the puck is) and hands
+  them to the location component with no duration, so nothing waits for an animator frame. The
+  phone's camera and puck are as before.
+- **Still on Mapbox's animators on the car,** so still standing still while the main thread gets no
+  display frames: the two Mapbox camera styles and the double tap's zoom. Smooth follow, the
+  default, is the car's style.
+- **Frame rates.** The car's surface draws a real 30 frames a second: its cap is `round(30 × 60 /
+  rate)`, within 1 and 60, for the rate the display's frames come at (measured from display
+  callbacks asked for one right after the other; 60 while the clock is on its timer), set again
+  when that rate moves by more than a tenth: 15 on a phone at 120 Hz. While a car surface shows the
+  map, the phone's map draws at most 60 frames a second, and as before once the surface goes.
+- **The phone's look on the car** (DECISIONS 50; [Day and night](#day-and-night)): the app's one
+  look, which `LookController` decides for the process. The car's session starts it if no screen
+  has (the car's host may have started the process), keeps it deciding while the session is
+  started, one loop with the phone's activity when both are, and hands it to the car's map as the
+  phone's screen hands it to its map, so a theme that waits for a quiet moment of the drive waits
+  on both. The car's map is made once the first look is decided, with that look. While the phone's
+  activity is not started, the car map's close view holds a switch, and Settings over the phone's
+  map lets nothing go early while the car's screen shows the map. The host's day and night colour
+  only the routing card's images.
+- **Lines**, numbers and states only:
+  - `display_state`, from the app at its start and at every change of the phone's own display:
+    `state` (ON, OFF, DOZE, DOZE_SUSPEND, VR, ON_SUSPEND or UNKNOWN) and `hz`, its refresh rate;
+  - `frame_clock`, with `screen` `car`, at each switch of the car's clock: `source` (`timer` or
+    `vsync`), `quietMs`, and on the way back `timerTicks`;
+  - the camera line's `render` adds `drawn` and `drawnFps`, the frames the render thread drew
+    beside the calls it got (`frames`, `fps`), on both maps; the car's camera line adds `clock`
+    (`vsyncTicks`, `timerTicks` of the second), `maxFps` and `measuredHz`, the phone's `capped` while
+    it draws at most 60;
+  - `car_surface` has `maxFps` (the cap set) and `measuredHz` (the rate it was worked out for), and
+    an `event` `fps` line at each new cap;
+  - `car_error` from the clock's callbacks has `failures`: the first at once, then at most one each
+    10 s with the count;
+  - `car_look` has the host's `dark` beside the map's `look` ([Day and night](#day-and-night)).
+- `renderFps` is Mapbox's own estimate, worked out against the rate it believes: on the car 60 Hz,
+  so it reads 15 at 120 Hz once the cap is right; `render.drawnFps` is the car's real rate. The
+  camera line's `p50Ms` and `p95Ms` take every call of the render thread, the paced ones with their
+  near-zero times too.
+
+### Still to come and unverified
+
+- Unverified: whether the car map's render thread still gets its own display callbacks while the
+  main thread gets none (the car's camera lines say it: `render.frames` and `drawn`; if not, the
+  camera and the puck move but nothing is drawn); what `display_state` says while the phone is
+  locked; the refresh rate Android reports for car-app's virtual display (the cap takes 60, also
+  Mapbox's own fallback); the heat over a drive with the car (the `thermal` lines).
+- A cost while the clock is on its timer: each puck update leaves a cleared entry in Android's
+  animation list until the next display frame, since an animator of no duration still registers
+  there. After an hour without display frames that is a few MB and a few percent of a core, gone
+  at the first frame. The app's own puck layer of a later step ends it.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1b.
 
 ## Modules and dependencies
 
@@ -426,8 +540,8 @@ Other notes:
   both.
 - `PhoneMap` keeps the view parts: the logo and attribution plugins, the fade-in and the tap that
   picks an alternative.
-- `CarNavigationMap` keeps the car parts: the surface, the widgets, the insets, the gestures, day and
-  night.
+- `CarNavigationMap` keeps the car parts: the surface, the widgets, the insets, the gestures, and
+  since step 1b the frame clock and the car's puck. Day and night are the app's one look.
 - The extraction comes first, with the phone unchanged and its tests passing.
 
 ## The car map
@@ -446,7 +560,8 @@ Other notes:
 
   Day and night come through the `setLook(LookOnMap)` it inherits ([Day and night](#day-and-night)).
 
-  `MapboxEngine.createCarMap(carContext: CarContext): CarMapRenderer` makes one per car Session. The
+  `MapboxEngine.createCarMap(carContext: CarContext): CarMapRenderer` makes one per car Session;
+  since step 1b `createCarMap(carContext, lookOnMap)`, with the app's look it starts in. The
   engine takes the host's areas itself, so `setViewportPadding` is not used on the car.
 - One `MapboxCarMap` (maps-androidauto 11.34.1) per Session, set up with
   `MapInitOptions(context = carContext, …)`: map options from
@@ -463,7 +578,7 @@ Other notes:
     scene loads it with the palette instead.
 - `CarNavigationMap` is the map's `MapboxCarMapObserver`. Every `onAttached` is a new map: on each
   `onSurfaceAvailable`, which also comes when the size or the DPI changes, the extension builds a new
-  `MapSurface` and the style loads again. So the car map keeps its state (dark mode, guidance state,
+  `MapSurface` and the style loads again. So the car map keeps its state (the look, guidance state,
   camera mode) and applies it on every attach. Built: of the camera mode, an overview the driver
   asked for during the drive under way ([Step 1](#where-it-settled-or-changed-the-design)). Expect a
   short reload when that happens. If it shows on a real head unit, replace `MapboxCarMap` with an
@@ -520,28 +635,31 @@ Other notes:
 
 ### Day and night
 
+- **The car's map shows the app's one look, the phone's** (DECISIONS 50, the owner's choice of
+  2026-11-13, built in step 1b): Auto by the sun at the phone's position, or Day or Night by hand in
+  Settings, with the phone's rules for when a switch goes during a drive (DECISIONS 48;
+  [CAMERA.md](CAMERA.md), Day and night during guidance). `LookController` decides it once for the
+  process, and both maps show it ([Step 1b](#step-1b-built)).
 - `CarContext.isDarkMode()` says whether the car wants a dark map; changes arrive in
-  `Session.onCarConfigurationChanged`. It is not read before the Session is CREATED. Apps draw light
-  by default and must switch to dark when the host says so (quality guideline MR-1).
+  `Session.onCarConfigurationChanged`. It is not read before the Session is CREATED. It colours only
+  the images the app draws for the host's routing card, the maneuver icon and the lanes image, which
+  sit on the host's card: the session builds the template again and each image is drawn once in the
+  host's look. The map is not touched, so a flip at a tunnel's entrance writes nothing on it.
+- **MR-1.** Google's car quality guidelines expect apps to draw light by default and to switch to
+  dark when the host says so. Internal testing is not reviewed against them
+  ([The real car](#the-real-car)); this choice is to be looked at again before any closed or open
+  testing of the car screen.
 - At night: the phone's night look (DECISIONS 15). By day: a bright, colourful map, Mapbox Standard
   with the `day` light preset and its default theme, not a faded one (DECISIONS 36). The route stays
   amber; `MapPalette.routeLine(look)` gives the route line its colours for each look.
-- The phone follows its own choice, by the sun or by hand (DECISIONS 48); the car follows the host.
-  The two can show different looks for some minutes at dusk, by design: each map takes its own look.
-  The phone's choice is not applied to the car for now; MR-1 would allow a choice of always light or
-  always dark later.
 - The car map takes its look through the `MapRenderer.setLook(LookOnMap)` it inherits, the entry the
-  phone map uses, and writes it as the phone map does.
-- **Two stages, against tunnel flips.** The host may follow a cabin light sensor, so its mode can flip
-  at a tunnel's entrance and back at its exit, often just before a junction. At each
-  `onCarConfigurationChanged` the car map writes the light preset and the colour settings at once:
-  dark at once, as MR-1 asks, with no tile rebuild. The basemap's theme follows once the host's mode
-  has held for 60 s (`CarLookTuning`, a first setting), and always in the STYLE callback; a flip back
-  within the 60 s cancels it. The theme swap redraws the basemap's tiles once, which is why it waits.
-  No maneuver hold in the car: the host's own screens flip at that moment.
-- `CarSession` passes the look to the car map and the image renderers, then invalidates the screen,
-  so the template gets images in the right look. Plates, signs and stop pictures drawn on the car's
-  surface follow the car's look, not the phone's.
+  phone map uses, from `LookController.showOn` as the phone's map does, and writes it as the phone
+  map does: a basemap's theme that waits for a quiet moment of the drive waits on both maps. The car
+  map is made with the app's look, and the map of every new surface draws its first tiles in it.
+- Built in step 1 and gone in step 1b: two stages against the host's tunnel flips, the light and
+  colours at once and the basemap's theme after 60 s of the same mode (`CarLookTuning`).
+- Plates, signs and stop pictures drawn on the car's surface follow the map's look, the app's; the
+  images on the host's card follow the host.
 - The switch needs no style reload:
   - every basemap key is set on its own with `setStyleImportConfigProperty`, as `MapLook.write`
     does today with the columns of `MapPalette.keys`. The day and the night columns name the same
@@ -549,35 +667,43 @@ Other notes:
   - the route line gets the look's colours through `MapboxRouteLineView.updateDynamicOptions` and is
     drawn again from `MapboxRouteLineApi.getRouteDrawData`;
   - the attribution bitmap is redrawn.
-- A **car_look** line for each change: `dark`, `cause` (`START` or `HOST`) and `themeHeldS` when the
-  theme waited.
+- A **car_look** line, with `dark`, the host's mode (left out when the car's context cannot say it),
+  `cause` (`START` when the car map is made, `APP` when it takes a new look of the app, `HOST` when
+  the host's mode changes), `look`, the look the map shows, and `themeDeferred` true while the
+  basemap keeps the theme of the look before. An `APP` line also has what the map wrote: `onMap`
+  (whether a surface's map was there; without one the next surface's map takes the look as it is
+  made), `keys`, `errors` and `failedKeys`, `writeMs` and `theme`.
 - `setStyleImportConfigProperties` is not used. It replaces the import's whole config and resets
   every key it does not name to the style default (Maps 11.34.1). One such key is the Navigation
   SDK's `showHdRoads=false`, which `MapHdRoadsVisibilityController` (ui-maps 3.34.1) sets only when a
   style loads. Since stage 1.1 it is also the app's own setting for lane details on the map
   ([DECISIONS.md](DECISIONS.md), 39). The car map will set it the way the phone map does:
   `MapRenderer` has `setLaneZoom` and `setLaneDetails` for both.
-- The first look is applied in the STYLE data-loaded callback, from `isDarkMode`, so there is no frame
-  in the wrong look.
-- Unverified: whether the light preset change animates. Check with the DHU's `day` and `night`
-  commands, and use `setStyleTransition` if the jump looks harsh.
+- The first look is applied in the STYLE data-loaded callback, from the app's look as the map is
+  made, so there is no frame in the wrong look.
+- Unverified: whether the light preset change animates. Check with Day and Night in the phone's
+  Settings, and use `setStyleTransition` if the jump looks harsh.
 - Mapbox's own car loader switches between two separate styles with a full reload; it is not used.
-- Day and night may also follow Android Auto's own "Day/night mode for maps" setting or the car's
-  light sensor, and some cars are reported to stay in day mode. Check the DHU commands and that
-  setting. The log records the mode the car reports. A tunnel flip of 30 s, the DHU's `night` and
-  then `day`, must write no theme.
+- The host's mode may follow Android Auto's own "Day/night mode for maps" setting or the car's light
+  sensor, and some cars are reported to stay in day mode. It now colours only the card's images; the
+  `car_look` lines record it beside the map's look.
 
 ### Performance
 
 - The phone map and the car map render separately, each with its own render thread and GL context.
-  With the phone app open and the car connected, the GPU work and the heat double. The phone map
+  With the phone app open and the car connected, the GPU work and the heat add up: on the first car
+  test both maps drew at the phone's 120 Hz and the phone was hot within minutes. The phone map
   stops drawing when its activity stops.
-- The car surface draws at up to 60 fps until the display rate is known, while the DHU streams
-  30 fps. Try `MapSurface.setMaximumFps(30)` when the head unit streams 30 fps, then measure.
-- With the phone locked, the camera's frame loop and the puck still run on the main thread. Mapbox's
-  `AnimationThreadController` (Maps 11.34.1) says a background animation thread can be essential for
-  Android Auto on some devices when the phone is locked. CAMERA.md has the check (`camFps` on the
-  DHU with the phone locked) and the fallbacks.
+- Built in step 1b ([Step 1b](#step-1b-built)): the car's surface draws a real 30 frames a second,
+  its cap scaled by the rate the display's frames come at, since Mapbox paces it against 60 Hz while
+  its render thread is called at the phone's rate; and while a car surface shows the map, the
+  phone's map draws at most 60 frames a second (`capped` in its camera line), a cap its own pacing
+  knows the phone's real rate for. The DHU streams 30 fps.
+- With the phone locked or the app in the background the main thread may get no display frames. The
+  car's camera, its zoom buttons' ease and its puck take their frames from the car's frame clock,
+  which falls back to a main-thread timer then. Mapbox's background animation thread
+  (`AnimationThreadController`, experimental, for every Mapbox animation in the app) is not used.
+  [CAMERA.md](CAMERA.md) has the clock and the checks.
 
 ## Screens and templates
 
@@ -906,6 +1032,8 @@ the bridge clears its callback there without the refusal; the posted callback th
   (DECISIONS 14). With the phone locked and only "while in use", the car's puck can be missing or
   stale, and a route asked for in the car can fail for lack of a position or start from an old one
   (`previewRoutes` falls back to the last known fix or the last puck position).
+- Seen in the first car test: after the drive ended, with the phone app in the background, the car
+  map's platform location brought no fix within about a minute (`car_location` with `fixes` 0).
 - "Allow all the time" covers this too. Free drive is not an option: it is billed (DECISIONS 13).
 
 ### The first device test
@@ -1526,9 +1654,9 @@ Debug build, phone on USB, Android Auto developer mode. Unlock the phone to star
 | AUTO_DRIVE | `adb shell dumpsys activity service io.github.purplepalm.custommaps.debug/io.github.purplepalm.custommaps.car.CustomMapsCarAppService AUTO_DRIVE`, then pick a place in the car and press Start. | A simulated drive. |
 | Process death | During guidance, **Settings → Debug → Crash now**. | No trip session until Resume; the resume offer on both screens; the exit reason in the log and in `adb shell dumpsys activity exit-info io.github.purplepalm.custommaps.debug`; the trip file closed as `interrupted`. |
 | Quota | Search, results, preview, tap every route several times, Start; also starting from a phone search. | No host error. |
-| Day and night | `day`, `night`, `daynight`; Android Auto's own day and night setting; `night`, then `day` 30 s later. | The bright day map and the night map, no reload, no frame in the wrong look; the light and colours at once, the theme after 60 s of the same mode; the 30 s flip writes no theme (`car_look` lines). |
+| Day and night | On the phone, Settings → Day and night: Day, Night, then Auto. Then `day`, `night`, `daynight` and Android Auto's own day and night setting. | The car's map changes with the phone's look, at once for a choice by hand, no reload, no frame in the wrong look (`car_look` `APP` lines). The DHU's commands change only the routing card's images (`car_look` `HOST` lines, the map's look unchanged). |
 | Go there now | During a simulated drive, share a link on the phone and confirm. | The new destination in the routing card; the trip session log shows whether it counted as a new trip. |
-| Phone locked | A simulated drive with the car map, the phone locked and its screen off. | `camFps` near the display rate (CAMERA.md). |
+| Phone locked | A simulated drive with the car map; lock the phone for a few minutes, then unlock it and leave the app with Home. | The car's map and puck keep moving: `frame_clock` lines when the clock goes to its timer and back, `display_state` lines, the car's camera lines with `clock.timerTicks`, `camWrites` near 60 and a small `puckLagM` ([CAMERA.md](CAMERA.md)). |
 
 ### Evidence
 
@@ -1573,7 +1701,8 @@ Debug build, phone on USB, Android Auto developer mode. Unlock the phone to star
 Stage 1.1 comes first ([ROADMAP.md](ROADMAP.md)). Then the work below. Step 1 built 4, 6, 7 without
 the reconnect fallback, and 10, with the parts of 2 and 3 they need (the stop reasons,
 `CarMapRenderer`, the routing card's data, the phone and car hosts, `MapScene`), and the README,
-DECISIONS and ROADMAP updates of 14.
+DECISIONS and ROADMAP updates of 14. Step 1b made 10 the phone's look and gave the car map's camera
+and puck of 6 a frame clock of their own ([Step 1b](#step-1b-built)).
 
 | # | Work | Checked by |
 |---|---|---|
@@ -1608,9 +1737,10 @@ DECISIONS and ROADMAP updates of 14.
 | `stableEdgeInsets` is null or stale | Own insets from the `Rect`s, the visible area as fallback |
 | The widget API is experimental and needs `ContextMode.SHARED` | Checked with every Maps upgrade |
 | `setStyleImportConfigProperties` resets other style settings | Keys set one by one |
-| A car that stays in day mode | Check Android Auto's own setting; the mode is logged |
-| Two maps double the GPU work and the heat | `setMaximumFps(30)`; measure; stage 5 measures heat too |
-| Main-thread frames may be throttled with the phone locked | The CAMERA.md check and fallbacks |
+| A car that stays in day mode | The car's map follows the phone's look since step 1b (DECISIONS 50); the host's mode, logged, colours only the card's images |
+| Google's quality guidelines expect a dark map when the car says night (MR-1), and the car's map follows the phone | Internal testing is not reviewed; looked at again before any closed or open testing (DECISIONS 50) |
+| Two maps double the GPU work and the heat | Step 1b: a real 30 frames a second on the car's surface, the phone's map at most 60 while the car shows the map; the `thermal` lines over ten minutes with the car (DRIVES.md); stage 5 measures heat too |
+| Main-thread frames may stop with the phone locked or the app in the background (18 s in the first car test) | Step 1b: the car's frame clock with its timer, Smooth follow, the zoom buttons and the puck on it; the two Mapbox camera styles and the double tap still wait for display frames |
 | The notification interceptor runs on a background thread and has one slot | The engine owns the slot; the extender's state is behind a lock |
 | Notifications refused: no rail and no heads-up in the car | Asked for during setup; both screens say so |
 | Before Start, with "while in use" and the phone locked, no puck and no route origin in the car | "Allow all the time"; case (b) |

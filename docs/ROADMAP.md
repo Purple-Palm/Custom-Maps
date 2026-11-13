@@ -8,7 +8,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
 | 1.1 | Guidance polish after the first drives, trip history and prediction (next build) | In progress |
-| 2 | Android Auto: car screen on the navigation template | Step 1 built: the map and the drive in the car, Start on the phone; the rest in steps |
+| 2 | Android Auto: car screen on the navigation template | Steps 1 and 1b built: the map and the drive in the car, Start on the phone; the rest in steps |
 | 3 | Signed release build and Google Play: internal testing, later production | Internal testing built (2026-11-11); production later |
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
@@ -88,18 +88,21 @@ zoom setting and the trip history with prediction.
   No End or Cancel within the first minute counts as a successful prediction. Each automatic start
   is a billed trip, so daily limits apply.
 
-## Stage 2: Android Auto (step 1 built)
+## Stage 2: Android Auto (steps 1 and 1b built)
 
 The full design is in [STAGE-2.md](STAGE-2.md). It is built in steps ([DECISIONS.md](DECISIONS.md),
 49). **Step 1 is built**: Android Auto lists the app; the car shows the app's map, the same scene as
-the phone, light or dark with the car, with the Mapbox logo and attribution; a drive started on the
-phone shows in the car with the phone card's turn, arrow, lanes, Then step and arrival estimate, and
-End; the arrival; a disconnect, another navigation app and the host's stop leave the drive running
-on the phone, and opening the app in the car again takes the car back. Start stays on the phone.
-What step 1 settled is in STAGE-2's [Step 1 (built)](STAGE-2.md#step-1-built).
+the phone, with the Mapbox logo and attribution; a drive started on the phone shows in the car with
+the phone card's turn, arrow, lanes, Then step and arrival estimate, and End; the arrival; a
+disconnect, another navigation app and the host's stop leave the drive running on the phone, and
+opening the app in the car again takes the car back. Start stays on the phone. What step 1 settled
+is in STAGE-2's [Step 1 (built)](STAGE-2.md#step-1-built). **Step 1b**, after the owner's first car
+test: the car's map keeps moving with the phone locked or the app in the background (a frame clock
+of its own, with its puck on it), draws a real 30 frames a second while the phone's map draws at
+most 60, and shows the phone's look ([Step 1b (built)](STAGE-2.md#step-1b-built)).
 
-Owner checks for step 1, on the DHU or in the car with the internal testing build:
-[DRIVES.md](DRIVES.md), The car screen.
+Owner checks for steps 1 and 1b, on the DHU or in the car with the internal testing build:
+[DRIVES.md](DRIVES.md), The car screen after step 1b.
 
 The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
 
@@ -108,7 +111,8 @@ The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
   Android Auto. Move to 1.8.0 when it is released.
 - [x] Map drawn on the car surface, camera padding from the visible and stable areas.
 - [x] Maneuver card with distance and lanes, ETA, action strips.
-- [x] A bright, colourful map by day and the dark map at night, following the car (`isDarkMode`).
+- [x] A bright, colourful map by day and the dark map at night: following the car (`isDarkMode`) in
+  step 1, the phone's look since step 1b (DECISIONS 50).
 - [ ] Turn-by-turn notifications on the car screen while another app is in front.
 - [x] Mapbox logo and © attribution visible on the car map.
 - [x] Start a route on the phone and continue in the car: with the car connected, the phone is the
