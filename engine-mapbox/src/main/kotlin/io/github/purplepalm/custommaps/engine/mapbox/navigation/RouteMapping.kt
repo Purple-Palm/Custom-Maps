@@ -98,9 +98,14 @@ internal fun laneInfoOf(lanes: List<LaneIndicator>): LaneInfo? {
 /**
  * Snapshot for the UI: the upcoming maneuver from the maneuver API, the maneuver after it from the
  * route's steps, and the trip totals. Whether the Then chip shows is decided by the engine, which
- * remembers the earlier updates. [speedMps] is the car's matched speed at this update.
+ * remembers the earlier updates. [speedMps] is the car's matched speed at this update; [upcoming] the
+ * leg's maneuvers after the next one, which the engine keeps for the whole step ([UpcomingManeuvers]).
  */
-internal fun RouteProgress.toSnapshot(next: MapboxManeuver, speedMps: Double?): RouteProgressSnapshot {
+internal fun RouteProgress.toSnapshot(
+    next: MapboxManeuver,
+    speedMps: Double?,
+    upcoming: List<FollowingManeuver> = emptyList(),
+): RouteProgressSnapshot {
     val type = ManeuverMapping.type(next.primary.type)
     val roundabout = ManeuverMapping.isRoundabout(type)
     val leg = currentLegProgress
@@ -124,6 +129,7 @@ internal fun RouteProgress.toSnapshot(next: MapboxManeuver, speedMps: Double?): 
         durationToNextManeuver = step?.durationRemaining.knownSeconds(),
         stepKey = "${navigationRoute.id}/${leg?.legIndex}/${step?.stepIndex}",
         following = followingManeuver(),
+        upcoming = upcoming,
         offRoute = currentState == RouteProgressState.OFF_ROUTE,
         inTunnel = inTunnel,
         speedMps = speedMps,
@@ -191,6 +197,42 @@ internal fun followingManeuver(steps: List<LegStep>, stepIndex: Int): FollowingM
         distanceAfterNext = following.distanceAfterNext + beyond.distanceAfterNext,
         durationAfterNext = if (bothTimesKnown) following.durationAfterNext + beyond.durationAfterNext else Duration.ZERO,
     )
+}
+
+/**
+ * Every maneuver of the leg after the next one, while the car is on step [stepIndex] of [steps], the
+ * leg's steps: in route order through the leg's arrival, each read from its step as
+ * [followingManeuver] reads the one after the next, with its distance and time from the next
+ * maneuver, summed along the way. So the first is the one [followingManeuver] gives.
+ *
+ * The way out of a roundabout is no item, as the roundabout's arrow shows it already: its length and
+ * time go to the maneuver after it. A step without a banner, or with a length that is not a number,
+ * ends the list there, since every distance after it would be wrong. A time that is not known makes
+ * the time of that maneuver and of every one after it unknown (zero), and the list goes on. Built
+ * once for each step of a drive ([UpcomingManeuvers]).
+ */
+internal fun upcomingManeuvers(steps: List<LegStep>, stepIndex: Int): List<FollowingManeuver> {
+    val upcoming = ArrayList<FollowingManeuver>()
+    // Summed in the order followingManeuver sums a roundabout's way out and the road after it, so
+    // the first item is equal to its answer, to the last bit.
+    var distance: Distance? = null
+    var duration: Duration? = null
+    var timeKnown = true
+    var index = stepIndex + 1
+    while (true) {
+        val step = maneuverAtEndOf(steps, index) ?: break
+        distance = distance?.plus(step.distanceAfterNext) ?: step.distanceAfterNext
+        if (step.durationAfterNext.isPositive()) {
+            duration = duration?.plus(step.durationAfterNext) ?: step.durationAfterNext
+        } else {
+            timeKnown = false
+        }
+        if (!ManeuverMapping.isRoundaboutExit(step.maneuver.type)) {
+            upcoming += FollowingManeuver(step.maneuver, distance, duration?.takeIf { timeKnown } ?: Duration.ZERO)
+        }
+        index += 1
+    }
+    return upcoming
 }
 
 /** The maneuver step [index] ends with, as the step's first banner describes it, and the step's length and time. */

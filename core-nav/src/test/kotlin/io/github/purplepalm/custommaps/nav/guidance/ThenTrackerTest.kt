@@ -78,6 +78,18 @@ class ThenTrackerTest {
     }
 
     @Test
+    fun `the leg's maneuvers after the next one pass through as the same list`() {
+        val following = requireNotNull(at(390.0).following)
+        val arrival = FollowingManeuver(Maneuver(ManeuverType.ARRIVE, TurnModifier.RIGHT, "Pine Street"), Distance.meters(450.0), 37.seconds)
+        val ahead = listOf(following, arrival)
+        val tracker = ThenTracker()
+        // As the engine hands it the same list for each update of a step.
+        assertSame(ahead, tracker.decide(at(420.0).copy(upcoming = ahead)).upcoming)
+        assertSame(ahead, tracker.decide(at(390.0).copy(upcoming = ahead)).upcoming)
+        assertEquals(emptyList<FollowingManeuver>(), tracker.decide(at(380.0)).upcoming)
+    }
+
+    @Test
     fun `a reset forgets the drive before`() {
         val tracker = ThenTracker()
         assertTrue(tracker.decide(at(390.0)).showThen)

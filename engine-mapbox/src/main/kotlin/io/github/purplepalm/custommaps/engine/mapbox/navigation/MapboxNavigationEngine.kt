@@ -153,6 +153,9 @@ internal class MapboxNavigationEngine(
     /** What the Then chip remembers from one progress update to the next; every drive starts it over. */
     private val thenTracker = ThenTracker()
 
+    /** The leg's maneuvers after the next one, built once a step for the snapshots of that step; every drive starts it over. */
+    private val upcoming = UpcomingManeuvers()
+
     /** Which route the maneuver card on screen is of, so it never keeps one of the route before. */
     private val cardContinuity = CardContinuity()
 
@@ -1003,6 +1006,7 @@ internal class MapboxNavigationEngine(
                 MapboxNavigationApp.attach(guidanceLifecycle)
                 // A new drive: the Then chip and the lane choices know nothing of the last one.
                 thenTracker.reset()
+                upcoming.reset()
                 laneChoices.clear()
                 laneRowLog.reset()
                 divergeWatch.reset()
@@ -1113,6 +1117,7 @@ internal class MapboxNavigationEngine(
                 _routeProgress.value = null
                 cardContinuity.reset()
                 thenTracker.reset()
+                upcoming.reset()
                 laneChoices.clear()
                 laneRowLog.reset()
                 divergeWatch.reset()
@@ -1480,14 +1485,15 @@ internal class MapboxNavigationEngine(
     private fun rawSideMeters(): Double? = lastRawOffset?.get("sideM") as? Double
 
     /**
-     * The UI's view of [progress] with its [next] maneuver, the Then rule applied, and the run-up's
-     * lane row or, outside a run-up, the lanes of a lane choice ahead.
+     * The UI's view of [progress] with its [next] maneuver and the leg's maneuvers after it, the Then
+     * rule applied, and the run-up's lane row or, outside a run-up, the lanes of a lane choice ahead.
      */
     private fun snapshotOf(progress: RouteProgress, next: MapboxManeuver): RouteProgressSnapshot {
         // The speed the camera gets with this update, so the card's lanes and the close view come
         // together. The snapshot carries the same one.
         val speed = lastMatch?.enhancedLocation?.speed
-        val decided = thenTracker.decide(progress.toSnapshot(next, speed))
+        // The leg's maneuvers after the next one: the same list for every update of the step.
+        val decided = thenTracker.decide(progress.toSnapshot(next, speed, upcoming.of(progress)))
         // The latch moved for this update already; this is its row.
         val runUp = laneChoices.runUp(progress, speed, nowSeconds())
         // None on a run-up: its row stands in for a lane choice's, and nothing of one is kept.

@@ -18,6 +18,16 @@ data class RouteProgressSnapshot(
     val stepKey: String = "",
     /** The maneuver after the next one in this leg; null when the next one is the arrival. */
     val following: FollowingManeuver? = null,
+    /**
+     * Every maneuver of this leg after the next one, in route order through the leg's arrival, each
+     * with its distance and time from the next maneuver as [following] has them, summed along the way:
+     * the first is the one [following] names. The way out of a roundabout is none of them, since the
+     * roundabout's arrow shows it; a step the route gives no banner or no length for ends the list,
+     * as every distance after it would be wrong. Empty when the next maneuver is the arrival and on a
+     * [pending] card. The same list object for every update of one step, so a screen builds its rows
+     * once a step.
+     */
+    val upcoming: List<FollowingManeuver> = emptyList(),
     /** The navigator has left the route; until a new route arrives, the maneuvers may be wrong. */
     val offRoute: Boolean = false,
     /** Whether the Then chip shows [following], as decided by the Then rule. */
