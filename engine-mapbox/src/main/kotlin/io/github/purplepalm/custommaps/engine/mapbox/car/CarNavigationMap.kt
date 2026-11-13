@@ -95,9 +95,12 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  * - **Day and night** follow the host ([CarContext.isDarkMode]) in two stages ([CarLook]): a
  *   [setLook] with the host's mode writes the light and colours at once and the basemap's theme once
  *   the mode has held for [CarLookTuning.themeHoldMillis]. A "car_look" line says each change.
+ * - **Frames.** Each surface has its frame clock ([CarFrames]), started as the surface comes and
+ *   stopped as it goes: the display's frames while the main thread gets them, a timer's while it
+ *   gets none, a "frame_clock" line at each switch and the ticks of each second in the camera line.
  * - **Lines.** Every line of the car map carries `screen=car`: the scene's camera, camera state and
- *   map_layers lines among them, beside "car_surface", "car_look" and "car_location". An exception
- *   caught here writes a "car_error" line with the call, the class and the message.
+ *   map_layers lines among them, beside "car_surface", "car_look", "car_location" and "frame_clock".
+ *   An exception caught here writes a "car_error" line with the call, the class and the message.
  *
  * The surface draws at most [MAX_FPS] frames a second. Main thread only.
  */
@@ -114,6 +117,9 @@ internal class CarNavigationMap(
 
     private val scope = MainScope()
     private val carMap = MapboxCarMap()
+
+    /** The frames of the map on the attached surface: from the display, or from a timer while the main thread gets none. */
+    private val frames = CarFrames(log)
 
     // What the car map is asked for, kept from one surface to the next.
     private var cameraStyle = CameraStyle.DEFAULT
@@ -185,6 +191,9 @@ internal class CarNavigationMap(
         override fun onLook(look: Look) {
             drawAttribution(look)
         }
+
+        // The frame clock's ticks of the second: from the display, and from the timer while the main thread got no frames.
+        override fun cameraFields(): Map<String, Any?> = mapOf("clock" to frames.takeTicks())
     }
 
     private val observer = object : MapboxCarMapObserver {
@@ -335,6 +344,7 @@ internal class CarNavigationMap(
             carMap.setGestureHandler(null)
             carContext.getCarService(AppManager::class.java).setSurfaceCallback(null)
         }
+        frames.stop()
         scope.cancel()
         log.log(SURFACE_LINE, mapOf("event" to EVENT_RELEASE, "attaches" to attaches))
     }
@@ -356,6 +366,8 @@ internal class CarNavigationMap(
         // either the map waits for the car's first position.
         (leftCamera ?: lastPositionCamera())?.let(mapSurface.mapboxMap::setCamera)
         leftCamera = null
+        // The surface's frames, before anything on it asks for one.
+        frames.start()
         val created = MapScene(
             context = carContext,
             engine = engine,
@@ -416,6 +428,8 @@ internal class CarNavigationMap(
         }
         // Whatever goes wrong here, the next surface starts from nothing of this one.
         guard("releaseScene") { scene?.release() }
+        // No frame for a surface that has gone; the next one starts the clock again.
+        frames.stop()
         scene = null
         carSurface = null
         logo = null

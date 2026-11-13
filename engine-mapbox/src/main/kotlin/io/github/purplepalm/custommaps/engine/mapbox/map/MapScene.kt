@@ -170,6 +170,12 @@ internal class MapScene(
 
         /** [look] is the map's look from now on, as asked with [setLook]; called within that call, also for the same look again. */
         fun onLook(look: Look)
+
+        /**
+         * What the screen adds to the camera line, once for each line: the car its frame clock's
+         * ticks. Also called once as the camera line starts, to drop what was counted before it.
+         */
+        fun cameraFields(): Map<String, Any?> = emptyMap()
     }
 
     private val scope = MainScope()
@@ -1303,8 +1309,9 @@ internal class MapScene(
         fixes = 0
         lastFixAt = 0L
         lastKeyPoints = 0
-        // Drops what the camera counted before this guidance.
+        // Drops what the camera, and the screen, counted before this guidance.
         camera.diagnostics()
+        host.cameraFields()
         // The first line says what the padding is.
         paddingChanges = 1
         startFrameStats()
@@ -1348,7 +1355,9 @@ internal class MapScene(
      * calls draw nothing. "renderFps" is the map library's own estimate of its rate, worked out
      * against the display rate it believes, which on the car's surface is not the phone's.
      * "animatorsEnabled" is false when Android's animations are switched off.
-     * "style" is the camera style in use, so drives in different styles can be compared.
+     * "style" is the camera style in use, so drives in different styles can be compared. The screen
+     * adds its own at the end ([Host.cameraFields]): the car its frame clock's ticks of the second,
+     * "clock" with "vsyncTicks" and "timerTicks".
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
@@ -1429,7 +1438,7 @@ internal class MapScene(
             "renderFps" to fps?.let { Motion.round(it, 1) },
             "animatorsEnabled" to ValueAnimator.areAnimatorsEnabled(),
             "hz" to host.refreshRate?.let { Math.round(it) },
-        )
+        ) + host.cameraFields()
         fixes = 0
         paddingChanges = 0
         return sample.filterValues { it != null }
