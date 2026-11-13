@@ -44,8 +44,8 @@ import kotlin.math.min
  *   path keeps to the road's line until those lanes lie on the new road ([CrossSection.RampStart]) and moves into its
  *   lane from there.
  * - **Turns.** Where the route turns onto another road with lanes, the path goes on with its lane straight along the
- *   old road until the new road's line lies farther out, then blends onto it ([CrossSection.RampStart]): the route
- *   geometry's diagonal at a gore is never drawn. Only the lanes that go on are drawn past the turn, so a move toward a
+ *   old road and settles with the lanes onto the new road ([CrossSection.RampStart]), as it settles where the drawing
+ *   ends at a turn: the route geometry's diagonal at a gore is never drawn. Only the lanes that go on are drawn past the turn, so a move toward a
  *   lane the plan names late ends there, in its lane ([lengthBeforeRampStart]). Where the drawing ends at such a turn,
  *   the path goes on straight from where it is the same way and, from halfway to where that line would cross the new
  *   road's line, settles onto it, never past it and with no kink where it meets it ([CrossSection.turnOff]); the turn is
@@ -471,9 +471,16 @@ class RoutePath private constructor(
                 // itself, reached twice, kept as it is.
                 val (local, at) = Loops.cut(st.indices.map { axis.offset(st[it], of[it]) }, st.asList(), { it }, { it })
                 val twice = { i: Int -> (i > 0 && local[i] == local[i - 1]) || (i + 1 < local.size && local[i] == local[i + 1]) }
+                // Where a turn's arc begins (a ramp's start, a drawing's turning end) the path's stations stop running with its
+                // length: a point there keeps the straight-on chords on either side read by their stations where they lie.
+                val arcs = (section.rampStarts.map { it.station }.filter { rs -> region.drawings.any { rs > it.from && rs < it.to } } +
+                    region.drawings.filter { it.turnsAtEnd }.map { it.to })
+                    .filter { it >= st.first() - CrossSection.RAMP_START_MAX_METERS && it <= st.last() + CrossSection.RAMP_START_MAX_METERS }
+                    .map { CrossSection.beginOf(axis, it) }
+                val arcStart = { i: Int -> arcs.any { abs(at[i] - it) < SAME_STATION } }
                 // Every sample of the last metres before the path is back on the route's own line: one chord over them would
                 // turn at the join.
-                for (i in simplify(local) { at[it] >= back - BACK_SAMPLED_METERS || twice(it) }) out.add(axis.toGeo(local[i]) to at[i])
+                for (i in simplify(local) { at[it] >= back - BACK_SAMPLED_METERS || twice(it) || arcStart(it) }) out.add(axis.toGeo(local[i]) to at[i])
             }
             // Each drawing is back on the road's line where its return or its turn ends (at its end where nothing was left);
             // the region's last where the path is the route's own line again.
@@ -789,13 +796,16 @@ class RoutePath private constructor(
         }
 
         /**
-         * Where the lanes past the ramp's start [start] have blended onto the new road along [axis]: [CrossSection.RAMP_BLEND_METERS]
-         * past where its line lies farther out, and no farther than the ramp's start reaches.
+         * Where the lanes past the ramp's start [start] have settled onto the new road along [axis] ([CrossSection.RampStart.settled]),
+         * no farther than the ramp's start reaches; and no earlier than [CrossSection.RAMP_BLEND_METERS] past the turn, so a path
+         * on the road's line there keeps to it across the gore even where the lanes need not move (their middle on its place
+         * already), and the gore stays bare as where it crosses them.
          */
-        private fun settledAt(start: CrossSection.RampStart, axis: RoadAxis): Double {
-            val crossing = max(start.station, CrossSection.crossing(axis, start.begin(axis), start.station, start.shift))
-            return min(start.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS, crossing + CrossSection.RAMP_BLEND_METERS)
-        }
+        private fun settledAt(start: CrossSection.RampStart, axis: RoadAxis): Double =
+            min(
+                start.station + CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS,
+                max(start.station + CrossSection.RAMP_BLEND_METERS, start.settled(axis)),
+            )
 
         /** What [piece] puts the path at, at [station], [hold] being where it was. */
         private fun valueOf(piece: Piece, station: Double, axis: RoadAxis, hold: Double): Double = when (piece) {

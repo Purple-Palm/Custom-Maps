@@ -231,7 +231,7 @@ class CrossSectionTest {
     }
 
     @Test
-    fun `at a ramp's start the lanes go on straight until the ramp's line lies farther out and blend onto it over 25 m`() {
+    fun `at a ramp's start the lanes go on straight and settle onto the ramp as a path does, never past their places`() {
         val route = LaneScenes.iw31()
         val section = section(route)
         val start = section.rampStarts.single()
@@ -245,26 +245,45 @@ class CrossSectionTest {
         val fillet = axis.fillets.first { Math.abs(it.station - gore) < 1e-6 }
         val crossing = CrossSection.crossing(axis, fillet.from, gore, start.shift)
         assertTrue(crossing > gore)
-        // Until the crossing, g4's middle goes straight on, 1.5 lanes east of the freeway's line, which runs due north.
-        for (station in listOf(fillet.from, gore - 1.0, gore, gore + 10.0, crossing - 0.5)) {
-            val centre = section.place(3, station, axis)!!.centre
-            val world = axis.offset(station, centre)
-            assertEquals(1.5 * w, world.x, 1e-6, "at $station")
-        }
         // There the ramp's line lies on the old carriageway's middle (the two lanes' line, 2 lanes east).
         assertEquals(2.0 * w, axis.at(crossing).point.x, 0.05)
-        // Then the blend onto the ramp's own carriageway, centred on its line: over 25 m, and nothing after.
-        assertTrue(Math.abs(section.place(3, crossing + 24.9, axis)!!.centre - 0.5 * w) > 1e-6)
-        assertEquals(0.5 * w, section.place(3, crossing + 25.0, axis)!!.centre, 1e-12)
-        assertEquals(0.5 * w, section.place(3, crossing + 100.0, axis)!!.centre, 1e-12)
-        assertEquals(-0.5 * w, section.place(4, crossing + 100.0, axis)!!.centre, 1e-12)
-        // On the way the two lanes stay two lanes wide on the ground: across the turning axis' normal, wider by its turn.
+        // Until halfway to that crossing, g4's middle goes straight on, 1.5 lanes east of the freeway's line, which runs due
+        // north, and the two lanes stay two lanes wide on the ground: across the turning axis' normal, wider by its turn.
+        val from = (fillet.from + crossing) * 0.5
+        for (station in listOf(fillet.from, gore - 1.0, gore, from - 0.5)) {
+            val centre = section.place(3, station, axis)!!.centre
+            assertEquals(1.5 * w, axis.offset(station, centre).x, 1e-6, "at $station")
+        }
         var station = fillet.from
-        while (station < crossing) {
+        while (station < from) {
             val left = section.place(3, station, axis)!!.left
             val right = section.place(4, station, axis)!!.right
             assertEquals(2.0 * w, (left - right) * axis.at(station).ty, 1e-6, "two lanes wide at $station")
             station += 0.5
+        }
+        // From there each lane settles onto its place on the ramp's own carriageway, centred on its line, as the path does
+        // past a turn: it closes in from its own side, never past its place, and is on it from where the middle settles.
+        val end = start.settled(axis)
+        assertEquals(CrossSection.turnOffEnd(axis, gore, start.shift), end, 0.0)
+        assertTrue(end > crossing, "settled at $end, the crossing at $crossing")
+        for ((lane, place) in listOf(3 to 0.5 * w, 4 to -0.5 * w)) {
+            var prev = section.place(lane, from, axis)!!.centre - place
+            assertTrue(prev < 0.0, "lane $lane right of its place where it begins to settle")
+            station = from
+            while (station < end + 50.0) {
+                station += 0.25
+                val now = section.place(lane, station, axis)!!.centre - place
+                assertTrue(now <= 0.0 && now >= prev - 1e-12, "lane $lane at $station: from $prev to $now")
+                prev = now
+            }
+            assertEquals(place, section.place(lane, end, axis)!!.centre, 1e-12)
+            assertEquals(place, section.place(lane, end + 60.0, axis)!!.centre, 1e-12)
+        }
+        assertTrue(Math.abs(section.place(3, end - 1.0, axis)!!.centre - 0.5 * w) > 1e-9)
+        // The middle settles by the path's own rule.
+        for (s in listOf(from, (from + end) * 0.5, end - 1.0)) {
+            val middle = (section.place(3, s, axis)!!.left + section.place(4, s, axis)!!.right) / 2.0
+            assertEquals(CrossSection.turnOff(axis, gore, start.shift, s), middle, 0.05, "at $s")
         }
         // Without the axis the ramp's lanes are where they lie on the ramp from the gore on.
         assertEquals(0.5 * w, section.place(3, gore + 1.0)!!.centre, 1e-12)
@@ -276,13 +295,16 @@ class CrossSectionTest {
     }
 
     @Test
-    fun `where the ramp's line never lies farther out the lanes blend from the turn`() {
+    fun `where the ramp's line never lies farther out the lanes move onto it from the turn's arc`() {
         // A line that turns left at the gore while the lanes onto it lie to the right: no crossing.
         val axis = RoadAxis.of(SceneLines.line(gore + 400.0, listOf(gore to 17.0)), null, SceneLines.geo(io.github.purplepalm.custommaps.nav.geo.LocalPoint(0.0, 0.0)))
         val fillet = axis.fillets.single()
         assertEquals(gore, CrossSection.crossing(axis, fillet.from, gore, -2.0 * w), 1e-9)
-        assertEquals(0.0, CrossSection.continuation(axis, gore, -2.0 * w, gore + CrossSection.RAMP_BLEND_METERS), 1e-12)
-        assertEquals(-2.0 * w, CrossSection.continuation(axis, gore, -2.0 * w, fillet.from - 1.0), 1e-12)
+        val start = CrossSection.RampStart(0, gore, -2.0 * w)
+        assertEquals(fillet.from + CrossSection.RAMP_BLEND_METERS, start.settled(axis), 1e-9)
+        assertEquals(0.0, start.at(axis, fillet.from + CrossSection.RAMP_BLEND_METERS), 1e-12)
+        assertEquals(-w, start.at(axis, fillet.from + CrossSection.RAMP_BLEND_METERS * 0.5), 1e-12)
+        assertEquals(-2.0 * w, start.at(axis, fillet.from - 1.0), 1e-12)
     }
 
     @Test
@@ -301,7 +323,7 @@ class CrossSectionTest {
         // Until halfway to where that straight-on line would cross the ramp's line, the straight-on line itself.
         assertEquals(shift, CrossSection.turnOff(axis, gore, shift, fillet.from - 1.0), 1e-12)
         for (station in listOf(fillet.from, (fillet.from + from) * 0.5, from)) {
-            assertEquals(CrossSection.continuation(axis, gore, shift, station), CrossSection.turnOff(axis, gore, shift, station), 1e-9, "at $station")
+            assertEquals(CrossSection.lineOffset(axis, fillet.from, shift, station)!!, CrossSection.turnOff(axis, gore, shift, station), 1e-9, "at $station")
         }
         // From there it closes in on the ramp's line from its own side and never past it, on it for good from where it settles.
         var prev = CrossSection.turnOff(axis, gore, shift, from)

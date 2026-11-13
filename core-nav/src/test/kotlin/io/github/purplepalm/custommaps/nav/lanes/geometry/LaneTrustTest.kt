@@ -73,6 +73,7 @@ class LaneTrustTest {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
         assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore", "litPastEdge")
+        assertSeen("lanesSettle")
     }
 
     @Test
@@ -177,6 +178,7 @@ class LaneTrustTest {
         goreWhereLanesAreLeft(b)
         noLoops(b)
         litGoesOn(b)
+        lanesSettleAtRampStarts(b)
     }
 
     // ------------------------------------------------------------------ 1, 2: no line and no ring of ours crosses itself
@@ -228,6 +230,35 @@ class LaneTrustTest {
                 "${b.name}: the old road's asphalt does not taper away to $taperEnd past the ramp's start at ${start.station}",
             )
             saw("gore")
+        }
+    }
+
+    // ------------------------------------------------------------------ 8: past a ramp's start the lanes settle as the path does
+
+    /**
+     * At every ramp's start inside a drawing, each lane that goes on settles onto its place on the new road as the path
+     * settles past a turn: from where the turn's arc begins until the lanes lie on the new road for good, its middle closes
+     * in on that place from one side, never moves away from it and never swings past it.
+     */
+    private fun lanesSettleAtRampStarts(b: Built) {
+        for (start in b.section.rampStarts) {
+            if (b.path.drawings.none { start.station > it.from && start.station < it.to }) continue
+            val axis = b.path.axisAt(start.station + 1e-3) ?: continue
+            val after = start.station + 1e-3
+            for (lane in b.section.lanes(after).filter { it.width > 1e-6 }.map { it.lane }) {
+                var side = 0.0
+                var last = Double.MAX_VALUE
+                for (s in along(start.begin(axis), start.settled(axis) + 1.0, 0.5)) {
+                    val place = b.section.place(lane, maxOf(s, after)) ?: break
+                    val drawn = b.section.place(lane, s, axis) ?: continue
+                    val off = drawn.centre - place.centre
+                    if (side == 0.0 && abs(off) > 1e-6) side = Math.signum(off)
+                    assertTrue(off * side >= -1e-6, "${b.name}: lane $lane swings past its place on the new road at $s ($off)")
+                    assertTrue(abs(off) <= last + 1e-6, "${b.name}: lane $lane moves away from its place on the new road at $s ($off)")
+                    last = abs(off)
+                }
+                saw("lanesSettle")
+            }
         }
     }
 

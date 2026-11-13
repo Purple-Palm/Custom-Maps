@@ -139,10 +139,14 @@ class RoutePathTest {
         }
         // On the ramp: g4 is its left lane.
         assertEquals(0.5 * w, path.offsetAt(gore + 150.0), 1e-9)
-        // Past the gore the path goes straight on in g4, 1.5 lanes east of the freeway's line: never the gore's diagonal.
+        // Past the gore the path goes straight on in g4, 1.5 lanes east of the freeway's line, until the lanes begin to settle
+        // onto the ramp, halfway to where g4's middle would cross its place there: never the gore's diagonal.
         val axis = path.axisAt(gore + 5.0)!!
         val fillet = axis.fillets.first { abs(it.station - gore) < 1e-6 }
-        for (station in listOf(fillet.from, gore, gore + 10.0)) {
+        val start = iw31.section.rampStarts.single()
+        val settles = (fillet.from + CrossSection.crossing(axis, fillet.from, gore, start.shift)) * 0.5
+        assertTrue(settles - 1.0 > fillet.to, "settles at $settles")
+        for (station in listOf(fillet.from, gore, fillet.to, settles - 1.0)) {
             assertEquals(1.5 * w, axis.offset(station, path.offsetAt(station)).x, 1e-6, "at $station")
         }
         // It reaches the ramp's start in its lane, not on the road's line: no diagonal.
@@ -312,7 +316,7 @@ class RoutePathTest {
         val path = built.path
         // The scene: no lane can be named on the exit's approach (C1); past the gore the route goes on onto a ramp with lanes,
         // whose card window names the ramp's lane toward the split. At the gore the ramp's lanes go on straight along the
-        // freeway, across the ramp's line, until it lies farther out, and blend onto the ramp from there.
+        // freeway, toward the ramp's line, and settle onto the ramp from halfway to where they would cross it.
         assertEquals(LanePlan.NoLane.Cause.DESIGNATED_BETWEEN, plan.noLane.single().cause)
         val ramp = plan.windows.single { it.kind == CardWindow.Kind.RAMP }
         assertEquals(gore, ramp.from, 1e-9)
@@ -320,8 +324,10 @@ class RoutePathTest {
         assertEquals(gore, start.station, 1e-9)
         assertTrue(abs(start.shift) > w)
         val axis = requireNotNull(path.axisAt(gore + 1.0))
-        val settled = max(gore, CrossSection.crossing(axis, start.begin(axis), gore, start.shift)) + CrossSection.RAMP_BLEND_METERS
-        assertTrue(plan.segments.first { it.named != null }.from < settled - CrossSection.RAMP_BLEND_METERS)
+        val crossing = max(gore, CrossSection.crossing(axis, start.begin(axis), gore, start.shift))
+        val settled = start.settled(axis)
+        assertTrue(settled > crossing)
+        assertTrue(plan.segments.first { it.named != null }.from < crossing)
         // The path keeps to the road's line from the drawing's start until the ramp's lanes lie on the ramp, and enters the
         // named lane from there with one S: never beside the drawn ramp.
         val enter = path.moves.first()

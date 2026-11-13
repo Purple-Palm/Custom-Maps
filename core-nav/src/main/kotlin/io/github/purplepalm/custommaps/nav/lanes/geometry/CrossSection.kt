@@ -47,9 +47,11 @@ import kotlin.math.sign
  *   open to every car again) ends where the other begins, and no lane moves there. Where a lane opens or ends between
  *   others, the fewer lanes on one side of it move and the rest stay; a lane only possible there is not counted.
  * - **A ramp's start** ([RampStart]): where the route turns off its road and lanes go on, they keep their place,
- *   straight on along the old road, until the new road's line lies farther out, and then blend onto the new
- *   road's carriageway over [RAMP_BLEND_METERS]: the route geometry's diagonal across the lanes at a gore is
- *   never drawn.
+ *   straight on along the old road, and settle onto the new road's carriageway as a path does past a turn
+ *   ([turnOff]): from halfway to where their middle's straight-on line would cross its place on the new road, along
+ *   a cubic that starts as fast as that line closes in and ends with neither slope nor curvature, never past their
+ *   places; where that line never closes in, they move onto them over [RAMP_BLEND_METERS] from the turn's arc. The
+ *   route geometry's diagonal across the lanes at a gore is never drawn.
  *
  * Pure; built once for a route's plan, off the main thread, and never stored.
  */
@@ -96,11 +98,14 @@ class CrossSection private constructor(
     /**
      * Where the route leaves its road at the intersection [node], at [station], onto another with lanes that go on:
      * there the lanes that go on lay with their middle [shift] metres to the left of their middle on the new road; they
-     * go on straight until the new road's line lies farther out, then blend onto it over [RAMP_BLEND_METERS] ([at]).
+     * go on straight and settle onto it as a path does past a turn ([at], [turnOff]).
      */
     data class RampStart(val node: Int, val station: Double, val shift: Double) {
         /** How far the middle of the lanes lies to the left of its place on the new road at [at], along [axis]. */
-        fun at(axis: RoadAxis, at: Double): Double = continuation(axis, station, shift, at)
+        fun at(axis: RoadAxis, at: Double): Double = turnOff(axis, station, shift, at)
+
+        /** Where the lanes lie on the new road for good, along [axis]. */
+        fun settled(axis: RoadAxis): Double = turnOffEnd(axis, station, shift)
 
         /** Where the old road's lanes begin to go straight on along [axis]: where the arc at the turn begins. */
         fun begin(axis: RoadAxis): Double = beginOf(axis, station)
@@ -177,8 +182,9 @@ class CrossSection private constructor(
 
     /**
      * The lanes drawn at [station], from the left. Along [axis], where given, a ramp's start puts each lane that was
-     * there before the turn on its own straight line until the new road's line lies farther out, then blends it onto
-     * the new road over [RAMP_BLEND_METERS]; without an axis the lanes lie on the new road from the turn on.
+     * there before the turn on its own straight line, and settles the lanes that go on onto their places on the new
+     * road as a path settles past a turn ([turnOff]): each from where the middle begins to settle, by the same share of
+     * how far it lay off its place there; without an axis the lanes lie on the new road from the turn on.
      */
     fun lanes(station: Double, axis: RoadAxis? = null): List<Place> {
         val layout = layoutAt(station) ?: return emptyList()
@@ -190,21 +196,46 @@ class CrossSection private constructor(
         } ?: return plain
         val begin = start.begin(axis)
         if (station < begin) return plain
-        val crossing = max(start.station, crossing(axis, begin, start.station, start.shift))
-        if (station >= crossing + RAMP_BLEND_METERS) return plain
+        val settled = abs(start.shift) <= SETTLED_METERS
+        val settle = if (settled) null else settling(axis, begin, start.station, start.shift)
+        // Where they lie on the new road for good ([RampStart.settled]).
+        val end = if (settled) begin else settle?.to ?: (begin + RAMP_BLEND_METERS)
+        if (station >= start.station && station >= end) return plain
         val before = layouts.firstOrNull { it.run == layout.run && it.to == start.station } ?: return plain
+        val after = layouts.firstOrNull { it.run == layout.run && it.from == start.station } ?: return plain
         val old = before.placesAt(begin)
-        val f = ramp(station, crossing, crossing + RAMP_BLEND_METERS)
+        // Each lane's place on the new road: from the turn on where it lies there, before the turn where it lies at the turn.
+        val targets = after.placesAt(max(station, start.station))
+        // How much of its offset from that place a lane still has: the straight-on line's own (1) until the middle begins
+        // to settle, from there the middle's cubic of the offset it had there; where the middle's line never closes in,
+        // the path's half-cosine of a half-cosine from the turn's arc.
+        val from = settle?.from ?: begin
+        val share = when {
+            settle == null -> 1.0 - ramp(ramp(station, begin, begin + RAMP_BLEND_METERS), 0.0, 1.0)
+            station < settle.from -> 1.0
+            station >= settle.to -> 0.0
+            else -> (1.0 - (station - settle.from) / (settle.to - settle.from)).let { u -> u * u * u }
+        }
         return plain.map { p ->
             val q = old.firstOrNull { it.lane == p.lane }
+            val t = targets.firstOrNull { it.lane == p.lane }
             val left = q?.let { lineOffset(axis, begin, it.left, station) }
             val right = q?.let { lineOffset(axis, begin, it.right, station) }
-            if (left == null || right == null) {
-                // A lane that was not there before the turn moves with the middle of those that were.
-                val shift = start.at(axis, station) - if (layout.to == start.station) start.shift else 0.0
-                p.copy(left = p.left + shift, right = p.right + shift)
-            } else {
-                p.copy(left = left * (1.0 - f) + p.left * f, right = right * (1.0 - f) + p.right * f)
+            when {
+                left == null || right == null -> {
+                    // A lane that was not there before the turn moves with the middle of those that were.
+                    val shift = start.at(axis, station) - if (layout.to == start.station) start.shift else 0.0
+                    p.copy(left = p.left + shift, right = p.right + shift)
+                }
+                // A lane that does not go on, or the straight-on stretch before the middle settles: its straight line.
+                t == null || (settle != null && station < settle.from) -> p.copy(left = left, right = right)
+                else -> {
+                    // Its offset from its place where it began to settle, by the share left of it.
+                    val l0 = if (settle == null) q.left else lineOffset(axis, begin, q.left, from) ?: q.left
+                    val r0 = if (settle == null) q.right else lineOffset(axis, begin, q.right, from) ?: q.right
+                    val t0 = after.placesAt(max(from, start.station)).firstOrNull { it.lane == p.lane } ?: t
+                    p.copy(left = t.left + (l0 - t0.left) * share, right = t.right + (r0 - t0.right) * share)
+                }
             }
         }
     }
@@ -273,7 +304,11 @@ class CrossSection private constructor(
         /** Asphalt outside each edge line, with no line on it. */
         const val APRON_METERS = 1.2
 
-        /** At a ramp's start the lanes blend onto the new road over this distance, once its line lies farther out. */
+        /**
+         * Past a turn whose straight-on line never closes in on the new road's line, a path and the lanes move onto it over
+         * this distance from the turn's arc. A path on the road's line through a ramp's start keeps to it at least this far
+         * past the turn, and a ramp's start reaches this far past [RAMP_START_MAX_METERS] at most.
+         */
         const val RAMP_BLEND_METERS = 25.0
 
         /** The new road's line must lie farther out within this distance of the turn; otherwise the lanes blend at once. */
@@ -316,25 +351,6 @@ class CrossSection private constructor(
             evidence: LaneEvidence = plan.evidence(),
             carriageway: (run: Int) -> Carriageway = { Carriageway.ONE_WAY },
         ): CrossSection = Builder(plan, evidence, carriageway).build()
-
-        /**
-         * Where something that lay [shift] metres to the left of its place on a new road lies at [at], the route having
-         * turned onto that road at [station] along [axis]: until the arc at the turn begins, [shift]; from there straight
-         * on along the old road's way until the new road's place lies farther out; then blended onto it over
-         * [RAMP_BLEND_METERS]; 0 after. Where the new road's place does not lie farther out within
-         * [RAMP_START_MAX_METERS], the blend begins at the turn.
-         */
-        fun continuation(axis: RoadAxis, station: Double, shift: Double, at: Double): Double {
-            val begin = beginOf(axis, station)
-            if (at < begin) return shift
-            val crossing = max(station, crossing(axis, begin, station, shift))
-            val line = lineOffset(axis, begin, shift, at) ?: return 0.0
-            return when {
-                at < crossing -> line
-                at < crossing + RAMP_BLEND_METERS -> line * (1.0 - ramp(at, crossing, crossing + RAMP_BLEND_METERS))
-                else -> 0.0
-            }
-        }
 
         /**
          * Where a path that lay [shift] metres to the left of a new road's line lies at [at], the route having turned onto that

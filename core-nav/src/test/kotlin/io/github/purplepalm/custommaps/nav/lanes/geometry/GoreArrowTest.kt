@@ -114,8 +114,9 @@ class GoreArrowTest {
             path.points[k].longitude + (path.points[k + 1].longitude - path.points[k].longitude) * f,
         )
         assertEquals(0.0, Geo.meters(expected, arrow.last()), 1e-6)
-        // About 42 m long: the path is a little longer than the route where it lies outside the ramp's bend.
+        // About 42 m long: the path settles onto the ramp's line from inside its bend and never swings past it, so it is a
+        // little shorter than the route there.
         val length = arrow.zipWithNext { a, b -> Geo.meters(a, b) }.sum()
-        assertTrue(length in (GoreArrow.BEFORE_METERS + GoreArrow.AFTER_METERS)..(GoreArrow.BEFORE_METERS + GoreArrow.AFTER_METERS + 4.0), "$length m")
+        assertTrue(length in (GoreArrow.BEFORE_METERS + GoreArrow.AFTER_METERS - 2.0)..(GoreArrow.BEFORE_METERS + GoreArrow.AFTER_METERS), "$length m")
     }
 }
