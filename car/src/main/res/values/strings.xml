@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- The car's screen. Anything that needs the phone says so, to be done when the car is parked. -->
-    <string name="car_start_idle">Choose a destination and press Start on the phone when you are parked.</string>
+
+    <!-- The action before a drive and in the route preview, and its message. -->
+    <string name="car_start_on_phone">Start on phone</string>
+    <string name="car_start_idle">Choose a destination and press Start on the phone when you are parked. The drive then shows here.</string>
+    <string name="car_start_preview">Press Start on the phone when you are parked.</string>
+
+    <!-- The action during a drive: it ends, as the phone's End ends it. -->
+    <string name="car_end">End</string>
+
+    <!-- While the phone reads its saved token, at a start from the car. -->
+    <string name="car_loading">Loading Custom Maps…</string>
+
+    <!-- What is missing before the map can show, and where it is done. -->
+    <string name="car_setup_title">Set up on the phone</string>
+    <string name="car_setup_token">Custom Maps needs a Mapbox token. Add one in the app on the phone when you are parked.</string>
+    <string name="car_setup_location">Custom Maps needs precise location. Allow it in the app on the phone when you are parked.</string>
 </resources>

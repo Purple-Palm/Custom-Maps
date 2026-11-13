@@ -13,6 +13,8 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import io.github.purplepalm.custommaps.car.CarMapSettings
+import io.github.purplepalm.custommaps.car.CarParts
 import io.github.purplepalm.custommaps.car.CarSession
 import io.github.purplepalm.custommaps.diagnostics.DeviceLog
 import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
@@ -145,10 +147,29 @@ class AppGraph(private val application: Application) {
     val mapsAccess: StateFlow<MapsAccess> = _mapsAccess.asStateFlow()
 
     /**
+     * What every car session is made from: the drive and the car's side of the engine, the access to
+     * maps, and the settings the car's map follows as the phone's does.
+     */
+    private val carParts = CarParts(
+        navigation = engine.navigation,
+        mapsAccess = mapsAccess,
+        createMap = engine::createCarMap,
+        attachHost = engine::attachCarHost,
+        mapSettings = CarMapSettings(
+            cameraStyle = settings.cameraStyle,
+            laneZoom = settings.laneZoom,
+            laneDetails = settings.laneDetails,
+            ownRouteLine = settings.ownRouteLine,
+            drawOwnLanes = settings.drawOwnLanes,
+        ),
+        debugLog = debugLog,
+    )
+
+    /**
      * The car's screen for a connection of the car's host, from the car app service. [info] says
      * which of the car's displays it is for; the app declares only the main one.
      */
-    fun carSession(info: SessionInfo): Session = CarSession(debugLog, info.displayType)
+    fun carSession(info: SessionInfo): Session = CarSession(carParts, info.displayType)
 
     /**
      * When the app was installed on this phone, which is when its trip session log began: an

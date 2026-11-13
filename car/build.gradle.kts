@@ -34,6 +34,11 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
+// The car's words, which CarMessagesTest reads from the resources: as an input of the test task, a
+// change to them runs the tests again instead of taking their result from the build cache.
+val carResources = layout.projectDirectory.dir("src/main/res")
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    inputs.dir(carResources).withPropertyName("carResources").withPathSensitivity(PathSensitivity.RELATIVE)
 }
