@@ -195,7 +195,8 @@ internal class MapScene(
 
         /**
          * What the screen adds to the camera line, once for each line: the car its frame clock's
-         * ticks. Also called once as the camera line starts, to drop what was counted before it.
+         * ticks, its frame rate cap and the display rate measured. Also called once as the camera
+         * line starts, to drop what was counted before it.
          */
         fun cameraFields(): Map<String, Any?> = emptyMap()
     }
@@ -1450,9 +1451,11 @@ internal class MapScene(
      * calls draw nothing. "renderFps" is the map library's own estimate of its rate, worked out
      * against the display rate it believes, which on the car's surface is not the phone's.
      * "animatorsEnabled" is false when Android's animations are switched off.
-     * "style" is the camera style in use, so drives in different styles can be compared. The screen
-     * adds its own at the end ([Host.cameraFields]): the car its frame clock's ticks of the second,
-     * "clock" with "vsyncTicks" and "timerTicks".
+     * "style" is the camera style in use, so drives in different styles can be compared. "capped"
+     * is true while the phone's map draws at most [PHONE_FPS_WITH_CAR] frames a second, because a
+     * car's surface shows the map too. The screen adds its own at the end ([Host.cameraFields]): the
+     * car its frame clock's ticks of the second ("clock" with "vsyncTicks" and "timerTicks"), the cap
+     * on its surface's frames ("maxFps") and the display rate measured now ("measuredHz").
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
