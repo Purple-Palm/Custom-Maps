@@ -37,6 +37,7 @@ import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.car.CarArea
 import io.github.purplepalm.custommaps.nav.car.CarAreas
 import io.github.purplepalm.custommaps.nav.car.CarFailure
+import io.github.purplepalm.custommaps.nav.car.CarFrameCap
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.car.CarLook
 import io.github.purplepalm.custommaps.nav.car.CarOverview
@@ -107,9 +108,11 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   An exception caught here writes a "car_error" line with the call, the class and the message.
  *
  * The surface draws [CarFrameRate.TARGET_FPS] frames a second: the map library paces the car's surface
- * against a display rate of 60, so its cap is scaled by the rate the display's frames really come at
- * ([CarFrameRate], measured by [CarFrames]), worked out again each second and set when that rate
- * moves by more than a tenth; a "car_surface" line with `event` fps says each new cap. Main thread
+ * by its render thread's ticks against a display rate of 60, so its cap is worked out for the rate those
+ * ticks really come at ([CarFrameCap]): during guidance from the render thread's own statistics, which
+ * the camera line takes each second, otherwise from the rate of the display's frames ([CarFrames]),
+ * and 60 while the frame clock runs on its timer. It is set again when the map would draw more than a
+ * tenth off 30 at the cap set now; a "car_surface" line with `event` fps says each new cap. Main thread
  * only.
  */
 @OptIn(MapboxExperimental::class)
@@ -172,14 +175,8 @@ internal class CarNavigationMap(
     /** Whether the engine counts a surface of this car map as showing the map: the phone's map is capped meanwhile. */
     private var surfaceShown = false
 
-    /**
-     * The display rate the surface's frame rate cap is set for, kept for the next surface; null until
-     * one was measured, when the cap is the one for the rate the map library believes.
-     */
-    private var capHz: Double? = null
-
-    /** The cap on the surface's frames that is set now. */
-    private var maxFps = CarFrameRate.maxFps(CarFrameRate.ASSUMED_HZ)
+    /** The cap on the surface's frames, and the rate it is worked out for, kept for the next surface. */
+    private val frameCap = CarFrameCap()
 
     /** New positions of the platform's location on this surface since the last "car_location" check. */
     private var platformFixes = 0
@@ -211,12 +208,23 @@ internal class CarNavigationMap(
         }
 
         // The frame clock's ticks of the second, from the display and from the timer while the main
-        // thread got no frames, the cap on the surface's frames, and the display rate measured now.
-        override fun cameraFields(): Map<String, Any?> = mapOf(
-            "clock" to frames.takeTicks(),
-            "maxFps" to maxFps,
-            "measuredHz" to frames.displayHz()?.let { Motion.round(it, 1) },
-        )
+        // thread got no frames, the cap on the surface's frames and where its rate came from, and the
+        // display rate measured now. The render thread's next window starts here.
+        override fun cameraFields(): Map<String, Any?> {
+            val fields = mapOf(
+                "clock" to frames.takeTicks(),
+                "maxFps" to frameCap.maxFps,
+                "capFrom" to frameCap.basis?.let(::basisName),
+                "measuredHz" to frames.displayHz()?.let { Motion.round(it, 1) },
+            )
+            frameCap.onWindowStart()
+            return fields
+        }
+
+        // The render thread's window of the second: its ticks hold the surface's cap at 30 frames a second.
+        override fun onRenderWindow(calls: Int, missedVsync: Long, windowMillis: Long) = guard("renderWindow") {
+            if (frameCap.onRenderWindow(calls + missedVsync, windowMillis, frames.displayHz(), frames.stayedOnDisplay())) applyCap()
+        }
     }
 
     private val observer = object : MapboxCarMapObserver {
@@ -384,9 +392,9 @@ internal class CarNavigationMap(
         showsSurface(true)
         val mapSurface = surface.mapSurface
         // The car's screen does not need more, and the frames cost the phone's battery and heat: the
-        // cap for the display rate measured on the surface before, until this one's is measured.
-        maxFps = CarFrameRate.maxFps(capHz ?: CarFrameRate.ASSUMED_HZ)
-        mapSurface.setMaximumFps(maxFps)
+        // cap worked out on the surface before, until this one's frames say otherwise.
+        frameCap.onSurface()
+        mapSurface.setMaximumFps(frameCap.maxFps)
         // Where the driver left the last surface's map, else where the car was last seen; without
         // either the map waits for the car's first position.
         (leftCamera ?: lastPositionCamera())?.let(mapSurface.mapboxMap::setCamera)
@@ -589,25 +597,23 @@ internal class CarNavigationMap(
     }
 
     /**
-     * The surface's frame rate cap, once a second: for the display rate measured now, when it moved
-     * by more than a tenth from the one the cap is set for ([CarFrameRate]); a "car_surface" line
-     * with `event` fps says each rate the cap was worked out for.
+     * The surface's frame rate cap, once a second: 60 on the frame clock's timer, else the render
+     * thread's rate the cap was last held for, while the display's rate is what it was then, else the
+     * display's rate ([CarFrameCap.onSecond]).
      */
     private suspend fun followFrameRate() {
         while (true) {
             delay(FRAME_RATE_CHECK_MS)
             guard("frameRate") {
-                val hz = frames.displayHz() ?: return@guard
-                if (!CarFrameRate.changed(capHz, hz)) return@guard
-                capHz = hz
-                val fps = CarFrameRate.maxFps(hz)
-                if (fps != maxFps) {
-                    maxFps = fps
-                    carSurface?.mapSurface?.setMaximumFps(fps)
-                }
-                log.log(SURFACE_LINE, surfaceFields(EVENT_FPS))
+                if (frameCap.onSecond(frames.onTimer, frames.displayHz())) applyCap()
             }
         }
+    }
+
+    /** The cap worked out now on the surface, and a "car_surface" line with `event` fps that says it and its rate. */
+    private fun applyCap() {
+        carSurface?.mapSurface?.setMaximumFps(frameCap.maxFps)
+        log.log(SURFACE_LINE, surfaceFields(EVENT_FPS))
     }
 
     /**
@@ -649,9 +655,17 @@ internal class CarNavigationMap(
             "stable" to CarAreas.insets(width, height, stable)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "visible" to CarAreas.insets(width, height, visible)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "attaches" to attaches,
-            "maxFps" to maxFps,
-            "measuredHz" to capHz?.let { Motion.round(it, 1) },
+            "maxFps" to frameCap.maxFps,
+            "measuredHz" to frameCap.rateHz.takeUnless { it.isNaN() }?.let { Motion.round(it, 1) },
+            "capFrom" to frameCap.basis?.let(::basisName),
         )
+    }
+
+    /** How a "car_surface" or camera line names where the rate of the cap came from. */
+    private fun basisName(basis: CarFrameCap.Basis): String = when (basis) {
+        CarFrameCap.Basis.DISPLAY -> "display"
+        CarFrameCap.Basis.RENDER -> "render"
+        CarFrameCap.Basis.TIMER -> "timer"
     }
 
     /** The camera at the car's last known position at the browsing zoom; null while there is none. */

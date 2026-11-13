@@ -1,6 +1,5 @@
 package io.github.purplepalm.custommaps.nav.car
 
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -8,10 +7,9 @@ import kotlin.math.roundToInt
  * against the display rate it believes that surface has, 60 Hz (the car app library's own virtual
  * display), while the map's render thread is called at the phone's display rate. A cap of 30 so draws
  * 60 frames a second on a phone at 120 Hz, while Mapbox's own estimate still reads 30. So the cap
- * the car map sets is scaled by the rate at which the display's frames really come:
- * `round(30 x 60 / rate)`, within 1 and 60, for a real 30 frames a second. While the frame clock runs
- * on its timer the main thread has no display rate to measure, and 60 is taken. The cap is set again
- * only when the rate moves by more than a tenth.
+ * the car map sets is `round(30 x 60 / rate)`, within 1 and 60, for the rate at which the map
+ * library's render thread really ticks: its own count when there is one, else the display's rate,
+ * 60 while the frame clock runs on its timer ([CarFrameCap]).
  */
 object CarFrameRate {
 
@@ -24,18 +22,14 @@ object CarFrameRate {
     const val MIN_FPS = 1
     const val MAX_FPS = 60
 
-    /** A change of the rate by more than this share sets the cap again. */
+    /** A cap is set again when the map would draw more than this share off [TARGET_FPS] at the one set now. */
     const val CHANGE_SHARE = 0.10
 
-    /** The cap to set for a display that sends its frames at [displayHz]. */
-    fun maxFps(displayHz: Double): Int {
-        if (!(displayHz > 0.0) || displayHz.isInfinite()) return TARGET_FPS
-        return (TARGET_FPS * ASSUMED_HZ / displayHz).roundToInt().coerceIn(MIN_FPS, MAX_FPS)
+    /** The cap to set for a render thread that ticks [rateHz] times a second, as it does at a display of that rate. */
+    fun maxFps(rateHz: Double): Int {
+        if (!(rateHz > 0.0) || rateHz.isInfinite()) return TARGET_FPS
+        return (TARGET_FPS * ASSUMED_HZ / rateHz).roundToInt().coerceIn(MIN_FPS, MAX_FPS)
     }
-
-    /** Whether a cap set for [appliedHz], or none yet set for a measured rate, is set again for [displayHz]. */
-    fun changed(appliedHz: Double?, displayHz: Double): Boolean =
-        appliedHz == null || abs(displayHz - appliedHz) > CHANGE_SHARE * appliedHz
 
     /** The display rate to cap for: [vsyncHz] as measured from the display's frames, [ASSUMED_HZ] while the clock runs on its timer. */
     fun displayHz(source: CarFrameClock.Source, vsyncHz: Double?): Double? =

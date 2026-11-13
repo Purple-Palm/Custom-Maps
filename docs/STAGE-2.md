@@ -239,11 +239,22 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
   display frames: the two Mapbox camera styles and the double tap's zoom. The camera style chosen in
   Settings applies to the car too (DECISIONS 26); Smooth follow, the default, is the one that keeps
   moving.
-- **Frame rates.** The car's surface draws a real 30 frames a second: its cap is `round(30 × 60 /
-  rate)`, within 1 and 60, for the rate the display's frames come at (measured from display
-  callbacks asked for one right after the other; 60 while the clock is on its timer), set again
-  when that rate moves by more than a tenth: 15 on a phone at 120 Hz. While a car surface shows the
-  map, the phone's map draws at most 60 frames a second, and as before once the surface goes.
+- **Frame rates.** The car's surface draws a real 30 frames a second (`CarFrameCap`): its cap is
+  `round(30 × 60 / rate)`, within 1 and 60, for the rate at which Mapbox's render thread ticks, as
+  Mapbox counts its ticks: its calls and the display frames it counts as missed. That rate is not
+  always the display's: on a phone at 120 Hz a frame that takes longer than one display frame to
+  draw makes the next call wait for the display frame after next, which Mapbox counts as one tick,
+  so the cap for the display's rate alone, 15, drew about 24 frames a second with frames of 9 to
+  16 ms. During guidance 30 is held from the render thread's own ticks, which the camera line's
+  window of its statistics counts each second (15 to 20 at 120 Hz): a window counts when the frame
+  clock stayed on the display, the cap did not change in it and the render thread was called on at
+  least half of the display's frames; the cap goes down at once when the map would draw more than a
+  tenth over 30, and up only when two windows in a row say it would draw more than a tenth under.
+  Before the first guidance it is the rate of the display's frames (measured from display callbacks
+  asked for one right after the other), after it the last render thread's rate while the display's
+  rate stays within a tenth of the one it was counted at, and 60 while the clock is on its timer.
+  While a car surface shows the map, the phone's map draws at most 60 frames a second, and as
+  before once the surface goes.
 - **The phone's look on the car** (DECISIONS 50; [Day and night](#day-and-night)): the app's one
   look, which `LookController` decides for the process. The car's session starts it if no screen
   has (the car's host may have started the process), keeps it deciding while the session is
@@ -260,15 +271,15 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
     `vsync`), `quietMs`, and on the way back `timerTicks`;
   - the camera line's `render` adds `drawn` and `drawnFps`, the frames the render thread drew
     beside the calls it got (`frames`, `fps`), on both maps; the car's camera line adds `clock`
-    (`vsyncTicks`, `timerTicks` of the second), `maxFps` and `measuredHz`, the phone's `capped` while
-    it draws at most 60;
-  - `car_surface` has `maxFps` (the cap set) and `measuredHz` (the rate it was worked out for), and
-    an `event` `fps` line at each new cap;
+    (`vsyncTicks`, `timerTicks` of the second), `maxFps`, `capFrom` (`render`, `display` or `timer`)
+    and `measuredHz`, the phone's `capped` while it draws at most 60;
+  - `car_surface` has `maxFps` (the cap set), `measuredHz` (the rate it was worked out for) and
+    `capFrom`, and an `event` `fps` line at each new cap;
   - `car_error` from the clock's callbacks has `failures`: the first at once, then at most one each
     10 s with the count;
   - `car_look` has the host's `dark` beside the map's `look` ([Day and night](#day-and-night)).
 - `renderFps` is Mapbox's own estimate, worked out against the rate it believes: on the car 60 Hz,
-  so it reads 15 at 120 Hz once the cap is right; `render.drawnFps` is the car's real rate. The
+  so it reads the cap, 15 to 20 at 120 Hz; `render.drawnFps` is the car's real rate. The
   camera line's `p50Ms` and `p95Ms` take every call of the render thread, the paced ones with their
   near-zero times too.
 
@@ -695,10 +706,11 @@ Other notes:
   test both maps drew far more frames than they needed and the phone grew hot quickly. The phone map
   stops drawing when its activity stops.
 - Built in step 1b ([Step 1b](#step-1b-built)): the car's surface draws a real 30 frames a second,
-  its cap scaled by the rate the display's frames come at, since Mapbox paces it against 60 Hz while
-  its render thread is called at the phone's rate; and while a car surface shows the map, the
-  phone's map draws at most 60 frames a second (`capped` in its camera line), a cap its own pacing
-  knows the phone's real rate for. The DHU streams 30 fps.
+  its cap held from the rate its render thread really ticks at (during guidance its own count, else
+  the display's rate), since Mapbox paces it against 60 Hz while its render thread is called at the
+  phone's rate; and while a car surface shows the map, the phone's map draws at most 60 frames a
+  second (`capped` in its camera line), a cap its own pacing knows the phone's real rate for. The
+  DHU streams 30 fps.
 - With the phone locked or the app in the background the main thread may get no display frames. The
   car's camera, its zoom buttons' ease and its puck take their frames from the car's frame clock,
   which falls back to a main-thread timer then. Mapbox's background animation thread

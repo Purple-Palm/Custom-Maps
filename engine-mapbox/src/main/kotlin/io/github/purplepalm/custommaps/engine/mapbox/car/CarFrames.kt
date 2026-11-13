@@ -108,6 +108,12 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
      */
     fun displayHz(): Double? = CarFrameRate.displayHz(clock.source, rate.hz())
 
+    /** Whether the clock runs on its timer now: the main thread gets no display frames. */
+    val onTimer: Boolean get() = clock.source == CarFrameClock.Source.TIMER
+
+    /** Whether the clock has stayed on the display's frames since the last [takeTicks]: no timer tick, and on the display now. */
+    fun stayedOnDisplay(): Boolean = !onTimer && clock.timerTicks == 0
+
     /** The ticks since the last call, from the display and from the timer, for the camera line. */
     fun takeTicks(): Map<String, Any?> {
         val fields = mapOf("vsyncTicks" to clock.vsyncTicks, "timerTicks" to clock.timerTicks)

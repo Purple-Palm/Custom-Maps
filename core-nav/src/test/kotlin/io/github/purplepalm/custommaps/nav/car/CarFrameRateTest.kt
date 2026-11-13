@@ -1,9 +1,7 @@
 package io.github.purplepalm.custommaps.nav.car
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -71,16 +69,6 @@ class CarFrameRateTest {
         assertEquals(30, CarFrameRate.maxFps(Double.POSITIVE_INFINITY))
         // Half way between two caps it rounds up: 30 x 60 / 144 = 12.5.
         assertEquals(13, CarFrameRate.maxFps(144.0))
-    }
-
-    @Test
-    fun `the cap is set again only when the rate moves by more than a tenth`() {
-        assertTrue(CarFrameRate.changed(appliedHz = null, displayHz = 60.0), "the first measured rate")
-        assertFalse(CarFrameRate.changed(appliedHz = 120.0, displayHz = 125.0))
-        assertFalse(CarFrameRate.changed(appliedHz = 120.0, displayHz = 108.5))
-        assertTrue(CarFrameRate.changed(appliedHz = 120.0, displayHz = 132.5))
-        assertTrue(CarFrameRate.changed(appliedHz = 120.0, displayHz = 107.5))
-        assertTrue(CarFrameRate.changed(appliedHz = 120.0, displayHz = 60.0), "off the display onto the timer")
     }
 
     @Test

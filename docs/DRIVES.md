@@ -51,9 +51,10 @@ with day and night now following the phone; 7 to 13 are step 1b's
    the phone goes on guiding, no error line. Open Custom Maps in the car again: the routing card is
    back, `navigationStarted` with `cause` `intent` or `start`. Note whether the other app stopped.
 7. **Frames with the phone app in front.** A simulated drive with the car connected and the phone
-   app in front, for a minute: the car's map moves smoothly. The car's camera lines: `render.drawnFps`
-   about 30, `maxFps` 15 on a phone at 120 Hz, `clock.vsyncTicks` about 60; the phone's: `capped`
-   true and `renderFps` about 60; a `car_surface` line with `event` `fps`.
+   app in front, for a minute: the car's map moves smoothly. The car's camera lines, a few seconds
+   into the drive: `render.drawnFps` about 30 (27 to 33), `maxFps` 15 to 20 on a phone at 120 Hz with
+   `capFrom` `render`, `clock.vsyncTicks` about 60; the phone's: `capped` true and `renderFps` about
+   60; `car_surface` lines with `event` `fps` as the cap settles.
 8. **The phone locked during a drive.** Lock the phone for a few minutes, then unlock it: the car's
    map and its car icon keep moving. The `display_state` lines (OFF or DOZE while locked?), every
    `frame_clock` line (`source` `timer`, then `vsync` again, with `quietMs` and `timerTicks`), and

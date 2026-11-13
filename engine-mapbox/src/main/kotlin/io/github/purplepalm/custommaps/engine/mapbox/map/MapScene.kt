@@ -196,9 +196,18 @@ internal class MapScene(
         /**
          * What the screen adds to the camera line, once for each line: the car its frame clock's
          * ticks, its frame rate cap and the display rate measured. Also called once as the camera
-         * line starts, to drop what was counted before it.
+         * line starts, to drop what was counted before it. Each call starts the next window of the
+         * render thread's statistics.
          */
         fun cameraFields(): Map<String, Any?> = emptyMap()
+
+        /**
+         * The render thread's window that the camera line has just taken, about a second: [calls]
+         * of the render thread and the display frames it counted as missed ([missedVsync]) in
+         * [windowMillis]; called right before [cameraFields]. The car's surface holds its frame rate
+         * cap from them; the phone does nothing with them.
+         */
+        fun onRenderWindow(calls: Int, missedVsync: Long, windowMillis: Long) = Unit
     }
 
     private val scope = MainScope()
@@ -1455,7 +1464,8 @@ internal class MapScene(
      * is true while the phone's map draws at most [PHONE_FPS_WITH_CAR] frames a second, because a
      * car's surface shows the map too. The screen adds its own at the end ([Host.cameraFields]): the
      * car its frame clock's ticks of the second ("clock" with "vsyncTicks" and "timerTicks"), the cap
-     * on its surface's frames ("maxFps") and the display rate measured now ("measuredHz").
+     * on its surface's frames ("maxFps"), where the rate it was worked out for came from ("capFrom":
+     * render, display or timer) and the display rate measured now ("measuredHz").
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
@@ -1585,6 +1595,7 @@ internal class MapScene(
         val stats = recorder.stop()
         recorder.start()
         val frames = stats.frameTimeList
+        host.onRenderWindow(frames.size, stats.totalSkippedVsync, stats.totalTime)
         return RenderStats.fields(
             callbacks = frames.size,
             pacedSkips = stats.pacedSkippedVsync,

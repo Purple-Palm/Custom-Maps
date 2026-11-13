@@ -433,10 +433,11 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, the lane zoom and the lane details switch, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
 | `CarNavigationMap` | `:engine-mapbox`, `car/CarNavigationMap.kt` | The car's map (stage 2, step 1): a `MapScene` with `CameraTuning.CAR` on the car's surface, with its padding, gestures, zoom buttons, logo and attribution, its frame clock, puck and frame rate cap (step 1b), and the app's look. |
 | `CarFrameClock` | `:core-nav`, `nav/car/CarFrameClock.kt` | The car map's frame clock, its decisions: the display's frames while they come, a timer every 16 ms once none has come for 50 ms while a frame is wanted, back to the display when two of its frames come within 25 ms, never two ticks within 15 ms. |
-| `CarFrames` | `:engine-mapbox`, `car/CarFrames.kt` | The clock on Android for each car surface: Choreographer and a main-thread `Handler`, the car's `FrameSource`, the `frame_clock` lines, and the rate of the display's frames for the cap. |
+| `CarFrames` | `:engine-mapbox`, `car/CarFrames.kt` | The clock on Android for each car surface: Choreographer and a main-thread `Handler`, the car's `FrameSource`, the `frame_clock` lines, and the rate of the display's frames and whether the clock left them, for the cap. |
 | `PuckTrack` | `:core-nav`, `nav/car/PuckTrack.kt` | Where the car's puck is at a tick: through an update's points at one speed, in the update's time, the bearing the short way round, a new update from where the puck is. |
 | `CarPuck`, `PuckRelay` | `:engine-mapbox`, `car/CarPuck.kt`, `map/camera/PuckRelay.kt` | The car's location provider: follows the platform's location or the guidance puck and, on each tick of the car's clock, hands the location component the puck's place and bearing with no duration. |
-| `CarFrameRate`, `VsyncRate` | `:core-nav`, `nav/car/CarFrameRate.kt` | The cap of the car's surface for a real 30 frames a second, and the rate of the display's frames it is worked out from. |
+| `CarFrameRate`, `VsyncRate` | `:core-nav`, `nav/car/CarFrameRate.kt` | The cap of the car's surface for a rate, `round(30 × 60 / rate)`, and the rate of the display's frames. |
+| `CarFrameCap` | `:core-nav`, `nav/car/CarFrameCap.kt` | The car's cap held at a real 30 frames a second: from the render thread's own ticks during guidance, else from the display's rate, 60 on the timer. |
 
 The math is pure Kotlin on the Java 8 API in `:core-nav` (DECISIONS 4) and is tested on the JVM.
 Everything that touches Mapbox types stays in `:engine-mapbox` (DECISIONS 12).
@@ -678,16 +679,29 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
 - **Smooth follow on the car.** Only Smooth follow keeps moving while the main thread gets no display
   frames. The two Mapbox styles keep Mapbox's own animators, and so does the double tap's zoom: they
   stand still then, as the whole car map did before step 1b.
-- **Frame rate (step 1b).** The car's surface draws a real 30 frames a second:
-  `setMaximumFps(round(30 × 60 / rate))`, within 1 and 60, for the rate at which the display's frames
-  come, measured from display callbacks asked for one right after the other (the lower quartile of
-  the last 16 intervals), 60 while the clock runs on its timer, and set again when the rate moves by
-  more than a tenth: 15 on a phone at 120 Hz. Mapbox paces the car's surface against 60 Hz, the rate
-  of car-app's own virtual display by Android's sources and Mapbox's own fallback, while its render
+- **Frame rate (step 1b).** The car's surface draws a real 30 frames a second (`CarFrameCap`):
+  `setMaximumFps(round(30 × 60 / rate))`, within 1 and 60, for the rate at which Mapbox's render
+  thread ticks as Mapbox counts it. Mapbox paces the car's surface against 60 Hz, the rate of
+  car-app's own virtual display by Android's sources and Mapbox's own fallback, while its render
   thread is called at the phone's rate, so the former `setMaximumFps(30)` drew 60 frames a second at
-  120 Hz. While a car surface shows the map,
-  the phone's map draws at most 60 frames a second (`setMaximumFps(60)`, which its pacing knows the
-  phone's real rate for), and as before once the surface goes.
+  120 Hz. It draws on `cap` of every 60 ticks, a tick being a call of its render thread plus the
+  display frames it counts as missed when a call comes more than 1/60 s and a millisecond after the
+  one before. At 120 Hz a frame that takes longer than one display frame makes the next call wait
+  for the display frame after next, which counts as one tick: the ticks then come slower than the
+  display's frames, and the cap for the display's rate alone, 15, drew about 24 frames a second
+  with frames of 9 to 16 ms. So during guidance 30 is held from the render thread's own ticks: each
+  second the camera line's window of its statistics gives `render.frames` plus `render.missedVsync`.
+  A window counts when the frame clock stayed on the display, the cap did not change in it and the
+  render thread was called on at least half of the display's frames (a map that draws now and then,
+  standing at a light, says nothing); the cap goes down at once when the map would draw more than a
+  tenth over 30 at the cap set now, and up only when two windows in a row say it would draw more
+  than a tenth under, for the faster of the two. Without windows (before the first guidance) the
+  rate is that of the display's frames, measured from display callbacks asked for one right after
+  the other (the lower quartile of the last 16 intervals); after a guidance the last render
+  thread's rate, while the display's rate stays within a tenth of the one it was counted at; 60
+  while the clock runs on its timer. At 120 Hz the cap is 15 to 20. While a car surface shows the
+  map, the phone's map draws at most 60 frames a second (`setMaximumFps(60)`, which its pacing knows
+  the phone's real rate for), and as before once the surface goes.
 
 ### Logging
 
@@ -713,12 +727,12 @@ not. The car's map writes its own, with `screen` `car`.
 | `keyPoints` | the points the navigator sent with the latest position, which the puck glides through | |
 | `padding`, `paddingChanges` | the map's padding in pixels (top, left, bottom, right) and how often it changed; in the first line and whenever it changed. The top includes the Then chip's band | rare, since the top padding only grows; never when the Then chip comes or goes |
 | `render` | the render thread that second: `frames` and `fps`, how often it was called; `drawn` and `drawnFps`, how many of those calls drew a frame, since under a frame rate cap some calls draw nothing (paced); `missedVsync`; and `p50Ms`, `p95Ms` and `maxMs` of every call, the paced ones with their near-zero times too | on the car `drawnFps` about 30; on the phone `drawn` the same as `frames` without a cap |
-| `renderFps` | the renderer's own estimate of its rate (`MapView.setOnFpsChangedListener`, called on the render thread), worked out against the display rate the map library believes, which on the car's surface is 60 whatever the phone's: there it reads 15 at 120 Hz once the cap is right, and `render.drawnFps` is the real rate; left out while the map draws nothing | at least 55 at 60 Hz on the phone |
+| `renderFps` | the renderer's own estimate of its rate (`MapView.setOnFpsChangedListener`, called on the render thread), worked out against the display rate the map library believes, which on the car's surface is 60 whatever the phone's: there it reads the cap, 15 to 20 at 120 Hz, and `render.drawnFps` is the real rate; left out while the map draws nothing | at least 55 at 60 Hz on the phone |
 | `animatorsEnabled` | `ValueAnimator.areAnimatorsEnabled()` | false: the animator scale is 0 and the puck jumps |
 | `hz` | the display's refresh rate; left out on the car, whose host does not say it | |
 | `capped` | the phone's map only: true while it draws at most 60 frames a second because a car's surface shows the map too; left out otherwise | |
 | `clock` | the car's map only: the ticks of its frame clock that second, `vsyncTicks` from the display's frames and `timerTicks` from the timer | about 60 together while moving; `timerTicks` 0 while the display sends frames |
-| `maxFps`, `measuredHz` | the car's map only: the cap set on its surface, and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 and about 120 on a phone at 120 Hz |
+| `maxFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; where the rate it was worked out for came from, `render` (the render thread's own ticks), `display` or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 to 20, `render` and about 120 on a phone at 120 Hz during a drive |
 | `laneDetails` | the switch for lane details on the map | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
