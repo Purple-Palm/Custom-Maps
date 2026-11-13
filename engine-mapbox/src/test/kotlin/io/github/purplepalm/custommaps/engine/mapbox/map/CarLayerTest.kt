@@ -64,10 +64,10 @@ class CarLayerTest {
 
     /**
      * Positions on longitude 0 every frame of [seconds] at [SPEED] from [fromMeters] north, the clock moving with them, a fix of
-     * the puck about once a second as the engine gives it, and the watchdog's check about once a second where [check]; how many
-     * frames.
+     * the puck about once a second as the engine gives it, and the watchdog's check about once a second where [check]; the map's
+     * [bar] along its drawn lanes, the lit lane swapped in where [swapped]. How many frames.
      */
-    private fun frames(seconds: Double, fromMeters: Double = 0.0, bar: CarBar? = null, check: Boolean = true): Int {
+    private fun frames(seconds: Double, fromMeters: Double = 0.0, bar: CarBar? = null, swapped: Boolean = bar != null, check: Boolean = true): Int {
         val metersPerDegree = Math.toRadians(1.0) * Geo.EARTH_RADIUS_METERS
         var t = 0.0
         var count = 0
@@ -76,7 +76,7 @@ class CarLayerTest {
             t += FRAME / 1e9
             count++
             if (now % SECOND < FRAME) layer.onFix()
-            layer.onPosition((fromMeters + SPEED * t) / metersPerDegree, 0.0, 12.0, bar)
+            layer.onPosition((fromMeters + SPEED * t) / metersPerDegree, 0.0, 12.0, swapped, bar)
             if (check && now % SECOND < FRAME) layer.check(onScreen = true, speedMps = SPEED)
         }
         return count
@@ -167,11 +167,37 @@ class CarLayerTest {
         assertEquals(bar.latitude, latitude, 1e-6)
         assertEquals(bar.longitude, longitude, 1e-9)
         assertTrue(bearing < 0.01 || bearing > 359.99, "$bearing")
-        // Without the swap, the dot again: the map gives no bar.
+        // Without the swap, the dot again: this map's lit lane is not in the route line's place, whatever bar it holds.
         port.calls.clear()
-        frames(0.5, fromMeters = card.start + 9.0, bar = null, check = false)
+        frames(0.5, fromMeters = card.start + 9.0, bar = bar, swapped = false, check = false)
         assertEquals("showDot", port.calls.first())
+        assertTrue("showBar" !in port.calls)
         assertEquals(12.0, port.moves.last().third)
+        // Swapped in again: the bar, at the puck's station.
+        port.calls.clear()
+        frames(0.5, fromMeters = card.start + 9.0, bar = bar, check = false)
+        assertEquals("showBar", port.calls.first())
+    }
+
+    @Test
+    fun `a bar the puck lies on is never shown without this map's swap, from Start to the drive's end`() {
+        val id = "route-x#0"
+        val (legs, shapes) = FreewayExit.route(75, listOf(54, 62, 70))
+        val plan = requireNotNull(FreewayExit.plan(id, legs, shapes))
+        val drawing = ownLineDrawing(id, legs, shapes, plan, 1, lanes = true)
+        val own = requireNotNull(drawing.lanes)
+        val card = own.windows.cards.first()
+        val bar = requireNotNull(own.window(own.windows.windowAt(card.start), drawing.table, drawing.runs).carBar)
+        layer.setDrawing(true)
+        ready()
+        layer.onGuidance(true)
+        port.calls.clear()
+        // Through the whole card window with the bar at hand: the puck over the drawn lanes, but no close view on this map.
+        val count = frames((card.endInclusive - card.start - 12.0) / SPEED, fromMeters = card.start + 9.0, bar = bar, swapped = false, check = false)
+        assertTrue(bar.at(card.start + 9.0 + SPEED * count * FRAME / 1e9), "the bar would find the puck")
+        assertEquals(listOf("showDot") + List(count) { "moveTo" }, port.calls)
+        assertTrue(port.bars.isEmpty())
+        assertTrue(port.moves.all { it.third == 12.0 }, "the SDK's own bearing, the dot's")
     }
 
     @Test
@@ -234,7 +260,7 @@ class CarLayerTest {
             layer.onFix()
             for (f in 1..2) {
                 now = fix + f * FRAME
-                layer.onPosition(0.001 * k, 0.0, 12.0, null)
+                layer.onPosition(0.001 * k, 0.0, 12.0, false, null)
             }
         }
         assertEquals(emptyList<String>(), port.puckSettings(), "never given back")
@@ -265,7 +291,7 @@ class CarLayerTest {
             assertEquals(listOf(mapOf("drawer" to "own", "reason" to "scene")), log.lines.map { it.second })
             repeat(90) {
                 now += FRAME
-                scene.onPosition(0.001, 0.0, 0.0, null)
+                scene.onPosition(0.001, 0.0, 0.0, false, null)
                 if (it % 60 == 0) scene.check(onScreen = true, speedMps = SPEED)
             }
             assertEquals(listOf("hidePuck"), port.puckSettings(), "no further setting on surface $surface")
@@ -273,7 +299,7 @@ class CarLayerTest {
             scene.release()
             val calls = port.calls.size
             scene.onGuidance(false)
-            scene.onPosition(0.002, 0.0, 0.0, null)
+            scene.onPosition(0.002, 0.0, 0.0, false, null)
             assertEquals(calls, port.calls.size)
         }
     }
@@ -368,6 +394,59 @@ class CarLayerTest {
         )) {
             assertFalse(LOCATION_SETTINGS.containsMatchIn(line), line)
         }
+    }
+
+    @Test
+    fun `the scene tells its car layer the drive's state at every render, its own swap and bar each frame and each fix`() {
+        val scene = File("src/main/kotlin/io/github/purplepalm/custommaps/engine/mapbox/map/MapScene.kt").readText()
+        // At every render, not only where a drive begins: the puck comes back at the drive's end, however it ends.
+        assertTrue(hasStatement(scene, "private fun render(state: GuidanceState)", "carLayer.onGuidance(state == GuidanceState.ACTIVE)"))
+        // Each frame of the puck: this map's own swap and bar; the layer chooses between the bar and the dot.
+        val frame = "carLayer.onPosition(point.latitude(), point.longitude(), lastBearing ?: 0.0, ownLine.swapped, ownLine.carBar)"
+        assertTrue(hasStatement(scene, "private fun onPuckMoved(point: Point)", frame))
+        // Each matched position the engine gave the drawn car, for the watchdog.
+        assertTrue(hasStatement(scene, "override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult)", "carLayer.onFix()"))
+    }
+
+    @Test
+    fun `a statement counts only at its function's own level, outside every block and condition`() {
+        val text = """
+            |class A {
+            |    fun f(x: Int) {
+            |        if (x > 0) b.c()
+            |        if (x < 0) {
+            |            b.d()
+            |        }
+            |        b.e() // a comment
+            |    }
+            |
+            |    fun g() {
+            |        b.c()
+            |    }
+            |}
+        """.trimMargin()
+        assertTrue(hasStatement(text, "fun f(x: Int)", "b.e()"))
+        assertFalse(hasStatement(text, "fun f(x: Int)", "b.c()"), "under a condition, and another function's")
+        assertFalse(hasStatement(text, "fun f(x: Int)", "b.d()"), "inside a block")
+        assertTrue(hasStatement(text, "fun g()", "b.c()"))
+    }
+
+    /**
+     * Whether the function [declaration] of [text] has [statement] among the statements of its own body, outside every block and
+     * condition in it: a line of the body, at the body's own indent, with nothing else on it but a comment.
+     */
+    private fun hasStatement(text: String, declaration: String, statement: String): Boolean {
+        val lines = code(text).lines()
+        val at = lines.indexOfFirst { it.trim().startsWith(declaration) }
+        require(at >= 0) { "No $declaration" }
+        val indent = lines[at].takeWhile { it == ' ' }.length
+        val body = " ".repeat(indent + 4)
+        for (line in lines.drop(at + 1)) {
+            // The function's closing brace, or whatever follows it.
+            if (line.isNotBlank() && line.takeWhile { it == ' ' }.length <= indent) return false
+            if (line.trimEnd() == body + statement) return true
+        }
+        return false
     }
 
     /** [text] without its comments: what the compiler reads. */

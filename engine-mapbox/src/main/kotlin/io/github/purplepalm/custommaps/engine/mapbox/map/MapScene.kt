@@ -1158,8 +1158,9 @@ internal class MapScene(
     }
 
     private fun onPuckMoved(point: Point) {
-        // The car drawn by the app, with the switch on: the bar while the lit lane shows in the route line's place, else the dot.
-        carLayer.onPosition(point.latitude(), point.longitude(), lastBearing ?: 0.0, if (ownLine.swapped) ownLine.carBar else null)
+        // The car drawn by the app, with the switch on: the bar while the lit lane shows in the route line's place on this map,
+        // else the dot.
+        carLayer.onPosition(point.latitude(), point.longitude(), lastBearing ?: 0.0, ownLine.swapped, ownLine.carBar)
         lastPuck = point
         engine.lastPuckPosition = point
         if (cameraSampling != null) puckCadence.tick(SystemClock.elapsedRealtimeNanos())

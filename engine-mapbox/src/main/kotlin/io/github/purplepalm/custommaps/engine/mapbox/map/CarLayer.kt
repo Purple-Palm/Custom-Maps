@@ -168,15 +168,16 @@ internal class CarLayer(
 
     /**
      * Every frame of the puck: its animated position at [latitude], [longitude] and the SDK's own bearing [puckBearing];
-     * [bar], the car's bar along the lanes drawn, while the lit lane shows in the route line's place, else null. Moves the own
-     * layer there: the bar where the bar finds the puck over drawn lanes, else the dot. Allocates nothing of its own.
+     * [swapped], whether the lit lane shows in the route line's place on this map (its own camera's close view latched), and
+     * [bar], the car's bar along the lanes this map draws, or null. Moves the own layer there: the bar only while the lit lane
+     * is swapped in and the bar finds the puck over drawn lanes, else the dot. Allocates nothing of its own.
      */
-    fun onPosition(latitude: Double, longitude: Double, puckBearing: Double, bar: CarBar?) {
+    fun onPosition(latitude: Double, longitude: Double, puckBearing: Double, swapped: Boolean, bar: CarBar?) {
         // With the switch off, or the car given back, nothing but these reads.
         if (!live || !shown) return
         watch.onPosition()
         try {
-            if (bar != null && bar.place(latitude, longitude)) {
+            if (swapped && bar != null && bar.place(latitude, longitude)) {
                 if (mark != Mark.BAR || bar.twoWay != barTwoWay || CarBar.widthChanged(barWidth, bar.width) || LaneDrawing.stopsStale(barLatitude, bar.latitude)) {
                     port.showBar(bar.width, bar.twoWay, bar.latitude)
                     mark = Mark.BAR
