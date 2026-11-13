@@ -47,6 +47,18 @@ object RunUpRule {
     /** Why a row lights a lane kept for car pools or buses: the route marks no other lane. */
     const val ODD_DESIGNATED_ONLY = "designated_only"
 
+    /**
+     * Why a row read from the lane plan has no words: between the car and the row's point a lane on the exit's side
+     * opens or may begin, or the lane the plan names there counts otherwise from the exit's edge where the car is.
+     */
+    const val ODD_OPENS_AHEAD = "opens_ahead"
+
+    /** Why a row read from the lane plan has no words: by the plan's reading, a road without lane data leaves on the exit's side before the exit. */
+    const val ODD_UNKNOWN_AHEAD = "unknown_ahead"
+
+    /** Why a row has no words: the lane plan names no lane yet, at the row's point or where the car is, or the route's plan is on its way. */
+    const val ODD_NOT_NAMED = "not_named"
+
     /** A point of the step where the route goes straight on, with its lanes as the route lists them. */
     data class LanePoint(
         /** The route, leg, step and intersection, as the lane choices key it. */
@@ -100,6 +112,12 @@ object RunUpRule {
 
     /** The composed lane at one point: its offset from the exit's edge, and whether the counts leave no doubt about it. */
     data class Composed(val need: Int, val exact: Boolean)
+
+    /**
+     * A row as the card draws it ([drawRow]): [lanes], and [target], the words for its lit lanes, null where they have
+     * none. [inPieces]: the lit lanes are lanes open to every car but do not lie side by side.
+     */
+    class DrawnRow(val lanes: LaneInfo, val target: LaneTarget?, val inPieces: Boolean)
 
     /**
      * The side the exit leaves on: the side of the maneuver's own [modifier], the route step's and
@@ -226,7 +244,7 @@ object RunUpRule {
         val exit = litAtExit(exitLanes, edge)
         if (edge == null) {
             val odd = if (exit.designatedOnly) ODD_DESIGNATED_ONLY else null
-            return RunUpLanes(drawn(exitLanes, exit.lit), target = null, key = exitKey, odd = odd, need = null)
+            return RunUpLanes(drawRow(exitLanes, exit.lit, emptySet(), edge = null, exact = true).lanes, target = null, key = exitKey, odd = odd, need = null)
         }
         val points = edgePoints(pointsAhead, edge)
         val plan = compose(points, exit.offset ?: 0, designatedAtEdge(exitLanes, edge))
@@ -239,19 +257,21 @@ object RunUpRule {
         if (shown >= 0) {
             val point = points[shown]
             val composed = plan[shown]
-            lanes = drawn(point.lanes, listOf(point.order[composed.need]))
+            val row = drawRow(point.lanes, listOf(point.order[composed.need]), emptySet(), edge, composed.exact)
+            lanes = row.lanes
             key = point.key
             need = composed.need
-            target = if (composed.exact) words(edge, 1, composed.need, point.openLanes) else null
+            target = row.target
             odd = if (composed.exact) null else ODD_COMPOSED
         } else {
-            lanes = drawn(exitLanes, exit.lit)
+            val row = drawRow(exitLanes, exit.lit, emptySet(), edge, exact = true)
+            lanes = row.lanes
             key = exitKey
             need = exit.offset
-            target = if (exit.inOnePiece) words(edge, exit.lit.size, exit.offset, exitLanes.count { !it.designated }) else null
+            target = row.target
             odd = when {
                 exit.designatedOnly -> ODD_DESIGNATED_ONLY
-                exit.lit.isNotEmpty() && !exit.inOnePiece -> ODD_PIECES
+                row.inPieces -> ODD_PIECES
                 else -> null
             }
             // The points on the way that are no edge points still count: the exit's lane has to
@@ -265,7 +285,33 @@ object RunUpRule {
             target = null
             odd = ODD_UNKNOWN_BRANCH
         }
-        return RunUpLanes(lanes, target, key, odd, need)
+        return RunUpLanes(lanes, target, key, odd, need, edge)
+    }
+
+    /**
+     * A point's lanes as the card draws them, lit on lanes chosen elsewhere, as the lane plan chooses them, and the words
+     * for those lanes: the one place rows and words are composed. Every lane of [lanes], as the route lists them from
+     * the leftmost, is drawn: [lit] (indices into [lanes]) lit with the arrow the route takes there, those kept for car
+     * pools dim, the lanes of [outline] as outlines, never lit. The words name [lit] counted from [edge] among the lanes
+     * open to every car that are no outline, and there are words only where [exact] (the counts on the way leave no
+     * doubt), every lit lane is such a lane, the lit lanes lie side by side, are not every such lane, and are few enough
+     * or near enough the edge to name ([LaneTarget.hasWords]).
+     */
+    fun drawRow(lanes: List<RouteLane>, lit: List<Int>, outline: Set<Int>, edge: LaneEdge?, exact: Boolean): DrawnRow {
+        val on = lit.filter { it in lanes.indices && it !in outline }
+        val drawn = LaneInfo(
+            lanes.mapIndexed { i, lane ->
+                val isLit = i in on
+                Lane(lane.indications, isRecommended = isLit, activeIndication = if (isLit) litArrow(lane) else null, designated = lane.designated, outline = i in outline)
+            },
+        )
+        if (edge == null || on.isEmpty()) return DrawnRow(drawn, target = null, inPieces = false)
+        val open = openFromEdge(lanes, edge).filter { it !in outline }
+        val places = on.map { open.indexOf(it) }.sorted()
+        if (places.first() < 0) return DrawnRow(drawn, target = null, inPieces = false)
+        val inOnePiece = places.last() - places.first() == places.size - 1
+        val target = if (exact && inOnePiece) words(edge, places.size, places.first(), open.size) else null
+        return DrawnRow(drawn, target, inPieces = !inOnePiece)
     }
 
     /** The exit's lanes to use, as indices into its lanes, and where they lie. */
@@ -322,17 +368,6 @@ object RunUpRule {
         if (offset == null || count <= 0 || count >= openLanes) return null
         return LaneTarget(edge, count, offset).takeIf { it.hasWords }
     }
-
-    /**
-     * The lanes as the card draws them: every lane, those kept for car pools dim, the [lit] ones
-     * recommended with the arrow the route takes there.
-     */
-    private fun drawn(lanes: List<RouteLane>, lit: List<Int>): LaneInfo = LaneInfo(
-        lanes.mapIndexed { i, lane ->
-            val on = i in lit
-            Lane(lane.indications, isRecommended = on, activeIndication = if (on) litArrow(lane) else null, designated = lane.designated)
-        },
-    )
 
     /** The arrow the route takes from a lit lane: the one the route names, else the lane's arrow that turns least, else straight on. */
     private fun litArrow(lane: RouteLane): TurnModifier =

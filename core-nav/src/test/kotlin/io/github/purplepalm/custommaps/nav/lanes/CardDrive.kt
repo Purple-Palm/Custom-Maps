@@ -17,9 +17,11 @@ import io.github.purplepalm.custommaps.nav.model.TurnModifier
  * engine's lane choices make it (engine `LaneChoices`: the points of each step, the one run-up latch, the
  * run-up's row from [RunUpRule], a lane choice's row within its close view's window) and as [CardLanes]
  * picks one; the next maneuver's own row lights the lanes the route marks, as the navigation SDK's banner
- * does. Keys are the route's node indices. Test code only.
+ * does. With a [plan], as the engine has it once the route's plan is held: the latch holds through the ramps
+ * the plan holds through ([LanePlan.rampAfter]), with the split's row on the ramp, and the run-up's row is read
+ * from the plan ([CardPlanRow]). Keys are the route's node indices. Test code only.
  */
-internal class CardDrive(private val route: LaneRoute, private val tuning: CameraTuning = CameraTuning.PHONE) {
+internal class CardDrive(private val route: LaneRoute, private val tuning: CameraTuning = CameraTuning.PHONE, private val plan: LanePlan? = null) {
 
     /** A row the card began to show with the car at [station]: of the lane point [node], with [target] as its words. */
     data class Shown(val station: Double, val node: Int, val row: CardPlanAgreement.Row, val target: LaneTarget?, val odd: String?)
@@ -27,8 +29,11 @@ internal class CardDrive(private val route: LaneRoute, private val tuning: Camer
     private val nodes = route.nodes
     private val maneuvers = nodes.indices.filter { nodes[it].maneuver != null }
 
-    /** Every row the card shows as the car drives the route from its start, one update each [every] metres, each when it begins. */
-    fun drive(every: Double = 1.0): List<Shown> {
+    /**
+     * Every row the card shows as the car drives the route from its start, one update each [every] metres, each when it
+     * begins; with [everyUpdate], the row of every update.
+     */
+    fun drive(every: Double = 1.0, everyUpdate: Boolean = false): List<Shown> {
         val latch = RunUpLatch(tuning)
         val shown = ArrayList<Shown>()
         var cardKey: Int? = null
@@ -54,18 +59,25 @@ internal class CardDrive(private val route: LaneRoute, private val tuning: Camer
             if (exit.isLanePoint && exit.maneuver?.viewStaysUp == true && toExit >= 0.0) {
                 choices.add(choice(exitNode, toExit, nodes[exitNode - 1].freeway, atManeuver = true, edgeLeaves = false))
             }
-            val held = latch.onProgress(now, choices, speed, onRoute = true)
+            // As the engine hands the latch the ramp its plan holds through after the gore of the exit it holds.
+            val ramp = latch.exitKey?.toIntOrNull()?.let { plan?.rampAfter(it) }
+            val held = if (plan == null) {
+                latch.onProgress(now, choices, speed, onRoute = true)
+            } else {
+                latch.onProgress(now, choices, speed, onRoute = true, routeMeters = station, rampMeters = ramp?.meters ?: Double.NaN, rampMps = ramp?.planningMps ?: Double.NaN)
+            }
             var source = CardLanes.Source.NONE
             var node = -1
             var lanes: List<Lane> = emptyList()
             var target: LaneTarget? = null
             var odd: String? = null
-            if (held != null) {
+            if (held != null || latch.rampAhead >= 0.0) {
                 val ahead = points.filter { nodes[it].station - station >= 0.0 }.map { RunUpRule.LanePoint(it.toString(), nodes[it].station - station, nodes[it].lanes) }
                 val branchAhead = (stepFirst + 1 until exitNode).any { b ->
                     edge != null && !nodes[b].isLanePoint && nodes[b - 1].freeway && LaneEvidence.branchesOff(nodes[b], edge) && nodes[b].station - station >= 0.0
                 }
-                val row = RunUpRule.row(edge, ahead, exitNode.toString(), exit.lanes, branchAhead)
+                val rule = RunUpRule.row(edge, ahead, exitNode.toString(), exit.lanes, branchAhead)
+                val row = if (rule == null || plan == null) rule else CardPlanRow.of(rule, plan, plan.topology.points.first { it.node == rule.key.toInt() }, station)
                 if (row != null) {
                     source = CardLanes.Source.RUN_UP
                     node = row.key.toInt()
@@ -90,7 +102,7 @@ internal class CardDrive(private val route: LaneRoute, private val tuning: Camer
                 }
             }
             val now2 = Triple(source, node, lanes to target)
-            if (source != CardLanes.Source.NONE && now2 != last) {
+            if (source != CardLanes.Source.NONE && (now2 != last || everyUpdate)) {
                 shown.add(Shown(station, node, CardPlanAgreement.Row(source, lanes, words = target != null, exact = odd != RunUpRule.ODD_COMPOSED), target, odd))
             }
             last = now2

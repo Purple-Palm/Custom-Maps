@@ -9,13 +9,17 @@ import com.mapbox.api.directions.v5.models.StepIntersection
 import com.mapbox.api.directions.v5.models.StepManeuver
 import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.LaneTarget
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -242,6 +246,32 @@ class LanePlansTest {
         assertNull(held.rampAfter(null))
         // Without lanes at the turn the plan constrains nothing on the ramp: none.
         assertNull(requireNotNull(plan()).rampAfter("route-a#0/0/0/end"))
+    }
+
+    @Test
+    fun `the card's run-up row reads the plan of its route through the lane choices' keys`() {
+        val held = requireNotNull(plan())
+        val key = "route-a#0/0/0/end"
+        val gore = requireNotNull(held.pointOf(key))
+        val rule = requireNotNull(RunUpRule.row(LaneEdge.RIGHT, emptyList(), key, held.input.route.nodes[gore.node].lanes, branchAhead = false))
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 2, 0), rule.target)
+        val rows = CardPlanRow()
+        // Past the road without lane data at 12, the plan's lanes in words; the same object at the next update.
+        val near = along(13)
+        val row = requireNotNull(rows.rowFrom(rule, held, near, held.at(near), coming = false))
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 2, 0), row.target)
+        assertEquals(listOf(3, 4), row.lanes.lanes.indices.filter { row.lanes.lanes[it].isRecommended })
+        val next = near + 30.0
+        assertSame(row, rows.rowFrom(rule, held, next, held.at(next), coming = false))
+        // Before it, no words: the road may take the right lane with it.
+        val far = requireNotNull(rows.rowFrom(rule, held, along(11), held.at(along(11)), coming = false))
+        assertNull(far.target)
+        assertEquals(RunUpRule.ODD_UNKNOWN_AHEAD, far.odd)
+        // While the plan of the route is on its way, no words; with no plan of it, the lane choices' row as it is.
+        assertEquals(RunUpRule.ODD_NOT_NAMED, CardPlanRow().rowFrom(rule, null, Double.NaN, held.at(near), coming = true)?.odd)
+        assertSame(rule, CardPlanRow().rowFrom(rule, null, Double.NaN, held.at(near), coming = false))
+        // A key of no lane point of the route: no words.
+        assertNull(CardPlanRow().rowFrom(rule.copy(key = "route-b#0/0/0/end"), held, near, held.at(near), coming = false)?.target)
     }
 
     @Test

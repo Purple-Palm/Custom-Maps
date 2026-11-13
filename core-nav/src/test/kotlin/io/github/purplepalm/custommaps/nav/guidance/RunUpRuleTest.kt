@@ -551,4 +551,70 @@ class RunUpRuleTest {
             }
         }
     }
+
+    // ------------------------------------------------------------------ rows for lanes chosen elsewhere (the lane plan)
+
+    @Test
+    fun `a row drawn for lanes chosen elsewhere is the rule's own where it lights the same lanes`() {
+        // Every row the rule makes, drawn again for its own lit lanes and no outline: the same lanes and words.
+        val approaches = listOf(
+            // S15, S8 and S16 of the design's rig.
+            Approach(right, listOf(at(1_400.0, "T1", s(), s(), s(), s(), sr(false)), at(800.0, "T2", s(), s(), sr(false), sr(false))), listOf(s(false), s(false), sr())),
+            Approach(right, listOf(at(500.0, "D", s(), s(), s(), s(false))), listOf(s(false), s(false), s(false), sr())),
+            Approach(left, listOf(at(1_200.0, "T1", sl(false), s(), s(), s(), s())), listOf(hov(), sl(), s(false), s(false))),
+        )
+        for (approach in approaches) {
+            for (toGore in 2_200 downTo 0 step 50) {
+                val row = approach.rowAt(toGore.toDouble()) ?: continue
+                val lanes = if (row.key == "E") approach.exit else approach.points.first { it.second.key == row.key }.second.lanes
+                val lit = row.lanes.lanes.indices.filter { row.lanes.lanes[it].isRecommended }
+                val drawn = RunUpRule.drawRow(lanes, lit, emptySet(), row.edge, exact = row.odd != RunUpRule.ODD_COMPOSED)
+                assertEquals(row.lanes, drawn.lanes, "$toGore m")
+                if (row.odd == null) assertEquals(row.target, drawn.target, "$toGore m")
+            }
+        }
+        // The rule says which side its words count from.
+        assertEquals(right, approaches[0].rowAt(2_000.0)?.edge)
+        assertEquals(left, approaches[2].rowAt(2_000.0)?.edge)
+    }
+
+    @Test
+    fun `an outline is drawn, never lit, and never counted in the words`() {
+        // A right exit: the option lane lit on the exit's arrow, the exit-only lane beside it still to come.
+        val lanes = listOf(s(), s(), s(), RouteLane(setOf(s, sr), valid = true, active = true, validIndication = sr), sr())
+        val toCome = RunUpRule.drawRow(lanes, listOf(3), setOf(4), right, exact = true)
+        assertTrue(toCome.lanes.lanes[4].outline)
+        assertFalse(toCome.lanes.lanes[4].isRecommended)
+        assertEquals(sr, toCome.lanes.lanes[3].activeIndication)
+        // Counted without the outline the option lane is the right lane; drawn as a lane it is the second from the right.
+        assertEquals(LaneTarget(right, 1, 0), toCome.target)
+        assertEquals(LaneTarget(right, 1, 1), RunUpRule.drawRow(lanes, listOf(3), emptySet(), right, exact = true).target)
+        // Asked to light an outline, it does not: the outline stays unlit and out of the count.
+        val asked = RunUpRule.drawRow(lanes, listOf(3, 4), setOf(4), right, exact = true)
+        assertFalse(asked.lanes.lanes[4].isRecommended)
+        assertEquals(LaneTarget(right, 1, 0), asked.target)
+        // A far-side outline changes no offset, but every lane drawn lit is no lane named: no words.
+        val farSide = RunUpRule.drawRow(listOf(s(), sr(), sr()), listOf(1, 2), setOf(0), right, exact = true)
+        assertNull(farSide.target)
+        assertEquals(LaneTarget(right, 2, 0), RunUpRule.drawRow(listOf(s(), sr(), sr()), listOf(1, 2), emptySet(), right, exact = true).target)
+    }
+
+    @Test
+    fun `a row drawn for lanes chosen elsewhere has words only where they leave no doubt`() {
+        val lanes = listOf(hov(), s(), s(), s(), sr())
+        assertNull(RunUpRule.drawRow(lanes, listOf(3), emptySet(), right, exact = false).target, "the counts on the way leave doubt")
+        val pieces = RunUpRule.drawRow(lanes, listOf(2, 4), emptySet(), right, exact = true)
+        assertNull(pieces.target)
+        assertTrue(pieces.inPieces)
+        assertNull(RunUpRule.drawRow(lanes, listOf(1, 2, 3, 4), emptySet(), right, exact = true).target, "every open lane")
+        assertNull(RunUpRule.drawRow(lanes, listOf(1), emptySet(), right, exact = true).target, "too far in to name")
+        assertNull(RunUpRule.drawRow(lanes, listOf(0), emptySet(), right, exact = true).target, "a car pool lane")
+        assertNull(RunUpRule.drawRow(lanes, listOf(4), emptySet(), edge = null, exact = true).target, "no side")
+        assertNull(RunUpRule.drawRow(lanes, emptyList(), emptySet(), right, exact = true).target, "nothing lit")
+        // The car pool lane is drawn dim, never counted: the right lane of four open ones.
+        val exit = RunUpRule.drawRow(lanes, listOf(4), emptySet(), right, exact = true)
+        assertTrue(exit.lanes.lanes[0].designated)
+        assertEquals(LaneTarget(right, 1, 0), exit.target)
+        assertFalse(exit.inPieces)
+    }
 }

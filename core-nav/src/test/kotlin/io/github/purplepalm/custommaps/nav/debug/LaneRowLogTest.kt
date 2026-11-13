@@ -196,6 +196,18 @@ class LaneRowLogTest {
     }
 
     @Test
+    fun `a row read from the lane plan says why it has no words`() {
+        for (odd in listOf(RunUpRule.ODD_OPENS_AHEAD, RunUpRule.ODD_UNKNOWN_AHEAD, RunUpRule.ODD_NOT_NAMED)) {
+            val log = LaneRowLog()
+            val quiet = exitRow.copy(target = null, odd = odd, edge = LaneEdge.RIGHT)
+            val line = requireNotNull(log.at(snapshot(runUpLanes = quiet), runUpMeters = 700.0, runUp = "r/0/2/end", start = "edge"))
+            assertEquals(odd, line["odd"])
+            assertFalse("words" in line)
+        }
+        assertEquals(listOf("opens_ahead", "unknown_ahead", "not_named"), listOf(RunUpRule.ODD_OPENS_AHEAD, RunUpRule.ODD_UNKNOWN_AHEAD, RunUpRule.ODD_NOT_NAMED))
+    }
+
+    @Test
     fun `a row lit only on a lane kept for car pools says so, whichever row it is`() {
         val carPoolLit = Lane(setOf(TurnModifier.SLIGHT_LEFT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_LEFT, designated = true)
         val onlyCarPool = LaneInfo(listOf(carPoolLit, off, off, off))

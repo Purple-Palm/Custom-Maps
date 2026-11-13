@@ -86,8 +86,9 @@ data class LanesAhead(
 /**
  * The card's lane row on a run-up to an exit or a fork: the lanes of the next point on the way
  * where a lane at the exit's side leaves the route, lit on the one lane that leads through every
- * such point to the exit, and from the last of them on the exit's own lanes. It holds no distance,
- * so it stays the same object for as long as the row does.
+ * such point to the exit, and from the last of them on the exit's own lanes. Where the route has a
+ * lane plan, the plan lights it and marks the lanes the map does not draw yet as outlines. It holds
+ * no distance, so it stays the same object for as long as the row does.
  */
 data class RunUpLanes(
     /** The lanes the card draws, from the leftmost: the ones to use recommended, lanes for car pools and buses dim. */
@@ -103,4 +104,6 @@ data class RunUpLanes(
      * from 0, for the log; null when the side is not known or no lane open to every car is lit.
      */
     val need: Int? = null,
+    /** The side the exit leaves on, which the lanes and the words count from; null when it cannot be told. */
+    val edge: LaneEdge? = null,
 )

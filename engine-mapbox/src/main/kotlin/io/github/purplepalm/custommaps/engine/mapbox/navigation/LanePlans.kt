@@ -4,6 +4,7 @@ import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindows
 import io.github.purplepalm.custommaps.nav.lanes.LaneCarry
@@ -15,6 +16,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 
 /*
  * The lane plan of each primary route a drive uses (the app's own lanes, design 5): built once for the
@@ -263,6 +265,15 @@ internal fun carryLine(shapes: List<List<List<Point>>>, input: LaneRouteInput): 
     }
     return LaneCarry.Line.of(steps, starts)
 }
+
+/**
+ * The card's run-up row for [rule], the lane choices' row of a progress update, read from [held], the plan of the update's
+ * route, with the car at [station] on that route and the plan there [atCar] ([CardPlanRow]): the row's point is found by the
+ * lane choices' own key. While the plan of the update's route is on its way ([coming]) the rule's row has no words; without
+ * a plan of it, the rule's row stands.
+ */
+internal fun CardPlanRow.rowFrom(rule: RunUpLanes?, held: RouteLanePlan?, station: Double, atCar: PlanSegment?, coming: Boolean): RunUpLanes? =
+    row(rule, held?.plan, rule?.let { held?.pointOf(it.key) }, station, atCar.takeIf { held != null }, coming)
 
 /** Where an error line says a lane plan could not be made. */
 internal const val LANE_PLAN_ERROR = "lane_plan"

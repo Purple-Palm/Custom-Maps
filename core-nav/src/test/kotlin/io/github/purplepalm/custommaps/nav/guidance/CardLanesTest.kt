@@ -74,6 +74,20 @@ class CardLanesTest {
     }
 
     @Test
+    fun `a run-up's row from the lane plan comes as it is, its lanes still to come and its want of words included`() {
+        val toCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
+        val option = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
+        val lanes = LaneInfo(listOf(off, off, off, option, toCome))
+        val fromPlan = RunUpLanes(lanes, target = null, key = "r/0/2/end", odd = RunUpRule.ODD_OPENS_AHEAD, need = 0, edge = LaneEdge.RIGHT)
+        val row = CardLanes.of(snapshot(maneuverLanes, choice, fromPlan))
+        assertEquals(Source.RUN_UP, row.source)
+        assertSame(lanes, row.lanes)
+        assertNull(row.target)
+        // A pending card shows none of it.
+        assertEquals(Source.NONE, CardLanes.of(snapshot(maneuverLanes, choice, fromPlan, pending = true)).source)
+    }
+
+    @Test
     fun `no lanes at all is no row`() {
         val none = CardLanes.of(snapshot())
         assertEquals(Source.NONE, none.source)

@@ -228,7 +228,10 @@ object LanePlanner {
     private class UnknownExitRecord(val station: Double, route: LaneRoute) {
         private val node: Int? = route.nodes.indices.firstOrNull { route.nodes[it].station >= station && LaneEvidence.planTurns(route.nodes[it]) }
 
-        fun hold(inWindow: Boolean, droppedAt: Double?) = LanePlan.UnknownExitHold(station, node, inWindow, droppedAt)
+        /** Where the step it lies on begins: the last maneuver the route turns at before it. */
+        private val stepFrom: Double = route.nodes.lastOrNull { it.station < station && LaneEvidence.planTurns(it) }?.station ?: Double.NEGATIVE_INFINITY
+
+        fun hold(inWindow: Boolean, droppedAt: Double?) = LanePlan.UnknownExitHold(station, node, inWindow, droppedAt, stepFrom)
     }
 }
 
@@ -321,9 +324,19 @@ class LanePlan internal constructor(
      * maneuver at the intersection [node] (null past the route's last). [inWindow]: it lies in a card
      * window. [droppedAt]: the station where the plan named the lane at that edge before the road all the
      * same, because no other lane of the band was left there (P7's limit); null where the hold lasted.
+     * [stepFrom]: where its step begins, the station of the last maneuver the route turns at before it.
      */
-    data class UnknownExitHold(val station: Double, val node: Int?, val inWindow: Boolean, val droppedAt: Double?) {
+    data class UnknownExitHold(
+        val station: Double,
+        val node: Int?,
+        val inWindow: Boolean,
+        val droppedAt: Double?,
+        val stepFrom: Double = Double.NEGATIVE_INFINITY,
+    ) {
         val held: Boolean get() = droppedAt == null
+
+        /** Whether it lies at or ahead of a car at [station] on the same step: the card's words wait until it is passed. */
+        fun ahead(station: Double): Boolean = station > stepFrom && station <= this.station
     }
 
     /**

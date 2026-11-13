@@ -1,10 +1,13 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
 import io.github.purplepalm.custommaps.nav.guidance.CardLanes
+import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.GORE
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.LaneTarget
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -228,6 +231,124 @@ class CardPlanAgreementTest {
         assertEquals(listOf(index), CardPlanAgreement.of(shown.row, plan, gore, requireNotNull(a5.possibleFrom) - 1.0).outline, "before the previous lane point")
         assertTrue(CardPlanAgreement.of(shown.row, plan, gore, requireNotNull(a5.possibleFrom) + 1.0).outline.isEmpty(), "possible from there")
         assertTrue(CardPlanAgreement.of(shown.row, plan, gore, GORE - 100.0).outline.isEmpty())
+    }
+
+    // ------------------------------------------------------------------ the card's row from the plan
+
+    /**
+     * The freeway scenes of the design's scenario line as main has them, through the card's row from the plan: IA and its
+     * far side, IW31, the rig's S5 to S9, S11 (IA's exit with a turn 400 m past it; S12 is the same for the card), S13,
+     * S15 to S17 and S20 (S14 is S9 for the card), GEOM's S2, the car-pool case that has a run-up, the hold cases and a
+     * keep left. GEOM's S6 has no run-up (its exit is no lane choice), and the cases where no lane can be named are below.
+     */
+    private val freeway = linkedMapOf(
+        "s11" to LaneScenes.approach(emptyList(), LaneScenes.iaExit(), id = "s11"),
+    ).apply {
+        val all = LaneScenes.all()
+        for (name in listOf(
+            "ia", "ia-far", "iw31", "s5", "s6", "s7", "s8", "s9", "s13", "s15", "s16", "s17", "s20", "geom-s2-400", "geom-s2-150",
+            "carpool-ends", "prefers-other", "prefers-middle", "prefers-left", "split-right", "two-added",
+            "edge-before-road", "dropped-hold-stays", "keep-left",
+        )) {
+            put(name, requireNotNull(all[name]) { name })
+        }
+    }
+
+    @Test
+    fun `the card's row from the plan agrees with the plan at every update, words and outlines included`() {
+        for ((name, route) in freeway) {
+            val plan = plan(route)
+            var runUps = 0
+            for (shown in CardDrive(route, plan = plan).drive(everyUpdate = true)) {
+                if (shown.row.source != CardLanes.Source.RUN_UP) continue
+                runUps++
+                val point = requireNotNull(plan.topology.points.firstOrNull { it.node == shown.node }) { "$name: no lane point at ${shown.node}" }
+                val result = CardPlanAgreement.of(shown.row, plan, point, shown.station)
+                val at = "$name at ${GORE - shown.station} m before the gore"
+                assertTrue(result.agree, "$at: ${result.why}")
+                // The lanes the map does not draw yet are the row's outlines, never lit.
+                assertEquals(result.outline, shown.row.lanes.indices.filter { shown.row.lanes[it].outline }, at)
+                assertTrue(shown.row.lanes.none { it.outline && it.isRecommended }, at)
+                // Words only where nothing opens ahead and no road without lane data is left before the exit.
+                if (shown.target != null) {
+                    assertFalse(result.opensAhead, at)
+                    assertFalse(result.unknownAhead, at)
+                    assertTrue(result.exact, at)
+                }
+            }
+            assertTrue(runUps > 0, "$name: no run-up")
+        }
+    }
+
+    @Test
+    fun `where no lane can be named the card's row from the plan has no words`() {
+        // A left exit beyond the car-pool lane (where only the car-pool lane can be used, as in GEOM's S5, the exit is no
+        // lane choice and there is no run-up).
+        for (route in listOf(LaneScenes.carpoolBeyond())) {
+            val plan = plan(route)
+            val rows = CardDrive(route, plan = plan).drive(everyUpdate = true).filter { it.row.source == CardLanes.Source.RUN_UP }
+            assertTrue(rows.isNotEmpty(), route.routeId)
+            for (shown in rows) {
+                assertNull(shown.target, route.routeId)
+                assertEquals(CardPlanAgreement.Why.NO_LANE, CardPlanAgreement.of(shown.row, plan, plan.topology.points.first { it.node == shown.node }, shown.station).why)
+            }
+        }
+    }
+
+    @Test
+    fun `on the W31 scene the card lights the option lane, the exit-only lane an outline until it may be there, words only once it is`() {
+        val route = LaneScenes.iw31()
+        val plan = plan(route)
+        val exitNode = route.nodes.indexOfFirst { it.station == GORE }
+        val gore = plan.topology.points.first { it.node == exitNode }
+        val a5 = plan.topology.lanes.single { it.possibleFrom != null && it.id !in plan.named }
+        val option = gore.lanes.indexOf(requireNotNull(plan.segmentAt(gore.station)?.named))
+        val toCome = gore.lanes.indexOf(a5.id)
+        val window = plan.windows.first { it.kind == CardWindow.Kind.RUN_UP }
+        // The exit's own row, as the rule makes it all through the run-up: no point on the way is one where the right lane leaves.
+        val rule = requireNotNull(
+            RunUpRule.row(LaneEdge.RIGHT, emptyList(), exitNode.toString(), route.nodes[exitNode].lanes, branchAhead = false),
+        )
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), rule.target)
+        fun at(car: Double) = CardPlanRow.of(rule, plan, gore, car)
+        fun offset(row: RunUpLanes) = CardDrive.offsets(row.lanes.lanes.filter { !it.outline }, listOf(row.lanes.lanes.filter { !it.outline }.indexOfFirst { it.isRecommended }), LaneEdge.RIGHT).single()
+        val possibleFrom = requireNotNull(a5.possibleFrom)
+        // The plan names the option lane from its first stretch in the run-up's window.
+        val named = plan.segments.first { it.inWindow && it.named != null && it.from >= window.from - 1e-9 }.from
+        for (car in listOf(named + 1.0, possibleFrom - 1.0)) {
+            // From the run-up's start to the lane point before the one that first lists it: the option lane is the rightmost
+            // lane drawn, the exit-only lane an outline beside it; no words.
+            val row = at(car)
+            assertTrue(row.lanes.lanes[toCome].outline, "$car")
+            assertEquals(listOf(option), row.lanes.lanes.indices.filter { row.lanes.lanes[it].isRecommended })
+            assertEquals(0, offset(row), "the rightmost at $car")
+            assertNull(row.target)
+            assertEquals(RunUpRule.ODD_OPENS_AHEAD, row.odd)
+            val result = CardPlanAgreement.of(CardPlanAgreement.Row(CardLanes.Source.RUN_UP, row.lanes.lanes, words = false), plan, gore, car)
+            assertTrue(result.agree)
+            assertEquals(listOf(toCome), result.outline)
+            assertTrue(result.opensAhead)
+        }
+        for (car in listOf(possibleFrom, a5.opens - 1.0)) {
+            // From where it may be there: a lane of the row, the option lane the rightmost but one, still no words.
+            val row = at(car)
+            assertFalse(row.lanes.lanes[toCome].outline, "$car")
+            assertEquals(1, offset(row), "the rightmost but one at $car")
+            assertNull(row.target)
+            assertEquals(RunUpRule.ODD_OPENS_AHEAD, row.odd)
+        }
+        for (car in listOf(a5.opens, GORE - 1.0)) {
+            // From its known start: "2nd from right".
+            val row = at(car)
+            assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), row.target, "$car")
+            assertNull(row.odd)
+            assertTrue(CardPlanAgreement.of(CardPlanAgreement.Row(CardLanes.Source.RUN_UP, row.lanes.lanes, words = true), plan, gore, car).agree)
+        }
+        // Past the gore the close view holds through the ramp to its split, and the card shows the split's row from the
+        // plan: the left lane, in words.
+        val split = CardDrive(route, plan = plan).drive().last { it.row.source == CardLanes.Source.RUN_UP }
+        assertEquals(route.nodes.indexOfFirst { it.station > GORE && it.maneuver?.type == ManeuverType.FORK }, split.node)
+        assertEquals(LaneTarget(LaneEdge.LEFT, 1, 0), split.target)
     }
 
     // ------------------------------------------------------------------ the other outcomes

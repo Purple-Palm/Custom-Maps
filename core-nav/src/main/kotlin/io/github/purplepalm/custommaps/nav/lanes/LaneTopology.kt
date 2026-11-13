@@ -198,6 +198,9 @@ class LaneTopology private constructor(
     /** The lanes of each run. */
     private val runLanes: List<List<Lane>> = runs.map { run -> lanes.filter { it.run == run.index } }
 
+    /** Every lane of the run [run] (an index into [runs]), in id order; none for a run the route does not have. */
+    internal fun lanesOf(run: Int): List<Lane> = runLanes.getOrNull(run).orEmpty()
+
     companion object {
 
         /** The width of a lane on a freeway or a ramp (design 4.2), for tapers. */

@@ -66,6 +66,7 @@ import io.github.purplepalm.custommaps.nav.guidance.StartPlan
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanAgreement
+import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
 import io.github.purplepalm.custommaps.nav.lanes.LaneAgreeLine
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
@@ -77,6 +78,7 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
+import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.network.OfflineReason
 import io.github.purplepalm.custommaps.nav.network.offlineReason
@@ -258,10 +260,25 @@ internal class MapboxNavigationEngine(
 
     /**
      * The plan held for the route of the latest progress update, at the car's station: the one lookup in the
-     * plan each update makes ([LanePlans.planFor], [RouteLanePlan.at]), for the "lane_agree" line only;
-     * nothing on the screen reads it. Null without a plan of that route. Main thread.
+     * plan each update makes ([LanePlans.planFor], [RouteLanePlan.at], [lookUpPlan]), for the card's run-up row
+     * ([CardPlanRow]) and the "lane_agree" line. Null without a plan of that route. Main thread.
      */
     private var lanePlanAtCar: PlanSegment? = null
+
+    /** The plan of the latest progress update's route, where the car's station on it is known; null otherwise. Main thread. */
+    private var lanePlanHeld: RouteLanePlan? = null
+
+    /** The car's station on [lanePlanHeld]'s route at the latest progress update; not a number without it. Main thread. */
+    private var lanePlanStation = Double.NaN
+
+    /**
+     * The card's run-up row read from the lane plan, with every choice of who draws the lanes on the map: the same
+     * object while it does not change; every drive starts it over. Main thread.
+     */
+    private val cardPlanRow = CardPlanRow()
+
+    /** Whether reading the card's row from the plan failed in this drive: one error line, then the lane choices' row as it is. */
+    private var cardPlanFailed = false
 
     /** Where the car was on the route of the plan held at the latest update that had one: for a change of route (D8). Main thread. */
     private var lanePlanCar: CarOnPlan? = null
@@ -925,12 +942,16 @@ internal class MapboxNavigationEngine(
         forgetLaneAgree()
     }
 
-    /** What the card's comparison with the plan remembers of a drive goes: the next drive starts it over. */
+    /** What the card's row from the plan and its comparison with the plan remember of a drive goes: the next drive starts them over. */
     private fun forgetLaneAgree() {
         lanePlanAtCar = null
+        lanePlanHeld = null
+        lanePlanStation = Double.NaN
         lanePlanCar = null
         laneAgreeRows.reset()
         laneAgreeFailed = false
+        cardPlanRow.reset()
+        cardPlanFailed = false
     }
 
     /** The "route_request" line of every route request the app sends, before a trip or inside one. */
@@ -1274,6 +1295,8 @@ internal class MapboxNavigationEngine(
         // The run-up moves once for this update, here or in the map's camera if that asked first;
         // never for an update held back above.
         if (active) laneChoices.runUp(progress, lastMatch?.enhancedLocation?.speed, nowSeconds())
+        // The update's one lookup in the plan of its route, for the card's row and the lane_agree line.
+        if (active) lookUpPlan(progress)
         val next = if (active) maneuverApi.getManeuvers(progress).value?.firstOrNull() else null
         // Without the next maneuver the card stays as it is, but never with a maneuver of the route
         // before a reroute or another change of route: it waits, dimmed, for the new route's.
@@ -1396,26 +1419,18 @@ internal class MapboxNavigationEngine(
     }
 
     /**
-     * For [progress], an update the guards let through, and [snapshot], the card it publishes: the one
-     * lookup in the plan of the update's route at the car's station, and a "lane_agree" line when the card
-     * begins to show a row at a lane point ([LaneAgreeLine.Rows]): the run-up's row, a lane choice's, and on
-     * a freeway the exit's or the fork's own, against the plan there ([CardPlanAgreement]). A progress update
+     * For [progress], an update the guards let through, and [snapshot], the card it publishes: with the
+     * update's one lookup in the plan of its route ([lookUpPlan]), a "lane_agree" line when the card begins
+     * to show a row at a lane point ([LaneAgreeLine.Rows]): the run-up's row, a lane choice's, and on a
+     * freeway the exit's or the fork's own, against the plan there ([CardPlanAgreement]). A progress update
      * of another route than the plan's, and a pending card, read none. Reads only what the navigator already
      * handed over. A failure costs one error line and the lines of the rest of the drive, never the drive.
      */
     private fun logLaneAgree(progress: RouteProgress, snapshot: RouteProgressSnapshot?) {
         if (laneAgreeFailed) return
         try {
-            val held = lanePlans.planFor(progress.navigationRoute.id)
-            val leg = progress.currentLegProgress
-            val stepProgress = leg?.currentStepProgress
-            val car = if (held != null && leg != null && stepProgress != null) {
-                held.station(leg.legIndex, stepProgress.stepIndex, stepProgress.distanceTraveled.toDouble())
-            } else {
-                null
-            }
-            lanePlanAtCar = if (held != null && car != null) held.at(car) else null
-            if (held != null && car != null) lanePlanCar = CarOnPlan(held.routeId, car)
+            val held = lanePlanHeld?.takeIf { it.routeId == progress.navigationRoute.id }
+            val car = lanePlanStation.takeIf { held != null }
             val card = if (snapshot != null) CardLanes.of(snapshot) else NO_ROW
             val key = when (card.source) {
                 CardLanes.Source.RUN_UP -> snapshot?.runUpLanes?.key
@@ -1442,6 +1457,50 @@ internal class MapboxNavigationEngine(
         } catch (e: RuntimeException) {
             laneAgreeFailed = true
             debugLog.error(LaneAgreeLine.TYPE, e)
+        }
+    }
+
+    /**
+     * The update's one lookup in the lane plan of [progress]'s route, an update the guards let through: the plan held
+     * for that route, the car's station on it and the plan there ([LanePlans.planFor], [RouteLanePlan.at]), for the
+     * card's run-up row and the "lane_agree" line; none where no plan of the route is held. The station is also kept for
+     * a change of route (D8). Reads only what the navigator already handed over; it cannot fail the drive.
+     */
+    private fun lookUpPlan(progress: RouteProgress) {
+        lanePlanHeld = null
+        lanePlanStation = Double.NaN
+        lanePlanAtCar = null
+        val held = lanePlans.planFor(progress.navigationRoute.id) ?: return
+        val leg = progress.currentLegProgress ?: return
+        val stepProgress = leg.currentStepProgress ?: return
+        val car = try {
+            held.station(leg.legIndex, stepProgress.stepIndex, stepProgress.distanceTraveled.toDouble())
+        } catch (e: RuntimeException) {
+            null
+        } ?: return
+        lanePlanHeld = held
+        lanePlanStation = car
+        lanePlanAtCar = held.at(car)
+        lanePlanCar = CarOnPlan(held.routeId, car)
+    }
+
+    /**
+     * The card's run-up row for [rule], the lane choices' row of this update ([LaneChoices.runUp]), read from the lane
+     * plan of [progress]'s route ([CardPlanRow]) with every choice of who draws the lanes on the map: lit on the plan's
+     * lanes, the lanes the map does not draw yet as outlines, and words only where the plan allows them; while that
+     * plan is on its way, the rule's row without words. The same object while it does not change. A failure costs the
+     * plan's reading for the rest of the drive, the rule's row standing, and one error line, never the drive.
+     */
+    private fun runUpRowOf(progress: RouteProgress, rule: RunUpLanes?): RunUpLanes? {
+        if (rule == null || cardPlanFailed) return rule
+        return try {
+            val held = lanePlanHeld?.takeIf { it.routeId == progress.navigationRoute.id }
+            val coming = held == null && lanePlans.answerFor(progress.navigationRoute.id) == null
+            cardPlanRow.rowFrom(rule, held, lanePlanStation, lanePlanAtCar, coming)
+        } catch (e: RuntimeException) {
+            cardPlanFailed = true
+            debugLog.error(CARD_PLAN_ERROR, e)
+            rule
         }
     }
 
@@ -1501,8 +1560,8 @@ internal class MapboxNavigationEngine(
         val speed = lastMatch?.enhancedLocation?.speed
         // The leg's maneuvers after the next one: the same list for every update of the step.
         val decided = thenTracker.decide(progress.toSnapshot(next, speed, upcoming.of(progress)))
-        // The latch moved for this update already; this is its row.
-        val runUp = laneChoices.runUp(progress, speed, nowSeconds())
+        // The latch moved for this update already; this is its row, lit from the lane plan of the route.
+        val runUp = runUpRowOf(progress, laneChoices.runUp(progress, speed, nowSeconds()))
         // None on a run-up: its row stands in for a lane choice's, and nothing of one is kept.
         val lanes = laneChoices.lanesAhead(laneChoices.ahead(progress), speed)
         // Added onto what the tracker decided: a copy of a fresh snapshot would lose the rule's
@@ -1713,6 +1772,9 @@ internal class MapboxNavigationEngine(
 
         /** The card without a lane row. */
         val NO_ROW = CardLanes(CardLanes.Source.NONE)
+
+        /** Where an error line says the card's run-up row could not be read from the lane plan. */
+        const val CARD_PLAN_ERROR = "cardPlanRow"
     }
 }
 
