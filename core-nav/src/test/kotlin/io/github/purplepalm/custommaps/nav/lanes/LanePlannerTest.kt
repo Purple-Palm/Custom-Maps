@@ -827,11 +827,22 @@ class LanePlannerTest {
         // to plan, two tables of about 100 MB at once. Now each lane keeps costs only where it is there.
         val bean = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
         assumeTrue(bean.isThreadAllocatedMemorySupported && bean.isThreadAllocatedMemoryEnabled)
+        // What a plan allocates depends on how much of the planner the JIT has compiled at that point (compiled code
+        // allocates less), so one measurement of each length can catch them in different states. After a warm-up of both
+        // lengths, each is planned [MEMORY_RUNS] times, in turn, and its least is taken: both as the JIT leaves them.
+        val half = longRun(300)
+        val full = longRun(600)
         bytesToPlan(longRun(30), bean)
-        val half = bytesToPlan(longRun(300), bean)
-        val full = bytesToPlan(longRun(600), bean)
-        assertTrue(full < 80_000_000L, "600 km: $full bytes")
-        assertTrue(full < 3 * half, "600 km: $full bytes, 300 km: $half bytes")
+        bytesToPlan(half, bean)
+        bytesToPlan(full, bean)
+        var halfBytes = Long.MAX_VALUE
+        var fullBytes = Long.MAX_VALUE
+        repeat(MEMORY_RUNS) {
+            halfBytes = minOf(halfBytes, bytesToPlan(half, bean))
+            fullBytes = minOf(fullBytes, bytesToPlan(full, bean))
+        }
+        assertTrue(fullBytes < 80_000_000L, "600 km: $fullBytes bytes")
+        assertTrue(fullBytes < 3 * halfBytes, "600 km: $fullBytes bytes, 300 km: $halfBytes bytes")
     }
 
     @Test
@@ -862,5 +873,10 @@ class LanePlannerTest {
         for (method in plans) {
             assertEquals(listOf(LaneTopology::class.java, List::class.java, List::class.java), method.parameterTypes.toList())
         }
+    }
+
+    private companion object {
+        /** How often each length is planned for the memory test once the planner is warm; the least counts. */
+        const val MEMORY_RUNS = 3
     }
 }
