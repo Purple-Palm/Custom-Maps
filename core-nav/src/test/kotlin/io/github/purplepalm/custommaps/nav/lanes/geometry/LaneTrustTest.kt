@@ -72,7 +72,7 @@ class LaneTrustTest {
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
+        assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
     }
 
     @Test
@@ -84,7 +84,7 @@ class LaneTrustTest {
             check(build("random-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
         }
         assertSeen("line", "paint", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "gore")
+        assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "gore")
     }
 
     @Test
@@ -102,7 +102,7 @@ class LaneTrustTest {
         // careful reading of a few of these routes; never on the scenes or the approaches above.
         assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
+        assertSeen("simpleLine", "simpleRing", "lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
     }
 
     @Test
@@ -119,7 +119,7 @@ class LaneTrustTest {
             check(built)
         }
         assertTrue(waited > 0, "no lane lit only from where it lies about the path")
-        assertSeen("line", "paint", "named", "toward", "opens", "lit", "tint", "litOnLanes", "litInLane")
+        assertSeen("line", "paint", "named", "toward", "opens", "lit", "tint", "litOnLanes", "litInLane", "simpleLine", "simpleRing")
     }
 
     /**
@@ -179,6 +179,25 @@ class LaneTrustTest {
         litOnTheNamedLane(b)
         bareWhereReachedOnTheLine(b)
         goreWhereLanesAreLeft(b)
+        noLoops(b)
+    }
+
+    // ------------------------------------------------------------------ 1, 2: no line and no ring of ours crosses itself
+
+    /**
+     * Where a line lies farther out than a tight arc's radius it turns where it would cross itself (design 3.3): no line of
+     * ours (a lane line, an edge or channelizing line, a lit lane's edge, a diamond's outline) and no ring (the asphalt, a lane
+     * drawn darker, a tint, the lit lane, an arrow) crosses itself anywhere, on the route's carriageway, a stub or past a turn.
+     */
+    private fun noLoops(b: Built) {
+        for (f in b.features) {
+            for (part in f.parts) {
+                val closed = f.kind.polygon || f.kind == Kind.DIAMOND
+                val crossing = DrawingProbe.selfCrossing(part.map { SceneLines.local(it) }, closed)
+                assertTrue(crossing == null, "${b.name}: a ${f.part} ${f.kind} ${f.between ?: f.side ?: f.lane} over ${f.from}..${f.to} crosses itself, pieces $crossing")
+                saw(if (closed) "simpleRing" else "simpleLine")
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 8: past a gore the old road's lanes go on and taper away

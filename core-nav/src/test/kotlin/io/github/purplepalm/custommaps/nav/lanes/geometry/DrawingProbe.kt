@@ -1,7 +1,11 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
 
 /** Reads a drawing's features back along a road's axis: where a point lies, and where a polygon's outline crosses a station. */
 internal object DrawingProbe {
@@ -49,6 +53,51 @@ internal object DrawingProbe {
         return out.sorted()
     }
 
+    /**
+     * Two pieces of the line [points] (a ring where [closed]: its last point its first) that cross, by the indices of their
+     * first points, each end of either at least [CROSS_CLEAR_METERS] off the other's line; null where none do. Every pair of
+     * pieces that are not neighbours, found through a grid of [CELL_METERS].
+     */
+    fun selfCrossing(points: List<LocalPoint>, closed: Boolean): Pair<Int, Int>? {
+        val n = points.size - 1
+        if (n < 3) return null
+        val grid = HashMap<Long, MutableList<Int>>()
+        for (i in 0 until n) {
+            val a = points[i]
+            val b = points[i + 1]
+            for (x in floor(min(a.x, b.x) / CELL_METERS).toLong()..floor(max(a.x, b.x) / CELL_METERS).toLong()) {
+                for (y in floor(min(a.y, b.y) / CELL_METERS).toLong()..floor(max(a.y, b.y) / CELL_METERS).toLong()) {
+                    grid.getOrPut(x * 1_000_003L + y) { ArrayList() }.add(i)
+                }
+            }
+        }
+        for (cell in grid.values) {
+            for (p in cell.indices) for (q in p + 1 until cell.size) {
+                val i = min(cell[p], cell[q])
+                val j = max(cell[p], cell[q])
+                if (j - i < 2 || (closed && i == 0 && j == n - 1)) continue
+                if (crosses(points[i], points[i + 1], points[j], points[j + 1])) return i to j
+            }
+        }
+        return null
+    }
+
+    /** Whether the pieces [a] to [b] and [c] to [d] cross, each end of either at least [CROSS_CLEAR_METERS] off the other's line. */
+    private fun crosses(a: LocalPoint, b: LocalPoint, c: LocalPoint, d: LocalPoint): Boolean {
+        fun side(p: LocalPoint, q: LocalPoint, r: LocalPoint): Double {
+            val len = p.distanceTo(q)
+            return if (len < 1e-12) 0.0 else ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)) / len
+        }
+        fun opposite(u: Double, v: Double) = (u > CROSS_CLEAR_METERS && v < -CROSS_CLEAR_METERS) || (u < -CROSS_CLEAR_METERS && v > CROSS_CLEAR_METERS)
+        return opposite(side(c, d, a), side(c, d, b)) && opposite(side(a, b, c), side(a, b, d))
+    }
+
     /** Projections from a guess within a few metres converge to well under a micrometre in this many steps. */
     private const val ITERATIONS = 12
+
+    /** Two pieces cross where each end of either lies at least this far off the other's line: a tenth of a micrometre. */
+    private const val CROSS_CLEAR_METERS = 1e-7
+
+    /** The grid [selfCrossing] finds pieces near each other with. */
+    private const val CELL_METERS = 4.0
 }

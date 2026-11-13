@@ -79,6 +79,9 @@ import kotlin.math.sin
  *   pointing at the lit lane.
  * - Both are cut into pieces at multiples of [PIECE_METERS] from the route's start, with ids that stay the same in every
  *   window ([litId], [tintId]): the map hides a tint behind the car and gives a lit piece its traffic by feature state.
+ * - **A curve too sharp for the lanes** (3.3): where a line or an edge of the asphalt, a lane, a tint or the lit lane lies
+ *   farther out than an arc's radius on its inner side (1 - kappa t <= 0, [RoadAxis.folds]), it turns where it would cross
+ *   itself and nothing of it is drawn where it folds ([Loops]): no line or ring of the drawing crosses itself.
  *
  * Widths are ground widths: the map draws each as a zoom-only base-2 expression ([widthStops]), the asphalt and lines
  * from [ASPHALT_MIN_ZOOM], arrows and diamonds from [SYMBOL_MIN_ZOOM], the lit lane, its edges and the tints from
@@ -1408,13 +1411,13 @@ class LaneDrawing private constructor(
             }
         }
 
-        /** The lit lane's edges along [edges] as two lines, and [edges] emptied. */
+        /** The lit lane's edges along [edges] as two lines without their small loops ([untangle]), and [edges] emptied. */
         private fun litEdges(edges: Strip, lane: Int?, out: MutableList<Feature>) {
             if (edges.stations.size >= 2 && edges.stations.last() - edges.stations.first() > SAME_STATION) {
                 for ((side, points) in listOf(LaneEdge.LEFT to edges.left, LaneEdge.RIGHT to edges.right)) {
                     out.add(
                         Feature(
-                            Kind.LIT_EDGE, edges.stations.first(), edges.stations.last(), listOf(simplify(points)),
+                            Kind.LIT_EDGE, edges.stations.first(), edges.stations.last(), listOf(simplify(untangle(points, edges.stations).first)),
                             width = Width.EDGE, pattern = Pattern.SOLID, lane = lane, side = side,
                         ),
                     )
@@ -1553,42 +1556,65 @@ class LaneDrawing private constructor(
             }
         }
 
-        /** Strips of one polygon kind cut into pieces at multiples of [PIECE_METERS], each a feature with its piece's id. */
+        /**
+         * Strips of one polygon kind cut into pieces at multiples of [PIECE_METERS], each a feature with its piece's id. A strip
+         * is taken whole, its edges without their small loops ([untangle]), before it is cut, so a loop is cut the same where a
+         * piece's start falls on it.
+         */
         private inner class Pieces(private val kind: Kind, private val out: MutableList<Feature>) {
-            private var strip: Strip? = null
-            private var piece = 0L
-            private var lane = 0
-            private var id = 0L
+            private val strip = Strip()
+            private val lanes = ArrayList<Int>()
+            private var idOf: (Long) -> Long = { it }
 
-            /** Adds the sample at [s], its [left] and [right] edges, of [lane]; a piece's start ends the piece before it there. */
+            /** Adds the sample at [s], its [left] and [right] edges, of [lane]; [idOf] gives a piece's id. */
             fun add(s: Double, left: GeoPoint, right: GeoPoint, lane: Int, idOf: (Long) -> Long) {
-                val k = pieceOf(s)
-                val open = strip
-                if (open != null && k != piece) {
-                    if (abs(s - k * PIECE_METERS) <= SAME_STATION) {
-                        open.stations.add(s)
-                        open.left.add(left)
-                        open.right.add(right)
-                    }
-                    close()
-                }
-                val now = strip ?: Strip().also {
-                    strip = it
-                    piece = k
-                    this.lane = lane
-                    id = idOf(k)
-                }
-                now.stations.add(s)
-                now.left.add(left)
-                now.right.add(right)
+                strip.stations.add(s)
+                strip.left.add(left)
+                strip.right.add(right)
+                lanes.add(lane)
+                this.idOf = idOf
             }
 
-            /** Ends the piece being made. */
+            /** Ends the strip being made: its pieces, each from its first sample to the next piece's start where a sample lies there. */
             fun close() {
-                val open = strip ?: return
-                strip = null
-                if (open.stations.last() - open.stations.first() <= SAME_STATION) return
-                polygon(open, kind, Part.ROUTE, lane)?.let { out.add(it.copy(id = id)) }
+                val stations = strip.stations
+                if (stations.size >= 2) {
+                    val (left, leftAt) = untangle(strip.left, stations)
+                    val (right, rightAt) = untangle(strip.right, stations)
+                    val whole = left === strip.left && right === strip.right
+                    var i = 0
+                    while (i < stations.size) {
+                        val k = pieceOf(stations[i])
+                        var j = i
+                        while (j + 1 < stations.size && pieceOf(stations[j + 1]) == k) j++
+                        // The next piece's first sample ends this one too where it lies on the pieces' boundary.
+                        val end = if (j + 1 < stations.size && abs(stations[j + 1] - (k + 1) * PIECE_METERS) <= SAME_STATION) j + 1 else j
+                        val from = stations[i]
+                        val to = stations[end]
+                        if (to - from > SAME_STATION) {
+                            val feature = if (whole) {
+                                ring(strip.left.subList(i, end + 1), strip.right.subList(i, end + 1), kind, Part.ROUTE, lanes[i], from, to)
+                            } else {
+                                ring(between(left, leftAt, from, to), between(right, rightAt, from, to), kind, Part.ROUTE, lanes[i], from, to)
+                            }
+                            feature?.let { out.add(it.copy(id = idOf(k))) }
+                        }
+                        i = j + 1
+                    }
+                }
+                strip.stations.clear()
+                strip.left.clear()
+                strip.right.clear()
+                lanes.clear()
+            }
+
+            /** The part of the edge [points] at [stations] from [from] to [to]: its points between them, and its points at both. */
+            private fun between(points: List<GeoPoint>, stations: List<Double>, from: Double, to: Double): List<GeoPoint> {
+                val part = ArrayList<GeoPoint>()
+                part.add(pointOn(points, stations, from))
+                for (k in stations.indices) if (stations[k] > from && stations[k] < to) part.add(points[k])
+                part.add(pointOn(points, stations, to))
+                return part
             }
         }
 
@@ -1758,29 +1784,64 @@ class LaneDrawing private constructor(
 
         // ------------------------------------------------------------------ features from samples
 
-        /** A polygon of [strip]: its right edge forward and its left edge back, each simplified; null with fewer than two samples. */
+        /**
+         * A polygon of [strip]: its right edge forward and its left edge back, each without its small loops ([untangle]) and
+         * simplified; null with fewer than two samples.
+         */
         private fun polygon(strip: Strip, kind: Kind, part: Part, lane: Int?): Feature? {
             if (strip.stations.size < 2) return null
-            val right = simplify(strip.right)
-            val left = simplify(strip.left)
+            val right = untangle(strip.right, strip.stations).first
+            val left = untangle(strip.left, strip.stations).first
+            return ring(left, right, kind, part, lane, strip.stations.first(), strip.stations.last())
+        }
+
+        /**
+         * The polygon of the edges [left] and [right] from [from] to [to]: the right edge forward and the left back, each
+         * simplified. Where the two edges come within a few centimetres of each other (the tip of a wedge or a taper), simplified
+         * apart they may cross, and the ring is made of the edges as they were made, which never cross there; a ring that still
+         * crosses itself, a piece that begins inside a loop of a curve too tight for it, is made simple ([Loops.cutRing]). Null
+         * where nothing of it is left.
+         */
+        private fun ring(left: List<GeoPoint>, right: List<GeoPoint>, kind: Kind, part: Part, lane: Int?, from: Double, to: Double): Feature? {
+            if (left.isEmpty() || right.isEmpty()) return null
+            val simple = closed(simplify(right), simplify(left))
+            val frame = LocalMeters(simple.first().latitude, simple.first().longitude)
+            val flat = { points: List<GeoPoint> -> points.map { frame.toLocal(it.latitude, it.longitude) } }
+            val ring = if (Loops.ringCrossing(flat(simple)) == null) {
+                simple
+            } else {
+                val raw = closed(right, left)
+                val local = flat(raw)
+                if (Loops.ringCrossing(local) == null) raw else Loops.cutRing(local).map { GeoPoint(frame.latitudeOf(it), frame.longitudeOf(it)) }
+            }
+            if (ring.size < 4) return null
+            return Feature(kind, from, to, listOf(ccw(ring)), part = part, lane = lane)
+        }
+
+        /** The closed ring of [right] forward and [left] back. */
+        private fun closed(right: List<GeoPoint>, left: List<GeoPoint>): List<GeoPoint> {
             val ring = ArrayList<GeoPoint>(right.size + left.size + 1)
             ring.addAll(right)
             for (i in left.indices.reversed()) ring.add(left[i])
             ring.add(ring.first())
-            return Feature(kind, strip.stations.first(), strip.stations.last(), listOf(ccw(ring)), part = part, lane = lane)
+            return ring
         }
 
-        /** Makes [run] a feature: a solid line simplified, a broken or dotted one cut into dashes at the route's stations. */
+        /**
+         * Makes [run] a feature: without its small loops ([untangle]), a solid line simplified, a broken or dotted one cut into
+         * dashes at the route's stations.
+         */
         private fun emit(run: Run, out: MutableList<Feature>, part: Part) {
             if (run.stations.size < 2) return
             val from = run.stations.first()
             val to = run.stations.last()
             if (to - from < SAME_STATION) return
             val style = run.style
+            val (points, stations) = untangle(run.points, run.stations)
             val parts: List<List<GeoPoint>> = if (style.pattern == Pattern.SOLID) {
-                listOf(simplify(run.points))
+                listOf(simplify(points))
             } else {
-                dashes(run, style.pattern)
+                dashes(points, stations, style.pattern)
             }
             if (parts.isEmpty()) return
             val key = run.key
@@ -1800,10 +1861,13 @@ class LaneDrawing private constructor(
             )
         }
 
-        /** The dashes of [run] in [pattern]: each from a multiple of the pattern's period along the route, two points each. */
-        private fun dashes(run: Run, pattern: Pattern): List<List<GeoPoint>> {
-            val from = run.stations.first()
-            val to = run.stations.last()
+        /**
+         * The dashes of the line through [points] at [stations] in [pattern]: each from a multiple of the pattern's period along
+         * the route, two points each.
+         */
+        private fun dashes(points: List<GeoPoint>, stations: List<Double>, pattern: Pattern): List<List<GeoPoint>> {
+            val from = stations.first()
+            val to = stations.last()
             val period = pattern.periodMeters
             val out = ArrayList<List<GeoPoint>>()
             var k = floor(from / period).toLong()
@@ -1812,24 +1876,9 @@ class LaneDrawing private constructor(
                 val d1 = min(to, k * period + pattern.dashMeters)
                 k++
                 if (d1 - d0 < MIN_DASH_METERS) continue
-                out.add(listOf(pointOn(run, d0), pointOn(run, d1)))
+                out.add(listOf(pointOn(points, stations, d0), pointOn(points, stations, d1)))
             }
             return out
-        }
-
-        /** The point of [run] at [s], between its samples. */
-        private fun pointOn(run: Run, s: Double): GeoPoint {
-            val st = run.stations
-            var lo = 0
-            var hi = st.size - 1
-            while (hi - lo > 1) {
-                val mid = (lo + hi) ushr 1
-                if (st[mid] <= s) lo = mid else hi = mid
-            }
-            val a = run.points[lo]
-            val b = run.points[hi]
-            val f = if (st[hi] > st[lo]) ((s - st[lo]) / (st[hi] - st[lo])).coerceIn(0.0, 1.0) else 0.0
-            return GeoPoint(a.latitude + (b.latitude - a.latitude) * f, a.longitude + (b.longitude - a.longitude) * f)
         }
 
         private companion object {
@@ -1890,6 +1939,31 @@ private fun simplify(points: List<GeoPoint>): List<GeoPoint> {
         }
     }
     return points.filterIndexed { i, _ -> keep[i] }
+}
+
+/**
+ * [points] at [stations] without their small loops ([Loops.cut]), cut in flat metres about the first point: where a line or an
+ * edge lies farther out than an arc's radius on its inner side it turns where it would cross itself. Where nothing is cut, the
+ * same lists.
+ */
+private fun untangle(points: List<GeoPoint>, stations: List<Double>): Pair<List<GeoPoint>, List<Double>> {
+    if (points.size < 4) return points to stations
+    val frame = LocalMeters(points.first().latitude, points.first().longitude)
+    return Loops.cut(points, stations, { frame.toLocal(it.latitude, it.longitude) }, { GeoPoint(frame.latitudeOf(it), frame.longitudeOf(it)) })
+}
+
+/** The point at station [s] of the line through [points] at [stations], ascending: one of them, or between two. */
+private fun pointOn(points: List<GeoPoint>, stations: List<Double>, s: Double): GeoPoint {
+    var lo = 0
+    var hi = stations.size - 1
+    while (hi - lo > 1) {
+        val mid = (lo + hi) ushr 1
+        if (stations[mid] <= s) lo = mid else hi = mid
+    }
+    val a = points[lo]
+    val b = points[hi]
+    val f = if (stations[hi] > stations[lo]) ((s - stations[lo]) / (stations[hi] - stations[lo])).coerceIn(0.0, 1.0) else 0.0
+    return GeoPoint(a.latitude + (b.latitude - a.latitude) * f, a.longitude + (b.longitude - a.longitude) * f)
 }
 
 private fun distanceToSegment(p: LocalPoint, a: LocalPoint, b: LocalPoint): Double {

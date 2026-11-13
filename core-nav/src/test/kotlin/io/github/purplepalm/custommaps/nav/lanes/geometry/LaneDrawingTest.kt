@@ -477,6 +477,32 @@ class LaneDrawingTest {
     }
 
     @Test
+    fun `a line farther out than a tight arc's radius turns where it would cross itself, and so does the asphalt's edge`() {
+        // IA along a line that bends left by 3 and 2 degrees 0.2 m apart between its lane points: the first arc between the two
+        // bends is narrower than the carriageway's left half, so the left edge line and the asphalt's edge beyond it fold back
+        // over themselves there.
+        val route = LaneScenes.ia()
+        val at = gore - 1_234.5
+        val bends = (SceneLines.bendsOf(route) + listOf(at to 3.0, at + 0.2 to 2.0)).sortedBy { it.first }
+        val d = draw(route, SceneLines.line(route.lengthMeters, bends))
+        val axis = requireNotNull(d.path.axisAt(at))
+        val fillet = requireNotNull(axis.filletAt(at))
+        val left = d.drawing.lanesAt(at - 30.0).first().left
+        assertTrue(fillet.radius < left, "the arc's radius ${fillet.radius}, the left edge $left m out")
+        assertTrue(axis.folds(at, left), "the left edge line folds at the arc")
+        val edge = d.of(Kind.EDGE_LINE).single { it.side == LaneEdge.LEFT && covers(it, at) }
+        // It runs on through the bend as one line, and no line or ring of the drawing crosses itself.
+        assertEquals(1, edge.parts.size)
+        assertTrue(edge.from < at - 50.0 && edge.to > at + 50.0, "the left edge line over ${edge.from}..${edge.to}")
+        for (f in d.features) {
+            for (part in f.parts) {
+                val crossing = DrawingProbe.selfCrossing(part.map { SceneLines.local(it) }, f.kind.polygon || f.kind == Kind.DIAMOND)
+                assertNull(crossing, "${f.part} ${f.kind} ${f.side ?: f.between ?: f.lane} over ${f.from}..${f.to}")
+            }
+        }
+    }
+
+    @Test
     fun `a turn whose vertex lies a few micrometres past its node gets the stub, the taper and the gore all the same`() {
         // IW31 along a line whose bends lie 3 micrometres past their nodes' stations, as the rounding of long sums puts them:
         // each turn finds its arc, so the gore and the split are drawn as along the line whose bends lie on the nodes.
