@@ -61,14 +61,9 @@ class CloseViewTest {
         // Where CloseView counts a view that moves, the latched state does not.
         assertTrue(CloseView.smoothFollow(0.0, false, 0.0, true, large = true))
         assertFalse(CloseView.smoothFollowLatched(0.0, false, 0.0, true, large = true))
-        // Mapbox tuned has no move of its own: latched while its close view is on, with Large only.
-        for (frame in listOf(false, true)) {
-            for (window in listOf(false, true)) {
-                for (large in listOf(false, true)) {
-                    assertEquals(CloseView.mapboxTuned(frame, window, large), CloseView.mapboxTunedLatched(frame, window, large))
-                }
-            }
-        }
+        // Mapbox tuned's close views are the SDK's frames: never latched for the swap, while its close view is on too.
+        assertTrue(CloseView.mapboxTuned(framesManeuver = true, laneWindow = true, large = true))
+        assertFalse(CloseView.mapboxTunedLatched())
     }
 
     /** Smooth follow's answer from the maneuver focus alone, as the camera reads it after a progress update. */

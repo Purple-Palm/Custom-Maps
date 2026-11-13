@@ -9,7 +9,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
  * view or the junction view is latched ([onLatched]) and a drawn lane is at least [SWAP_IN_DP] wide on the screen
  * ([onZoom]), and it comes back when the view lets go or the lane is under [SWAP_OUT_DP]. Between the two widths the state
  * holds, so a view that rests there never makes the line blink, and a zoom that only nears [SWAP_IN_DP] never swaps at
- * all: the opaque line stays in the named lane, as at a high peak speed or in Mapbox tuned.
+ * all: the opaque line stays in the named lane, as at a high peak speed. Mapbox tuned's views are never latched
+ * ([io.github.purplepalm.custommaps.nav.camera.CloseView.mapboxTunedLatched]), so there the line stays at every zoom.
  *
  * At the swap the lit lane's amber ([amberDp]) is a little narrower than the held route line it replaces, at the same
  * colour and place, and from there on only wider. Pure; the map feeds it the latched state once per progress update and

@@ -36,7 +36,8 @@ internal interface GuidanceCamera {
      * Whether a close view is latched, as worked out at the camera's last [onRouteProgress]: the view down onto a junction
      * or in for lanes has reached its goal and holds ([io.github.purplepalm.custommaps.nav.camera.CloseView]'s latched
      * rules). The swap of the route line and the app's own lit lane waits for it. False before the first progress of a
-     * drive, and for a camera that never shows a close view.
+     * drive, for a camera that never shows a close view, and always for the navigation SDK's own camera (Mapbox standard
+     * and Mapbox tuned), whose frames the swap never follows.
      */
     val swapLatched: Boolean get() = false
 

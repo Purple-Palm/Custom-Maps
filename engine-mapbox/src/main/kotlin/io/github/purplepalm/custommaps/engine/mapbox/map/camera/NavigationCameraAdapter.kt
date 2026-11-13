@@ -178,8 +178,9 @@ internal class NavigationCameraAdapter(
     override var closeView = false
         private set
 
-    override var swapLatched = false
-        private set
+    // Never latched for the swap: Mapbox's close views are the navigation SDK's frames, and in them the route line stays,
+    // opaque, in the named lane (CloseView.mapboxTunedLatched).
+    override val swapLatched: Boolean get() = tuned && CloseView.mapboxTunedLatched()
 
     override fun requestFollowing() {
         stopIdleFollow()
@@ -286,7 +287,6 @@ internal class NavigationCameraAdapter(
             val large = laneZoom == LaneZoom.LARGE
             val framesManeuver = large && LaneZoomFrames.framesManeuver(progress, options)
             closeView = CloseView.mapboxTuned(framesManeuver = framesManeuver, laneWindow = laneFocus.goal > 0.0, large = large)
-            swapLatched = CloseView.mapboxTunedLatched(framesManeuver = framesManeuver, laneWindow = laneFocus.goal > 0.0, large = large)
         }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
@@ -312,7 +312,6 @@ internal class NavigationCameraAdapter(
     override fun onGuidanceEnded() {
         jumpFrame.reset()
         closeView = false
-        swapLatched = false
         // Mapbox standard keeps nothing else for a drive.
         if (!tuned) return
         laneFocus.reset(nowSeconds())

@@ -197,18 +197,13 @@ class LaneSwapTest {
     }
 
     @Test
-    fun `Mapbox tuned's close view and Default's zoom never swap, and from the swap the amber only grows`() {
-        // Mapbox tuned's close view has lanes of about 7 to 9.2 dp.
+    fun `Default's zoom never swaps, and from the swap the amber only grows`() {
+        // Default's 16.35: the drawing small, under the line, latched or not (Mapbox tuned's frames: the engine's
+        // LaneZoomFramesTest, with the camera's own limits).
         val swap = LaneSwap()
         swap.onLatched(true)
-        var dp = 7.05
-        while (dp <= 9.2) {
-            assertFalse(swap.onZoom(zoomOf(dp), 0.0))
-            dp += 0.05
-        }
-        assertFalse(swap.swapped)
-        // Default's 16.35: the drawing small, under the line.
         assertFalse(swap.onZoom(tuning.defaultMaxZoom, 0.0))
+        assertFalse(swap.swapped)
         assertTrue(LaneSwap.laneDp(tuning.defaultMaxZoom, 0.0) < 5.0)
         // At the swap the amber is 9.8 dp, and wider at every closer zoom.
         val zIn = zoomOf(LaneSwap.SWAP_IN_DP)

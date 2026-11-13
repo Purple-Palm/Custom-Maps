@@ -46,9 +46,11 @@ object CloseView {
         (maneuverGoal >= 1.0 && !maneuverMoving) || (large && laneGoal >= 1.0 && !laneMoving)
 
     /**
-     * Mapbox tuned: whether a close view is latched. Its frames are the navigation SDK's own, eased by its camera, with no
-     * move of this app's to wait for: latched while [mapboxTuned] says the close view is on.
+     * Mapbox tuned: whether a close view is latched for the swap. Never (the own lanes' design 8 and FIX T5: in Mapbox tuned
+     * the swap does not come, and the opaque line stays in the named lane with the tints beside it). Its close views are
+     * the navigation SDK's frames, fitted by the SDK between the limits this app sets, so a lane there is as wide as the
+     * SDK's fit makes it, wider than the swap's width at a low peak speed in the lane window and in the frame of a
+     * maneuver: latched on [mapboxTuned], the swap would follow the SDK's zoom alone.
      */
-    fun mapboxTunedLatched(framesManeuver: Boolean, laneWindow: Boolean, large: Boolean): Boolean =
-        mapboxTuned(framesManeuver, laneWindow, large)
+    fun mapboxTunedLatched(): Boolean = false
 }

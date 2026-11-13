@@ -3,9 +3,11 @@ package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 import com.mapbox.api.directions.v5.models.StepManeuver
 import com.mapbox.navigation.ui.maps.camera.data.FollowingFrameOptions
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.CloseView
 import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.camera.guidancePitch
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneSwap
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -233,6 +235,45 @@ class LaneZoomFramesTest {
         assertLimits(sdkMin, tuning.defaultMaxZoom, sdkLead, limits(false, false, floor))
         // With Default nothing moves, floor or not.
         assertLimits(sdkMin, tuning.defaultMaxZoom, sdkLead, LaneZoomFrames.tunedLimits(LaneZoom.DEFAULT, tuning, false, true, 0.0, floor))
+    }
+
+    @Test
+    fun `mapbox tuned never swaps the line and the lit lane, whatever zoom its frames reach at peaks of 15 to 40 m-s`() {
+        // The zooms the SDK fits Mapbox tuned's frames up to with Large, at the SDK's tilt on this made-up screen: the lane
+        // window with each peak speed's floor, and the frame of a maneuver, up to the junction's lanes.
+        val goals = ArrayList<Double>()
+        var peak = 15.0
+        while (peak <= 40.0 + 1e-9) {
+            for (framesManeuver in listOf(false, true)) {
+                goals.add(LaneZoomFrames.tunedLimits(LaneZoom.LARGE, tuning, framesManeuver, laneWindow = true, latitude = 0.0, lanesCap = cap(peak)).maxZoom)
+            }
+            peak += 0.5
+        }
+        assertEquals(MapScale.zoomForLaneDp(tuning.junctionLaneDp, 0.0), goals.max(), 1e-9)
+        // Many of them hold a drawn lane wider than the swap's: latched on its close view, the swap would follow the
+        // SDK's zoom alone, at a low peak and at every maneuver.
+        val wide = goals.filter { LaneSwap.laneDp(it, 0.0) >= LaneSwap.SWAP_IN_DP }
+        assertTrue(wide.size > goals.size / 2, "${wide.size} of ${goals.size}")
+        assertTrue(CloseView.mapboxTuned(framesManeuver = false, laneWindow = true, large = true))
+        for (goal in goals) {
+            // From the open road to the frame and back, as the SDK's camera eases, with the latched state Mapbox tuned
+            // publishes once per progress update.
+            val swap = LaneSwap()
+            var zoom = tuning.defaultMaxZoom
+            val zooms = ArrayList<Double>()
+            while (zoom < goal) {
+                zooms.add(zoom)
+                zoom += 0.01
+            }
+            zooms.add(goal)
+            zooms.addAll(zooms.reversed())
+            for (z in zooms) {
+                assertFalse(swap.onLatched(CloseView.mapboxTunedLatched()))
+                assertFalse(swap.onZoom(z, 0.0), "the swap at zoom $z on the way to $goal")
+                assertEquals(1.0, swap.lineOpacity)
+            }
+            assertEquals(0, swap.takeFlips())
+        }
     }
 
     @Test
