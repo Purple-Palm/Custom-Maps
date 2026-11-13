@@ -32,9 +32,11 @@ enum class CarGate {
 }
 
 /**
- * What the car's session does with its map when the gate or the token changes. A map keeps the token
- * it was made with, so a new token builds it again, as the phone's activity is made again for one
- * (DECISIONS 16). The map exists only while the gate is [CarGate.READY].
+ * What the car's session does with its map when the gate, the token or the app's look changes. A map
+ * keeps the token it was made with, so a new token builds it again, as the phone's activity is made
+ * again for one (DECISIONS 16). The map exists only while the gate is [CarGate.READY], and is first made
+ * once the app's first look is decided, so that its first tiles are drawn in it, as the phone composes
+ * its map only then.
  */
 sealed interface CarMapStep {
     /** Nothing to do. */
@@ -52,13 +54,14 @@ sealed interface CarMapStep {
     companion object {
         /**
          * The step from a map made for the token of [built], or none when null, to what [access] and
-         * [gate] allow now.
+         * [gate] allow now; a map is not made before the app's first look is decided ([lookDecided]),
+         * which comes within a moment of the session's start.
          */
-        fun next(built: Int?, access: MapsAccess, gate: CarGate): CarMapStep {
+        fun next(built: Int?, access: MapsAccess, gate: CarGate, lookDecided: Boolean): CarMapStep {
             val ready = access as? MapsAccess.Ready
             return when {
                 gate != CarGate.READY || ready == null -> if (built != null) Release else Keep
-                built == null -> Build(ready.generation)
+                built == null -> if (lookDecided) Build(ready.generation) else Keep
                 built != ready.generation -> Rebuild(ready.generation)
                 else -> Keep
             }

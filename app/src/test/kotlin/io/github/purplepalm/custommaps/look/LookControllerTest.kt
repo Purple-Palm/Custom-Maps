@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.look
 
+import io.github.purplepalm.custommaps.car.CarLookSession
 import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.look.Look
@@ -748,14 +749,20 @@ class LookControllerTest {
     @Test
     fun `a car session started with no activity decides the first look`() = runTest {
         val rig = Rig(this)
-        // The car's host started the process after dusk: no activity, the car's session starts the look.
+        // The car's host started the process after dusk: no activity, the car's session starts the look
+        // as it is created, waits for it before its map, and keeps it deciding while it is started.
         rig.elevation = -10.0
-        rig.controller.start()
-        val car = rig.onCarScreen()
+        val failures = mutableListOf<String>()
+        val car = CarLookSession(rig.controller, backgroundScope) { call, _ -> failures += call }
+        var mapLooks = 0
+        car.onCreate { mapLooks += 1 }
+        car.onStart()
+        assertFalse(car.decided)
         runCurrent()
         assertTrue(rig.controller.decided.value)
+        assertEquals(1, mapLooks)
         assertEquals(Look.NIGHT, rig.controller.look.value)
-        assertEquals(LookOnMap(Look.NIGHT), rig.controller.lookOnMap.value)
+        assertEquals(LookOnMap(Look.NIGHT), car.lookOnMap)
         assertEquals(LookCause.START, rig.looks().single()["cause"])
         // The car's map is made with it and is asked for nothing new.
         rig.showCarMap()
@@ -770,7 +777,13 @@ class LookControllerTest {
         rig.at(60)
         assertEquals(Look.DAY, rig.controller.look.value)
         assertEquals(LookOnMap(Look.DAY), rig.carRequests.last())
-        car.cancel()
+        // The car's session stops: nothing decides any more.
+        car.onStop()
+        runCurrent()
+        val decisions = rig.decisions
+        rig.at(3_600)
+        assertEquals(decisions, rig.decisions)
+        assertEquals(emptyList<String>(), failures)
     }
 
     @Test

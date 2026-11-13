@@ -256,14 +256,14 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
   While a car surface shows the map, the phone's map draws at most 60 frames a second, and as
   before once the surface goes.
 - **The phone's look on the car** (DECISIONS 50; [Day and night](#day-and-night)): the app's one
-  look, which `LookController` decides for the process. The car's session starts it if no screen
-  has (the car's host may have started the process), keeps it deciding while the session is
-  started, one loop with the phone's activity when both are, and hands it to the car's map as the
-  phone's screen hands it to its map, so a theme that waits for a quiet moment of the drive waits
-  on both. The car's map is made once the first look is decided, with that look. While the phone's
-  activity is not started, the car map's close view holds a switch, and Settings over the phone's
-  map lets nothing go early while the car's screen shows the map. The host's day and night colour
-  only the routing card's images.
+  look, which `LookController` decides for the process. The car's session (its part in the look,
+  `CarLookSession`) starts it if no screen has (the car's host may have started the process), keeps
+  it deciding while the session is started, one loop with the phone's activity when both are, and
+  hands it to the car's map as the phone's screen hands it to its map, so a theme that waits for a
+  quiet moment of the drive waits on both. The car's map is made once the first look is decided,
+  with that look (`CarMapStep`). While the phone's activity is not started, the car map's close view
+  holds a switch, and Settings over the phone's map lets nothing go early while the car's screen
+  shows the map. The host's day and night colour only the routing card's images.
 - **Lines**, numbers and states only:
   - `display_state`, from the app at its start and at every change of the phone's own display:
     `state` (ON, OFF, DOZE, DOZE_SUSPEND, VR, ON_SUSPEND or UNKNOWN) and `hz`, its refresh rate;
