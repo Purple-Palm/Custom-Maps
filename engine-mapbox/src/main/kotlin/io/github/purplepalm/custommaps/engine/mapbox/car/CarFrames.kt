@@ -6,6 +6,8 @@ import android.view.Choreographer
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.FrameSource
 import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarFrameClock
+import io.github.purplepalm.custommaps.nav.car.CarFrameRate
+import io.github.purplepalm.custommaps.nav.car.VsyncRate
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 
 /**
@@ -17,6 +19,9 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLog
  * "frame_clock" line says each switch between the two: `source` (vsync or timer), `quietMs` (how long
  * the display's frames were awaited, or gone, until then) and, back on the display, `timerTicks`.
  *
+ * While frames are wanted it also measures how fast the display sends them ([displayHz]): each
+ * display callback asks for the next one first, so their frame times are one display frame apart.
+ *
  * It runs only between [start] and [stop], the life of the surface attached, and only while a frame
  * is wanted. Nothing here allocates on a frame. Every call that Android makes into it catches what is
  * thrown, writes a "car_error" line and goes on: the car, the phone and the drive share one process.
@@ -25,6 +30,7 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLog
 internal class CarFrames(private val log: DebugLog) : FrameSource {
 
     private val clock = CarFrameClock()
+    private val rate = VsyncRate()
     private val choreographer = Choreographer.getInstance()
     private val handler = Handler(Looper.getMainLooper())
 
@@ -36,6 +42,9 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
     private var dispatching = false
 
     private var vsyncPosted = false
+
+    /** Whether the display callback posted was asked for at the start of the one before: their frames are one display frame apart. */
+    private var vsyncPostedInFrame = false
 
     /** When the timer posted to the main thread runs, or none is posted. */
     private var timerAt = CarFrameClock.NONE
@@ -52,6 +61,7 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
 
     /** A surface is attached: ticks may come from now on. */
     fun start() = handle("frameClockStart") {
+        rate.reset()
         clock.start(System.nanoTime())
         switchesLogged = clock.switches
         clock.setWanted(pending.isNotEmpty(), System.nanoTime())
@@ -91,6 +101,13 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
         if (!dispatching) wantFrames()
     }
 
+    /**
+     * The rate at which the display sends the main thread its frames, in hertz: as measured from the
+     * display's frames, and 60 while the clock runs on its timer ([CarFrameRate.displayHz]); null
+     * before it has been measured.
+     */
+    fun displayHz(): Double? = CarFrameRate.displayHz(clock.source, rate.hz())
+
     /** The ticks since the last call, from the display and from the timer, for the camera line. */
     fun takeTicks(): Map<String, Any?> {
         val fields = mapOf("vsyncTicks" to clock.vsyncTicks, "timerTicks" to clock.timerTicks)
@@ -105,7 +122,13 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
 
     private fun onVsync(frameTimeNanos: Long) {
         vsyncPosted = false
+        val backToBack = vsyncPostedInFrame
+        vsyncPostedInFrame = false
         handle("frameClockVsync") {
+            // The next display frame is asked for first: if nothing wants it after this tick, it is
+            // taken back, and otherwise the two frames are one display frame apart for the measure.
+            if (clock.vsyncWanted) postVsync(inFrame = true)
+            rate.onFrame(frameTimeNanos, backToBack)
             val tick = clock.onVsync(frameTimeNanos, System.nanoTime())
             logSwitch()
             if (tick != CarFrameClock.NONE) dispatch(tick)
@@ -153,13 +176,11 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
     /** Posts the display callback and the timer as the clock wants them, and takes back what it does not. */
     private fun sync() {
         if (clock.vsyncWanted) {
-            if (!vsyncPosted) {
-                choreographer.postFrameCallback(vsync)
-                vsyncPosted = true
-            }
+            if (!vsyncPosted) postVsync(inFrame = false)
         } else if (vsyncPosted) {
             choreographer.removeFrameCallback(vsync)
             vsyncPosted = false
+            vsyncPostedInFrame = false
         }
         val due = clock.timerAtNanos
         if (due == CarFrameClock.NONE) {
@@ -174,6 +195,12 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
             handler.postDelayed(timer, delayMillis(due))
             timerAt = due
         }
+    }
+
+    private fun postVsync(inFrame: Boolean) {
+        choreographer.postFrameCallback(vsync)
+        vsyncPosted = true
+        vsyncPostedInFrame = inFrame
     }
 
     /** Whole milliseconds from now until [due], rounded up, so the timer never runs before it. */

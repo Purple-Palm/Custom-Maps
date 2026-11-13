@@ -38,12 +38,14 @@ import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.car.CarArea
 import io.github.purplepalm.custommaps.nav.car.CarAreas
 import io.github.purplepalm.custommaps.nav.car.CarFailure
+import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.car.CarLook
 import io.github.purplepalm.custommaps.nav.car.CarLookStep
 import io.github.purplepalm.custommaps.nav.car.CarLookTuning
 import io.github.purplepalm.custommaps.nav.car.CarOverview
 import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.withFields
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
@@ -105,7 +107,11 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   map_layers lines among them, beside "car_surface", "car_look", "car_location" and "frame_clock".
  *   An exception caught here writes a "car_error" line with the call, the class and the message.
  *
- * The surface draws at most [MAX_FPS] frames a second. Main thread only.
+ * The surface draws [CarFrameRate.TARGET_FPS] frames a second: the map library paces the car's surface
+ * against a display rate of 60, so its cap is scaled by the rate the display's frames really come at
+ * ([CarFrameRate], measured by [CarFrames]), worked out again each second and set when that rate
+ * moves by more than a tenth; a "car_surface" line with `event` fps says each new cap. Main thread
+ * only.
  */
 @OptIn(MapboxExperimental::class)
 internal class CarNavigationMap(
@@ -166,6 +172,15 @@ internal class CarNavigationMap(
     /** Surfaces attached so far, for the "car_surface" lines. */
     private var attaches = 0
 
+    /**
+     * The display rate the surface's frame rate cap is set for, kept for the next surface; null until
+     * one was measured, when the cap is the one for the rate the map library believes.
+     */
+    private var capHz: Double? = null
+
+    /** The cap on the surface's frames that is set now. */
+    private var maxFps = CarFrameRate.maxFps(CarFrameRate.ASSUMED_HZ)
+
     /** New positions of the platform's location on this surface since the last "car_location" check. */
     private var platformFixes = 0
 
@@ -195,8 +210,13 @@ internal class CarNavigationMap(
             drawAttribution(look)
         }
 
-        // The frame clock's ticks of the second: from the display, and from the timer while the main thread got no frames.
-        override fun cameraFields(): Map<String, Any?> = mapOf("clock" to frames.takeTicks())
+        // The frame clock's ticks of the second, from the display and from the timer while the main
+        // thread got no frames, the cap on the surface's frames, and the display rate measured now.
+        override fun cameraFields(): Map<String, Any?> = mapOf(
+            "clock" to frames.takeTicks(),
+            "maxFps" to maxFps,
+            "measuredHz" to frames.displayHz()?.let { Motion.round(it, 1) },
+        )
     }
 
     private val observer = object : MapboxCarMapObserver {
@@ -358,8 +378,10 @@ internal class CarNavigationMap(
         attaches += 1
         carSurface = surface
         val mapSurface = surface.mapSurface
-        // The car's screen does not need more, and the frames cost the phone's battery and heat.
-        mapSurface.setMaximumFps(MAX_FPS)
+        // The car's screen does not need more, and the frames cost the phone's battery and heat: the
+        // cap for the display rate measured on the surface before, until this one's is measured.
+        maxFps = CarFrameRate.maxFps(capHz ?: CarFrameRate.ASSUMED_HZ)
+        mapSurface.setMaximumFps(maxFps)
         // A configuration change of the host may come with the new surface.
         look.onHost(hostIsDark(), now())?.let { log.log(LOOK_LINE, it.fields + mapOf("onMap" to false)) }
         // The new map draws its first tiles in the whole look; no theme waits after that.
@@ -411,6 +433,7 @@ internal class CarNavigationMap(
             launch { created.cameraMode.collect { _cameraMode.value = it } }
             launch { created.closeView.collect { _closeView.value = it } }
             launch { watchLocation() }
+            launch { followFrameRate() }
         }
         log.log(SURFACE_LINE, surfaceFields(EVENT_ATTACH))
     }
@@ -569,6 +592,28 @@ internal class CarNavigationMap(
     }
 
     /**
+     * The surface's frame rate cap, once a second: for the display rate measured now, when it moved
+     * by more than a tenth from the one the cap is set for ([CarFrameRate]); a "car_surface" line
+     * with `event` fps says each rate the cap was worked out for.
+     */
+    private suspend fun followFrameRate() {
+        while (true) {
+            delay(FRAME_RATE_CHECK_MS)
+            guard("frameRate") {
+                val hz = frames.displayHz() ?: return@guard
+                if (!CarFrameRate.changed(capHz, hz)) return@guard
+                capHz = hz
+                val fps = CarFrameRate.maxFps(hz)
+                if (fps != maxFps) {
+                    maxFps = fps
+                    carSurface?.mapSurface?.setMaximumFps(fps)
+                }
+                log.log(SURFACE_LINE, surfaceFields(EVENT_FPS))
+            }
+        }
+    }
+
+    /**
      * Whether the platform's location reaches the car map outside guidance: with the phone locked and
      * location allowed only while in use, it may not. A "car_location" line some seconds after each
      * surface comes, and whenever that changes. Numbers only.
@@ -607,7 +652,8 @@ internal class CarNavigationMap(
             "stable" to CarAreas.insets(width, height, stable)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "visible" to CarAreas.insets(width, height, visible)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "attaches" to attaches,
-            "maxFps" to MAX_FPS,
+            "maxFps" to maxFps,
+            "measuredHz" to capHz?.let { Motion.round(it, 1) },
         )
     }
 
@@ -669,9 +715,6 @@ internal class CarNavigationMap(
     }
 
     companion object {
-        /** The most frames a second the car's surface draws. */
-        const val MAX_FPS = 30
-
         /** The text attribution that Mapbox and OpenStreetMap ask for on every map. */
         const val ATTRIBUTION = "© Mapbox © OpenStreetMap"
 
@@ -693,6 +736,7 @@ internal class CarNavigationMap(
         private const val EVENT_STABLE = "stable"
         private const val EVENT_VISIBLE = "visible"
         private const val EVENT_RELEASE = "release"
+        private const val EVENT_FPS = "fps"
 
         private const val KIND_SCROLL = "scroll"
         private const val KIND_FLING = "fling"
@@ -703,6 +747,9 @@ internal class CarNavigationMap(
 
         /** How often the car map looks whether the platform's location reaches it. */
         private const val LOCATION_CHECK_MS = 10_000L
+
+        /** How often the frame rate cap is worked out again. */
+        private const val FRAME_RATE_CHECK_MS = 1_000L
         private const val MILLIS_PER_SECOND = 1_000L
     }
 }
