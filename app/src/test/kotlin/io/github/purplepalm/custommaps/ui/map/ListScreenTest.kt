@@ -46,6 +46,16 @@ class ListScreenTest {
     }
 
     @Test
+    fun `a row reads at a glance, its distance large and a step heavier, its words as large as the card's road`() {
+        val row = Sources.functionBody(list, "fun UpcomingRow(")
+        assertTrue("headlineMedium.copy(fontFeatureSettings = TABULAR_DIGITS)" in row, row)
+        assertTrue("fontWeight = FontWeight.SemiBold" in row, row)
+        // The card sets its road in titleLarge too.
+        assertTrue("typography.titleLarge" in row, row)
+        assertTrue("titleLarge" in Sources.functionBody(Sources.code("ui/guidance/GuidancePanels.kt"), "fun ManeuverCard("))
+    }
+
+    @Test
     fun `the phone's map is kept and put away while the list shows, and nothing calls its lifecycle`() {
         // One map for the screen's life, made whatever the screen shows.
         assertEquals(1, Regex("createPhoneMap\\(").findAll(screen).count())

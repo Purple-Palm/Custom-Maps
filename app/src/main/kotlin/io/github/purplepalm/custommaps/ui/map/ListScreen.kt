@@ -156,7 +156,10 @@ private fun UpcomingRows(progress: State<RouteProgressSnapshot?>, modifier: Modi
     }
 }
 
-/** One maneuver ahead: its arrow in the card's ink, its distance from the car large, and its words. */
+/**
+ * One maneuver ahead: its arrow in the card's ink, its distance from the car large and a step heavier,
+ * and its words as large as the card's road, all to be read at a glance from a phone mount.
+ */
 @Composable
 private fun UpcomingRow(row: ListRow, value: String, unit: String, divider: Boolean) {
     val tokens = LookTheme.tokens
@@ -177,7 +180,7 @@ private fun UpcomingRow(row: ListRow, value: String, unit: String, divider: Bool
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         text = value,
-                        style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TABULAR_DIGITS),
+                        style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = TABULAR_DIGITS),
                         fontWeight = FontWeight.SemiBold,
                         color = tokens.onCard,
                     )
@@ -187,12 +190,12 @@ private fun UpcomingRow(row: ListRow, value: String, unit: String, divider: Bool
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium,
                         color = tokens.onCardMuted,
-                        modifier = Modifier.padding(bottom = 2.dp),
+                        modifier = Modifier.padding(bottom = 4.dp),
                     )
                 }
                 Text(
                     text = row.words,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Medium,
                     color = tokens.onCard,
                     maxLines = 1,
