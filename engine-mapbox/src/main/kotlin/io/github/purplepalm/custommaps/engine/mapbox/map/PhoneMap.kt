@@ -105,6 +105,8 @@ class PhoneMap internal constructor(
             tuning = CameraTuning.PHONE,
             guidancePuck = engine.guidancePuck,
             host = host,
+            // Two maps at once cost the phone heat: its own draws less while the car's surface shows one.
+            capWhileCarShows = true,
         )
         mapView.gestures.addOnMapClickListener(mapClickListener)
     }

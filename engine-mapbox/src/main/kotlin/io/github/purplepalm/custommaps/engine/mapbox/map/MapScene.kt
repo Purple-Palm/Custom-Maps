@@ -172,6 +172,11 @@ internal class MapScene(
      * whose component takes them itself and glides with Mapbox's animators.
      */
     private val puckRelay: PuckRelay? = null,
+    /**
+     * Whether the map draws at most [PHONE_FPS_WITH_CAR] frames a second while a car's surface shows
+     * the map too ([MapboxNavigationEngine.carMapShown]): the phone's map, not the car's.
+     */
+    private val capWhileCarShows: Boolean = false,
 ) : MapRenderer {
 
     /** What the scene needs to know of the screen its map is on, and tells it. Main thread only. */
@@ -420,6 +425,9 @@ internal class MapScene(
     private var paddingChanges = 0
     private var transitionStartedAt = 0L
 
+    /** Whether the map is held to [PHONE_FPS_WITH_CAR] frames a second now, while a car's surface shows the map too. */
+    private var cappedForCar = false
+
     // The map's own frame rate, reported about once a second on the render thread while it draws.
     @Volatile private var renderFps = Double.NaN
 
@@ -624,6 +632,22 @@ internal class MapScene(
         offlineData?.attachMap(mapboxMap)
         scope.launch {
             combine(engine.guidanceState, engine.previewRoutes) { state, _ -> state }.collect { state -> render(state) }
+        }
+        if (capWhileCarShows) scope.launch { engine.carMapShown.collect(::capForCar) }
+    }
+
+    /**
+     * The phone's map draws at most [PHONE_FPS_WITH_CAR] frames a second while a car's surface shows
+     * the map too: on the first car test the two maps at once, the phone's at its display's 120 Hz,
+     * made the phone hot within minutes. The cap goes again when the car's surface does.
+     */
+    private fun capForCar(carShown: Boolean) {
+        if (carShown == cappedForCar) return
+        try {
+            controllable.setMaximumFps(if (carShown) PHONE_FPS_WITH_CAR else UNCAPPED_FPS)
+            cappedForCar = carShown
+        } catch (e: RuntimeException) {
+            debugLog.error("phoneFrameCap", e)
         }
     }
 
@@ -1509,6 +1533,8 @@ internal class MapScene(
             "renderFps" to fps?.let { Motion.round(it, 1) },
             "animatorsEnabled" to ValueAnimator.areAnimatorsEnabled(),
             "hz" to host.refreshRate?.let { Math.round(it) },
+            // Only while a car's surface shows the map too.
+            "capped" to true.takeIf { cappedForCar },
         ) + host.cameraFields()
         fixes = 0
         paddingChanges = 0
@@ -1602,6 +1628,15 @@ internal class MapScene(
 
         /** How long a write of the theme waits for the map to settle before it says it did not. */
         private const val LOOK_SETTLE_MS = 10_000L
+
+        /** The most frames a second the phone's map draws while a car's surface shows the map too. */
+        const val PHONE_FPS_WITH_CAR = 60
+
+        /**
+         * A cap above any display's rate, which draws at the display's own rate as with no cap: the
+         * map library's way back to none is for its own libraries only.
+         */
+        private const val UNCAPPED_FPS = Int.MAX_VALUE
 
         /** Who moved the map in a "camera_taken" line of a gesture without an animation of its own. */
         private const val DRIVER_OWNER = "driver"

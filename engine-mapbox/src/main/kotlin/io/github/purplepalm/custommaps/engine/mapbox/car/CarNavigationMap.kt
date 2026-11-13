@@ -172,6 +172,9 @@ internal class CarNavigationMap(
     /** Surfaces attached so far, for the "car_surface" lines. */
     private var attaches = 0
 
+    /** Whether the engine counts a surface of this car map as showing the map: the phone's map is capped meanwhile. */
+    private var surfaceShown = false
+
     /**
      * The display rate the surface's frame rate cap is set for, kept for the next surface; null until
      * one was measured, when the cap is the one for the rate the map library believes.
@@ -368,6 +371,7 @@ internal class CarNavigationMap(
             carContext.getCarService(AppManager::class.java).setSurfaceCallback(null)
         }
         frames.stop()
+        showsSurface(false)
         scope.cancel()
         log.log(SURFACE_LINE, mapOf("event" to EVENT_RELEASE, "attaches" to attaches))
     }
@@ -377,6 +381,7 @@ internal class CarNavigationMap(
         if (released) return
         attaches += 1
         carSurface = surface
+        showsSurface(true)
         val mapSurface = surface.mapSurface
         // The car's screen does not need more, and the frames cost the phone's battery and heat: the
         // cap for the display rate measured on the surface before, until this one's is measured.
@@ -460,6 +465,7 @@ internal class CarNavigationMap(
         guard("releaseScene") { scene?.release() }
         // No frame for a surface that has gone; the next one starts the clock again.
         frames.stop()
+        showsSurface(false)
         scene = null
         carSurface = null
         logo = null
@@ -583,6 +589,13 @@ internal class CarNavigationMap(
      */
     private fun restoreOverview() {
         if (overview.restores(engine.guidanceState.value)) scene?.setCameraMode(CameraMode.OVERVIEW)
+    }
+
+    /** Tells the engine whether a surface of this car map shows the map, once for each change: the phone's map draws less meanwhile. */
+    private fun showsSurface(shown: Boolean) {
+        if (shown == surfaceShown) return
+        surfaceShown = shown
+        engine.onCarSurface(shown)
     }
 
     /** The driver took the map with a gesture of [kind]: the camera lets go of it and leaves the overview. */

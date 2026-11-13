@@ -330,6 +330,23 @@ internal class MapboxNavigationEngine(
     /** Routes of the preview, the selected one first. Only the map reads them; they are not in the navigator yet. */
     val previewRoutes: StateFlow<List<NavigationRoute>> = _previewRoutes.asStateFlow()
 
+    /** Car surfaces that show the map now ([onCarSurface]). */
+    private var carSurfaces = 0
+
+    private val _carMapShown = MutableStateFlow(false)
+
+    /**
+     * True while a car's surface shows the map: the phone's map then draws at most 60 frames a
+     * second, since two maps draw at once. Main thread.
+     */
+    internal val carMapShown: StateFlow<Boolean> = _carMapShown.asStateFlow()
+
+    /** A car's surface came ([shown]) or went; each one that came goes once. Main thread. */
+    internal fun onCarSurface(shown: Boolean) {
+        carSurfaces = (carSurfaces + if (shown) 1 else -1).coerceAtLeast(0)
+        _carMapShown.value = carSurfaces > 0
+    }
+
     /**
      * Latest position of the map's location puck. A route request starts there when the location
      * service has no fix yet, and Start measures from it how far the car has moved.
