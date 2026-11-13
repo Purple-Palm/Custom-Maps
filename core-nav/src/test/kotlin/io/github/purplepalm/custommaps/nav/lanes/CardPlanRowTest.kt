@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
 import io.github.purplepalm.custommaps.nav.debug.LaneRowLog
+import io.github.purplepalm.custommaps.nav.guidance.CardLanes
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.GORE
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
@@ -238,6 +239,23 @@ class CardPlanRowTest {
             assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), row.target, "at ${GORE - at} m")
             assertNull(row.odd)
         }
+    }
+
+    @Test
+    fun `a car-pool lane that opens to every car beside the lane lit at the car holds the words until the plan lights it`() {
+        // A left exit whose lane is added beyond a car-pool lane that is open to every car from the lane point 800 m before
+        // the gore: that lane opens to every car on the way, left of the lane lit at the car and right of the exit's lane.
+        val route = LaneScenes.carpoolEnds()
+        val plan = plan(route)
+        val carPool = plan.topology.lanes.single { it.designated }
+        val opened = plan.topology.lanes.single { !it.designated && it.slot == carPool.slot }
+        val rows = CardDrive(route, plan = plan).drive(everyUpdate = true).filter { it.row.source == CardLanes.Source.RUN_UP }
+        val worded = rows.indexOfFirst { it.target != null }
+        assertTrue(worded > 0)
+        // No words before it is open to every car, and once they come they stay to the gore: no update without them between.
+        assertTrue(rows[worded].station >= opened.opens, "words at ${GORE - rows[worded].station} m")
+        assertTrue(rows.take(worded).all { it.odd == RunUpRule.ODD_OPENS_AHEAD || it.odd == RunUpRule.ODD_NOT_NAMED })
+        assertTrue(rows.drop(worded).all { it.target == LaneTarget(LaneEdge.LEFT, 1, 0) })
     }
 
     // ------------------------------------------------------------------ where the plan names no lane
