@@ -401,7 +401,7 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
                     map.setLook(request, onSettled)
                 } catch (e: RuntimeException) {
                     failed("setLook", e)
-                    LookApplied()
+                    LookApplied(onMap = false)
                 }
             }
         } catch (e: CancellationException) {

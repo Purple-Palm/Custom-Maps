@@ -99,6 +99,12 @@ data class LookApplied(
     val routeLine: Boolean = false,
     /** Whether the basemap's theme was written now; the settle time then follows. */
     val theme: Boolean = false,
+    /**
+     * Whether there was a map to take the look. False only from a renderer that has no map to write
+     * on now, as the car's between two surfaces, whose next map takes the look as it is made: the
+     * look's line then waits for the fields of a map that has one.
+     */
+    val onMap: Boolean = true,
 )
 
 /** Insets in pixels from each edge of the map surface. */

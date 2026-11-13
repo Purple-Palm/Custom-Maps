@@ -326,15 +326,18 @@ internal class CarNavigationMap(
     /**
      * The app's look, the one the phone's map shows ([LookOnMap]), with a theme that waits as on the
      * phone: written on the map of the surface there is, and kept for every later surface. The same
-     * request again writes nothing. A "car_look" line says what the map did with it.
+     * request again writes nothing. A "car_look" line says what the map did with it. Without a
+     * surface there is no map to write on ([LookApplied.onMap] false): the next surface's map takes
+     * the look as it is made.
      */
     override fun setLook(request: LookOnMap, onSettled: (idleMs: Long?) -> Unit): LookApplied {
-        if (released || request == lookRequest) return LookApplied()
+        if (released) return NOT_ON_MAP
+        if (request == lookRequest) return if (scene != null) LookApplied() else NOT_ON_MAP
         lookRequest = request
-        var applied = LookApplied()
+        var applied = NOT_ON_MAP
         guard("setLook") {
             val shown = scene?.setLook(request, onSettled)
-            applied = shown ?: LookApplied()
+            applied = shown ?: NOT_ON_MAP
             log.log(LOOK_LINE, CarLook.fields(hostDark(), CarLook.CAUSE_APP, request) + writeFields(shown))
         }
         return applied
@@ -706,6 +709,9 @@ internal class CarNavigationMap(
     companion object {
         /** The text attribution that Mapbox and OpenStreetMap ask for on every map. */
         const val ATTRIBUTION = "© Mapbox © OpenStreetMap"
+
+        /** What a look comes to while no surface's map is there to write it on. */
+        private val NOT_ON_MAP = LookApplied(onMap = false)
 
         private const val ATTRIBUTION_TEXT_DP = 12f
         private const val ATTRIBUTION_EDGE_DP = 1.5f

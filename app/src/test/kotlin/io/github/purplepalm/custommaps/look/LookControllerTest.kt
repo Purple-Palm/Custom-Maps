@@ -104,16 +104,17 @@ class LookControllerTest {
         /** A map on screen that writes the whole basemap for a change and the theme alone for a theme. */
         fun showMap(): Job = showMap(requests, settles)
 
-        /** The car's map, a map of the same kind on the car's screen. */
-        fun showCarMap(): Job = showMap(carRequests, carSettles)
+        /** The car's map, a map of the same kind on the car's screen; between two surfaces it has no map to write on. */
+        fun showCarMap(surface: Boolean = true): Job = showMap(carRequests, carSettles, surface)
 
-        private fun showMap(requests: MutableList<LookOnMap>, settles: MutableList<(Long?) -> Unit>): Job = test.backgroundScope.launch {
+        private fun showMap(requests: MutableList<LookOnMap>, settles: MutableList<(Long?) -> Unit>, surface: Boolean = true): Job = test.backgroundScope.launch {
             controller.showOn { request, onSettled ->
                 val first = requests.isEmpty()
                 val before = requests.lastOrNull()
                 requests += request
                 settles += onSettled
                 when {
+                    !surface -> LookApplied(onMap = false)
                     // Made with the look: nothing to write.
                     first -> LookApplied()
                     before != null && before.look == request.look -> LookApplied(keys = 1, writeMs = 0.5, transitionMs = 0, theme = true)
@@ -743,6 +744,7 @@ class LookControllerTest {
         assertFalse("0.4" in written || "0.7" in written || "SunPlace" in written)
         assertNull(rig.lines.firstOrNull { it.first == "look" && it.second["cause"] == LookCause.SUN && it.second["guidance"] == false })
     }
+
     @Test
     fun `a car session started with no activity decides the first look`() = runTest {
         val rig = Rig(this)
@@ -938,5 +940,37 @@ class LookControllerTest {
         assertEquals(1, rig.looks().count { it["cause"] == LookCause.RESUME })
         // The line has one map's fields: what the first map to take the request did.
         assertEquals(15, rig.looks().last()["keys"])
+    }
+
+    @Test
+    fun `the car's map between two surfaces leaves the look line to the phone's map`() = runTest {
+        val rig = Rig(this)
+        rig.startAndShow()
+        // The car's map first, with no surface to draw on, then the phone's.
+        rig.showCarMap(surface = false)
+        val phone = rig.showMap()
+        runCurrent()
+        rig.controller.onChoice(LookChoice.NIGHT)
+        runCurrent()
+        assertEquals(LookOnMap(Look.NIGHT), rig.carRequests.last())
+        // The phone's map wrote the look: the line has its fields, and its theme's settle time follows.
+        assertEquals(16, rig.looks().last()["keys"])
+        assertEquals(2.5, rig.looks().last()["writeMs"])
+        rig.settles.last()(800L)
+        assertEquals("look_settled" to mapOf<String, Any?>("idleMs" to 800L, "look" to Look.NIGHT), rig.lines.last())
+        // The phone's map goes before it takes the next look, which the car's map passed by: the line
+        // goes as it is.
+        rig.controller.onChoice(LookChoice.DAY)
+        phone.cancel()
+        runCurrent()
+        assertEquals(LookChoice.DAY, rig.looks().last()["choice"])
+        assertFalse("keys" in rig.looks().last())
+        // The car's map alone, still between surfaces: a line goes at once, with no map's fields.
+        rig.controller.onChoice(LookChoice.NIGHT)
+        runCurrent()
+        assertEquals(LookCause.CHOICE, rig.looks().last()["cause"])
+        assertEquals(LookChoice.NIGHT, rig.looks().last()["choice"])
+        assertFalse("keys" in rig.looks().last())
+        assertEquals(4, rig.looks().size)
     }
 }

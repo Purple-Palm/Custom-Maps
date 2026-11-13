@@ -157,6 +157,10 @@ class LookController(
     /** The written line whose theme write the map is still drawing; null when none. */
     private var settling: Settling? = null
 
+    /** The request that maps with nothing to write on passed by ([onMapApplied]), and how many of them did. */
+    private var passedRequest: LookOnMap? = null
+    private var passes = 0
+
     /**
      * Decides the first look of this process, before the activity's first frame, or as the car's
      * session starts when the car's host started the process. The choice is taken if the store
@@ -277,7 +281,7 @@ class LookController(
      * comes, the map's first one included, and what the map did goes into the line of the change
      * that asked for it ([onMapApplied]); with the phone's map and the car's both showing, the first
      * to take a request gives its line the map's fields. While no map shows, a line is written at
-     * once.
+     * once, and so is one that every map showing passed by, having no map to write on.
      */
     override suspend fun showOn(setLook: (request: LookOnMap, onSettled: (idleMs: Long?) -> Unit) -> LookApplied) {
         mapsShowing += 1
@@ -289,16 +293,27 @@ class LookController(
             }
         } finally {
             mapsShowing -= 1
-            if (mapsShowing == 0) writeWaitingLines()
+            if (mapsShowing == 0 || (passedRequest == _lookOnMap.value && passes >= mapsShowing)) writeWaitingLines()
         }
     }
 
     /**
      * A map did [applied] with [request], the latest request: the line of the change that asked
      * for it gets the map's fields, and lines of requests that a newer one replaced before the map
-     * took them go as they are. [handBack] matches the settle time of a theme written now.
+     * took them go as they are. [handBack] matches the settle time of a theme written now. A map
+     * that had no map to write on ([LookApplied.onMap] false, the car's between two surfaces) leaves
+     * the line to another map, and it goes as it is once every map showing passed it by.
      */
     fun onMapApplied(request: LookOnMap, applied: LookApplied, handBack: Long) {
+        if (!applied.onMap) {
+            if (request != passedRequest) {
+                passedRequest = request
+                passes = 0
+            }
+            passes += 1
+            if (passes >= mapsShowing) writeWaitingLines()
+            return
+        }
         val last = waitingLines.removeLastOrNull() ?: return
         writeWaitingLines()
         if (last.request != request) {
