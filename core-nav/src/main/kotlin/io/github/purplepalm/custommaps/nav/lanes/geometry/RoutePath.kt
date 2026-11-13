@@ -216,6 +216,9 @@ class RoutePath private constructor(
         /** Offsets that differ by less than this are the same: no move. */
         private const val SAME_OFFSET_METERS = 1e-6
 
+        /** A turn shorter than this many axis samples is sampled this many times along it ([RoadAxis.SAMPLE_METERS]). */
+        internal const val TURN_SAMPLES = 20
+
         /** Stations closer than this are one: where a lane ends, it is there just before and gone just after. */
         private const val SAME_STATION = 1e-6
 
@@ -449,10 +452,15 @@ class RoutePath private constructor(
             val diagonalsBefore = diagonals.size
             solve(region, axes, windowSamples)
             val ends = moves.subList(movesBefore, moves.size).map { it.to }
+            // A turn that settles within a few metres (a tight arc at its gore) is sampled at a [TURN_SAMPLES]th of its length,
+            // so its chords meet the road's line without a kink.
+            val turns = moves.subList(movesBefore, moves.size)
+                .filter { it.kind == Move.Kind.TURN && abs(it.offsetFrom) > SAME_OFFSET_METERS && it.to - it.from < TURN_SAMPLES * RoadAxis.SAMPLE_METERS }
+                .flatMap { m -> (1 until TURN_SAMPLES).map { m.from + (m.to - m.from) * it / TURN_SAMPLES } }
             while (moves.size > movesBefore) moves.removeAt(moves.size - 1)
             while (folds.size > foldsBefore) folds.removeAt(folds.size - 1)
             while (diagonals.size > diagonalsBefore) diagonals.removeAt(diagonals.size - 1)
-            windowSamples = samplesOf(axes, events + ends)
+            windowSamples = samplesOf(axes, events + ends + turns)
             val offsets = solve(region, axes, windowSamples)
             // Trim the end to where the path is back on the line, on a straight piece, and build the points.
             val windows = ArrayList<Window>()

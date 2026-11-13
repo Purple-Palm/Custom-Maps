@@ -798,6 +798,33 @@ class RoutePathTest {
         assertTrue(offset + w / 2.0 <= after.first().left + 1e-6 && offset - w / 2.0 >= after.last().right - 1e-6, "the path at $offset")
     }
 
+    @Test
+    fun `a turn that settles within a few metres meets the road's line without a kink`() {
+        // A right exit whose gore lies 0.45 m past a vertex of the line, so its arc is tight, reached while a move into its lane
+        // has just begun (a bus lane gives way to it shortly before the gore): the path turns off a few decimetres from the
+        // road's line and settles onto the ramp's within a few metres.
+        val route = LaneScenes.approach(
+            listOf(LaneScenes.at(400.0, s(), LaneScenes.bus()), LaneScenes.at(80.0, s(), LaneScenes.bus())),
+            exit = listOf(s(false), sr()),
+            id = "short-turn",
+        )
+        val line = SceneLines.line(route.lengthMeters, (SceneLines.bendsOf(route) + (gore - 0.45 to 0.0)).sortedBy { it.first })
+        val path = build(route, line).path
+        val drawing = path.drawings.single { it.turnsAtEnd }
+        val turn = path.moves.last { it.kind == RoutePath.Move.Kind.TURN }
+        val length = turn.to - turn.from
+        assertTrue(abs(turn.offsetFrom) > 0.1 && length < RoutePath.RAMP_MOVE_MIN_METERS, "a turn of $length m from ${turn.offsetFrom}")
+        // Its points lie a [RoutePath.TURN_SAMPLES]th of it apart at most...
+        val stations = path.stations.filter { it >= turn.from - 1e-9 && it <= turn.to + 1e-9 }
+        for ((a, b) in stations.zipWithNext()) assertTrue(b - a <= length / RoutePath.TURN_SAMPLES + 1e-6, "points $a and $b along a turn of $length m")
+        // ...so where it is back on the route's own line its last chord turns from that line by under a fifth of a degree.
+        val k = path.stations.indexOfFirst { abs(it - drawing.back) < 1e-6 }
+        val a = SceneLines.local(path.points[k - 1])
+        val b = SceneLines.local(path.points[k])
+        val kink = turnBetween(Math.toDegrees(atan2(b.x - a.x, b.y - a.y)), headingAt(path.route, path.routeStations, drawing.back))
+        assertTrue(kink < 0.2, "a kink of $kink degrees where the turn ends")
+    }
+
     // ------------------------------------------------------------------ the design's properties (10.1, LaneTrust 4, 5, 8, 9)
 
     @Test
