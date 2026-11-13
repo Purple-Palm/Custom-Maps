@@ -1107,14 +1107,16 @@ drawing ([DECISIONS.md](DECISIONS.md), 53). It writes the plan down and compares
 46. **Whether the plan agreed with the card.** One `lane_plan` line right after each `lane_evidence`
     line, and a `lane_agree` line each time the card begins to show a lane row at a point with lane
     data: a run-up's row, a lane choice's, and on a freeway the exit's or the fork's own. A run-up's
-    row reads the plan, outlines and words included, so every `lane_agree` line of a run-up's row
-    should say `agree` true: any `why` there is a fault worth a note with the exit. A lane choice's
-    row, or the exit's own row before the run-up, is still the route's own: a `why` of `lit` with
-    `unknownAhead` true can be right there, since before a road without lane data on the exit's side
-    the plan keeps clear of the lane that will be at the edge where that road leaves. Any other `lit`
-    or `amber` is a place where the card and the plan light different lanes: note the exit.
-    There should be no `error` line with `where` `lane_plan` or `lane_agree`, and Start and a reroute
-    should feel as before.
+    row reads the plan, outlines and words included, so a `lane_agree` line of a run-up's row should
+    say `agree` true, but for `why` `no_lane` where no lane can be named on the approach (only a
+    car-pool lane leads on, or the lanes to take lie beyond one: check 59), which is right there.
+    Any other `why` of a run-up's row (`lit`, `amber`, `not_named`, `row`, `no_point` or `words`) is
+    a fault worth a note with the exit. A lane choice's row, or the exit's own row before the
+    run-up, is still the route's own: a `why` of `lit` with `unknownAhead` true can be right there,
+    since before a road without lane data on the exit's side the plan keeps clear of the lane that
+    will be at the edge where that road leaves. Any other `lit` or `amber` is a place where the card
+    and the plan light different lanes: note the exit. There should be no `error` line with `where`
+    `lane_plan` or `lane_agree`, and Start and a reroute should feel as before.
 47. **How often a road without lane data dropped the hold.** A run-up's `unknownExits` in `lane_plan`
     counts the roads without lane data on the exit's side before it, and `unknownExitDropped` says
     where the plan lit the edge lane before such a road all the same, because it came less than about
@@ -1206,11 +1208,12 @@ data ([CAMERA.md](CAMERA.md), The app's own lanes):
 58. **The arrow at the gore.** The white maneuver arrow of the exit runs along the lit lane from just
     before the gore onto the ramp, not across the lanes; at a split on the ramp the same. With another
     choice of Lanes on the map it is Mapbox's arrow as before.
-59. **An exit no lane open to every car leads to** (its lane lies beyond a car-pool lane). No lane is
-    lit before the gore and the card has no words (`odd` `not_named`); the line keeps to the road's
-    line to the gore and across it, over asphalt without any line of the app's from where it turns
-    off until it is in the ramp's lane, and the arrow there is Mapbox's. On the ramp the lit lane
-    begins where the line moves into its lane.
+59. **An exit no lane open to every car leads to** (its lane lies beyond a car-pool lane). No lane
+    is lit before the gore and the card has no words (`odd` `not_named`; its `lane_agree` lines say
+    `why` `no_lane`, as they should); the line keeps to the road's line to the gore and across it,
+    over asphalt without any line of the app's from where it turns off until it is in the ramp's
+    lane, and the arrow there is Mapbox's. On the ramp the lit lane begins where the line moves into
+    its lane.
 60. **The car.** Over the drawn lanes in a close view, once the lit lane shows in the route line's
     place: a blue bar with a white rim across all the drawn lanes and a small forward tick on each
     outer apron, lying flat on the road and reading as paint across it, not standing up or floating;
