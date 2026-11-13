@@ -142,19 +142,24 @@ fun MapScreen(
         onDispose { engine.detachPhoneHost(lifecycleOwner) }
     }
 
-    // The map is made with the look it is to show, so its first tiles are drawn in that look. It is
-    // kept while the list shows in its place: back, it is the same map, with no new style load.
-    val phoneMap = remember { engine.createPhoneMap(context, looks.lookOnMap.value) }
-    DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
+    // The map is made with the look it is to show, so its first tiles are drawn in that look, and only
+    // in the composition that first shows it, whose view goes in the window at once (PhoneMapSlot): a
+    // screen that starts on the list, as one made again mid-drive while a car shows the map, has no map
+    // until the map is to show. Once made, the map is kept while the list shows in its place: back, it is
+    // the same map, with no new style load. Everything below that works on the map waits for it.
+    val mapSlot = remember { PhoneMapSlot<PhoneMap>() }
+    val phoneMap = mapSlot.take(shown = !listShown) { engine.createPhoneMap(context, looks.lookOnMap.value) }
+    if (phoneMap != null) DisposableEffect(phoneMap) { onDispose { phoneMap.release() } }
     // Put away while the list shows: its view leaves the window below, which stops it as a stopped
-    // activity does, and its scene draws nothing. It takes no part in the look meanwhile: no look is
-    // shown on it, and the car map's close view holds a switch in place of its own.
+    // activity does, and its scene draws nothing. It takes no part in the look meanwhile, as a map not
+    // made yet takes none: no look is shown on it, and the car map's close view holds a switch in place
+    // of its own.
     DisposableEffect(phoneMap, listShown) {
-        phoneMap.setAway(listShown)
+        phoneMap?.setAway(listShown)
         looks.onPhoneMapAway(listShown)
         onDispose { looks.onPhoneMapAway(false) }
     }
-    if (!listShown) {
+    if (phoneMap != null && !listShown) {
         // Every later look, at once, and what the map did with it for the look's line in the debug
         // log. Back from the list, its first one is the look decided meanwhile.
         LaunchedEffect(phoneMap) { looks.showOn(phoneMap::setLook) }
@@ -170,26 +175,31 @@ fun MapScreen(
             }
         }
     }
-    // While the activity is stopped nothing is on screen, and the camera draws no frames.
-    LifecycleStartEffect(phoneMap) {
-        phoneMap.setVisible(true)
-        onStopOrDispose { phoneMap.setVisible(false) }
+    if (phoneMap != null) {
+        // While the activity is stopped nothing is on screen, and the camera draws no frames.
+        LifecycleStartEffect(phoneMap) {
+            phoneMap.setVisible(true)
+            onStopOrDispose { phoneMap.setVisible(false) }
+        }
     }
-    val cameraMode by phoneMap.cameraMode.collectAsStateWithLifecycle()
-    // The camera style chosen in Settings, and every later choice at once, also during a drive.
-    LaunchedEffect(phoneMap) { settings.cameraStyle.collect(phoneMap::setCameraStyle) }
-    // The same for the lane zoom: how close the camera goes before turns and lane choices.
-    LaunchedEffect(phoneMap) { settings.laneZoom.collect(phoneMap::setLaneZoom) }
-    // And for lane markings on the map, where the map has them.
-    LaunchedEffect(phoneMap) { settings.laneDetails.collect(phoneMap::setLaneDetails) }
-    // And for the Debug switch that has the app draw the route line itself.
-    LaunchedEffect(phoneMap) { settings.ownRouteLine.collect(phoneMap::setOwnRouteLine) }
-    // And for the one that has it draw the freeway lanes itself.
-    LaunchedEffect(phoneMap) { settings.drawOwnLanes.collect(phoneMap::setDrawOwnLanes) }
+    // What the camera does, for the guidance bar on the map; there is no camera before the map.
+    val cameraMode by (if (phoneMap != null) phoneMap.cameraMode.collectAsStateWithLifecycle() else NO_CAMERA)
     // The pin of the place picked from search, of the routes, the drive and the arrival. It goes
     // when the place does: the place card closed, guidance ended.
     val pinnedPlace = state.pinnedPlace
-    LaunchedEffect(phoneMap, pinnedPlace) { phoneMap.showPlace(pinnedPlace) }
+    if (phoneMap != null) {
+        // The camera style chosen in Settings, and every later choice at once, also during a drive.
+        LaunchedEffect(phoneMap) { settings.cameraStyle.collect(phoneMap::setCameraStyle) }
+        // The same for the lane zoom: how close the camera goes before turns and lane choices.
+        LaunchedEffect(phoneMap) { settings.laneZoom.collect(phoneMap::setLaneZoom) }
+        // And for lane markings on the map, where the map has them.
+        LaunchedEffect(phoneMap) { settings.laneDetails.collect(phoneMap::setLaneDetails) }
+        // And for the Debug switch that has the app draw the route line itself.
+        LaunchedEffect(phoneMap) { settings.ownRouteLine.collect(phoneMap::setOwnRouteLine) }
+        // And for the one that has it draw the freeway lanes itself.
+        LaunchedEffect(phoneMap) { settings.drawOwnLanes.collect(phoneMap::setDrawOwnLanes) }
+        LaunchedEffect(phoneMap, pinnedPlace) { phoneMap.showPlace(pinnedPlace) }
+    }
 
     var locationAccess by remember { mutableStateOf(context.locationAccess()) }
     // Routes and guidance need precise location; approximate is only good for the puck.
@@ -197,9 +207,11 @@ fun MapScreen(
     var askedForLocation by rememberSaveable { mutableStateOf(false) }
     // The system stopped showing the permission dialog, so access has to be turned on in its settings.
     var locationBlocked by rememberSaveable { mutableStateOf(false) }
+    // Also run on each resume by the effect of the screen's first composition, so it asks the slot for
+    // the map, which that composition may not have had yet; a map made later asks for the access then.
     val refreshLocationAccess = {
         val access = context.locationAccess()
-        if (access != LocationAccess.NONE && locationAccess == LocationAccess.NONE) phoneMap.onLocationPermissionGranted()
+        if (access != LocationAccess.NONE && locationAccess == LocationAccess.NONE) mapSlot.map?.onLocationPermissionGranted()
         if (access != locationAccess) {
             viewModel.onLocationAccessChanged(access != LocationAccess.NONE, access == LocationAccess.PRECISE)
         }
@@ -260,7 +272,8 @@ fun MapScreen(
             if (result == SnackbarResult.ActionPerformed) onOpenSettings()
         }
     }
-    val mapAccessDenied by phoneMap.accessDenied.collectAsStateWithLifecycle()
+    // Only a map that has asked for its style can be refused one.
+    val mapAccessDenied = if (phoneMap != null) phoneMap.accessDenied.collectAsStateWithLifecycle().value else false
 
     // The Mapbox logo and attribution keep a fixed strip at the bottom left, just above the navigation
     // bar or the keyboard, and every panel stays above that strip. The floor keeps the logo clear of
@@ -269,7 +282,7 @@ fun MapScreen(
         WindowInsets.navigationBars.union(WindowInsets.ime).getBottom(density),
         with(density) { MIN_ORNAMENT_INSET.roundToPx() },
     )
-    LaunchedEffect(ornamentInset) { phoneMap.setOrnamentBottomInset(ornamentInset) }
+    if (phoneMap != null) LaunchedEffect(ornamentInset) { phoneMap.setOrnamentBottomInset(ornamentInset) }
     val ornamentStrip = PhoneMap.ORNAMENT_STRIP_DP.dp
     val bottomPanelsBottom = with(density) { ornamentInset.toDp() } + ornamentStrip
 
@@ -292,15 +305,17 @@ fun MapScreen(
     val guidancePadding = remember(screenHeight) { GuidancePadding() }
     val guiding = state.guidance == GuidanceState.ACTIVE
     val thenBand = with(density) { THEN_CHIP_BAND.roundToPx() }
-    LaunchedEffect(screenHeight, guiding, topPanelTop, maneuverPanelBottom, bottomPanelTop, thenBand) {
-        val top = guidancePadding.topInset(guiding, panelBottom = maneuverPanelBottom, restTop = topPanelTop, band = thenBand)
-        val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
-        phoneMap.setViewportPadding(ViewportPadding(panelMargin, top + panelMargin, panelMargin, bottom + panelMargin))
+    if (phoneMap != null) {
+        LaunchedEffect(screenHeight, guiding, topPanelTop, maneuverPanelBottom, bottomPanelTop, thenBand) {
+            val top = guidancePadding.topInset(guiding, panelBottom = maneuverPanelBottom, restTop = topPanelTop, band = thenBand)
+            val bottom = if (bottomPanelTop in 1 until screenHeight) screenHeight - bottomPanelTop else 0
+            phoneMap.setViewportPadding(ViewportPadding(panelMargin, top + panelMargin, panelMargin, bottom + panelMargin))
+        }
     }
     // The compass sits under whatever the top of the screen shows: under the offline chip when
     // that is up, and during guidance under the whole band, where the two tabs hang.
     val compassInset = compassTopInset(guiding, maneuverPanelBottom, thenBand, topPanelBottom, offlineChipBottom)
-    LaunchedEffect(compassInset) { phoneMap.setCompassTopInset(compassInset + panelMargin) }
+    if (phoneMap != null) LaunchedEffect(compassInset) { phoneMap.setCompassTopInset(compassInset + panelMargin) }
 
     BackHandler(enabled = state.guidance == GuidanceState.PREVIEW) { viewModel.onCancelPreview() }
     BackHandler(enabled = state.guidance == GuidanceState.IDLE && state.searchText.isNotEmpty()) { viewModel.clearSearch() }
@@ -310,8 +325,9 @@ fun MapScreen(
             .fillMaxSize()
             .onSizeChanged { screenHeight = it.height },
     ) {
-        if (listShown) {
-            // The drive without the map, in its place: the list, the map one tap away.
+        // The drive without the map, in its place: the list, the map one tap away. Past the list there
+        // is always a map: it is made in the composition that first shows it, this one at the latest.
+        if (listShown || phoneMap == null) {
             ListScreen(
                 progress = progress,
                 replay = replay,
@@ -606,6 +622,11 @@ private fun UserMessage.textRes(): Int = when (this) {
     UserMessage.PLACE_NOT_FOUND -> R.string.message_place_not_found
     UserMessage.START_FAILED -> R.string.message_start_failed
     UserMessage.TOKEN_REJECTED -> R.string.message_token_rejected
+}
+
+/** The camera of a screen that has no map yet, having started on the list: none, so idle. */
+private val NO_CAMERA: State<CameraMode> = object : State<CameraMode> {
+    override val value: CameraMode get() = CameraMode.IDLE
 }
 
 /** Lowest bottom inset for the Mapbox logo, so a rounded screen corner never clips it. */

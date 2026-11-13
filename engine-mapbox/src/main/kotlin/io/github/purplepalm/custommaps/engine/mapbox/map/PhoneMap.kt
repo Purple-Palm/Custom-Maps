@@ -36,10 +36,12 @@ import kotlinx.coroutines.flow.StateFlow
  * button in their fixed strip, the compass and the (i) dialog in the look's variants, the fade-in once
  * the style has loaded, and the tap that picks a route of the preview.
  *
- * The view's lifecycle follows the hosting activity; say with [setVisible] when the map is on screen,
- * and call [release] when the view leaves the composition. While the phone shows the list of the
- * maneuvers ahead in its place the screen keeps this map and takes its view out of the window, which
- * stops the view as a stopped activity does, and says so with [setAway].
+ * The view's lifecycle follows the hosting activity from the view's first attach on: Mapbox takes the
+ * activity's lifecycle for it only then, so a view never put in the window is never stopped or
+ * destroyed. Make the map where its view goes in the window at once. Say with [setVisible] when the
+ * map is on screen, and call [release] when the view leaves the composition. While the phone shows the
+ * list of the maneuvers ahead in its place the screen keeps this map and takes its view out of the
+ * window, which stops the view as a stopped activity does, and says so with [setAway].
  */
 class PhoneMap internal constructor(
     context: Context,
@@ -199,7 +201,10 @@ class PhoneMap internal constructor(
      */
     fun setAway(away: Boolean) = scene.setAway(away)
 
-    /** Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle. */
+    /**
+     * Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle,
+     * once it has been in the window.
+     */
     fun release() {
         scene.release()
         mapView.gestures.removeOnMapClickListener(mapClickListener)

@@ -87,8 +87,9 @@ class MapboxEngine private constructor(
     }
 
     /**
-     * A map for the phone screen, showing [lookOnMap] from its first tile on. Call
-     * [PhoneMap.release] when its view leaves the screen.
+     * A map for the phone screen, showing [lookOnMap] from its first tile on. Make it only where its
+     * view goes in the window at once: a view never in the window is never stopped or destroyed
+     * ([PhoneMap]). Call [PhoneMap.release] when its view leaves the screen.
      */
     fun createPhoneMap(context: Context, lookOnMap: LookOnMap): PhoneMap =
         PhoneMap(context, navigationEngine, debugLog, offlineData, lookOnMap)

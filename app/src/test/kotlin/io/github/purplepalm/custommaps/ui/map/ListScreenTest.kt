@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test
  * The list of the maneuvers ahead in place of the phone's map, and the map put away meanwhile. The
  * project has no Compose UI tests, so the sources hold the rules no compiler checks: nothing on the
  * list moves by itself, its page is the black one in the night look's colours, its rows are made once
- * a step, and the map is kept, out of the window, with nothing calling its lifecycle.
+ * a step, and the map is made only when it is to show, then kept, out of the window, with nothing
+ * calling its lifecycle.
  */
 class ListScreenTest {
 
@@ -57,18 +58,33 @@ class ListScreenTest {
 
     @Test
     fun `the phone's map is kept and put away while the list shows, and nothing calls its lifecycle`() {
-        // One map for the screen's life, made whatever the screen shows.
+        // One map for the screen's life, kept in its slot.
         assertEquals(1, Regex("createPhoneMap\\(").findAll(screen).count())
-        assertTrue("phoneMap.setAway(listShown)" in screen)
+        assertTrue("phoneMap?.setAway(listShown)" in screen)
         assertTrue("looks.onPhoneMapAway(listShown)" in screen)
         // The view leaves the parent it had before it is added again.
         assertTrue("(view.parent as? ViewGroup)?.removeView(view)" in screen)
         // The look goes to the map, and its close view to the look, only while the map is there.
-        val shown = screen.substringAfter("if (!listShown) {").substringBefore("LifecycleStartEffect")
+        val shown = screen.substringAfter("if (phoneMap != null && !listShown) {").substringBefore("LifecycleStartEffect")
         assertTrue("looks.showOn(phoneMap::setLook)" in shown, shown)
         assertTrue("phoneMap.closeView.collect" in shown, shown)
         // Nothing here calls the view's lifecycle: Mapbox stops and starts it with the window.
         assertFalse(Regex("""\.view\s*\.\s*on[A-Z]""").containsMatchIn(screen), "a lifecycle call on the map's view")
         assertFalse(Regex("""\bMapView\b""").containsMatchIn(screen))
+    }
+
+    @Test
+    fun `the phone's map is made only in a composition that shows it, so its view is in the window from the start`() {
+        // Made through the slot, and only when the map is to show: never while the list shows. A map view
+        // that has never been in the window is never stopped or destroyed by Mapbox.
+        val made = Regex("""mapSlot\.take\(shown = !listShown\) \{ engine\.createPhoneMap\(""")
+        assertEquals(1, made.findAll(screen).count(), "the map made through the slot while it is to show")
+        assertFalse("remember { engine.createPhoneMap(" in screen)
+        // The screen that makes the map shows its view in the same composition: the list only while it
+        // shows, the map's view otherwise.
+        val content = screen.substringAfter("if (listShown || phoneMap == null) {")
+        assertTrue("AndroidView(factory = { phoneMap.view" in content.substringAfter("} else {"), content)
+        // A resume reaches the map made after the screen's first composition, through the slot.
+        assertTrue("mapSlot.map?.onLocationPermissionGranted()" in screen)
     }
 }
