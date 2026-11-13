@@ -713,19 +713,65 @@ class RoutePathTest {
     }
 
     @Test
-    fun `where an offset would fold the path keeps to the road's line`() {
+    fun `where an offset would fold at a sharp bend the path keeps to the road's line`() {
         // A right lane named into a sharp left kink of the freeway's line (a mapping kink): the offset folds there.
         val route = LaneScenes.s9()
         val line = SceneLines.line(route.lengthMeters, listOf(gore - 100.0 to 120.0, gore - 99.0 to -120.0, gore to -17.0, gore + 400.0 to 90.0))
         val path = build(route, line).path
         assertTrue(path.folds.isNotEmpty())
         val fold = path.folds.first()
+        assertTrue(fold.toLine)
         assertEquals(0.0, path.offsetAt((fold.from + fold.to) / 2.0), 1e-12)
         assertTrue(path.foldMeters > 0.0)
         // Nowhere does the path's own offset fold.
         for (station in generateSequence(path.drawings.first().from) { it + 0.5 }.takeWhile { it < gore - 20.0 }) {
             val axis = path.axisAt(station) ?: continue
             assertFalse(axis.folds(station, path.offsetAt(station)), "at $station")
+        }
+    }
+
+    @Test
+    fun `where an offset would fold at a gentle bend the path keeps its lane and turns where it would cross itself`() {
+        // IA along a line that bends right by 3 and 2 degrees 0.2 m apart in its run-up: the short arc between the two bends
+        // is tighter than the path's offset to the right of it, so that offset folds there.
+        val route = LaneScenes.ia()
+        val at = gore - 1_234.5
+        val plain = build(route).path
+        val bends = (SceneLines.bendsOf(route) + listOf(at to -3.0, at + 0.2 to -2.0)).sortedBy { it.first }
+        val path = build(route, SceneLines.line(route.lengthMeters, bends)).path
+        val axis = requireNotNull(path.axisAt(at))
+        val fillet = requireNotNull(axis.filletAt(at))
+        assertTrue(fillet.turnDegrees < RoutePath.FOLD_KEEP_DEGREES)
+        assertTrue(fillet.radius < -plain.offsetAt(at), "the arc's radius ${fillet.radius}, the path ${plain.offsetAt(at)} m out")
+        val fold = path.folds.single()
+        assertFalse(fold.toLine)
+        assertTrue(fold.from >= fillet.from - 1e-9 && fold.to <= fillet.to + RoadAxis.SAMPLE_METERS, "the fold ${fold.from}..${fold.to}")
+        // The path keeps its lane through the bend, as along the line without it (to a tenth of a millimetre: the bent line's
+        // samples lie elsewhere)...
+        for (station in generateSequence(at - 150.0) { it + 0.25 }.takeWhile { it < at + 150.0 }) {
+            assertEquals(plain.offsetAt(station), path.offsetAt(station), 1e-4, "at $station")
+        }
+        // ...and its line turns where it would cross itself: no loop.
+        assertEquals(null, DrawingProbe.selfCrossing(path.points.map { SceneLines.local(it) }, false))
+    }
+
+    @Test
+    fun `a fold keeps the path's lane up to FOLD_KEEP_DEGREES of turn and the road's line past it`() {
+        // S9's right lane through a kink left and back right one metre apart: the kink's arc folds the lane's offset either way.
+        val route = LaneScenes.s9()
+        val plain = build(route).path
+        fun kinked(degrees: Double) = build(
+            route,
+            SceneLines.line(route.lengthMeters, listOf(gore - 140.0 to degrees, gore - 139.0 to -degrees, gore to -17.0, gore + 400.0 to 90.0)),
+        ).path
+        val keep = RoutePath.FOLD_KEEP_DEGREES
+        for ((degrees, toLine) in listOf(keep - 1.0 to false, keep + 1.0 to true)) {
+            val path = kinked(degrees)
+            val fold = path.folds.single()
+            assertEquals(toLine, fold.toLine, "at $degrees degrees")
+            val middle = (fold.from + fold.to) / 2.0
+            assertEquals(if (toLine) 0.0 else plain.offsetAt(middle), path.offsetAt(middle), 1e-4, "at $degrees degrees")
+            assertEquals(null, DrawingProbe.selfCrossing(path.points.map { SceneLines.local(it) }, false), "at $degrees degrees")
         }
     }
 
@@ -832,7 +878,7 @@ class RoutePathTest {
                 prev = now
             }
         }
-        val excluded = path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(built) + path.folds.map { it.from - FOLD_MARGIN_METERS to it.to + FOLD_MARGIN_METERS }
+        val excluded = path.moves.map { it.from - 1e-6 to it.to + 1e-6 } + turns(built) + path.folds.filter { it.toLine }.map { it.from - FOLD_MARGIN_METERS to it.to + FOLD_MARGIN_METERS }
         fun free(station: Double) = excluded.none { station >= it.first && station <= it.second }
         var windows = 0
         for (window in plan.windows) {
@@ -847,7 +893,7 @@ class RoutePathTest {
                 val named = seg?.named
                 // On the drawn asphalt or on the road's line wherever the plan names a lane, inside moves and at a ramp's
                 // start too; the blends around a fold aside.
-                val folded = path.folds.any { station >= it.from - FOLD_MARGIN_METERS && station <= it.to + FOLD_MARGIN_METERS }
+                val folded = path.folds.any { it.toLine && station >= it.from - FOLD_MARGIN_METERS && station <= it.to + FOLD_MARGIN_METERS }
                 if (seg != null && seg.inWindow && named != null && seg.noLane == null && drawn && !folded) {
                     val offset = path.offsetAt(station)
                     val edges = built.section.edges(station, requireNotNull(path.axisAt(station)))
@@ -901,7 +947,7 @@ class RoutePathTest {
                 if (here != approach) {
                     approach = here
                     first = 0.0
-                } else if (!inTurn && path.folds.none { station >= it.from - FOLD_MARGIN_METERS && station <= it.to + FOLD_MARGIN_METERS } &&
+                } else if (!inTurn && path.folds.none { it.toLine && station >= it.from - FOLD_MARGIN_METERS && station <= it.to + FOLD_MARGIN_METERS } &&
                     !plan.moves.any { it.back }
                 ) {
                     val d = now - prev
@@ -926,7 +972,7 @@ class RoutePathTest {
         // begun before the approach is still under way.
         for (approach in plan.noLane) {
             val begun = path.moves.filter { it.from < approach.from - 1e-6 }.map { it.from to it.to + 1e-6 }
-            val skip = turns(built) + begun + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+            val skip = turns(built) + begun + path.folds.filter { it.toLine }.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
             var station = approach.from
             while (station < approach.to) {
                 val drawn = path.drawings.any { station >= it.from && station < it.to }
@@ -941,7 +987,7 @@ class RoutePathTest {
         // lane named late has ended, not left the path beside the drawn ramp.
         for (start in built.section.rampStarts) {
             if (path.drawings.none { start.station > it.from && start.station < it.to }) continue
-            if (path.folds.any { start.station >= it.from - RoutePath.RETURN_METERS && start.station <= it.to + RoutePath.RETURN_METERS }) continue
+            if (path.folds.any { it.toLine && start.station >= it.from - RoutePath.RETURN_METERS && start.station <= it.to + RoutePath.RETURN_METERS }) continue
             val offset = path.offsetAt(start.station)
             if (abs(offset) < 1e-9) continue
             val edges = requireNotNull(built.section.edges(start.station, requireNotNull(path.axisAt(start.station))))
@@ -959,7 +1005,7 @@ class RoutePathTest {
             val drawing = path.drawings.firstOrNull { conflict.to > it.from && conflict.to < it.to } ?: continue
             val moving = path.moves.filter { (it.kind == RoutePath.Move.Kind.ENTER || it.kind == RoutePath.Move.Kind.LANE) && it.from <= conflict.to + 1.0 && it.to >= conflict.to }
             val until = minOf(drawing.to, moving.maxOfOrNull { it.to } ?: conflict.to)
-            val skip = turns(built) + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+            val skip = turns(built) + path.folds.filter { it.toLine }.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
             var station = conflict.to
             while (station <= until) {
                 val offset = path.offsetAt(station)
@@ -980,7 +1026,7 @@ class RoutePathTest {
         for (conflict in plan.flags) {
             if (conflict.kind != LanePlan.Flag.Kind.CONFLICT) continue
             val drawing = path.drawings.firstOrNull { conflict.to > it.from && conflict.to < it.to } ?: continue
-            val skip = turns(built) + path.folds.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
+            val skip = turns(built) + path.folds.filter { it.toLine }.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS }
             for ((i, move) in across.withIndex()) {
                 if (move.from < conflict.to - 1e-6 || move.from > conflict.to + 1.0) continue
                 val lane = plan.segmentAt(move.from + 1e-6)?.named ?: continue
@@ -1008,7 +1054,7 @@ class RoutePathTest {
         // ([CrossSection.turnOff]); past the return it moves only toward the road's line.
         for ((i, drawing) in path.drawings.withIndex()) {
             // Where the path keeps to the road's line around a fold, the fold's blends move it there.
-            fun folded(from: Double) = path.folds.any { it.to > from - RoutePath.RETURN_METERS && it.from < drawing.back + RoutePath.RETURN_METERS }
+            fun folded(from: Double) = path.folds.any { it.toLine && it.to > from - RoutePath.RETURN_METERS && it.from < drawing.back + RoutePath.RETURN_METERS }
             if (drawing.turnsAtEnd) {
                 val turn = path.moves.lastOrNull { it.kind == RoutePath.Move.Kind.TURN && it.from <= drawing.to + 1e-6 && it.from >= drawing.to - CrossSection.RAMP_START_MAX_METERS } ?: continue
                 if (folded(turn.from)) continue

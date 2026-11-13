@@ -442,6 +442,9 @@ class LaneDrawing private constructor(
 
         /** The path's way at a station is read from its offsets this far before and after it. */
         private const val SLOPE_METERS = 0.25
+
+        /** Where the path's offset folds, its way along the axis is read as no less than this share of the axis' own. */
+        private const val FOLDED_ALONG = 1e-6
     }
 
     /** How one line is drawn. */
@@ -1445,7 +1448,9 @@ class LaneDrawing private constructor(
             val place = axis.at(s)
             val t = path.offsetAt(s)
             val slope = (path.offsetAt(s + SLOPE_METERS) - path.offsetAt(s - SLOPE_METERS)) / (2.0 * SLOPE_METERS)
-            val along = 1.0 - place.curvature * t
+            // Where the path's offset folds (1 - kappa t <= 0) its way would turn back: the ribbon keeps the axis' side there,
+            // its edges are cut where they would cross themselves.
+            val along = max(1.0 - place.curvature * t, FOLDED_ALONG)
             val dx = place.tx * along + place.nx * slope
             val dy = place.ty * along + place.ny * slope
             val norm = hypot(dx, dy)

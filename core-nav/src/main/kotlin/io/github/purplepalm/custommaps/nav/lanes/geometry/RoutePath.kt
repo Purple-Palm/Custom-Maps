@@ -55,7 +55,10 @@ import kotlin.math.min
  *   it joins that line without a kink. The turn or the return at a drawing's end takes over a move still under way there,
  *   so no move runs on past the drawing.
  * - **Folds.** Where the path's offset would fold over itself on a curve too sharp for it (1 - kappa t <= 0, [RoadAxis]),
- *   it goes to the road's line there, over [RETURN_METERS] on each side ([folds]).
+ *   it keeps its lane and turns where it would cross itself ([Loops]), so the lane it is in and the lit lane go on
+ *   through a bend of a few degrees whose arc is short between two close vertices; where the road turns there by more
+ *   than [FOLD_KEEP_DEGREES] (a corner, a mapping kink) it goes to the road's line, over [RETURN_METERS] on each side
+ *   ([folds]).
  *
  * The geometry is computed in drawing windows of at most [WINDOW_METERS], each in local metres of one origin
  * ([RoadAxis]), cut on straight pieces so the windows meet without a kink, and simplified to [TOLERANCE_METERS]. Every
@@ -77,7 +80,7 @@ class RoutePath private constructor(
     val drawings: List<Drawing>,
     /** Every move of the path across the road, in route order. */
     val moves: List<Move>,
-    /** The stretches where the path's offset would fold, and it keeps to the road's line. */
+    /** The stretches where the path's offset would fold. */
     val folds: List<Fold>,
     /** The stretches past a ramp's start where the path keeps to the road's line, having reached the turn on it. */
     val diagonals: List<Diagonal>,
@@ -111,8 +114,12 @@ class RoutePath private constructor(
         }
     }
 
-    /** A stretch from [from] to [to] where the path would fold and keeps to the road's line, blended in and out around it. */
-    data class Fold(val from: Double, val to: Double) {
+    /**
+     * A stretch from [from] to [to] where the path's offset would fold. [toLine]: the road turns there by more than
+     * [FOLD_KEEP_DEGREES] and the path keeps to the road's line, blended in and out around it; else it keeps its offset and
+     * turns where it would cross itself.
+     */
+    data class Fold(val from: Double, val to: Double, val toLine: Boolean) {
         val meters: Double get() = to - from
     }
 
@@ -127,7 +134,7 @@ class RoutePath private constructor(
     /** One drawing window: its axis and the path's offset at each of its samples. */
     internal class Window(val axis: RoadAxis, val stations: DoubleArray, val offsets: DoubleArray)
 
-    /** How many metres of the route the path keeps to the road's line because its offset would fold there. */
+    /** How many metres of the route the path's offset would fold over. */
     val foldMeters: Double get() = folds.sumOf { it.meters }
 
     /** The path's offset from the road's line at [station], left positive: 0 away from the drawings. */
@@ -197,8 +204,18 @@ class RoutePath private constructor(
         /** ...but keep every sample of this many metres before the path is back on the route's own line, so it joins it without a kink. */
         const val BACK_SAMPLED_METERS = 12.0
 
+        /**
+         * Where the path's offset would fold and the road turns there by more than this (a corner, a mapping kink), the path
+         * keeps to the road's line around it; at a gentler bend, where the fold comes of a short arc between close vertices, it
+         * keeps its offset.
+         */
+        const val FOLD_KEEP_DEGREES = 40.0
+
         /** Offsets that differ by less than this are the same: no move. */
         private const val SAME_OFFSET_METERS = 1e-6
+
+        /** A fold is at a sharp bend where an arc turning by more than [FOLD_KEEP_DEGREES] lies within this of it. */
+        private const val SHARP_REACH_METERS = 12.0
 
         /** How far a move between lanes runs per lane it crosses, on a road of [road] planned at [speedMps]. */
         fun moveMeters(speedMps: Double, road: RoadKind): Double {
@@ -445,10 +462,13 @@ class RoutePath private constructor(
                 val st = DoubleArray(keep.size) { samples[keep[it]] }
                 val of = DoubleArray(keep.size) { off[keep[it]] }
                 windows.add(Window(axis, st, of))
-                val local = st.indices.map { axis.offset(st[it], of[it]) }
+                // Where the offset folds at a bend it keeps, the path turns where it would cross itself: the place it crosses
+                // itself, reached twice, kept as it is.
+                val (local, at) = Loops.cut(st.indices.map { axis.offset(st[it], of[it]) }, st.asList(), { it }, { it })
+                val twice = { i: Int -> (i > 0 && local[i] == local[i - 1]) || (i + 1 < local.size && local[i] == local[i + 1]) }
                 // Every sample of the last metres before the path is back on the route's own line: one chord over them would
                 // turn at the join.
-                for (i in simplify(local) { st[it] >= back - BACK_SAMPLED_METERS }) out.add(axis.toGeo(local[i]) to st[i])
+                for (i in simplify(local) { at[it] >= back - BACK_SAMPLED_METERS || twice(it) }) out.add(axis.toGeo(local[i]) to at[i])
             }
             // Each drawing is back on the road's line where its return or its turn ends (at its end where nothing was left);
             // the region's last where the path is the route's own line again.
@@ -825,7 +845,10 @@ class RoutePath private constructor(
             return lengthBeforeRampStart(length, start.station - station, jump, section.roadAt(station) ?: RoadKind.FREEWAY)
         }
 
-        /** Where the offsets fold, the path keeps to the road's line, blended in and out over [RETURN_METERS]. */
+        /**
+         * Where the offsets fold: at a bend of more than [FOLD_KEEP_DEGREES] the path keeps to the road's line, blended in and out
+         * over [RETURN_METERS]; elsewhere it keeps its offset (its points are cut where they would cross themselves).
+         */
         private fun foldsOf(axes: List<RoadAxis>, samples: List<DoubleArray>, offsets: List<DoubleArray>) {
             val stretches = ArrayList<Pair<Double, Double>>()
             for ((k, axis) in axes.withIndex()) {
@@ -843,12 +866,16 @@ class RoutePath private constructor(
                 if (start >= 0.0) stretches.add(start to s.last())
             }
             if (stretches.isEmpty()) return
-            for ((from, to) in stretches) folds.add(Fold(from, to))
+            val sharp = stretches.filter { (from, to) ->
+                axes.any { axis -> axis.fillets.any { it.to >= from - SHARP_REACH_METERS && it.from <= to + SHARP_REACH_METERS && it.turnDegrees > FOLD_KEEP_DEGREES } }
+            }
+            for ((from, to) in stretches) folds.add(Fold(from, to, (from to to) in sharp))
+            if (sharp.isEmpty()) return
             for ((k, s) in samples.withIndex()) {
                 val o = offsets[k]
                 for (j in s.indices) {
                     var keep = 1.0
-                    for ((from, to) in stretches) {
+                    for ((from, to) in sharp) {
                         val w = when {
                             s[j] < from - RETURN_METERS || s[j] > to + RETURN_METERS -> 1.0
                             s[j] in from..to -> 0.0

@@ -1761,12 +1761,15 @@ drawn yet. Before Start, in the preview, nothing changes.
   that lane onto the ramp instead of across the gore. Where no lane can be named before an exit (its
   lanes lie beyond a lane kept for car pools or buses), the line keeps to the road's line to the gore
   and, onto a ramp with lane data, until the ramp's lanes lie on the ramp, and moves into the ramp's
-  lane only from there. A move still under way where the drawn lanes end, as when the plan names the
-  exit's lane only shortly before the gore, ends with them: at the gore the line goes on straight
-  from where it is onto the ramp's line, and where the lane data stops it goes back to the road's
-  line from where it is. The lanes' places are rules (3.66 m lanes, laid out around the road's
-  line), not the paint on the road. Away from lanes the line lies exactly
-  on the SDK's. The car is where it always is: nothing moves its icon sideways
+  lane only from there. Where the road's line bends on an arc tighter than the line's distance from
+  it (a bend of a few degrees between two close points of the road's line), the line keeps its lane
+  and turns where it would cross itself; only around a corner of more than 40 degrees does it keep
+  to the road's line there, blending to it and back over 60 m on each side. A move still under way
+  where the drawn lanes end, as when the plan names the exit's lane only shortly before the gore,
+  ends with them: at the gore the line goes on straight from where it is onto the ramp's line, and
+  where the lane data stops it goes back to the road's line from where it is. The lanes' places are
+  rules (3.66 m lanes, laid out around the road's line), not the paint on the road. Away from lanes
+  the line lies exactly on the SDK's. The car is where it always is: nothing moves its icon sideways
   ([DECISIONS.md](DECISIONS.md), 39).
 - **How it looks.** Today's line and casing: the SDK's widths up to zoom 16.5 and from there on in
   the widths of 16.5, about 10.4 and 15.5 dp, as with lane details on (`RouteLineWidths`), never
@@ -1856,11 +1859,12 @@ them, whatever that line's own switch says. Before Start nothing changes, and st
   run-up's start to the gore and on onto the ramp where the ramp has lanes. It is drawn only where
   it is the lane the plan names: where the line lies within half a lane of that lane's middle, or
   moves into it, and the lit lane lies on the lanes drawn there. Where the line waits on the road's
-  line beside a lane that is still opening, or keeps to the road's line around a curve too sharp for
-  the lanes, the route line shows there instead. A line of the road's colour on the route line's own
-  path, trimmed with the route line's own trim, covers it behind the car, so the amber ends at the
-  car. The tint pieces the car has passed are hidden one station at a time by feature state; a lit
-  piece takes its stretch's traffic colour the same way.
+  line beside a lane that is still opening, or keeps to the road's line around a corner too sharp for
+  the lanes, the route line shows there instead; through a gentler bend the line keeps its lane and
+  the lit lane goes on with it. A line of the road's colour on the route line's own path, trimmed
+  with the route line's own trim, covers it behind the car, so the amber ends at the car. The tint
+  pieces the car has passed are hidden one station at a time by feature state; a lit piece takes its
+  stretch's traffic colour the same way.
 - **The swap** (`LaneSwap`): over the lit stretches the route line is drawn whole or not at all.
   While the camera's close view for the lanes or its junction view holds (`CloseView`'s latched
   rules: Smooth follow once the view has reached its goal and no longer moves; never Mapbox tuned,

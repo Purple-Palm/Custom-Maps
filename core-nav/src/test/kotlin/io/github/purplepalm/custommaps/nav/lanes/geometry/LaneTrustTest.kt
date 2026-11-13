@@ -119,7 +119,7 @@ class LaneTrustTest {
             check(built)
         }
         assertTrue(waited > 0, "no lane lit only from where it lies about the path")
-        assertSeen("line", "paint", "named", "toward", "opens", "lit", "tint", "litOnLanes", "litInLane", "simpleLine", "simpleRing")
+        assertSeen("line", "paint", "named", "toward", "opens", "lit", "tint", "litOnLanes", "litInLane", "simpleLine", "simpleRing", "litOverFold")
     }
 
     /**
@@ -180,6 +180,7 @@ class LaneTrustTest {
         bareWhereReachedOnTheLine(b)
         goreWhereLanesAreLeft(b)
         noLoops(b)
+        litGoesOn(b)
     }
 
     // ------------------------------------------------------------------ 1, 2: no line and no ring of ours crosses itself
@@ -845,6 +846,30 @@ class LaneTrustTest {
         }
     }
 
+    // ------------------------------------------------------------------ 4, 10: where the named lane goes on, the lit lane goes on
+
+    /**
+     * Between two lit stretches inside one card window and one drawing, where the plan names one lane all along, nothing is
+     * dark: across a fold the path keeps its lane and the lit lane goes on with it.
+     */
+    private fun litGoesOn(b: Built) {
+        val windows = merged(b.plan.windows.map { it.from to it.to })
+        val lit = b.drawing.litStretches()
+        for ((a, c) in lit.zipWithNext()) {
+            val from = a.endInclusive
+            val to = c.start
+            if (windows.none { from >= it.first - 1e-6 && to <= it.second + 1e-6 }) continue
+            if (b.path.drawings.none { from >= it.from && to <= it.to }) continue
+            val between = b.plan.segments.filter { it.to > from && it.from < to }
+            val named = between.firstOrNull()?.named ?: continue
+            val goesOn = between.all { it.named == named && it.noLane == null && it.inWindow }
+            assertFalse(goesOn, "${b.name}: lane $named named all along, dark from $from to $to")
+        }
+        for (fold in b.path.folds.filter { !it.toLine }) {
+            if (lit.any { fold.from > it.start && fold.to < it.endInclusive }) saw("litOverFold")
+        }
+    }
+
     // ------------------------------------------------------------------ 1, 2: a gore reached on the road's line is bare
 
     /**
@@ -934,7 +959,7 @@ class LaneTrustTest {
 
     /** The folds the path keeps to the road's line through, with the blends around them. */
     private fun folds(b: Built): List<Pair<Double, Double>> =
-        b.path.folds.map { it.from - RoutePath.RETURN_METERS - RoadAxis.SAMPLE_METERS to it.to + RoutePath.RETURN_METERS + RoadAxis.SAMPLE_METERS }
+        b.path.folds.filter { it.toLine }.map { it.from - RoutePath.RETURN_METERS - RoadAxis.SAMPLE_METERS to it.to + RoutePath.RETURN_METERS + RoadAxis.SAMPLE_METERS }
 
     /** Which approach [station] lies on: the index of the next maneuver the plan counts. */
     private fun approachOf(b: Built, station: Double): Int = b.route.nodes.indexOfFirst { it.station >= station && LaneEvidence.planTurns(it) }
