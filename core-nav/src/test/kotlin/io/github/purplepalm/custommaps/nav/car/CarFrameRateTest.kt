@@ -48,6 +48,33 @@ class CarFrameRateTest {
     }
 
     @Test
+    fun `a real 60 frames a second at 120, 90 and 60 Hz, and on the timer, with the Debug switch at 60`() {
+        assertEquals(30, CarFrameRate.maxFps(120.0, targetFps = 60))
+        assertEquals(40, CarFrameRate.maxFps(90.0, targetFps = 60))
+        assertEquals(60, CarFrameRate.maxFps(60.0, targetFps = 60))
+        for (hz in listOf(120, 90, 60)) {
+            assertEquals(60, drawnInASecond(displayHz = hz, maxFps = CarFrameRate.maxFps(hz.toDouble(), targetFps = 60)), "at $hz Hz")
+        }
+        val onTimer = CarFrameRate.displayHz(CarFrameClock.Source.TIMER, vsyncHz = 120.0)
+        assertEquals(60, CarFrameRate.maxFps(onTimer!!, targetFps = 60))
+        // Without a rate the target itself; 60 x 60 / 144 = 25.
+        assertEquals(60, CarFrameRate.maxFps(Double.NaN, targetFps = 60))
+        assertEquals(60, CarFrameRate.maxFps(0.0, targetFps = 60))
+        assertEquals(25, CarFrameRate.maxFps(144.0, targetFps = 60))
+        // Still within 1 and 60.
+        assertEquals(60, CarFrameRate.maxFps(40.0, targetFps = 60))
+        assertEquals(1, CarFrameRate.maxFps(10_000.0, targetFps = 60))
+    }
+
+    @Test
+    fun `the Debug switch offers 30 and 60 a second, and any other number reads as 30`() {
+        assertEquals(listOf(30, 60), CarFrameRate.TARGETS)
+        assertEquals(30, CarFrameRate.targetOf(30))
+        assertEquals(60, CarFrameRate.targetOf(60))
+        for (other in listOf(0, 1, 29, 45, 61, 120, -60)) assertEquals(30, CarFrameRate.targetOf(other), "$other")
+    }
+
+    @Test
     fun `on the timer the rate is taken for 60, which caps at 30`() {
         val hz = CarFrameRate.displayHz(CarFrameClock.Source.TIMER, vsyncHz = 120.0)
         assertEquals(60.0, hz)

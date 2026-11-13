@@ -7,8 +7,9 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * The car map's frame cap, held at 30 frames a second from the render thread's own ticks, against a
- * replay of the map library's pacing ([PacedRenderThread]) and against windows made up by hand.
+ * The car map's frame cap, held at 30 frames a second, or 60 with the Debug switch, from the render
+ * thread's own ticks, against a replay of the map library's pacing ([PacedRenderThread]) and against
+ * windows made up by hand.
  */
 class CarFrameCapTest {
 
@@ -230,6 +231,110 @@ class CarFrameCapTest {
     }
 
     @Test
+    fun `about 60 frames a second at the display rates a phone has, with the Debug switch at 60`() {
+        val cases = listOf(120.0 to 5.0, 120.0 to 12.0, 90.0 to 5.0, 60.0 to 5.0)
+        for ((hz, draw) in cases) {
+            val run = drive(realHz = hz, drawMillis = draw, seconds = 12, target = 60)
+            assertSettled(run, "$hz Hz, $draw ms", target = 60)
+            assertEquals(60, run.cap.targetFps)
+        }
+        // Frames quick to draw keep the cap for the display's rate: 30 at 120 Hz, 40 at 90, 60 at 60.
+        assertEquals(listOf(30), drive(realHz = 120.0, drawMillis = 5.0, seconds = 8, target = 60).caps.distinct())
+        assertEquals(listOf(40), drive(realHz = 90.0, drawMillis = 5.0, seconds = 8, target = 60).caps.distinct())
+        assertEquals(listOf(60), drive(realHz = 60.0, drawMillis = 5.0, seconds = 8, target = 60).caps.distinct())
+    }
+
+    @Test
+    fun `with the Debug switch at 60 the timer takes the cap to 60`() {
+        val cap = CarFrameCap()
+        cap.setTarget(60)
+        assertTrue(cap.onSecond(onTimer = true, displayHz = null))
+        assertEquals(60, cap.maxFps)
+        assertEquals(CarFrameCap.Basis.TIMER, cap.basis)
+        // Back on a display at 120 Hz: 30.
+        assertTrue(cap.onSecond(onTimer = false, displayHz = 120.0))
+        assertEquals(30, cap.maxFps)
+    }
+
+    @Test
+    fun `a cap stays while the map draws within a tenth of 60 at it`() {
+        val cap = displayCap(120.0, target = 60)
+        assertEquals(30, cap.maxFps)
+        // 30 x 108 / 60 = 54: held, twice.
+        repeat(2) { assertFalse(cap.onRenderWindow(ticks = 108, windowMillis = 1_000, displayHz = 120.0, onDisplay = true)) }
+        // 30 x 107 / 60 is under 54: two windows raise it, to round(60 x 60 / 107).
+        assertFalse(cap.onRenderWindow(ticks = 107, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertTrue(cap.onRenderWindow(ticks = 107, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertEquals(34, cap.maxFps)
+        // 34 x 116 / 60 is under 66: held; 34 x 117 / 60 is over: lowered at once.
+        assertFalse(cap.onRenderWindow(ticks = 116, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertTrue(cap.onRenderWindow(ticks = 117, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertEquals(31, cap.maxFps)
+    }
+
+    @Test
+    fun `the switch from 30 to 60 and back sets the cap at once, for the rate taken`() {
+        // Before guidance, for the display's rate: 15 and 30 at 120 Hz.
+        val display = displayCap(120.0)
+        assertEquals(15, display.maxFps)
+        assertTrue(display.setTarget(60))
+        assertEquals(30, display.maxFps)
+        assertEquals(60, display.targetFps)
+        assertEquals(CarFrameCap.Basis.DISPLAY, display.basis)
+        assertEquals(120.0, display.rateHz, 1e-9)
+        // The same target again changes nothing.
+        assertFalse(display.setTarget(60))
+        assertTrue(display.setTarget(30))
+        assertEquals(15, display.maxFps)
+        // During guidance, for the render thread's own ticks: round(30 x 60 / 96) and round(60 x 60 / 96).
+        val render = renderCap(ticks = 96)
+        assertEquals(19, render.maxFps)
+        assertTrue(render.setTarget(60))
+        assertEquals(38, render.maxFps)
+        assertEquals(CarFrameCap.Basis.RENDER, render.basis)
+        // Held once a second while the display's rate stays, at 60 as at 30.
+        assertFalse(render.onSecond(onTimer = false, displayHz = 120.0))
+        assertEquals(38, render.maxFps)
+        assertTrue(render.setTarget(30))
+        assertEquals(19, render.maxFps)
+        // Before any rate, for the 60 Hz the map library believes.
+        val fresh = CarFrameCap()
+        assertEquals(30, fresh.maxFps)
+        assertTrue(fresh.setTarget(60))
+        assertEquals(60, fresh.maxFps)
+        assertTrue(fresh.rateHz.isNaN())
+    }
+
+    @Test
+    fun `the window under way at a switch says nothing, and a raise that waits is dropped`() {
+        val cap = displayCap(120.0)
+        // 15 x 90 / 60 is under 27: a raise waits for a second window.
+        assertFalse(cap.onRenderWindow(ticks = 90, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertTrue(cap.setTarget(60))
+        assertEquals(30, cap.maxFps)
+        // The window the switch came in had two caps: it says nothing, and the raise is gone.
+        assertFalse(cap.onRenderWindow(ticks = 90, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        // 30 x 90 / 60 is under 54: two windows of the new cap raise it, to round(60 x 60 / 90).
+        assertFalse(cap.onRenderWindow(ticks = 90, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertTrue(cap.onRenderWindow(ticks = 90, windowMillis = 1_000, displayHz = 120.0, onDisplay = true))
+        assertEquals(40, cap.maxFps)
+        // And back to 30: round(30 x 60 / 90), at once, for the rate it holds.
+        assertTrue(cap.setTarget(30))
+        assertEquals(20, cap.maxFps)
+    }
+
+    @Test
+    fun `a target the switch has no word for stays within 1 and 60`() {
+        val cap = displayCap(60.0)
+        assertTrue(cap.setTarget(90))
+        assertEquals(60, cap.targetFps)
+        assertEquals(60, cap.maxFps)
+        assertTrue(cap.setTarget(0))
+        assertEquals(1, cap.targetFps)
+        assertEquals(1, cap.maxFps)
+    }
+
+    @Test
     fun `the cap stays within 1 and 60`() {
         val cap = CarFrameCap()
         // A display at 30 Hz with frames slow to draw: 20 ticks a second would ask for 90.
@@ -238,8 +343,12 @@ class CarFrameCapTest {
         assertEquals(1, CarFrameRate.maxFps(10_000.0))
     }
 
-    /** A cap for the display's [hz] alone, as before any guidance, and the camera line's first window starting. */
-    private fun displayCap(hz: Double): CarFrameCap = CarFrameCap().also {
+    /**
+     * A cap for the display's [hz] alone, as before any guidance, for [target] frames a second, and the
+     * camera line's first window starting.
+     */
+    private fun displayCap(hz: Double, target: Int = CarFrameRate.TARGET_FPS): CarFrameCap = CarFrameCap().also {
+        it.setTarget(target)
         it.onSecond(onTimer = false, displayHz = hz)
         it.onWindowStart()
     }
@@ -254,13 +363,14 @@ class CarFrameCapTest {
     private class Run(val cap: CarFrameCap, val drawn: List<Int>, val caps: List<Int>)
 
     /**
-     * A drive with the car's map on a display at [realHz] whose frames take [drawMillis] to draw: the
-     * cap for the display's rate first, as before guidance, then each second a look half way through
-     * ([CarFrameCap.onSecond]) and the camera line's window at its end ([CarFrameCap.onRenderWindow]),
-     * each new cap set on the render thread at once.
+     * A drive with the car's map on a display at [realHz] whose frames take [drawMillis] to draw, for
+     * [target] frames a second: the cap for the display's rate first, as before guidance, then each
+     * second a look half way through ([CarFrameCap.onSecond]) and the camera line's window at its end
+     * ([CarFrameCap.onRenderWindow]), each new cap set on the render thread at once.
      */
-    private fun drive(realHz: Double, drawMillis: Double, seconds: Int): Run {
+    private fun drive(realHz: Double, drawMillis: Double, seconds: Int, target: Int = CarFrameRate.TARGET_FPS): Run {
         val cap = CarFrameCap()
+        cap.setTarget(target)
         cap.onSecond(onTimer = false, displayHz = realHz)
         val thread = PacedRenderThread(realHz, drawMillis, cap.maxFps)
         // Guidance starts: the camera line's first window.
@@ -281,10 +391,11 @@ class CarFrameCapTest {
         return Run(cap, drawn, caps)
     }
 
-    /** The last five seconds of [run] drew within a tenth of 30 a second, under one cap. */
-    private fun assertSettled(run: Run, what: String = "") {
+    /** The last five seconds of [run] drew within a tenth of [target] a second, under one cap. */
+    private fun assertSettled(run: Run, what: String = "", target: Int = CarFrameRate.TARGET_FPS) {
         val last = run.drawn.takeLast(5)
-        assertTrue(last.all { it in 27..33 }, "$what: drawn ${run.drawn}, caps ${run.caps}")
+        val band = (target - target / 10)..(target + target / 10)
+        assertTrue(last.all { it in band }, "$what: drawn ${run.drawn}, caps ${run.caps}")
         assertEquals(1, run.caps.takeLast(5).distinct().size, "$what: caps ${run.caps}")
     }
 

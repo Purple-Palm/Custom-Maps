@@ -15,14 +15,15 @@ import kotlin.math.max
  * one tick: its ticks then come slower than the display's frames, and the cap for the display's rate
  * alone (15 at 120 Hz) draws fewer than 30 frames a second, about 24 when frames take 9 to 16 ms.
  *
- * So the cap follows the render thread's own ticks, `round(30 × 60 / ticks a second)` within 1 and 60
- * ([CarFrameRate.maxFps]):
+ * So the cap follows the render thread's own ticks, `round(target × 60 / ticks a second)` within 1 and
+ * 60 ([CarFrameRate.maxFps]), for the target of [targetFps] frames a second: 30, or 60 with the Debug
+ * switch ([setTarget]), which takes effect at once:
  * - **During guidance** each window of the render thread's statistics that the camera line takes,
  *   about a second, brings its ticks ([onRenderWindow]). A window counts when the frame clock stayed
  *   on the display all through it, the cap was not changed in it, and the render thread was called on
  *   at least half of the display's frames: a map that drew now and then, standing at a light, says
  *   nothing about how fast it draws. The cap goes down at once when the map would draw more than a
- *   tenth over 30 frames a second, and up only when two windows in a row say it would draw more than a
+ *   tenth of the target over it, and up only when two windows in a row say it would draw more than a
  *   tenth under, for the faster of the two, so a window that was busy only in part never brings
  *   more frames by itself.
  * - **Once a second** ([onSecond]): 60 while the frame clock runs on its timer, when the main thread
@@ -32,16 +33,23 @@ import kotlin.math.max
  *   frames on the main thread, which is what there is before the first guidance.
  *
  * A cap is set again only when the frames the map would draw at the one set now are more than a
- * tenth off 30. Pure: the car map sets the cap on its surface and writes the lines. Nothing here
- * allocates. Main thread only.
+ * tenth off the target. Pure: the car map sets the cap on its surface and writes the lines. Nothing
+ * here allocates. Main thread only.
  */
 class CarFrameCap {
 
     /** Where the rate a cap is worked out for comes from. */
     enum class Basis { DISPLAY, RENDER, TIMER }
 
+    /**
+     * The frames a second the cap is worked out for: [CarFrameRate.TARGET_FPS], or the other target
+     * of the Debug switch ([setTarget]).
+     */
+    var targetFps: Int = CarFrameRate.TARGET_FPS
+        private set
+
     /** The cap set now: the one for the 60 Hz the map library believes, until a rate is taken. */
-    var maxFps: Int = CarFrameRate.maxFps(CarFrameRate.ASSUMED_HZ)
+    var maxFps: Int = CarFrameRate.maxFps(CarFrameRate.ASSUMED_HZ, targetFps)
         private set
 
     /** The rate [maxFps] was worked out for, ticks or frames a second; NaN until one was taken. */
@@ -68,6 +76,29 @@ class CarFrameCap {
     /** The caps set so far, and how many there were as the window under way began. */
     private var caps = 0
     private var capsAtWindowStart = 0
+
+    /** The frames a second around the target within which a cap stays: a tenth of the target either way. */
+    private val lowFps: Double get() = targetFps * (1.0 - CarFrameRate.CHANGE_SHARE)
+    private val highFps: Double get() = targetFps * (1.0 + CarFrameRate.CHANGE_SHARE)
+
+    /**
+     * The Debug switch's target, [fps] frames a second (within 1 and 60): the cap is worked out for it
+     * at once, for the rate taken (the 60 Hz the map library believes before one). A new cap is a cap
+     * changed in the window under way, which then says nothing, and a raise that was waiting for a
+     * second window goes with it. Returns whether the target changed, for the car map to set the cap
+     * and say so.
+     */
+    fun setTarget(fps: Int): Boolean {
+        val target = fps.coerceIn(CarFrameRate.MIN_FPS, CarFrameRate.MAX_FPS)
+        if (target == targetFps) return false
+        targetFps = target
+        val cap = CarFrameRate.maxFps(if (basis == null) CarFrameRate.ASSUMED_HZ else rateHz, target)
+        if (cap != maxFps) {
+            maxFps = cap
+            caps += 1
+        }
+        return true
+    }
 
     /**
      * A new surface, with a render thread of its own: it starts with the cap set now, and the rate
@@ -100,13 +131,13 @@ class CarFrameCap {
         } else {
             val drawn = drawnAt(hz)
             when {
-                drawn > HIGH_FPS -> {
+                drawn > highFps -> {
                     raiseHz = Double.NaN
                     hold(hz, displayHz)
                     take(hz, Basis.RENDER)
                 }
                 // A raise waits for a second window; the rate held meanwhile is the one before.
-                drawn < LOW_FPS ->
+                drawn < lowFps ->
                     if (raiseHz.isNaN()) {
                         raiseHz = hz
                         false
@@ -155,12 +186,13 @@ class CarFrameCap {
     private fun drawnAt(rate: Double): Double = maxFps * rate / CarFrameRate.ASSUMED_HZ
 
     /**
-     * [rate] from [basis], taken when the cap set now would draw more than a tenth off 30, or as the
-     * first rate. A cap that holds on and off the timer keeps its number, and says where it is from.
+     * [rate] from [basis], taken when the cap set now would draw more than a tenth off the target, or
+     * as the first rate. A cap that holds on and off the timer keeps its number, and says where it is
+     * from.
      */
     private fun follow(rate: Double, basis: Basis): Boolean {
         val held = this.basis
-        if (held != null && drawnAt(rate) in LOW_FPS..HIGH_FPS) {
+        if (held != null && drawnAt(rate) in lowFps..highFps) {
             if (held != basis && (held == Basis.TIMER || basis == Basis.TIMER)) {
                 rateHz = rate
                 this.basis = basis
@@ -175,7 +207,7 @@ class CarFrameCap {
         val first = this.basis == null
         rateHz = rate
         this.basis = basis
-        val cap = CarFrameRate.maxFps(rate)
+        val cap = CarFrameRate.maxFps(rate, targetFps)
         if (cap == maxFps) return first
         maxFps = cap
         caps += 1
@@ -188,10 +220,6 @@ class CarFrameCap {
 
         /** The shortest window that counts. */
         const val MIN_WINDOW_MILLIS = 500L
-
-        /** The frames a second around 30 within which a cap stays: a tenth either way. */
-        const val LOW_FPS = CarFrameRate.TARGET_FPS * (1.0 - CarFrameRate.CHANGE_SHARE)
-        const val HIGH_FPS = CarFrameRate.TARGET_FPS * (1.0 + CarFrameRate.CHANGE_SHARE)
 
         private const val MILLIS_PER_SECOND = 1_000.0
     }
