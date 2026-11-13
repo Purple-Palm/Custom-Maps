@@ -253,6 +253,9 @@ internal object LaneLayers {
         /** Shows or hides the layers of what is lit for the route the map holds: the tints, the lit lane and its edges, the eraser. */
         fun setLitVisible(visible: Boolean)
 
+        /** Shows or hides every other layer of the drawing: the asphalt, the paint and its shapes, the lane arrows and their edge. */
+        fun setVisible(visible: Boolean)
+
         /** The eraser's colours along the path, a step from each of [stops] on: the road's where a lane is lit, else none. */
         fun setEraser(stops: List<OwnRouteLine.ColourStop>)
 
@@ -348,6 +351,11 @@ internal object LaneLayers {
         override fun setLitVisible(visible: Boolean) {
             val visibility = Value.valueOf(if (visible) "visible" else "none")
             for (id in LIT_LAYERS) set(id, "visibility", visibility)
+        }
+
+        override fun setVisible(visible: Boolean) {
+            val visibility = Value.valueOf(if (visible) "visible" else "none")
+            for (spec in LAYERS) if (spec.id !in LIT_LAYERS) set(spec.id, "visibility", visibility)
         }
 
         override fun setEraser(stops: List<OwnRouteLine.ColourStop>) {

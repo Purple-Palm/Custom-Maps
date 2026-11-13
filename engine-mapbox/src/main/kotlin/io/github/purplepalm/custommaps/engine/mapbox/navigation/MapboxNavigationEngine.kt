@@ -70,6 +70,7 @@ import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
 import io.github.purplepalm.custommaps.nav.lanes.LaneAgreeLine
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
+import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.model.Distance
@@ -95,6 +96,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripVitals
 import java.io.File
 import java.io.IOException
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import com.mapbox.common.location.Location as MapboxLocation
 import kotlin.coroutines.resume
 import kotlin.math.max
@@ -1210,6 +1212,14 @@ internal class MapboxNavigationEngine(
      */
     private fun endTripTally() {
         if (!tripTally.running) return
+        // What a map still measures of the trip goes into its summary; a failure costs that, never the trip's end.
+        for (listener in tripEndListeners) {
+            try {
+                listener()
+            } catch (e: RuntimeException) {
+                debugLog.error("tripEndListener", e)
+            }
+        }
         val ending = tripEnding ?: TripEnding.END_IN_APP
         val fields = tripTally.fields(SystemClock.elapsedRealtime(), staleStart.staleUpdates)
         tripTally.end()
@@ -1238,6 +1248,23 @@ internal class MapboxNavigationEngine(
     /** A map error of the drive's map, by the name of its kind, for the trip's summary. */
     internal fun onMapError(kind: String) {
         tripTally.onMapError(kind)
+    }
+
+    /** A close view the measuring switch measured on a map of the drive, for the trip summary's frame gate. */
+    internal fun onLaneMeasureView(view: LaneMeasureGate.View) {
+        tripTally.onLaneView(view)
+    }
+
+    /** Called right before a trip's summary is added up, on the main thread: a map closes what it measured of the trip. */
+    private val tripEndListeners = CopyOnWriteArrayList<() -> Unit>()
+
+    /** [listener] hears each trip's end right before its summary is added up; a map adds itself while it lives. */
+    internal fun addTripEndListener(listener: () -> Unit) {
+        tripEndListeners += listener
+    }
+
+    internal fun removeTripEndListener(listener: () -> Unit) {
+        tripEndListeners -= listener
     }
 
     /**

@@ -200,6 +200,8 @@ fun MapScreen(
         LaunchedEffect(phoneMap) { settings.lanesOnMap.collect(phoneMap::setLanesOnMap) }
         // And for the Debug switch that has the app draw the route line itself.
         LaunchedEffect(phoneMap) { settings.ownRouteLine.collect(phoneMap::setOwnRouteLine) }
+        // And for the one that measures what the lanes drawn by the app cost the map's frames.
+        LaunchedEffect(phoneMap) { settings.measureOwnLanes.collect(phoneMap::setMeasureOwnLanes) }
         LaunchedEffect(phoneMap, pinnedPlace) { phoneMap.showPlace(pinnedPlace) }
     }
 

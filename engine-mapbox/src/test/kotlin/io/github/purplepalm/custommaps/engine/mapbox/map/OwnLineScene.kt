@@ -183,6 +183,9 @@ internal class OwnLineScene {
         /** Whether what is lit for the route is shown. */
         var litShown = true
 
+        /** Whether the rest of the drawing is shown. */
+        var baseShown = true
+
         /** The eraser's gradient and trim, as set last. */
         var eraserStops: List<OwnRouteLine.ColourStop>? = null
         var eraserTrim: Double? = null
@@ -194,6 +197,8 @@ internal class OwnLineScene {
             this.positions = positions
             shownColours = colours
             this.latitude = latitude
+            // Added layers show until told otherwise.
+            baseShown = true
         }
 
         override fun setColours(colours: LaneColours) {
@@ -243,6 +248,11 @@ internal class OwnLineScene {
         override fun setLitVisible(visible: Boolean) {
             record("setLitVisible")
             litShown = visible
+        }
+
+        override fun setVisible(visible: Boolean) {
+            record("setVisible")
+            baseShown = visible
         }
 
         override fun setEraser(stops: List<OwnRouteLine.ColourStop>) {

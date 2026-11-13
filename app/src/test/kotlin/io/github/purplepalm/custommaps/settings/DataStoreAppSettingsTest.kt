@@ -224,6 +224,19 @@ class DataStoreAppSettingsTest {
     }
 
     @Test
+    fun `the measuring switch is off until turned on, stored under its own key, each change reported`() = runBlocking {
+        assertFalse(settings.measureOwnLanes.first())
+        settings.setMeasureOwnLanes(true)
+        assertTrue(settings.measureOwnLanes.first())
+        assertEquals(true, dataStore.data.first()[booleanPreferencesKey("measure_own_lanes")])
+        assertFalse(settings.ownRouteLine.first(), "the other Debug switches are their own")
+        assertEquals(LanesOnMap.OFF, settings.lanesOnMap.first(), "the switch chooses no lanes")
+        settings.setMeasureOwnLanes(false)
+        assertFalse(settings.measureOwnLanes.first())
+        assertEquals(listOf<Pair<String, Any>>("measure_own_lanes" to true, "measure_own_lanes" to false), changes)
+    }
+
+    @Test
     fun `the car's map draws 30 frames a second until the Debug switch says 60, stored under its own key`() = runBlocking {
         assertEquals(30, settings.carMapFps.first())
         settings.setCarMapFps(60)

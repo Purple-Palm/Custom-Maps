@@ -52,8 +52,8 @@ data class LookSettings(
 data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
 /**
- * The debug section: trip sessions started on this phone, the simulated drive and own route line
- * switches, the car map's frames, and the debug log.
+ * The debug section: trip sessions started on this phone, the simulated drive, own route line and
+ * measuring switches, the car map's frames, and the debug log.
  */
 data class DebugState(
     /** The month's trip sessions, and since when the count runs when that is after the month began. */
@@ -65,6 +65,8 @@ data class DebugState(
     val simulateDrive: Boolean = false,
     /** Whether the app draws the route line of a drive itself. */
     val ownRouteLine: Boolean = false,
+    /** Whether a drive with the lanes drawn by the app measures what they cost the map's frames. */
+    val measureOwnLanes: Boolean = false,
     /** The frames a second the car's map draws: 30, or 60 ([CarFrameRate.TARGETS]). */
     val carMapFps: Int = CarFrameRate.TARGET_FPS,
     /** Size of the debug log on the phone; null until measured. */
@@ -102,14 +104,14 @@ class SettingsViewModel(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
     /** The Debug switches, in one value. */
-    private data class Switches(val simulate: Boolean, val ownLine: Boolean, val carMapFps: Int)
+    private data class Switches(val simulate: Boolean, val ownLine: Boolean, val measureLanes: Boolean, val carMapFps: Int)
 
-    private val switches = combine(settings.simulateDrive, settings.ownRouteLine, settings.carMapFps) { simulate, ownLine, fps ->
-        Switches(simulate, ownLine, fps)
+    private val switches = combine(settings.simulateDrive, settings.ownRouteLine, settings.measureOwnLanes, settings.carMapFps) { simulate, ownLine, measure, fps ->
+        Switches(simulate, ownLine, measure, fps)
     }
 
     val debug: StateFlow<DebugState> =
-        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, carMapFps), bytes, list ->
+        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, measureLanes, carMapFps), bytes, list ->
             val time = now()
             DebugState(
                 trips = TripLog.monthCount(entries, time, installedAt()),
@@ -117,6 +119,7 @@ class SettingsViewModel(
                 recentTrips = entries.takeLast(RECENT_TRIPS).asReversed().map { RecentTrip(it, TokenTripCounts.of(it.tokenId, list)) },
                 simulateDrive = simulate,
                 ownRouteLine = ownLine,
+                measureOwnLanes = measureLanes,
                 carMapFps = carMapFps,
                 logBytes = bytes,
             )
@@ -153,6 +156,21 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value, which the map keeps too.
                 debugLog.error("settings.setOwnRouteLine", e)
+            }
+        }
+    }
+
+    /**
+     * Applies at once, also during a drive: with the lanes drawn by the app the measuring begins, or ends with the view it
+     * measured.
+     */
+    fun setMeasureOwnLanes(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setMeasureOwnLanes(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the map keeps too.
+                debugLog.error("settings.setMeasureOwnLanes", e)
             }
         }
     }

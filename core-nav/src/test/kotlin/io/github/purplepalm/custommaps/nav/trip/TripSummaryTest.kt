@@ -2,6 +2,8 @@ package io.github.purplepalm.custommaps.nav.trip
 
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
+import io.github.purplepalm.custommaps.nav.look.Look
 import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -46,6 +48,26 @@ class TripSummaryTest {
         assertEquals(4.2, fields["longestGapS"])
         assertEquals(false, fields["staleStart"])
         assertEquals(0, fields["staleUpdates"])
+    }
+
+    @Test
+    fun `a trip the measuring switch measured close views of carries the frame gate, and the next trip starts without`() {
+        val tally = TripTally()
+        tally.begin(0L, simulated = true, offline = false)
+        assertFalse("laneGate" in tally.fields(1_000L, staleUpdates = 0), "no view measured, no gate")
+        // Made-up views: six of each kind at night, the drawing's within the budget.
+        repeat(LaneMeasureGate.MIN_VIEWS) {
+            tally.onLaneView(LaneMeasureGate.View(Look.NIGHT, drawn = true, renderP95Ms = 9.0, missedPerSecond = 2.0, uploadMaxMs = 3.0, counts = true))
+            tally.onLaneView(LaneMeasureGate.View(Look.NIGHT, drawn = false, renderP95Ms = 8.5, missedPerSecond = 2.0, uploadMaxMs = 3.0, counts = true))
+        }
+        val gate = tally.fields(2_000L, staleUpdates = 0)["laneGate"] as Map<*, *>
+        assertEquals("pass", gate["gate"])
+        assertEquals(12, gate["views"])
+        tally.end()
+        // A view after the trip ended counts into none.
+        tally.onLaneView(LaneMeasureGate.View(Look.DAY, drawn = true, renderP95Ms = 9.0, missedPerSecond = 2.0, uploadMaxMs = 3.0, counts = true))
+        tally.begin(5_000L, simulated = true, offline = false)
+        assertFalse("laneGate" in tally.fields(6_000L, staleUpdates = 0))
     }
 
     @Test

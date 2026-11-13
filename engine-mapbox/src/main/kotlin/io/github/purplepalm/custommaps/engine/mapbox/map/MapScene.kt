@@ -16,6 +16,8 @@ import com.mapbox.maps.MapControllable
 import com.mapbox.maps.MapLoadingErrorType
 import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.MapboxMap
+import com.mapbox.maps.PerformanceSamplerOptions
+import com.mapbox.maps.PerformanceStatisticsOptions
 import com.mapbox.maps.Style
 import com.mapbox.maps.StyleDataLoadedType
 import com.mapbox.maps.plugin.PuckBearing
@@ -86,6 +88,8 @@ import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.guidance.UTurnArrow
+import io.github.purplepalm.custommaps.nav.lanes.LaneMeasure
+import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
@@ -137,7 +141,10 @@ import kotlinx.coroutines.withContext
  *
  * Behind a Debug switch ([setOwnRouteLine]) the route line of a drive is the app's own, drawn along
  * the lanes of the route's lane plan in place of the navigation SDK's primary line, whatever Lanes on
- * the map says.
+ * the map says. Behind another, the phone's alone ([setMeasureOwnLanes]), a drive with the lanes drawn
+ * by the app measures what they cost the map's frames ([LaneMeasure]): they show around every other
+ * close view only, each close view runs one statistics collection of the map and writes a
+ * "lane_measure" line, and the trip summary says whether the drawing passed the frame gate.
  *
  * While the scene exists, the style it shows is among what is kept ahead of the car during guidance
  * for stretches without a connection ([OfflineData]).
@@ -329,6 +336,44 @@ internal class MapScene(
 
     /** Who draws the lanes on the map, as Settings says; Off until it says otherwise. */
     private var lanesOnMap = LanesOnMap.OFF
+
+    /** The look the map shows, for the measured close views. */
+    private var look = lookOnMap.look
+
+    /** Whether Mapbox's lane details are on under the app's drawing for a measuring drive's check ([LaneMeasure]). */
+    private var detailsCheck = false
+
+    /** The statistics collections of the measured views, counted so a late sample of one that ended is dropped. */
+    private var statsCollection = 0
+
+    /** Whether the measuring failed on this map: it is off for the map's life, after one error line. */
+    private var measureFailed = false
+
+    /** The Debug switch Measure the drawn lanes, the phone's map alone ([setMeasureOwnLanes]). */
+    private val laneMeasure = LaneMeasure(
+        object : LaneMeasure.Effects {
+            override fun startStats() = startLaneStats()
+
+            override fun stopStats() = stopLaneStats()
+
+            override fun showDrawing(shown: Boolean) = ownLine.setLanesShown(shown)
+
+            override fun checkDetails(on: Boolean) {
+                detailsCheck = on
+                applyLaneDetails()
+            }
+
+            override fun detailsShown(): Boolean? = laneDetails.shown
+
+            override fun log(fields: Map<String, Any?>) = debugLog.log(LANE_MEASURE, fields)
+
+            override fun report(view: LaneMeasureGate.View) = engine.onLaneMeasureView(view)
+        },
+        SystemClock::elapsedRealtimeNanos,
+    )
+
+    /** A trip's end, right before its summary: the view measured then ends in it. */
+    private val tripEnd: () -> Unit = { measure { onGuidance(false) } }
 
     /** The lane plan of the drive's route, answered on the route lines' worker: the own line's path is built from it. */
     private val planListener: (String, RouteLanePlan?) -> Unit = { routeId, plan ->
@@ -669,6 +714,9 @@ internal class MapScene(
 
         MapboxNavigationApp.registerObserver(navigationObserver)
         engine.lanePlans.addListener(planListener)
+        engine.addTripEndListener(tripEnd)
+        // The lanes' windows that load while a view is measured.
+        ownLine.onWindowLoad = { loadMs, bytes -> measure { onWindowLoaded(loadMs, bytes) } }
         // The style this map shows is kept ahead of the car during guidance from now on. The style
         // may still be loading: it is taken when it has loaded, and again each time it loads.
         offlineData?.attachMap(mapboxMap)
@@ -818,6 +866,7 @@ internal class MapScene(
         camera = createCamera(style)
         // It has seen no progress yet: its first one says whether it shows a close view.
         _closeView.value = false
+        measure { onCameraStyle() }
         when (mode) {
             CameraMode.FOLLOWING -> camera.requestFollowing()
             CameraMode.OVERVIEW -> camera.requestOverview()
@@ -844,12 +893,74 @@ internal class MapScene(
     override fun setLanesOnMap(choice: LanesOnMap) {
         if (choice == lanesOnMap) return
         lanesOnMap = choice
-        laneDetails.setEnabled(choice.mapboxDetails)
-        applyRouteLineWidths()
+        // Another choice ends a measured view first, and its check of Mapbox's lane details with it.
+        measure { setAppDraws(choice.appDraws) }
+        applyLaneDetails()
         appDrawsLanes = choice.appDraws
         applyOwnLine()
         // The car drawn by the app goes with the lanes.
         carLayer.setDrawing(appDrawsLanes)
+    }
+
+    /** Mapbox's lane details as Lanes on the map has them, or under the drawing for a measuring drive's check, with the route line's widths. */
+    private fun applyLaneDetails() {
+        laneDetails.setEnabled(lanesOnMap.mapboxDetails || (lanesOnMap.appDraws && detailsCheck))
+        applyRouteLineWidths()
+    }
+
+    /**
+     * Debug, the phone's map: Measure the drawn lanes ([LaneMeasure]). With the lanes drawn by the app, during guidance,
+     * the drawing shows around every other close view only and each close view's frames are measured. Off, nothing of it
+     * runs.
+     */
+    fun setMeasureOwnLanes(enabled: Boolean) {
+        measure { setSwitch(enabled) }
+    }
+
+    /**
+     * Runs [block] on the measuring. A failure costs the measuring for this map's life and one error line, never the
+     * drive: the drawing shows again and Mapbox's lane details go back as Lanes on the map has them.
+     */
+    private inline fun measure(block: LaneMeasure.() -> Unit) {
+        if (measureFailed) return
+        try {
+            laneMeasure.block()
+        } catch (e: RuntimeException) {
+            measureFailed = true
+            debugLog.error(LANE_MEASURE, e)
+            try {
+                stopLaneStats()
+                ownLine.setLanesShown(true)
+                detailsCheck = false
+                applyLaneDetails()
+            } catch (again: RuntimeException) {
+                debugLog.error(LANE_MEASURE, again)
+            }
+        }
+    }
+
+    /** One statistics collection of the map for a measured view, its samples summed into the view on the main thread. */
+    @OptIn(MapboxExperimental::class)
+    private fun startLaneStats() {
+        val collection = ++statsCollection
+        val options = PerformanceStatisticsOptions.Builder()
+            .samplerOptions(listOf(PerformanceSamplerOptions.PER_FRAME_RENDERING_STATS, PerformanceSamplerOptions.CUMULATIVE_RENDERING_STATS))
+            .samplingDurationMillis(LANE_STATS_SAMPLE_MS)
+            .build()
+        mapboxMap.startPerformanceStatisticsCollection(options) { stats ->
+            // A sample of a collection that has ended is dropped.
+            if (collection == statsCollection) {
+                val cumulative = stats.cumulativeStatistics
+                measure { onSample(stats.perFrameStatistics?.uploadDurationStatistics?.maxMillis, cumulative?.graphicsProgramsCreationTimeMillis, cumulative?.graphicsPrograms) }
+            }
+        }
+    }
+
+    /** Stops the measured view's collection; a sample still on its way is dropped. */
+    @OptIn(MapboxExperimental::class)
+    private fun stopLaneStats() {
+        statsCollection++
+        if (mapboxMap.isValid()) mapboxMap.stopPerformanceStatisticsCollection()
     }
 
     override fun setOwnRouteLine(enabled: Boolean) {
@@ -887,6 +998,7 @@ internal class MapScene(
         val startedNanos = SystemClock.elapsedRealtimeNanos()
         val writes = lookApplier.setLook(request)
         val written = applyLook(writes)
+        look = request.look
         // The phone's compass and (i) dialog take the look here.
         host.onLook(request.look)
         val writeMs = Motion.round((SystemClock.elapsedRealtimeNanos() - startedNanos) / NANOS_PER_MILLI.toDouble(), 1)
@@ -920,6 +1032,7 @@ internal class MapScene(
         this.visible = visible
         camera.setVisible(visible && !away)
         carLayer.setShown(visible && !away)
+        measure { setOnScreen(visible && !away && !covered, LaneMeasure.End.BACKGROUND) }
     }
 
     /**
@@ -928,6 +1041,7 @@ internal class MapScene(
      */
     fun setCovered(covered: Boolean) {
         this.covered = covered
+        measure { setOnScreen(visible && !away && !covered, LaneMeasure.End.COVERED) }
     }
 
     /**
@@ -946,6 +1060,7 @@ internal class MapScene(
         camera.setAway(away)
         camera.setVisible(visible && !away)
         carLayer.setShown(visible && !away)
+        measure { setOnScreen(visible && !away && !covered, LaneMeasure.End.AWAY) }
     }
 
     /**
@@ -953,6 +1068,9 @@ internal class MapScene(
      * itself follows the lifecycle of its host.
      */
     fun release() {
+        // The measuring's own release: a measured view ends with its line, and its collection stops, before the map goes.
+        measure { release() }
+        engine.removeTripEndListener(tripEnd)
         zoomEase.cancel()
         // A wait for the map to settle after a look ends without an answer.
         onLookSettled = null
@@ -1074,6 +1192,7 @@ internal class MapScene(
         if (state == GuidanceState.ACTIVE) startCameraSampling() else stopCameraSampling()
         // The car drawn by the app from Start to the drive's end, with the switch on.
         carLayer.onGuidance(state == GuidanceState.ACTIVE)
+        measure { onGuidance(state == GuidanceState.ACTIVE) }
         when (state) {
             GuidanceState.PREVIEW -> {
                 useLocationProvider(guidance = false)
@@ -1106,6 +1225,7 @@ internal class MapScene(
                 clearRoutes()
                 camera.onGuidanceEnded()
                 _closeView.value = false
+                measure { onCloseView(false, runUp = false, look = look) }
                 // A camera that still showed the route goes back to the car and stays on it. One the
                 // driver had taken the map from, and one that is on the car already, are left alone.
                 val showedRoute = !camera.isIdle && !idleFollow.following
@@ -1157,6 +1277,8 @@ internal class MapScene(
         camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), runUpKey, engine.laneChoices.rampAhead)
         // Once per update, and published only when it changes.
         _closeView.value = camera.closeView
+        // With the measuring switch: a measured view begins or ends with the close view.
+        measure { onCloseView(camera.closeView, runUpKey != null, look) }
         // The app's own lanes, with their switch on: whether the camera's close view holds, for the swap of the route line
         // and the lit lane; the tints the car has passed, and the next window where it is due.
         if (ownLine.enabled) {
@@ -1641,7 +1763,7 @@ internal class MapScene(
             (if (ownLine.enabled) ownLine.diagnostics() else emptyMap()) + mapOf(
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "paddingChanges" to paddingChanges.takeIf { it > 0 },
-            "render" to takeFrameStats(),
+            "render" to takeFrameStats(puckMoves.count),
             "renderFps" to fps?.let { Motion.round(it, 1) },
             "animatorsEnabled" to ValueAnimator.areAnimatorsEnabled(),
             "hz" to host.refreshRate?.let { Math.round(it) },
@@ -1687,10 +1809,11 @@ internal class MapScene(
      * The frames of the last second: how often the render thread was called and how many of those
      * calls drew, the others being skipped on purpose under a frame rate cap ([RenderStats]), how long
      * the render thread took for them, and how many screen refreshes it missed. Mapbox advises
-     * sessions of one to two seconds.
+     * sessions of one to two seconds. A view the measuring switch measures takes the second's frame
+     * times and the [puckUpdates] of the second.
      */
     @OptIn(MapboxExperimental::class)
-    private fun takeFrameStats(): Map<String, Any?>? {
+    private fun takeFrameStats(puckUpdates: Int): Map<String, Any?>? {
         val recorder = controllable.renderThreadStatsRecorder
         if (!recorder.isRecording) return null
         val stats = recorder.stop()
@@ -1698,6 +1821,8 @@ internal class MapScene(
         val frames = stats.frameTimeList
         renderCalls = frames.size
         host.onRenderWindow(frames.size, stats.totalSkippedVsync, stats.totalTime)
+        // The second's frame times, into a view the measuring switch measures; the positions the car's layer was handed.
+        measure { onSecond(frames, stats.totalSkippedVsync, puckUpdates) }
         return RenderStats.fields(
             callbacks = frames.size,
             pacedSkips = stats.pacedSkippedVsync,
@@ -1752,5 +1877,11 @@ internal class MapScene(
         /** The zoom buttons, as a kind of the driver's moves, and the length of their ease. */
         const val ZOOM_KIND = "zoom"
         private const val ZOOM_EASE_MS = 300L
+
+        /** The line of a measured close view, and of a measuring drive's check of Mapbox's lane details. */
+        private const val LANE_MEASURE = "lane_measure"
+
+        /** The sampling time of a measured view's statistics collection: one sample a second, summed over the view. */
+        private const val LANE_STATS_SAMPLE_MS = 1_000.0
     }
 }

@@ -138,6 +138,13 @@ class PhoneMap internal constructor(
 
     override fun setOwnRouteLine(enabled: Boolean) = scene.setOwnRouteLine(enabled)
 
+    /**
+     * Debug: Measure the drawn lanes. With the lanes drawn by the app, during guidance, they show around every other close
+     * view only, and each close view's frames go to a "lane_measure" line; the trip summary says whether the drawing
+     * passed the frame gate. The phone's map alone measures: the car's draws the lanes as ever.
+     */
+    fun setMeasureOwnLanes(enabled: Boolean) = scene.setMeasureOwnLanes(enabled)
+
     override fun showPlace(place: Place?) = scene.showPlace(place)
 
     override fun setLook(request: LookOnMap, onSettled: (idleMs: Long?) -> Unit): LookApplied = scene.setLook(request, onSettled)

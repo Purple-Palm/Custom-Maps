@@ -18,6 +18,7 @@ class FakeAppSettings(
     lanesOnMap: LanesOnMap = LanesOnMap.DEFAULT,
     dayNight: LookChoice = LookChoice.DEFAULT,
     ownRouteLine: Boolean = false,
+    measureOwnLanes: Boolean = false,
     carMapFps: Int = 30,
 ) : AppSettings {
 
@@ -47,6 +48,10 @@ class FakeAppSettings(
     override val ownRouteLine = MutableStateFlow(ownRouteLine)
 
     override suspend fun setOwnRouteLine(enabled: Boolean) = store { ownRouteLine.value = enabled }
+
+    override val measureOwnLanes = MutableStateFlow(measureOwnLanes)
+
+    override suspend fun setMeasureOwnLanes(enabled: Boolean) = store { measureOwnLanes.value = enabled }
 
     override val carMapFps = MutableStateFlow(carMapFps)
 

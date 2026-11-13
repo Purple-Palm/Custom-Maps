@@ -359,6 +359,30 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `the measuring switch is off until switched on, and the switch is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        runCurrent()
+        assertFalse(viewModel.debug.value.measureOwnLanes)
+        viewModel.setMeasureOwnLanes(true)
+        runCurrent()
+        assertTrue(settings.measureOwnLanes.value)
+        assertTrue(viewModel.debug.value.measureOwnLanes)
+        assertFalse(viewModel.debug.value.ownRouteLine, "the other Debug switches are their own")
+        assertEquals(LanesOnMap.OFF, viewModel.guidance.value.lanesOnMap, "the switch chooses no lanes")
+    }
+
+    @Test
+    fun `a measuring switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setMeasureOwnLanes(true)
+        runCurrent()
+        assertFalse(viewModel.debug.value.measureOwnLanes)
+        assertFalse(settings.measureOwnLanes.value)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
     fun `the car's map draws 30 frames a second until 60 is chosen, and the choice is stored`() = runTest(dispatcher) {
         val viewModel = viewModel()
         runCurrent()

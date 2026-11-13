@@ -119,6 +119,7 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                 onLanesOnMapChange = settingsViewModel::setLanesOnMap,
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
+                onMeasureOwnLanesChange = settingsViewModel::setMeasureOwnLanes,
                 onCarMapFpsChange = settingsViewModel::setCarMapFps,
                 onShareLog = {
                     scope.launch {

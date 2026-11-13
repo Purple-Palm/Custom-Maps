@@ -114,6 +114,7 @@ fun SettingsScreen(
     onLanesOnMapChange: (LanesOnMap) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
+    onMeasureOwnLanesChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -163,6 +164,7 @@ fun SettingsScreen(
                 debug,
                 onSimulateDriveChange,
                 onOwnRouteLineChange,
+                onMeasureOwnLanesChange,
                 onCarMapFpsChange,
                 onShareLog,
                 onClearLog,
@@ -431,6 +433,7 @@ private fun DebugSection(
     debug: DebugState,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
+    onMeasureOwnLanesChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -527,6 +530,25 @@ private fun DebugSection(
         }
         Spacer(Modifier.width(16.dp))
         AppSwitch(checked = debug.ownRouteLine, onCheckedChange = onOwnRouteLineChange)
+    }
+
+    // What the lanes drawn by the app cost the map's frames, measured on a drive.
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.debug_measure_own_lanes),
+                style = MaterialTheme.typography.titleSmall,
+                color = LookTheme.tokens.onCard,
+            )
+            Text(
+                text = stringResource(R.string.debug_measure_own_lanes_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = LookTheme.tokens.onCardMuted,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        AppSwitch(checked = debug.measureOwnLanes, onCheckedChange = onMeasureOwnLanesChange)
     }
 
     // The car's map at 30 or 60 frames a second, to compare what the car shows of each.
@@ -791,6 +813,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onLanesOnMapChange = {},
             onSimulateDriveChange = {},
             onOwnRouteLineChange = {},
+            onMeasureOwnLanesChange = {},
             onCarMapFpsChange = {},
             onShareLog = {},
             onClearLog = {},

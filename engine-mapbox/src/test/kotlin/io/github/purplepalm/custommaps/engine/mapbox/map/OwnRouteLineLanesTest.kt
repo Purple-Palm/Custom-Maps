@@ -497,6 +497,79 @@ class OwnRouteLineLanesTest {
     }
 
     @Test
+    fun `the measuring switch hides the lanes whole, keeps the route line whole over the lit stretches and the car a dot`() {
+        drawn()
+        line.onCameraZoom(zoomOf(13.0), 0.0)
+        line.onLatched(true)
+        assertTrue(line.swapped)
+        style.litPairWrites.clear()
+        // Hidden: every layer of the lanes draws nothing, and the line takes the lit stretches back at once.
+        line.setLanesShown(false)
+        assertFalse(lanes.baseShown)
+        assertFalse(lanes.litShown)
+        assertEquals(listOf(true), style.litPairWrites)
+        assertFalse(line.swapped, "no bar while the lanes are hidden")
+        // The camera's word changes nothing while they are: no swap, no write.
+        line.onLatched(false)
+        line.onLatched(true)
+        line.onCameraZoom(zoomOf(14.0), 0.0)
+        assertEquals(listOf(true), style.litPairWrites)
+        assertFalse(line.swapped)
+        // The same word again writes nothing.
+        val calls = style.calls.size
+        line.setLanesShown(false)
+        assertEquals(calls, style.calls.size)
+        // The windows go on while they are hidden: driving on, the next one is sent and loads.
+        val before = laneLines().size
+        var car = 0.0
+        while (lanes.sent.isEmpty() && car <= routeEnd) {
+            puck(car)
+            line.onProgress()
+            scene.jobs.runAll()
+            car += 20.0
+        }
+        assertTrue(lanes.sent.isNotEmpty(), "a window is sent while the lanes are hidden")
+        scene.loadWindow()
+        assertEquals(before + 1, laneLines().size)
+        assertFalse(lanes.baseShown)
+        // Shown again: as they would have been, the swap back where the camera's state says.
+        line.setLanesShown(true)
+        assertTrue(lanes.baseShown)
+        assertTrue(lanes.litShown)
+        assertEquals(listOf(true, false), style.litPairWrites)
+        assertTrue(line.swapped)
+    }
+
+    @Test
+    fun `lanes hidden across a style load are hidden again on the new style, and a line without lanes is left alone`() {
+        drawn()
+        line.setLanesShown(false)
+        scene.reload()
+        line.onStyleLoaded(Look.DAY)
+        // The new style's layers come visible; they are hidden at once, and what is lit stays hidden once drawn.
+        assertFalse(lanes.baseShown)
+        scene.load()
+        scene.loadWindow()
+        assertFalse(lanes.litShown)
+        // Without the lanes, nothing of them is touched.
+        line.setLanes(false)
+        style.calls.clear()
+        line.setLanesShown(true)
+        line.setLanesShown(false)
+        assertTrue(style.calls.none { it.startsWith("lanes.") }, "${style.calls}")
+    }
+
+    @Test
+    fun `each window that loads is told with its set-to-loaded time and size`() {
+        val loads = mutableListOf<Pair<Long, Int>>()
+        line.onWindowLoad = { ms, bytes -> loads += ms to bytes }
+        drawn()
+        assertEquals(1, loads.size)
+        assertEquals(laneLines().single()["loadMs"], loads.single().first)
+        assertEquals(laneLines().single()["bytes"], loads.single().second)
+    }
+
+    @Test
     fun `at the swap the lit lane's amber is nearly as wide as the held route line it takes the place of, and wider closer in`() {
         // The own line, both pairs, holds its width from 16.5 on: 10.38 dp.
         val held = RouteLineWidths.widthAt(RouteLineWidths.LINE, RouteLineWidths.HOLD_ZOOM)

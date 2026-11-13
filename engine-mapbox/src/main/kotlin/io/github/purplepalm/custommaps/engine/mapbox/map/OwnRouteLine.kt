@@ -217,6 +217,15 @@ internal class OwnRouteLine(
     /** The latitude the lanes' widths and minimum zooms are set for. */
     private var laneLatitude = 0.0
 
+    /**
+     * Whether the lanes show ([setLanesShown]): the measuring switch hides them around every other close view. Hidden, the
+     * lit lane never takes the route line's place.
+     */
+    private var lanesShown = true
+
+    /** Hears each window of the lanes that loaded: from set to loaded, in milliseconds, and its size in bytes. */
+    var onWindowLoad: ((loadMs: Long, bytes: Int) -> Unit)? = null
+
     private var styleReady = false
     private var released = false
     private var look = Look.NIGHT
@@ -495,6 +504,29 @@ internal class OwnRouteLine(
     }
 
     /**
+     * Shows the app's lanes, or hides them ([lanesShown]): every layer of theirs draws nothing, and the route line stays
+     * whole over the lit stretches, so the car is the dot. The windows, the trim and the states go on as ever, and shown
+     * again the lanes are as they would have been. Written only where it changes, never per frame.
+     */
+    fun setLanesShown(shown: Boolean) {
+        if (shown == lanesShown) return
+        lanesShown = shown
+        if (!lanes || !ready()) return
+        attempt {
+            showLanes()
+            // Hidden, the pair over the lit stretches is whole; shown again, as the swap says.
+            if (drawn) layers.setLitShown(!(shown && swap.swapped))
+        }
+    }
+
+    /** Every layer of the lanes shown or hidden as [lanesShown] says, what is lit only on a line drawn for the route. */
+    private fun showLanes() {
+        val port = lanePort ?: return
+        port.setVisible(lanesShown)
+        port.setLitVisible(lanesShown && drawn)
+    }
+
+    /**
      * The camera's word, once per progress update, whether a close view or the junction view is latched: with the lanes,
      * the swap's state, the line's opacity written where it flips.
      */
@@ -516,7 +548,7 @@ internal class OwnRouteLine(
      * Whether the lit lane shows in the route line's place now ([LaneSwap]): with the lanes, on a line drawn for the route
      * the drive is on. Only while it is does the car show as a bar across the lanes ([carBar]).
      */
-    val swapped: Boolean get() = enabled && lanes && drawn && swap.swapped
+    val swapped: Boolean get() = enabled && lanes && drawn && lanesShown && swap.swapped
 
     /**
      * The car's bar along the window of the lanes the map holds ([LaneWindow.carBar]), with the lanes drawn for the route the
@@ -526,7 +558,8 @@ internal class OwnRouteLine(
 
     /** The swap's state on the drawn line; a line not drawn takes it when it is ([show]). */
     private fun applySwap() {
-        if (!drawn || !ready()) return
+        // Hidden lanes keep the line whole whatever the camera says: it was written whole as they hid.
+        if (!drawn || !ready() || !lanesShown) return
         attempt { layers.setLitShown(!swap.swapped) }
     }
 
@@ -687,10 +720,14 @@ internal class OwnRouteLine(
         addLanes()
     }
 
-    /** The lanes' layers, empty, under the route line and over the own line ([LaneLayers.positions]), if [lanes] is on. */
+    /**
+     * The lanes' layers, empty, under the route line and over the own line ([LaneLayers.positions]), if [lanes] is on;
+     * hidden again at once while the lanes are ([lanesShown]).
+     */
     private fun addLanes() {
         if (!lanes) return
         lanePort?.add(LaneLayers.positions(LaneLayers.PLACEMENT, routeLayers().last().id), MapPalette.lanes(look), laneLatitude)
+        if (!lanesShown) showLanes()
     }
 
     private fun removeLayers() {
@@ -839,6 +876,7 @@ internal class OwnRouteLine(
         window = loaded
         hiddenTints = 0
         windowsLoaded++
+        val loadMs = Math.round((loadedAt - windowSentAt) / NANOS_PER_MILLI)
         debugLog.log(
             LANE_DRAWING,
             mapOf(
@@ -850,10 +888,11 @@ internal class OwnRouteLine(
                 "coordinates" to loaded.coordinates,
                 "bytes" to loaded.bytes,
                 "buildMs" to Math.round(windowBuildNanos / NANOS_PER_MILLI),
-                "loadMs" to Math.round((loadedAt - windowSentAt) / NANOS_PER_MILLI),
+                "loadMs" to loadMs,
                 "budget" to loaded.withinBudget,
             ),
         )
+        onWindowLoad?.invoke(loadMs, loaded.bytes)
         // Whether feature states outlive a new window's data is not known: they are set again for every window.
         if (drawn) applyStates(loaded)
     }
@@ -925,8 +964,8 @@ internal class OwnRouteLine(
             if (lanes) lanePort?.setEraserTrim(trim)
             layers.setVisible(true)
             if (lanes) {
-                layers.setLitShown(!swap.swapped)
-                lanePort?.setLitVisible(true)
+                layers.setLitShown(!(swap.swapped && lanesShown))
+                lanePort?.setLitVisible(lanesShown)
                 window?.let(::applyStates)
             }
             primary.hide()

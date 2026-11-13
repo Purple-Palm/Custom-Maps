@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.nav.trip
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 
 /**
  * How a trip ended, as its "trip_summary" line names it in [logName]. End pressed on the car screen is
@@ -60,6 +61,9 @@ class TripTally {
     private var offlineSince = 0L
     private var offlineMillis = 0L
 
+    /** The close views the measuring switch measured on the trip, for its frame gate. */
+    private val laneViews = mutableListOf<LaneMeasureGate.View>()
+
     /** A trip session starts at [nowMillis]; [offline] says whether the app has no internet now. */
     fun begin(nowMillis: Long, simulated: Boolean, offline: Boolean) {
         running = true
@@ -79,6 +83,7 @@ class TripTally {
         this.offline = offline
         offlineSince = nowMillis
         offlineMillis = 0L
+        laneViews.clear()
     }
 
     /** The navigator's id of the trip session, which its "session_state" line also has. */
@@ -125,6 +130,11 @@ class TripTally {
         if (running) mapErrors[kind] = (mapErrors[kind] ?: 0) + 1
     }
 
+    /** A close view the measuring switch measured ([io.github.purplepalm.custommaps.nav.lanes.LaneMeasure]). */
+    fun onLaneView(view: LaneMeasureGate.View) {
+        if (running) laneViews += view
+    }
+
     /** Whether the app has no internet, from [nowMillis] on. */
     fun onOffline(offline: Boolean, nowMillis: Long) {
         if (!running || offline == this.offline) return
@@ -139,7 +149,9 @@ class TripTally {
      * "meters", "reroutes", "offRouteEpisodes", "firstProgressS" (from the start to the trip's
      * first progress), "longestGapS" (the longest time between two progress updates),
      * "mapErrors" (a count for each kind), "offlineSeconds" and "staleStart" with
-     * "staleUpdates", the updates that still carried where the trip before left the car.
+     * "staleUpdates", the updates that still carried where the trip before left the car; and on a
+     * trip the measuring switch measured close views of, "laneGate", the frame gate of the app's
+     * lanes ([LaneMeasureGate.summary]).
      */
     fun fields(nowMillis: Long, staleUpdates: Int): Map<String, Any?> {
         val offlineNow = offlineMillis + if (offline) nowMillis - offlineSince else 0L
@@ -156,7 +168,7 @@ class TripTally {
             "offlineSeconds" to seconds(offlineNow),
             "staleStart" to (staleUpdates > 0),
             "staleUpdates" to staleUpdates,
-        )
+        ) + if (laneViews.isEmpty()) emptyMap() else mapOf("laneGate" to LaneMeasureGate.summary(laneViews))
     }
 
     /** The trip session stopped: nothing more is counted. */

@@ -49,7 +49,8 @@ internal class LaneDetails(
     private var reapplied = 0
 
     /** What the style said when it was last asked; null when it has no such setting, or was not asked yet. */
-    private var shown: Boolean? = null
+    var shown: Boolean? = null
+        private set
 
     /** The driver's switch in Settings. */
     var enabled = false

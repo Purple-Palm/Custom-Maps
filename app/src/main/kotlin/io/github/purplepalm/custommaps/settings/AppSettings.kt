@@ -56,6 +56,14 @@ interface AppSettings {
     suspend fun setOwnRouteLine(enabled: Boolean)
 
     /**
+     * Debug: whether a drive with the lanes drawn by the app measures what they cost the phone's map: the drawing shows
+     * around every other close view only, so the views with it and without it can be compared.
+     */
+    val measureOwnLanes: Flow<Boolean>
+
+    suspend fun setMeasureOwnLanes(enabled: Boolean)
+
+    /**
      * Debug: the frames a second the map on the car's screen draws, one of [CarFrameRate.TARGETS]: 30,
      * or 60 to compare with what the car's screen shows.
      */
@@ -179,6 +187,13 @@ class DataStoreAppSettings(
         onChanged(OWN_ROUTE_LINE.name, enabled)
     }
 
+    override val measureOwnLanes: Flow<Boolean> = preferences.map { it[MEASURE_OWN_LANES] ?: false }.distinctUntilChanged()
+
+    override suspend fun setMeasureOwnLanes(enabled: Boolean) {
+        dataStore.edit { it[MEASURE_OWN_LANES] = enabled }
+        onChanged(MEASURE_OWN_LANES.name, enabled)
+    }
+
     /** A number of frames the Debug switch does not offer reads as 30. */
     override val carMapFps: Flow<Int> =
         preferences.map { CarFrameRate.targetOf(it[CAR_MAP_FPS] ?: CarFrameRate.TARGET_FPS) }.distinctUntilChanged()
@@ -200,6 +215,7 @@ class DataStoreAppSettings(
         private val LANES_ON_MAP = stringPreferencesKey("lanes_on_map")
         private val DAY_NIGHT = stringPreferencesKey("day_night")
         private val OWN_ROUTE_LINE = booleanPreferencesKey("own_route_line")
+        private val MEASURE_OWN_LANES = booleanPreferencesKey("measure_own_lanes")
         private val CAR_MAP_FPS = intPreferencesKey("car_map_fps")
 
         /** The switch Lane details on the map of the versions before [LANES_ON_MAP]: read once, to carry it over. */
