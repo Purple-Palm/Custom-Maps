@@ -122,6 +122,9 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
     override fun onCreateScreen(intent: Intent): Screen {
         try {
             log.log(SESSION_LINE, mapOf("event" to "screen", "action" to intent.action))
+            // The host asks for the first screen when the stack is empty: a message still held from an
+            // earlier stack is gone with it, should the library ask again in one session.
+            stack.shown?.let(stack::onGone)
             evaluate("screen")
             val root = homeScreen()
             screensMade = true
