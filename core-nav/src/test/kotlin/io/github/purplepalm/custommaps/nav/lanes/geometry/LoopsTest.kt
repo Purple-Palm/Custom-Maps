@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import kotlin.math.tan
 
 /** Lines of the drawing without the loops of a curve too tight for them ([Loops]). */
 class LoopsTest {
@@ -19,15 +18,15 @@ class LoopsTest {
     @Test
     fun `a line that turns back and crosses itself is cut at the crossing, which it reaches twice`() {
         // East along y = 0 past x = 0, back to the south-west, north along x = 0: the first and the third pieces cross at 0, 0.
-        val line = listOf(p(-5.0, 0.0), p(1.0, 0.0), p(0.0, -1.0), p(0.0, 5.0))
-        val stations = listOf(100.0, 106.0, 107.0, 113.0)
+        val line = listOf(p(-9.0, 0.0), p(1.0, 0.0), p(0.0, -1.0), p(0.0, 9.0))
+        val stations = listOf(200.0, 210.0, 211.0, 221.0)
         // It turns back at both ends of the second piece.
         assertEquals(listOf(1, 2), Loops.turnsBack(line))
         assertNotNull(DrawingProbe.selfCrossing(line, closed = false))
         val (points, at) = cut(line, stations)
         assertEquals(listOf(line[0], p(0.0, 0.0), p(0.0, 0.0), line[3]), points)
-        // Reached five sixths along the first piece and a sixth along the third.
-        assertEquals(listOf(100.0, 105.0, 108.0, 113.0), at)
+        // Reached nine tenths along the first piece and a tenth along the third.
+        assertEquals(listOf(200.0, 209.0, 212.0, 221.0), at)
         assertNull(DrawingProbe.selfCrossing(points, closed = false))
     }
 
@@ -47,7 +46,7 @@ class LoopsTest {
 
     @Test
     fun `a loop is cut only where it closes within its stations' limit`() {
-        val line = listOf(p(-5.0, 0.0), p(1.0, 0.0), p(0.0, -1.0), p(0.0, 5.0))
+        val line = listOf(p(-9.0, 0.0), p(1.0, 0.0), p(0.0, -1.0), p(0.0, 9.0))
         assertEquals(60.0, Loops.LOOP_METERS)
         val within = cut(line, listOf(0.0, 1.0, 2.0, Loops.LOOP_METERS)).first
         assertEquals(4, within.size)
@@ -61,7 +60,7 @@ class LoopsTest {
         // A right angle to the left, its arc 1.2 m wide (half a metre from the vertex at most); the offset 3 m to the left
         // runs past the arc's centre and back. Cut, it turns where the offsets of the two straight sides meet: 3 m before the
         // corner along the first side, 3 m out.
-        val axis = RoadAxis.of(listOf(p(-50.0, 0.0), p(0.0, 0.0), p(0.0, 50.0)).map { SceneLines.geo(it) }, doubleArrayOf(0.0, 50.0, 100.0))
+        val axis = RoadAxis.of(listOf(p(-60.0, 0.0), p(0.0, 0.0), p(0.0, 60.0)).map { SceneLines.geo(it) }, doubleArrayOf(0.0, 60.0, 120.0))
         val fillet = axis.fillets.single()
         assertTrue(fillet.radius < 3.0)
         val stations = axis.stations().toList()
@@ -74,9 +73,10 @@ class LoopsTest {
         val vertex = axis.toLocal(SceneLines.geo(p(0.0, 0.0)))
         assertEquals(-3.0, x.x - vertex.x, 1e-6)
         assertEquals(3.0, x.y - vertex.y, 1e-6)
-        // At the stations of the straight sides' points there: 3 m before the vertex and 3 m after it.
-        assertEquals(50.0 - 3.0 * tan(Math.toRadians(45.0)), at[corner - 1], 1e-6)
-        assertEquals(50.0 + 3.0, at[corner], 1e-6)
+        // At the stations of the straight sides' points there: 3 m before the vertex and 3 m after it (at a right angle the
+        // sides' offsets meet as far from the vertex along each side as they lie out).
+        assertEquals(60.0 - 3.0, at[corner - 1], 1e-6)
+        assertEquals(60.0 + 3.0, at[corner], 1e-6)
     }
 
     @Test
