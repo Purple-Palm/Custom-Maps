@@ -118,6 +118,20 @@ class LookContrastTest {
         assertTrue(Contrast.ratio(Contrast.over(night.onCard, night.card, night.pendingCardAlpha.toDouble()), night.card) >= GRAPHIC)
     }
 
+    @Test
+    fun `the list's black page carries the night look's colours at their targets, whatever the look`() {
+        // The same page in both looks; the list on it always takes the night look's colours.
+        assertEquals(BLACK, LookPalette.DAY.listPage)
+        assertEquals(BLACK, LookPalette.NIGHT.listPage)
+        val onList = listOf(
+            Pair("a row's distance and words on the list's page", { it.onCard }, { it.listPage }, GLANCE),
+            Pair("a row's unit and the attribution line on the list's page", { it.onCardMuted }, { it.listPage }, TEXT),
+            Pair("a row's arrow on the list's page", { it.onCard }, { it.listPage }, GRAPHIC),
+        )
+        val night = LookPalette.NIGHT
+        assertAll(onList.map { pair -> Executable { assertReaches(pair, night, pair.bg(night)) } })
+    }
+
     private fun assertReaches(pair: Pair, palette: LookPalette, background: Long) {
         val ratio = Contrast.ratio(pair.fg(palette), background)
         assertTrue(ratio >= pair.target, "${palette.look}, ${pair.what}: %.2f, needs %.1f".format(ratio, pair.target))

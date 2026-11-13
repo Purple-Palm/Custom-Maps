@@ -58,6 +58,7 @@ class LookTokens(private val palette: LookPalette) {
     val previewMapStandIn: Color get() = Color(palette.previewMapStandIn)
     val pendingCardAlpha: Float get() = palette.pendingCardAlpha
     val darkBarIcons: Boolean get() = palette.darkBarIcons
+    val listPage: Color get() = Color(palette.listPage)
 }
 
 /**

@@ -5,6 +5,7 @@ import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import kotlin.time.Duration.Companion.minutes
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -63,6 +64,18 @@ class GuidanceBarTest {
         assertEquals(RemainingForm.BOTH, remainingForm(room = 100, both = 100, time = 50))
         assertEquals(RemainingForm.TIME, remainingForm(room = 100, both = 101, time = 100))
         assertEquals(RemainingForm.STACKED, remainingForm(room = 100, both = 150, time = 101))
+    }
+
+    @Test
+    fun `a List button stays beside Overview and End while the three fit, and takes a row of its own when they do not`() {
+        // While a car's screen shows the map: the three buttons, their gaps and Recenter's extra room,
+        // exactly as wide as the bar inside its padding, stay in one row.
+        assertFalse(listRowOfItsOwn(width = 304, buttonsRow = 304))
+        assertTrue(listRowOfItsOwn(width = 304, buttonsRow = 305))
+        // Overview (141) and End (77) at the largest font with their gap take 226 of the 304: a List
+        // button of Material's 58 dp at least, its gap and Recenter's room must fit in the 78 left.
+        assertFalse(listRowOfItsOwn(width = 304, buttonsRow = 226 + 8 + 58 + 12))
+        assertTrue(listRowOfItsOwn(width = 304, buttonsRow = 226 + 8 + 58 + 13))
     }
 
     @Test

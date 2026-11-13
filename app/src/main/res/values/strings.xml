@@ -68,6 +68,9 @@
     <string name="guidance_overview">Overview</string>
     <string name="guidance_recenter">Recenter</string>
     <string name="guidance_end">End</string>
+    <!-- While the car shows the map during a drive: the phone's map in place of the list of the maneuvers ahead, and back. -->
+    <string name="guidance_map">Map</string>
+    <string name="guidance_list">List</string>
     <string name="guidance_arrived">You have arrived</string>
     <string name="guidance_done">Done</string>
     <string name="guidance_then">Then</string>

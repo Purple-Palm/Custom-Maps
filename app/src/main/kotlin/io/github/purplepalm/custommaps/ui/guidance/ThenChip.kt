@@ -151,7 +151,8 @@ private val THEN_FADE: AnimatedContentTransitionScope<Maneuver>.() -> ContentTra
  * Both are drawn outside the panel's bounds. Nothing above them in the layout may clip its
  * children, or they are cut off.
  *
- * [onRunUpWords] is the card's ([ManeuverCard]).
+ * [onRunUpWords] is the card's ([ManeuverCard]). Without [then] the chip never shows: on the list of
+ * the maneuvers ahead, whose first row is that maneuver.
  */
 @Composable
 fun ManeuverPanel(
@@ -159,11 +160,12 @@ fun ManeuverPanel(
     modifier: Modifier = Modifier,
     onRunUpWords: (key: String, shown: Boolean) -> Unit = { _, _ -> },
     endTab: @Composable () -> Unit = {},
+    then: Boolean = true,
 ) {
     Layout(
         content = {
             ManeuverCard(progress, Modifier.layoutId(PanelPart.CARD), onRunUpWords)
-            ThenChipSlot(progress.thenManeuver?.maneuver, Modifier.layoutId(PanelPart.THEN))
+            ThenChipSlot(if (then) progress.thenManeuver?.maneuver else null, Modifier.layoutId(PanelPart.THEN))
             // Always there, and empty while the tab has nothing to say.
             Box(Modifier.layoutId(PanelPart.END_TAB)) { endTab() }
         },

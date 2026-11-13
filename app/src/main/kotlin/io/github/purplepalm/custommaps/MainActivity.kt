@@ -21,6 +21,8 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.ui.CustomMapsApp
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import io.github.purplepalm.custommaps.ui.theme.LookPalette
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -28,6 +30,9 @@ class MainActivity : ComponentActivity() {
 
     /** The look the screen was last composed in; null before its first composition. */
     private var composedLook: Look? = null
+
+    /** Whether the list of the maneuvers ahead is on the screen with nothing over it: light icons in the bars then. */
+    private val listShown = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val createdAt = SystemClock.uptimeMillis()
@@ -43,13 +48,13 @@ class MainActivity : ComponentActivity() {
         // The first look of the process; an activity created again finds it decided.
         looks.start()
         holdFirstFrame(createdAt, looks)
-        lifecycleScope.launch { looks.look.collect { showWindowLook(it) } }
+        lifecycleScope.launch { combine(looks.look, listShown, ::Pair).collect { (look, list) -> showWindowLook(look, list) } }
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { looks.runWhileStarted() } }
         recreateWhenTokenChanges(graph)
         setContent {
             val look by looks.look.collectAsState()
             CustomMapsTheme(look) {
-                CustomMapsApp(graph)
+                CustomMapsApp(graph, onListShown = { listShown.value = it })
             }
             SideEffect { composedLook = look }
         }
@@ -75,13 +80,17 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** The window's own background, behind the map before it draws, and the bars' icons for [look]. */
-    private fun showWindowLook(look: Look) {
+    /**
+     * The window's own background, behind the map before it draws, and the bars' icons for [look]:
+     * light in both looks over the list's black page ([listShown]).
+     */
+    private fun showWindowLook(look: Look, listShown: Boolean) {
         val palette = LookPalette.of(look)
         window.setBackgroundDrawable(palette.screen.toInt().toDrawable())
+        val darkIcons = palette.darkBarIcons && !listShown
         WindowCompat.getInsetsController(window, window.decorView).run {
-            isAppearanceLightStatusBars = palette.darkBarIcons
-            isAppearanceLightNavigationBars = palette.darkBarIcons
+            isAppearanceLightStatusBars = darkIcons
+            isAppearanceLightNavigationBars = darkIcons
         }
     }
 

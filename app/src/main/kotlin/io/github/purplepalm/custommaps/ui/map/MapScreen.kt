@@ -32,13 +32,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -77,6 +75,8 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.PhoneMap
 import io.github.purplepalm.custommaps.look.LookController
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.GuidancePadding
+import io.github.purplepalm.custommaps.nav.car.PhoneScreen
+import io.github.purplepalm.custommaps.nav.car.PhoneScreenState
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -99,9 +99,11 @@ import kotlinx.coroutines.withContext
  * The main screen: the map with search, route choice and guidance drawn over it. [network] is the
  * app's network as Android reports it, for the chip that says when the app is offline.
  *
- * While [listShown], during a drive while a car's surface shows the map ([PhoneScreens]), the phone
- * shows the drive without its map: the map is put away, kept as it is but out of the window, and comes
- * back as of now when the list goes. With no car it is never shown.
+ * During a drive while a car's surface shows the map, [phoneScreen] may be the list ([PhoneScreens]):
+ * the phone then shows the drive without its map ([ListScreen]), with Map ([onMapButton]) to bring
+ * the map back; the map is put away meanwhile, kept as it is but out of the window, and comes back as
+ * of now. On the map the guidance bar has List ([onListButton]) while [phoneScreen] offers it. With no
+ * car the screen is never the list and the bar has no List button.
  */
 @Composable
 fun MapScreen(
@@ -111,8 +113,11 @@ fun MapScreen(
     debugLog: DebugLog,
     network: StateFlow<NetworkStatus>,
     onOpenSettings: () -> Unit,
-    listShown: Boolean,
+    phoneScreen: PhoneScreenState,
+    onMapButton: () -> Unit,
+    onListButton: () -> Unit,
 ) {
+    val listShown = phoneScreen.screen == PhoneScreen.LIST
     val context = LocalContext.current
     val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -305,154 +310,154 @@ fun MapScreen(
             .fillMaxSize()
             .onSizeChanged { screenHeight = it.height },
     ) {
-        // Out of the window while the list shows. The view is the same one when it comes back: it
-        // leaves whatever parent it had first, for a view can be in only one. Mapbox stops and starts
-        // it with the window; nothing here calls its lifecycle.
-        if (!listShown) {
-            AndroidView(factory = { phoneMap.view.also { view -> (view.parent as? ViewGroup)?.removeView(view) } }, modifier = Modifier.fillMaxSize())
-        }
-
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                // Keeps the suggestions above the keyboard and the Mapbox logo on top of it.
-                .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom))
-                .padding(bottom = ornamentStrip)
-                .padding(12.dp)
-                .onGloballyPositioned {
-                    val bounds = it.boundsInRoot()
-                    topPanelTop = bounds.top.toInt()
-                    topPanelBottom = bounds.bottom.toInt()
-                },
-        ) {
-            when (state.guidance) {
-                GuidanceState.ACTIVE -> ManeuverSlot(
-                    progress,
-                    offline,
-                    onBottomChanged = { maneuverPanelBottom = it },
-                    onRunUpWords = { key, shown -> engine.onRunUpWordsShown(key, shown) },
-                )
-                GuidanceState.IDLE, GuidanceState.ARRIVED -> {
-                    SearchBar(
-                        text = state.searchText,
-                        // Also while a picked suggestion is being looked up.
-                        searching = state.searching || (state.busy && state.selectedPlace == null),
-                        onTextChange = viewModel::onSearchTextChange,
-                        onClear = viewModel::clearSearch,
-                        onOpenSettings = onOpenSettings,
-                    )
-                    if (state.suggestions.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        SuggestionList(
-                            suggestions = state.suggestions,
-                            onPick = { suggestion ->
-                                focusManager.clearFocus()
-                                viewModel.onSuggestionPicked(suggestion)
-                            },
-                        )
-                    }
-                }
-                GuidanceState.PREVIEW -> Unit
-            }
-        }
-
-        // The offline chip under the search bar. It is no part of the column above, so nothing
-        // that is measured there changes when it comes or goes. It shows only where it ends above
-        // the strip of the Mapbox logo.
-        if (showsOfflineSentence(state.guidance, suggestionsShown = state.suggestions.isNotEmpty())) {
-            val chipTop = topPanelBottom + with(density) { OFFLINE_CHIP_GAP.roundToPx() }
-            val chipMaxBottom = screenHeight - ornamentInset - with(density) { ornamentStrip.roundToPx() }
-            OfflineChipSlot(
-                reason = offline,
-                onOpenSettings = { context.openDataSettings(debugLog) },
-                onBottomChanged = { offlineChipBottom = it },
-                fits = { height -> offlineChipFits(chipTop, height, chipMaxBottom) },
-                modifier = Modifier
-                    // From the search bar's bottom edge, as far below it as its suggestions are.
-                    .offset { IntOffset(0, topPanelBottom) }
-                    .padding(start = 12.dp, top = OFFLINE_CHIP_GAP, end = 12.dp),
-            )
-        }
-
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPanelsBottom)
-                .onGloballyPositioned { bottomPanelTop = it.boundsInRoot().top.toInt() },
-        ) {
-            // While suggestions are open the driver is choosing a place; nothing else sits over the list.
-            val choosing = state.suggestions.isNotEmpty()
-            if (state.guidance == GuidanceState.IDLE && locationAccess != LocationAccess.NONE && !choosing) {
-                MyLocationButton(
-                    onClick = { phoneMap.setCameraMode(CameraMode.FOLLOWING) },
-                    modifier = Modifier
-                        .align(Alignment.End)
-                        .padding(bottom = 8.dp),
-                )
-            }
-            // Over the guidance bar, clear of the maneuver card and of the Mapbox logo's strip.
-            if (state.guidance == GuidanceState.ACTIVE) ReplaySlot(replay, onSeek = viewModel::onReplaySeek)
-            when {
-                state.guidance == GuidanceState.PREVIEW -> RouteSheet(
-                    destination = state.destination,
-                    routes = state.routes,
-                    simulateDrive = state.simulateDrive,
-                    onSelect = viewModel::onRouteSelected,
-                    onStart = startGuidance,
-                    onClose = viewModel::onCancelPreview,
-                )
-                state.guidance == GuidanceState.ACTIVE -> GuidanceBarSlot(
-                    progress = progress,
-                    following = cameraMode == CameraMode.FOLLOWING,
-                    onToggleOverview = {
-                        phoneMap.setCameraMode(if (cameraMode == CameraMode.FOLLOWING) CameraMode.OVERVIEW else CameraMode.FOLLOWING)
-                    },
-                    onEnd = viewModel::onEnd,
-                )
-                choosing -> Unit
-                state.guidance == GuidanceState.ARRIVED -> ArrivedCard(
-                    destination = state.destination,
-                    onDone = viewModel::onDismissArrival,
-                )
-                state.selectedPlace != null -> PlaceCard(
-                    place = requireNotNull(state.selectedPlace),
-                    busy = state.busy,
-                    onDirections = {
-                        if (precise) viewModel.onDirections() else requestLocation()
-                    },
-                    onClose = viewModel::clearSearch,
-                )
-                mapAccessDenied -> ActionPrompt(
-                    text = stringResource(R.string.token_rejected_prompt),
-                    action = settingsLabel,
-                    onAction = onOpenSettings,
-                )
-                !precise -> ActionPrompt(
-                    text = stringResource(
-                        when {
-                            locationBlocked -> R.string.location_prompt_blocked
-                            locationAccess == LocationAccess.APPROXIMATE -> R.string.location_prompt_precise
-                            else -> R.string.location_prompt
-                        },
-                    ),
-                    action = stringResource(if (locationBlocked) R.string.location_open_settings else R.string.location_allow),
-                    onAction = requestLocation,
-                )
-            }
-        }
-
-        // Mapbox's route data with no map under it: a static attribution where the map's own was.
         if (listShown) {
-            Text(
-                text = stringResource(R.string.data_attribution),
-                style = MaterialTheme.typography.labelSmall,
-                color = LookTheme.tokens.onCardMuted,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 12.dp, bottom = with(density) { ornamentInset.toDp() } + 6.dp),
+            // The drive without the map, in its place: the list, the map one tap away.
+            ListScreen(
+                progress = progress,
+                replay = replay,
+                offline = offline,
+                onMap = onMapButton,
+                onEnd = viewModel::onEnd,
+                onSeek = viewModel::onReplaySeek,
+                onRunUpWords = { key, shown -> engine.onRunUpWordsShown(key, shown) },
             )
+        } else {
+            // The map's view is the same one when it comes back from the list. It leaves whatever parent it
+            // had first, for a view can be in only one; Mapbox stops it as it leaves the window and starts it
+            // as it is back, and nothing here calls its lifecycle.
+            AndroidView(factory = { phoneMap.view.also { view -> (view.parent as? ViewGroup)?.removeView(view) } }, modifier = Modifier.fillMaxSize())
+
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    // Keeps the suggestions above the keyboard and the Mapbox logo on top of it.
+                    .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = ornamentStrip)
+                    .padding(12.dp)
+                    .onGloballyPositioned {
+                        val bounds = it.boundsInRoot()
+                        topPanelTop = bounds.top.toInt()
+                        topPanelBottom = bounds.bottom.toInt()
+                    },
+            ) {
+                when (state.guidance) {
+                    GuidanceState.ACTIVE -> ManeuverSlot(
+                        progress,
+                        offline,
+                        onBottomChanged = { maneuverPanelBottom = it },
+                        onRunUpWords = { key, shown -> engine.onRunUpWordsShown(key, shown) },
+                    )
+                    GuidanceState.IDLE, GuidanceState.ARRIVED -> {
+                        SearchBar(
+                            text = state.searchText,
+                            // Also while a picked suggestion is being looked up.
+                            searching = state.searching || (state.busy && state.selectedPlace == null),
+                            onTextChange = viewModel::onSearchTextChange,
+                            onClear = viewModel::clearSearch,
+                            onOpenSettings = onOpenSettings,
+                        )
+                        if (state.suggestions.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            SuggestionList(
+                                suggestions = state.suggestions,
+                                onPick = { suggestion ->
+                                    focusManager.clearFocus()
+                                    viewModel.onSuggestionPicked(suggestion)
+                                },
+                            )
+                        }
+                    }
+                    GuidanceState.PREVIEW -> Unit
+                }
+            }
+
+            // The offline chip under the search bar. It is no part of the column above, so nothing
+            // that is measured there changes when it comes or goes. It shows only where it ends above
+            // the strip of the Mapbox logo.
+            if (showsOfflineSentence(state.guidance, suggestionsShown = state.suggestions.isNotEmpty())) {
+                val chipTop = topPanelBottom + with(density) { OFFLINE_CHIP_GAP.roundToPx() }
+                val chipMaxBottom = screenHeight - ornamentInset - with(density) { ornamentStrip.roundToPx() }
+                OfflineChipSlot(
+                    reason = offline,
+                    onOpenSettings = { context.openDataSettings(debugLog) },
+                    onBottomChanged = { offlineChipBottom = it },
+                    fits = { height -> offlineChipFits(chipTop, height, chipMaxBottom) },
+                    modifier = Modifier
+                        // From the search bar's bottom edge, as far below it as its suggestions are.
+                        .offset { IntOffset(0, topPanelBottom) }
+                        .padding(start = 12.dp, top = OFFLINE_CHIP_GAP, end = 12.dp),
+                )
+            }
+
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPanelsBottom)
+                    .onGloballyPositioned { bottomPanelTop = it.boundsInRoot().top.toInt() },
+            ) {
+                // While suggestions are open the driver is choosing a place; nothing else sits over the list.
+                val choosing = state.suggestions.isNotEmpty()
+                if (state.guidance == GuidanceState.IDLE && locationAccess != LocationAccess.NONE && !choosing) {
+                    MyLocationButton(
+                        onClick = { phoneMap.setCameraMode(CameraMode.FOLLOWING) },
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .padding(bottom = 8.dp),
+                    )
+                }
+                // Over the guidance bar, clear of the maneuver card and of the Mapbox logo's strip.
+                if (state.guidance == GuidanceState.ACTIVE) ReplaySlot(replay, onSeek = viewModel::onReplaySeek)
+                when {
+                    state.guidance == GuidanceState.PREVIEW -> RouteSheet(
+                        destination = state.destination,
+                        routes = state.routes,
+                        simulateDrive = state.simulateDrive,
+                        onSelect = viewModel::onRouteSelected,
+                        onStart = startGuidance,
+                        onClose = viewModel::onCancelPreview,
+                    )
+                    state.guidance == GuidanceState.ACTIVE -> GuidanceBarSlot(
+                        progress = progress,
+                        following = cameraMode == CameraMode.FOLLOWING,
+                        onToggleOverview = {
+                            phoneMap.setCameraMode(if (cameraMode == CameraMode.FOLLOWING) CameraMode.OVERVIEW else CameraMode.FOLLOWING)
+                        },
+                        onEnd = viewModel::onEnd,
+                        onList = onListButton.takeIf { phoneScreen.listButton },
+                    )
+                    choosing -> Unit
+                    state.guidance == GuidanceState.ARRIVED -> ArrivedCard(
+                        destination = state.destination,
+                        onDone = viewModel::onDismissArrival,
+                    )
+                    state.selectedPlace != null -> PlaceCard(
+                        place = requireNotNull(state.selectedPlace),
+                        busy = state.busy,
+                        onDirections = {
+                            if (precise) viewModel.onDirections() else requestLocation()
+                        },
+                        onClose = viewModel::clearSearch,
+                    )
+                    mapAccessDenied -> ActionPrompt(
+                        text = stringResource(R.string.token_rejected_prompt),
+                        action = settingsLabel,
+                        onAction = onOpenSettings,
+                    )
+                    !precise -> ActionPrompt(
+                        text = stringResource(
+                            when {
+                                locationBlocked -> R.string.location_prompt_blocked
+                                locationAccess == LocationAccess.APPROXIMATE -> R.string.location_prompt_precise
+                                else -> R.string.location_prompt
+                            },
+                        ),
+                        action = stringResource(if (locationBlocked) R.string.location_open_settings else R.string.location_allow),
+                        onAction = requestLocation,
+                    )
+                }
+            }
         }
 
         // Material's snackbar reads the inverse roles: the look's dark card with an amber action.
@@ -566,15 +571,16 @@ private fun ReplaySlot(replay: State<ReplayPosition?>, onSeek: (Double) -> Unit)
     if (simulated) ReplaySlider(position = replay, onSeek = onSeek, modifier = Modifier.padding(bottom = 4.dp))
 }
 
-/** The guidance bar, reading the progress itself. */
+/** The guidance bar, reading the progress itself; with [onList], while a car's screen shows the map, its List button. */
 @Composable
 private fun GuidanceBarSlot(
     progress: State<RouteProgressSnapshot?>,
     following: Boolean,
     onToggleOverview: () -> Unit,
     onEnd: () -> Unit,
+    onList: (() -> Unit)?,
 ) {
-    GuidanceBar(progress = progress.value, following = following, onToggleOverview = onToggleOverview, onEnd = onEnd)
+    GuidanceBar(progress = progress.value, following = following, onToggleOverview = onToggleOverview, onEnd = onEnd, onList = onList)
 }
 
 @Composable

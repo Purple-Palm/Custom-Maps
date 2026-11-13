@@ -35,10 +35,12 @@ import kotlinx.coroutines.launch
 
 /**
  * Token setup until a token is stored, then the map. Settings opens over the map instead of
- * replacing it, so the map (and a drive in progress) carries on underneath.
+ * replacing it, so the map (and a drive in progress) carries on underneath. [onListShown] hears
+ * whether the list of the maneuvers ahead is on the screen with nothing over it: its black page
+ * wants light icons in the system bars, in both looks.
  */
 @Composable
-fun CustomMapsApp(graph: AppGraph) {
+fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
     val access by graph.mapsAccess.collectAsStateWithLifecycle()
     // The map is made once the first look is decided, so it draws its first tiles in that look.
     val lookDecided by graph.lookController.decided.collectAsStateWithLifecycle()
@@ -50,6 +52,8 @@ fun CustomMapsApp(graph: AppGraph) {
     val scope = rememberCoroutineScope()
     // Settings over the map hides it: a look that waits for a quiet moment of the drive goes now.
     LaunchedEffect(showSettings) { graph.lookController.onCovered(showSettings) }
+    val listOnTop = phoneScreen.screen == PhoneScreen.LIST && access is MapsAccess.Ready && lookDecided && !showSettings
+    LaunchedEffect(listOnTop) { onListShown(listOnTop) }
 
     // The page colour shows until the map has drawn, and behind its fade-in.
     Box(
@@ -71,7 +75,9 @@ fun CustomMapsApp(graph: AppGraph) {
                     debugLog = graph.debugLog,
                     network = graph.network.status,
                     onOpenSettings = { showSettings = true },
-                    listShown = phoneScreen.screen == PhoneScreen.LIST,
+                    phoneScreen = phoneScreen,
+                    onMapButton = graph.phoneScreens::onMapButton,
+                    onListButton = graph.phoneScreens::onListButton,
                 )
             }
         }

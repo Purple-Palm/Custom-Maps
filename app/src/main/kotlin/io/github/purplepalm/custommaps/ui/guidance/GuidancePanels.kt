@@ -71,7 +71,8 @@ import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 
-private const val TABULAR_DIGITS = "tnum"
+/** Digits all as wide, so a number that changes does not move what stands beside it. */
+internal const val TABULAR_DIGITS = "tnum"
 
 /** Corner radius of the maneuver card; the Then chip tucks this far under its bottom edge. */
 internal val CARD_CORNER = 24.dp
@@ -433,6 +434,12 @@ internal const val WIDE_TIME_LEFT = "9 hr 59 min"
  * camera's padding with it.
  * Overview has a border of its own and a label in the card's ink in both looks: Material's outlined
  * button would draw a border the card hardly shows (1.28:1 at night) and a muted label.
+ *
+ * While a car's screen shows the map during a drive, two more buttons take the driver between the
+ * phone's map and the list of the maneuvers ahead ([io.github.purplepalm.custommaps.nav.car.PhoneScreenRule]):
+ * with [onList] the map's bar has a List button left of Overview, where it stays when Overview turns
+ * into Recenter; with [onMap] the list's bar has Map in place of Overview and Recenter, and
+ * [following] and [onToggleOverview] count for nothing. Without either the bar is as it always was.
  */
 @Composable
 fun GuidanceBar(
@@ -441,6 +448,8 @@ fun GuidanceBar(
     onToggleOverview: () -> Unit,
     onEnd: () -> Unit,
     modifier: Modifier = Modifier,
+    onList: (() -> Unit)? = null,
+    onMap: (() -> Unit)? = null,
 ) {
     val tokens = LookTheme.tokens
     // The numbers read at a glance a step heavier than Material's, for sunlight.
@@ -451,8 +460,21 @@ fun GuidanceBar(
     val arrival = progress?.let { ImperialFormat.arrivalTime(ZonedDateTime.now(), it.durationRemaining) }
     val time = progress?.let { ImperialFormat.duration(it.durationRemaining) }
     val distance = progress?.let { ImperialFormat.distance(it.distanceRemaining).toString() }
-    val toggleLabel = stringResource(if (following) R.string.guidance_overview else R.string.guidance_recenter)
-    val otherLabel = stringResource(if (following) R.string.guidance_recenter else R.string.guidance_overview)
+    // On the list the toggle is the Map button, which has no other label to keep room for.
+    val toggleLabel = stringResource(
+        when {
+            onMap != null -> R.string.guidance_map
+            following -> R.string.guidance_overview
+            else -> R.string.guidance_recenter
+        },
+    )
+    val otherLabel = stringResource(
+        when {
+            onMap != null -> R.string.guidance_map
+            following -> R.string.guidance_recenter
+            else -> R.string.guidance_overview
+        },
+    )
     // How wide the numbers are at their smallest, and how much wider the toggle's other label is
     // than the one it shows, in pixels; the measurer keeps what it has measured.
     val measurer = rememberTextMeasurer()
@@ -487,8 +509,19 @@ fun GuidanceBar(
                         )
                     }
                 }
+                if (onList != null) {
+                    OutlinedButton(
+                        onClick = onList,
+                        modifier = Modifier.layoutId(BarPart.LIST),
+                        border = BorderStroke(1.dp, tokens.outline),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
+                        contentPadding = COMPACT_BUTTON_PADDING,
+                    ) {
+                        Text(stringResource(R.string.guidance_list))
+                    }
+                }
                 OutlinedButton(
-                    onClick = onToggleOverview,
+                    onClick = onMap ?: onToggleOverview,
                     modifier = Modifier.layoutId(BarPart.TOGGLE),
                     border = BorderStroke(1.dp, tokens.outline),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
@@ -511,28 +544,44 @@ fun GuidanceBar(
             val loose = constraints.copy(minWidth = 0, minHeight = 0)
             val toggle = measurables.first { it.layoutId == BarPart.TOGGLE }.measure(loose)
             val end = measurables.first { it.layoutId == BarPart.END }.measure(loose)
+            val list = measurables.firstOrNull { it.layoutId == BarPart.LIST }?.measure(loose)
             val numbersPart = measurables.first { it.layoutId == BarPart.NUMBERS }
+            // The List button and its gap, left of the room the toggle keeps for its wider label.
+            val listWidth = if (list != null) list.width + gap else 0
             // The buttons and the gaps beside them, with room for the toggle's wider label.
-            val buttons = gap + toggle.width + toggleSlack + gap + end.width
+            val buttons = gap + listWidth + toggle.width + toggleSlack + gap + end.width
+            val listX = { width: Int -> width - end.width - gap - toggle.width - toggleSlack - listWidth }
             val bounded = constraints.hasBoundedWidth
             if (!bounded || barRows(constraints.maxWidth, buttons, numbers) == BarRows.ONE) {
                 val room = if (bounded) (constraints.maxWidth - buttons).coerceAtLeast(0) else Constraints.Infinity
                 val column = numbersPart.measure(loose.copy(maxWidth = room))
                 val width = if (bounded) constraints.maxWidth else column.width + buttons
-                val height = constraints.constrainHeight(maxOf(column.height, toggle.height, end.height))
+                val height = constraints.constrainHeight(maxOf(column.height, toggle.height, end.height, list?.height ?: 0))
                 layout(width, height) {
                     column.placeRelative(0, (height - column.height) / 2)
+                    list?.placeRelative(listX(width), (height - list.height) / 2)
                     toggle.placeRelative(width - end.width - gap - toggle.width, (height - toggle.height) / 2)
                     end.placeRelative(width - end.width, (height - end.height) / 2)
                 }
             } else {
-                // The numbers across the whole bar, and the buttons under them where they were.
+                // The numbers across the whole bar, and the buttons under them where they were. A List
+                // button that does not fit beside the other two, with the largest fonts on a narrow
+                // phone, stands in a row of its own between them, at the bar's end side.
                 val column = numbersPart.measure(loose)
                 val width = constraints.maxWidth
-                val buttonsTop = column.height + gap
-                val buttonsHeight = maxOf(toggle.height, end.height)
+                val listAbove = list != null && listRowOfItsOwn(width, buttonsRow = buttons - gap)
+                val listRow = if (list != null && listAbove) list.height + gap else 0
+                val buttonsTop = column.height + gap + listRow
+                val buttonsHeight = maxOf(toggle.height, end.height, if (listAbove) 0 else list?.height ?: 0)
                 layout(width, constraints.constrainHeight(buttonsTop + buttonsHeight)) {
                     column.placeRelative(0, 0)
+                    if (list != null) {
+                        if (listAbove) {
+                            list.placeRelative(width - list.width, column.height + gap)
+                        } else {
+                            list.placeRelative(listX(width), buttonsTop + (buttonsHeight - list.height) / 2)
+                        }
+                    }
                     toggle.placeRelative(width - end.width - gap - toggle.width, buttonsTop + (buttonsHeight - toggle.height) / 2)
                     end.placeRelative(width - end.width, buttonsTop + (buttonsHeight - end.height) / 2)
                 }
@@ -542,7 +591,7 @@ fun GuidanceBar(
 }
 
 /** The parts of the guidance bar, by which its layout finds them. */
-private enum class BarPart { NUMBERS, TOGGLE, END }
+private enum class BarPart { NUMBERS, LIST, TOGGLE, END }
 
 /** Where the guidance bar's numbers stand: beside its two buttons, or in a row of their own above them. */
 internal enum class BarRows { ONE, TWO }
@@ -555,6 +604,14 @@ internal enum class BarRows { ONE, TWO }
  */
 internal fun barRows(width: Int, buttons: Int, numbers: Int): BarRows =
     if (numbers <= width - buttons) BarRows.ONE else BarRows.TWO
+
+/**
+ * Whether the List button stands in a row of its own above the other two buttons, in a guidance bar
+ * [width] wide inside its padding whose buttons take [buttonsRow] side by side, gaps and the room
+ * the toggle keeps for its wider label included, all in pixels: only where they do not fit, so that
+ * no button is ever cut.
+ */
+internal fun listRowOfItsOwn(width: Int, buttonsRow: Int): Boolean = buttonsRow > width
 
 /** How the time and the distance left are shown ([remainingForm]). */
 internal enum class RemainingForm {
@@ -832,6 +889,27 @@ private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Loo
             GuidanceBar(long, following = true, onToggleOverview = {}, onEnd = {})
             Spacer(Modifier.height(12.dp))
             GuidanceBar(progress = null, following = true, onToggleOverview = {}, onEnd = {})
+        }
+    }
+}
+
+/**
+ * The guidance bar while a car's screen shows the map: on the phone's map with the List button, on a
+ * narrow phone with a large and the largest font, where the numbers take a row of their own; and on
+ * the list with Map in place of Overview.
+ */
+@Preview(name = "guidance bar with the car", widthDp = 360)
+@Preview(name = "guidance bar with the car, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "guidance bar with the car, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun GuidanceBarCarPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) {
+        Column {
+            GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {}, onList = {})
+            Spacer(Modifier.height(12.dp))
+            GuidanceBar(previewExitProgress(), following = false, onToggleOverview = {}, onEnd = {}, onList = {})
+            Spacer(Modifier.height(12.dp))
+            GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {}, onMap = {})
         }
     }
 }

@@ -57,10 +57,12 @@ import kotlinx.coroutines.flow.collectLatest
  * ([onSeek], with the share of the track from 0 to 1); a tap goes there too. TalkBack reads it as a
  * slider named "Simulated drive position", with the position in percent, and can move it.
  *
- * [position] is read here, not by the caller, so a new position reaches only this slider.
+ * [position] is read here, not by the caller, so a new position reaches only this slider. Where
+ * nothing may move by itself, as on the list of the maneuvers ahead, [glides] false has the dot go
+ * to each new position at once: one frame a position.
  */
 @Composable
-fun ReplaySlider(position: State<ReplayPosition?>, onSeek: (Double) -> Unit, modifier: Modifier = Modifier) {
+fun ReplaySlider(position: State<ReplayPosition?>, onSeek: (Double) -> Unit, modifier: Modifier = Modifier, glides: Boolean = true) {
     val seek by rememberUpdatedState(onSeek)
     val glide = remember { DotGlide() }
     // The frame of a glide; read only when the slider is drawn, so a frame draws and composes nothing.
@@ -70,8 +72,8 @@ fun ReplaySlider(position: State<ReplayPosition?>, onSeek: (Double) -> Unit, mod
     LaunchedEffect(position) {
         snapshotFlow { position.value }.collectLatest { now ->
             val target = now?.fraction?.toFloat() ?: return@collectLatest
-            // A seek shows where it goes at once; so does the first position.
-            if (now.seeking || !glide.started || held.value != null) {
+            // A seek shows where it goes at once; so does the first position, and every one where the dot does not glide.
+            if (!glides || now.seeking || !glide.started || held.value != null) {
                 glide.snapTo(target)
                 frame.longValue = withFrameNanos { it }
                 return@collectLatest

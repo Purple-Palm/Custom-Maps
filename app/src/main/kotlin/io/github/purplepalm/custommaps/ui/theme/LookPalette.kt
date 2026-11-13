@@ -96,6 +96,12 @@ class LookPalette private constructor(
     val pendingCardAlpha: Float,
     /** Dark icons in the system bars, over the light map and pages by day. */
     val darkBarIcons: Boolean,
+    /**
+     * The page of the list of the maneuvers ahead, which the phone shows in place of its map while the
+     * car shows the map: black in both looks, the least power on the phone's own screen. The list
+     * takes the night look's colours on it whatever the look.
+     */
+    val listPage: Long,
 ) {
     companion object {
         /** The light look: white cards with a soft shadow over the bright map, graphite ink, dark amber marks. */
@@ -142,6 +148,7 @@ class LookPalette private constructor(
             // The road name of a dimmed card stays at 4.7:1 on white; at 45 % it would be 2.9:1.
             pendingCardAlpha = 0.60f,
             darkBarIcons = true,
+            listPage = 0xFF000000,
         )
 
         /**
@@ -192,6 +199,7 @@ class LookPalette private constructor(
             previewMapStandIn = 0xFF2B3036,
             pendingCardAlpha = 0.45f,
             darkBarIcons = false,
+            listPage = 0xFF000000,
         )
 
         /** The palette of [look]. */
