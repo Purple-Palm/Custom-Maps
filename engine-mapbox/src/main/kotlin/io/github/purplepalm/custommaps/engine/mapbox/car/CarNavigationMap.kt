@@ -98,6 +98,9 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  * - **Frames.** Each surface has its frame clock ([CarFrames]), started as the surface comes and
  *   stopped as it goes: the display's frames while the main thread gets them, a timer's while it
  *   gets none, a "frame_clock" line at each switch and the ticks of each second in the camera line.
+ *   Smooth follow, the zoom buttons' ease and the puck ([CarPuck]) move on it, so the map goes on
+ *   moving while Android gives the main thread no frames; the two Mapbox camera styles keep
+ *   Mapbox's own animators, which wait for those frames.
  * - **Lines.** Every line of the car map carries `screen=car`: the scene's camera, camera state and
  *   map_layers lines among them, beside "car_surface", "car_look", "car_location" and "frame_clock".
  *   An exception caught here writes a "car_error" line with the call, the class and the message.
@@ -385,6 +388,8 @@ internal class CarNavigationMap(
             onPlatformFix = { platformFixes += 1 },
             // Smooth follow moves on the car's own frames, also while the main thread gets none from the display.
             frames = frames,
+            // And so does the puck, which the camera follows.
+            puckRelay = CarPuck(frames, log),
         )
         scene = created
         created.setCameraStyle(cameraStyle)

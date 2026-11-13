@@ -57,7 +57,7 @@ import kotlin.math.sin
  * once per frame with [MapboxMap.setCamera], from a frame of its [FrameSource] on the main thread:
  * on the phone the display's own frames ([Choreographer]), the thread and the frame the puck's own
  * animation runs on; on the car the car's frame clock, which goes on while Android gives the main
- * thread no frames. What the navigator sends once a second
+ * thread no frames, and on which the car's puck moves too. What the navigator sends once a second
  * only moves targets. The viewport data source still computes the bearing that looks ahead along
  * the road, the zoom, and the frames around a maneuver and of the overview; each of its frames is
  * reached over [CameraTuning.sampleHoldSeconds]. The camera goes after the targets on critically

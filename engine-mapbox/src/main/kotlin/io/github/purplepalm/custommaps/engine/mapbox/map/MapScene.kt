@@ -60,6 +60,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.camera.JunctionPoints
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.LaneZoomFrames
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.NavigationCameraAdapter
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PlatformPuck
+import io.github.purplepalm.custommaps.engine.mapbox.map.camera.PuckRelay
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.SmoothNavigationCamera
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.MapboxNavigationEngine
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.RouteLanePlan
@@ -165,6 +166,12 @@ internal class MapScene(
      * Mapbox's own animators.
      */
     private val frames: FrameSource = DisplayFrames(),
+    /**
+     * The car's puck on the car's frame clock, which the location component takes as its provider in
+     * place of the platform's and the guidance puck, and which follows them instead; null on the phone,
+     * whose component takes them itself and glides with Mapbox's animators.
+     */
+    private val puckRelay: PuckRelay? = null,
 ) : MapRenderer {
 
     /** What the scene needs to know of the screen its map is on, and tells it. Main thread only. */
@@ -590,7 +597,8 @@ internal class MapScene(
                 feedPuck(target)
             }
         }
-        plugins.location.setLocationProvider(platformPuck)
+        plugins.location.setLocationProvider(puckRelay ?: platformPuck)
+        puckRelay?.follow(platformPuck)
         plugins.location.updateSettings {
             enabled = true
             // Mapbox's own dot and bearing arrow on its white disc, with a graphite edge around the
@@ -867,6 +875,8 @@ internal class MapScene(
         viewportDataSource.onDestroy()
         plugins.location.removeOnIndicatorPositionChangedListener(puckPositionListener)
         plugins.location.removeOnIndicatorBearingChangedListener(puckBearingListener)
+        // The car's puck lets go of its provider and draws no more.
+        puckRelay?.release()
         routeLineApi.cancel()
         routeLineView.cancel()
     }
@@ -1296,8 +1306,14 @@ internal class MapScene(
      * the guidance puck afresh for every drive, so it never first shows where the last drive ended.
      */
     private fun useLocationProvider(guidance: Boolean) {
-        val current = plugins.location.getLocationProvider()
         val wanted = if (guidance) guidancePuck else platformPuck
+        // The car's component keeps its own puck, which follows the one wanted.
+        val relay = puckRelay
+        if (relay != null) {
+            relay.follow(wanted)
+            return
+        }
+        val current = plugins.location.getLocationProvider()
         if (current !== wanted) plugins.location.setLocationProvider(wanted)
     }
 

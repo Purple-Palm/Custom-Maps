@@ -73,6 +73,16 @@ internal class CarFrames(private val log: DebugLog) : FrameSource {
         if (!dispatching) wantFrames()
     }
 
+    /**
+     * [callback] gets the next tick, once, ahead of everyone else who asks for it: the puck, which the
+     * camera of the same tick then sees where it is.
+     */
+    fun postFirst(callback: Choreographer.FrameCallback) {
+        pending.remove(callback)
+        pending.add(0, callback)
+        if (!dispatching) wantFrames()
+    }
+
     /** [callback] gets no tick it asked for, also not the one under way. */
     override fun remove(callback: Choreographer.FrameCallback) {
         pending.remove(callback)
