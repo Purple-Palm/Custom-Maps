@@ -378,6 +378,9 @@ class LaneDrawing private constructor(
         /** Whether stops made at [builtAt] should be made again at [latitude]: it has moved [LATITUDE_STEP_DEGREES] or more. */
         fun stopsStale(builtAt: Double, latitude: Double): Boolean = abs(latitude - builtAt) >= LATITUDE_STEP_DEGREES
 
+        /** How long the wedge is that ends a tint [tintMeters] long whose lane stops working: [WEDGE_METERS], or the whole tint. */
+        internal fun wedgeMeters(tintMeters: Double): Double = min(WEDGE_METERS, tintMeters)
+
         /**
          * Whether a line that moves [sideways] metres over [along] metres of the route does so as a step, not along a taper
          * or a bend: more than [STEP_METERS], and more across the road than along it. A line is broken there.
@@ -1404,7 +1407,7 @@ class LaneDrawing private constructor(
                 if (s1 - s0 <= SAME_STATION) continue
                 val d = drawings[span.drawing]
                 val end = ends[span.drawing]
-                val wedge = if (span.leaves) min(WEDGE_METERS, span.to - span.from) else 0.0
+                val wedge = if (span.leaves) wedgeMeters(span.to - span.from) else 0.0
                 val pieces = Pieces(Kind.TINT, out)
                 for (s in litSamples(s0, s1)) {
                     val axis = axisAt(s)

@@ -89,15 +89,15 @@ class LaneDrawingTest {
         assertEquals(gore - 3_600.0, from, 1e-9)
         val taper = RoutePath.ASPHALT_TAPER_METERS
         assertNull(drawing.asphaltAt(from - taper - 0.01))
-        assertEquals(LaneDrawing.STANDARD_FREEWAY_BAND_METERS, width(drawing.asphaltAt(from - taper)), 1e-9)
-        assertEquals((LaneDrawing.STANDARD_FREEWAY_BAND_METERS + 4.0 * w + 2.0 * apron) / 2.0, width(drawing.asphaltAt(from - taper / 2.0)), 1e-9)
+        assertEquals(9.0, width(drawing.asphaltAt(from - taper)), 1e-9)
+        assertEquals((9.0 + 4.0 * w + 2.0 * apron) / 2.0, width(drawing.asphaltAt(from - taper / 2.0)), 1e-9)
         assertEquals(4.0 * w + 2.0 * apron, width(drawing.asphaltAt(from)), 1e-9)
         // The feature itself: its first cross-section is the band's width, its points on the asphalt's edges.
         val asphalt = d.of(Kind.ASPHALT).single()
         val ring = asphalt.parts.single()
         assertEquals(from - taper, asphalt.from, 1e-6)
         assertEquals(ring.first(), ring.last())
-        assertEquals(LaneDrawing.STANDARD_FREEWAY_BAND_METERS, meters(ring.first(), ring[ring.size - 2]), MM)
+        assertEquals(9.0, meters(ring.first(), ring[ring.size - 2]), MM)
         val west = ring.filter { abs(station(it) - (gore - 3_000.0)) < 1_000.0 }.maxOf { offset(it) }
         assertEquals(2.0 * w + apron, west, MM)
     }
@@ -159,8 +159,8 @@ class LaneDrawingTest {
         // Dashes are cut at the route's stations: on the gore's tight arc an inner line's dash is shorter on the ground, by
         // 1 - kappa t; measured here before it.
         for (dash in dotted.parts.drop(1).filter { station(it[1]) < gore - 20.0 }) {
-            assertEquals(LaneDrawing.DOTTED_DASH_METERS, station(dash[1]) - station(dash[0]), 1e-6)
-            val phase = station(dash[0]) / Pattern.DOTTED.periodMeters
+            assertEquals(0.91, station(dash[1]) - station(dash[0]), 1e-6)
+            val phase = station(dash[0]) / 3.65
             assertEquals(Math.round(phase).toDouble(), phase, 1e-6)
         }
         assertEquals(LaneDrawing.DOTTED_DASH_METERS + LaneDrawing.DOTTED_GAP_METERS, Pattern.DOTTED.periodMeters, 1e-12)
@@ -192,13 +192,13 @@ class LaneDrawingTest {
         assertEquals(4, diamonds.size)
         for (diamond in diamonds) {
             assertEquals(0, hov.id.compareTo(requireNotNull(diamond.lane)))
-            val k = diamond.from / LaneDrawing.DIAMOND_EVERY_METERS
+            val k = diamond.from / 402.0
             assertEquals(Math.round(k).toDouble(), k, 1e-9, "every 402 m from the route's start")
             val ring = diamond.parts.single()
             assertEquals(5, ring.size)
             assertEquals(ring.first(), ring.last())
-            assertEquals(LaneDrawing.DIAMOND_LENGTH_METERS, meters(ring[0], ring[2]), 1e-6)
-            assertEquals(LaneDrawing.DIAMOND_WIDTH_METERS, meters(ring[1], ring[3]), 1e-6)
+            assertEquals(4.0, meters(ring[0], ring[2]), 1e-6)
+            assertEquals(0.91, meters(ring[1], ring[3]), 1e-6)
             // In the middle of the car-pool lane, the leftmost of four lanes about the road's line.
             assertEquals(1.5 * w, offset(ring[0]), MM)
             assertTrue(diamond.to <= hov.closes)
@@ -271,13 +271,16 @@ class LaneDrawingTest {
     fun `an edge line is broken 15 m on each side of an intersection where a road meets its side`() {
         val d = draw(LaneScenes.ia())
         val ia0 = gore - 2_180.0
-        val gap = LaneDrawing.JUNCTION_GAP_METERS
         val left = d.of(Kind.EDGE_LINE).filter { it.side == LaneEdge.LEFT }
-        assertTrue(left.any { abs(it.to - (ia0 - gap)) < 1e-3 }, "${left.map { it.from to it.to }}")
-        assertTrue(left.any { abs(it.from - (ia0 + gap)) < 1e-3 }, "${left.map { it.from to it.to }}")
-        assertTrue(left.none { it.to > ia0 - gap + 1e-3 && it.from < ia0 + gap - 1e-3 })
+        assertTrue(left.any { abs(it.to - (ia0 - 15.0)) < 1e-3 }, "${left.map { it.from to it.to }}")
+        assertTrue(left.any { abs(it.from - (ia0 + 15.0)) < 1e-3 }, "${left.map { it.from to it.to }}")
+        assertTrue(left.none { it.to > ia0 - 15.0 + 1e-3 && it.from < ia0 + 15.0 - 1e-3 })
+        // Just outside the gap on either side the left edge is drawn, just inside it not.
+        for ((x, drawn) in listOf(ia0 - 15.2 to true, ia0 - 14.8 to false, ia0 + 14.8 to false, ia0 + 15.2 to true)) {
+            assertEquals(drawn, left.any { covers(it, x) }, "the left edge line at ${x - ia0} m from the intersection")
+        }
         // No road meets the right side there: the right edge goes on through.
-        assertTrue(d.of(Kind.EDGE_LINE).any { it.side == LaneEdge.RIGHT && it.from < ia0 - gap && it.to > ia0 + gap })
+        assertTrue(d.of(Kind.EDGE_LINE).any { it.side == LaneEdge.RIGHT && it.from < ia0 - 15.0 && it.to > ia0 + 15.0 })
     }
 
     @Test
@@ -310,14 +313,15 @@ class LaneDrawingTest {
         val arrows = d.of(Kind.ARROW)
         fun row(at: Double) = arrows.filter { abs(it.from - at) < 1e-6 }.sortedBy { it.lane }
         val p2 = gore - 620.0
-        val near = row(p2 - LaneDrawing.ARROW_NEAR_METERS)
+        // The near row 10 m before the point, the far one 200 m before it.
+        val near = row(p2 - 10.0)
         assertEquals(listOf(0, 1, 2, 3, 4), near.map { it.lane })
         assertEquals(listOf(TurnModifier.STRAIGHT), near[0].indications)
         assertEquals(listOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT).sortedBy { it.ordinal }, near[3].indications)
         assertEquals(listOf(TurnModifier.SLIGHT_RIGHT), near[4].indications)
         assertEquals(2, near[3].parts.size, "a straight arrow and a bent one")
         // The far row: the exit-only lane is only possible there, so it has none.
-        assertEquals(listOf(0, 1, 2, 3), row(p2 - LaneDrawing.ARROW_FAR_METERS).map { it.lane })
+        assertEquals(listOf(0, 1, 2, 3), row(p2 - 200.0).map { it.lane })
         // At the gore only the far row, at 170 m: the maneuver arrow begins 12 m before the gore.
         assertEquals(listOf(0, 1, 2, 3, 4), row(gore - LaneDrawing.ARROW_FAR_MIN_METERS).map { it.lane })
         assertTrue(row(gore - LaneDrawing.ARROW_NEAR_METERS).isEmpty())
@@ -333,12 +337,12 @@ class LaneDrawingTest {
         val straight = near[0].parts.single()
         val tail = straight.minOf { station(it) }
         val tip = straight.maxOf { station(it) }
-        assertEquals(LaneDrawing.ARROW_LENGTH_METERS, tip - tail, MM)
-        assertEquals(p2 - LaneDrawing.ARROW_NEAR_METERS, tail, MM)
+        assertEquals(7.16, tip - tail, MM)
+        assertEquals(gore - 630.0, tail, MM)
         val across = straight.map { offset(it) }
-        assertEquals(LaneDrawing.ARROW_HEAD_WIDTH_METERS, across.max() - across.min(), MM)
+        assertEquals(1.05, across.max() - across.min(), MM)
         val stem = straight.filter { station(it) < tail + 1.0 }.map { offset(it) }
-        assertEquals(LaneDrawing.ARROW_STEM_METERS, stem.max() - stem.min(), MM)
+        assertEquals(0.2, stem.max() - stem.min(), MM)
     }
 
     @Test
@@ -592,7 +596,7 @@ class LaneDrawingTest {
             assertTrue(d.features.none { it.id != null && it.kind != Kind.LIT && it.kind != Kind.TINT })
             for (f in pieces) {
                 val k = LaneDrawing.pieceOf(f.from)
-                assertTrue(f.from >= k * LaneDrawing.PIECE_METERS - UM && f.to <= (k + 1) * LaneDrawing.PIECE_METERS + UM, "${f.kind} ${f.from}..${f.to}")
+                assertTrue(f.from >= k * 50.0 - UM && f.to <= (k + 1) * 50.0 + UM, "${f.kind} ${f.from}..${f.to}")
                 assertEquals(if (f.kind == Kind.LIT) LaneDrawing.litId(k) else LaneDrawing.tintId(requireNotNull(f.lane), k), f.id)
             }
             // A window that cuts pieces: the pieces wholly inside it are the same features, the cut ones keep their ids.
@@ -644,8 +648,8 @@ class LaneDrawingTest {
                     continue
                 }
                 // The lane stops working here, or in the zone that begins here: the tint narrows to nothing at its near edge.
-                val wedge = min(LaneDrawing.WEDGE_METERS, tinted.to - tinted.from)
-                assertEquals(LaneDrawing.WEDGE_METERS, wedge)
+                val wedge = min(110.0, tinted.to - tinted.from)
+                assertEquals(110.0, wedge)
                 for (back in listOf(0.37, 27.37, 55.37, 82.37, wedge + 3.37)) {
                     val x = tinted.to - back
                     val place = d.drawing.lanesAt(x).single { it.lane == lane }
@@ -728,6 +732,55 @@ class LaneDrawingTest {
             if (stretches.isNotEmpty()) lit++
         }
         assertTrue(lit >= 20, "scenes with a lit lane: $lit")
+    }
+
+    @Test
+    fun `the drawing's sizes, in numbers, and each rule's border on both sides`() {
+        // MUTCD's sizes (design 2.2).
+        assertEquals(3.05, LaneDrawing.BROKEN_DASH_METERS)
+        assertEquals(9.15, LaneDrawing.BROKEN_GAP_METERS)
+        assertEquals(0.91, LaneDrawing.DOTTED_DASH_METERS)
+        assertEquals(2.74, LaneDrawing.DOTTED_GAP_METERS)
+        assertEquals(3.65, Pattern.DOTTED.periodMeters, 1e-12)
+        assertEquals(0.91, LaneDrawing.DIAMOND_WIDTH_METERS)
+        assertEquals(4.0, LaneDrawing.DIAMOND_LENGTH_METERS)
+        assertEquals(402.0, LaneDrawing.DIAMOND_EVERY_METERS)
+        assertEquals(7.16, LaneDrawing.ARROW_LENGTH_METERS)
+        assertEquals(2.13, LaneDrawing.ARROW_HEAD_LENGTH_METERS)
+        assertEquals(1.05, LaneDrawing.ARROW_HEAD_WIDTH_METERS)
+        assertEquals(0.20, LaneDrawing.ARROW_STEM_METERS)
+        // The rules' numbers.
+        assertEquals(10.0, LaneDrawing.ARROW_NEAR_METERS)
+        assertEquals(200.0, LaneDrawing.ARROW_FAR_METERS)
+        assertEquals(170.0, LaneDrawing.ARROW_FAR_MIN_METERS)
+        assertEquals(230.0, LaneDrawing.ARROW_FAR_MAX_METERS)
+        assertEquals(100.0, LaneDrawing.STUB_METERS)
+        assertEquals(9.0, LaneDrawing.STANDARD_FREEWAY_BAND_METERS)
+        assertEquals(5.5, LaneDrawing.STANDARD_RAMP_BAND_METERS)
+        assertEquals(15.0, LaneDrawing.JUNCTION_GAP_METERS)
+        assertEquals(1.0, LaneDrawing.STEP_METERS)
+        assertEquals(50.0, LaneDrawing.PIECE_METERS)
+        assertEquals(110.0, LaneDrawing.WEDGE_METERS)
+        assertEquals(1.0, LaneDrawing.FLOOR_DP)
+        assertEquals(0.5, LaneDrawing.LATITUDE_STEP_DEGREES)
+        assertEquals(24.0, LaneDrawing.MAX_ZOOM)
+        // A tint that stops working after 100 m wedges over all of it, one after 120 m over its last 110 m.
+        assertEquals(100.0, LaneDrawing.wedgeMeters(100.0))
+        assertEquals(109.9, LaneDrawing.wedgeMeters(109.9))
+        assertEquals(110.0, LaneDrawing.wedgeMeters(110.1))
+        assertEquals(110.0, LaneDrawing.wedgeMeters(120.0))
+        // A piece is 50 m from the route's start: 0 to 50, 50 to 100, and its ids count from there.
+        assertEquals(0L, LaneDrawing.pieceOf(0.0))
+        assertEquals(0L, LaneDrawing.pieceOf(49.99))
+        assertEquals(1L, LaneDrawing.pieceOf(50.0))
+        assertEquals(1L, LaneDrawing.pieceOf(99.99))
+        assertEquals(121L, LaneDrawing.pieceOf(6_050.0))
+        assertEquals(1_000_000_000_121L, LaneDrawing.litId(121L))
+        assertEquals(2_000_040_000_120L, LaneDrawing.tintId(4, 120L))
+        // A line steps where it moves more than a metre sideways, and more across than along.
+        assertFalse(LaneDrawing.steps(1.0, 0.0))
+        assertTrue(LaneDrawing.steps(1.01, 1.0))
+        assertFalse(LaneDrawing.steps(1.01, 1.01))
     }
 
     @Test

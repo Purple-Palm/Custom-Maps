@@ -575,7 +575,8 @@ class LaneTrustTest {
             val id = requireNotNull(f.id) { "${b.name}: a ${f.kind} piece without an id" }
             assertTrue(ids.add(id), "${b.name}: two pieces with the id $id")
             val piece = LaneDrawing.pieceOf(f.from)
-            assertTrue(f.to <= (piece + 1) * LaneDrawing.PIECE_METERS + 1e-6, "${b.name}: a ${f.kind} piece over ${f.from}..${f.to}")
+            // 50 m pieces from the route's start.
+            assertTrue(f.to <= (piece + 1) * 50.0 + 1e-6 && f.from >= piece * 50.0 - 1e-6, "${b.name}: a ${f.kind} piece over ${f.from}..${f.to}")
             assertEquals(if (f.kind == Kind.LIT) LaneDrawing.litId(piece) else LaneDrawing.tintId(lane.id, piece), id)
             // Each part of a piece (a piece may hold two, where its lane is lit or tinted on both sides of a gap) at its middle.
             val middles = f.parts.map { ring ->
@@ -648,7 +649,8 @@ class LaneTrustTest {
                 val place = b.drawing.lanesAt(x).firstOrNull { it.lane == lane } ?: continue
                 val across = DrawingProbe.across(requireNotNull(b.path.axisAt(x)), x, pieces.filter { x >= it.from && x <= it.to }.flatMap { it.parts })
                 assertEquals(2, across.size, "${b.name}: lane $lane's tint at $x")
-                val wedge = minOf(LaneDrawing.WEDGE_METERS, to - from)
+                // Over the last 110 m of the tint, or all of it where it is shorter.
+                val wedge = minOf(110.0, to - from)
                 if (wedge >= WEDGE_SAMPLED_METERS) {
                     val expected = place.width * (1.0 - CrossSection.ramp(x, to - wedge, to))
                     assertEquals(expected, across[1] - across[0], RoutePath.TOLERANCE_METERS, "${b.name}: lane $lane's tint at $x, where it stops working at $to")
