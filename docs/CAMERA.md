@@ -1576,9 +1576,12 @@ where the rule's reading leaves no doubt, the plan lights the rule's own lanes, 
   edge and moves it to the edge once past it; where the road comes less than about 12 s of driving
   before the exit the lane reaches the edge before it, and the words wait until it is passed (the
   owner's answer of 2026-11-11);
-- no lane on the exit's side opens or may begin between the car and the row's point, and the lit
-  lane counts the same from the exit's edge at the car as at that point (`opens_ahead`): the words
-  of a row whose exit-only lane is still to come wait until it is there.
+- no lane on the exit's side opens or may begin between the car and the row's point, also one that
+  is gone again before it, and the lit lane counts the same from the exit's edge at the car as at
+  that point, every lane the map draws at the car counted, also one that ends before the point
+  (`opens_ahead`): the words of a row whose exit-only lane is still to come wait until it is there,
+  and those of a point ahead wait while a lane beside the lit one still ends on the way. A lane in
+  its last 5 m, as the one that left at the point just passed, no longer counts.
 
 While a new route's plan is on its way the row is the rule's, without words; where no plan could be
 made it is the rule's row as before. A failure of the reading costs it for the drive and writes one

@@ -19,10 +19,10 @@ import io.github.purplepalm.custommaps.nav.model.RunUpLanes
  *   the point never is one: the lane the map lights flows into it along its taper.
  * - **Words** are the rule's, for the lit lanes counted without the outlines, and only while the plan names a lane at
  *   the car and at the point, no road without lane data leaves on the exit's side before the exit
- *   ([RunUpRule.ODD_UNKNOWN_AHEAD]), and between the car and the point no lane on the exit's side of the named one opens
- *   or may begin and the named lane keeps its count from the exit's edge ([RunUpRule.ODD_OPENS_AHEAD]). Where the plan
- *   names no lane at the car or the point, as before its card window, the rule's lanes stay lit, without words
- *   ([RunUpRule.ODD_NOT_NAMED]).
+ *   ([RunUpRule.ODD_UNKNOWN_AHEAD]), between the car and the point no lane on the exit's side opens or may begin, also
+ *   one gone again by the point, and the named lane counts the same from the exit's edge at the car, every lane drawn
+ *   there counted, as at the point ([RunUpRule.ODD_OPENS_AHEAD]). Where the plan names no lane at the car or the point,
+ *   as before its card window, the rule's lanes stay lit, without words ([RunUpRule.ODD_NOT_NAMED]).
  * - Where no lane can be named on the approach (C1) the rule's lanes stay lit as the interim card has them, without
  *   words: the plan names no lane there, so neither do the words; so where the plan says nothing of the point.
  *
@@ -150,9 +150,10 @@ class CardPlanRow {
 
         /**
          * Whether, between the car at [car] and [point] ahead, the lane the plan names counts differently from the exit's
-         * edge, or a lane on the exit's side of the lane named at the point opens or may begin: only the named lane itself,
-         * entered along its taper, keeps the words. At the car only lanes still there at the point count, so the lane that
-         * left at the point just passed is none. Never for a point the car has reached.
+         * edge, or a lane on the exit's side opens or may begin: only the named lane itself, entered along its taper, keeps
+         * the words. At the car every lane a drawing shows there counts, also one that ends before the point, but for a lane
+         * in its last [LaneTopology.LEAVE_PAST_POINT_METERS], as the one that left at the point just passed; ahead, a lane
+         * that opens or may begin counts also where it is gone again by the point. Never for a point the car has reached.
          */
         internal fun opensAhead(plan: LanePlan, point: LaneTopology.Point, atPoint: PlanSegment?, car: Double, atCar: PlanSegment?): Boolean {
             val pointStation = point.station
@@ -162,18 +163,20 @@ class CardPlanRow {
             val topology = plan.topology
             val lit = topology.lanes.getOrNull(named) ?: return false
             val carLane = atCar?.takeIf { it.run == atPoint.run }?.named?.let { topology.lanes.getOrNull(it) }
+            val lanes = topology.lanesOf(lit.run)
             val countAtPoint = atPoint.namedFromEdge
             if (carLane != null && countAtPoint != null) {
                 var countAtCar = 0
-                for (other in topology.lanesOf(carLane.run)) {
-                    if (other.id == carLane.id || other.designated || other.closes <= pointStation) continue
-                    if (!drawnAt(other, plan, car)) continue
-                    if (exitSide(other, carLane, edge)) countAtCar++
+                for (other in lanes) {
+                    if (other.id == carLane.id || other.designated || other.closes <= car + LaneTopology.LEAVE_PAST_POINT_METERS) continue
+                    if (drawnAt(other, plan, car) && exitSide(other, carLane, edge)) countAtCar++
                 }
                 if (countAtCar != countAtPoint) return true
             }
-            for (lane in topology.lanesOf(lit.run)) {
-                if (lane.id == lit.id || lane.designated || !lane.exists(pointStation) || !exitSide(lane, lit, edge)) continue
+            for (lane in lanes) {
+                if (lane.id == lit.id || lane.designated) continue
+                // On the exit's side of the lane lit at the point, or of the one lit at the car where that is another.
+                if (!exitSide(lane, lit, edge) && (carLane == null || !exitSide(lane, carLane, edge))) continue
                 if (lane.opens > car && lane.opens <= pointStation) return true
                 val possible = lane.possibleFrom
                 if (possible != null && lane.id !in plan.named && possible > car && possible <= pointStation) return true

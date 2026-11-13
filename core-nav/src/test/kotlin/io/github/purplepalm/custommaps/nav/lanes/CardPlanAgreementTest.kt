@@ -117,14 +117,16 @@ class CardPlanAgreementTest {
     }
 
     @Test
-    fun `the words agree except where an exit-only lane the plan does not name still opens ahead`() {
+    fun `the words agree except where a lane the plan does not name opens ahead or a lane drawn at the car is gone by the point`() {
         for ((name, _) in scenes) {
             val route = requireNotNull(LaneScenes.all()[name])
             for ((shown, result) in compared(route)) {
                 val waits = shown.row.source == CardLanes.Source.RUN_UP && shown.row.words && result.opensAhead
                 if (waits) {
                     assertEquals(CardPlanAgreement.Why.WORDS, result.why, name)
-                    assertTrue(name in setOf("ia", "ia-far", "iw31"), "$name: words waiting at ${shown.station}")
+                    // S16: past the point where the left lane leaves, the lane then at the left edge becomes a car-pool lane
+                    // 50 m on, so the interim's "Left lane" names another lane there than at the exit.
+                    assertTrue(name in setOf("ia", "ia-far", "iw31", "s16"), "$name: words waiting at ${shown.station}")
                 } else {
                     assertTrue(result.agree, "$name at ${shown.station}: ${result.why}")
                 }
@@ -238,11 +240,15 @@ class CardPlanAgreementTest {
     /**
      * The freeway scenes of the design's scenario line as main has them, through the card's row from the plan: IA and its
      * far side, IW31, the rig's S5 to S9, S11 (IA's exit with a turn 400 m past it; S12 is the same for the card), S13,
-     * S15 to S17 and S20 (S14 is S9 for the card), GEOM's S2, the car-pool case that has a run-up, the hold cases and a
-     * keep left. GEOM's S6 has no run-up (its exit is no lane choice), and the cases where no lane can be named are below.
+     * S15 to S17 and S20 (S14 is S9 for the card), GEOM's S2, the car-pool case that has a run-up, the hold cases, a keep
+     * left, and lanes gone before an edge point, or that come and go before it or before an exit lane added at the gore.
+     * GEOM's S6 has no run-up (its exit is no lane choice), and the cases where no lane can be named are below.
      */
     private val freeway = linkedMapOf(
         "s11" to LaneScenes.approach(emptyList(), LaneScenes.iaExit(), id = "s11"),
+        "lane-ends-before-edge" to LaneScenes.laneEndsBeforeEdge(),
+        "short-lane-before-edge" to LaneScenes.shortLaneBeforeEdge(),
+        "short-lane-before-exit-lane" to LaneScenes.shortLaneBeforeExitLane(),
     ).apply {
         val all = LaneScenes.all()
         for (name in listOf(
@@ -277,6 +283,43 @@ class CardPlanAgreementTest {
                 }
             }
             assertTrue(runUps > 0, "$name: no run-up")
+        }
+    }
+
+    @Test
+    fun `where the card's run-up row has words, the plan counts its lane the same from the car all the way to the row's point`() {
+        val grid = LanePlanner.GRID_METERS
+        val last = LaneTopology.LEAVE_PAST_POINT_METERS
+        val worded = HashMap<String, Int>()
+        for ((name, route) in freeway) {
+            val plan = plan(route)
+            for (shown in CardDrive(route, plan = plan).drive(everyUpdate = true)) {
+                if (shown.row.source != CardLanes.Source.RUN_UP || shown.target == null) continue
+                worded[name] = (worded[name] ?: 0) + 1
+                val point = plan.topology.points.first { it.node == shown.node }
+                val atPoint = requireNotNull(plan.segmentAt(point.station))
+                val car = shown.station
+                // The plan counts on its 5 m grid: for a few metres a lane in its last ones, as the one that left at the point
+                // just passed, is still in the count of the stretch at the car, and one that opens or may begin not yet.
+                val lanes = plan.topology.lanes.filter { it.run == atPoint.run }
+                val settling = lanes.any { lane ->
+                    (lane.closes > car - grid && lane.closes <= car + last) || (lane.opens > car - grid && lane.opens <= car) ||
+                        lane.possibleFrom.let { it != null && it > car - grid && it <= car }
+                }
+                for (segment in plan.segments) {
+                    if (segment.run != atPoint.run || segment.to <= car || segment.from > point.station) continue
+                    if (segment.from <= car && settling) continue
+                    assertEquals(
+                        atPoint.namedFromEdge,
+                        segment.namedFromEdge,
+                        "$name at ${GORE - car} m before the gore: the stretch from ${GORE - segment.from} m",
+                    )
+                }
+            }
+        }
+        // Words come on each of these, once nothing differs any more.
+        for (name in listOf("ia", "iw31", "s16", "lane-ends-before-edge", "short-lane-before-edge", "short-lane-before-exit-lane")) {
+            assertTrue((worded[name] ?: 0) > 0, name)
         }
     }
 

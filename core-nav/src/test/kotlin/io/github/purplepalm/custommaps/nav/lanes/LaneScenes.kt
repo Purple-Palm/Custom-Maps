@@ -383,6 +383,57 @@ internal object LaneScenes {
         id = "dropped-hold-stays",
     )
 
+    /**
+     * A lane gone before an edge point with nothing that says where: five lanes 2,000 m before a right exit, four at 1,000 m,
+     * where the right one leaves by a road on the right; the exit takes the right lane of the three that go on. The careful
+     * reading ends the right lane of the five early, 30 m past the first point: until then the lane lit at the car has one
+     * lane more on its right than at the edge point. Planned at 27 m/s. For the card's tests, not among [all].
+     */
+    fun laneEndsBeforeEdge() = approach(
+        listOf(at(2_000.0, s(), s(), s(), s(), s()), at(1_000.0, s(), s(), s(), s(false), roads = EXIT_RIGHT)),
+        exit = listOf(s(false), s(false), sr()),
+        id = "lane-ends-before-edge",
+    )
+
+    /**
+     * A lane that comes and goes before an edge point: four lanes 2,200 m before a right exit, a road joining on the right
+     * 1,950 m before, five lanes at 1,800 m and four again at 1,400 m with nothing that says where the fifth went; at
+     * 1,000 m the right lane leaves by a road on the right, and the exit takes the right lane of the three that go on. The
+     * lane added on the exit's side may be there from the point before it, and the careful reading ends it 30 m past the
+     * point that lists it. Planned at 27 m/s. For the card's tests, not among [all].
+     */
+    fun shortLaneBeforeEdge() = approach(
+        listOf(
+            at(2_200.0, s(), s(), s(), s()),
+            bare(1_950.0, JOIN_RIGHT),
+            at(1_800.0, s(), s(), s(), s(), s()),
+            at(1_400.0, s(), s(), s(), s()),
+            at(1_000.0, s(), s(), s(), s(false), roads = EXIT_RIGHT),
+        ),
+        exit = listOf(s(false), s(false), sr()),
+        id = "short-lane-before-edge",
+    )
+
+    /**
+     * A lane that comes and goes right of the lane lit at the car, before an exit whose own lane is added at its gore: the
+     * right lane of five leaves by a road on the right 1,200 m before a right exit; four lanes at 1,000 m, a road joining on
+     * the right 900 m before, five lanes at 800 m and four again at 500 m with nothing that says where the fifth went; the
+     * exit adds its lane on the right, entered from the right lane along its taper. The lane that comes and goes lies right
+     * of the lane lit at the car and left of the exit's lane, which the topology adds after it. Planned at 27 m/s. For the
+     * card's tests, not among [all].
+     */
+    fun shortLaneBeforeExitLane() = approach(
+        listOf(
+            at(1_200.0, s(), s(), s(), s(), sr(false), roads = EXIT_RIGHT),
+            at(1_000.0, s(), s(), s(), s()),
+            bare(900.0, JOIN_RIGHT),
+            at(800.0, s(), s(), s(), s(), s()),
+            at(500.0, s(), s(), s(), s()),
+        ),
+        exit = listOf(s(false), s(false), s(false), s(false), sr()),
+        id = "short-lane-before-exit-lane",
+    )
+
     /** Two lanes added on the right at a point 900 m before a right exit, which takes the inner one only. */
     fun twoAdded() = approach(
         listOf(at(2_000.0, s(), s(), s(), s()), at(900.0, s(), s(), s(), s(), sr(), sr())),

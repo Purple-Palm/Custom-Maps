@@ -149,6 +149,97 @@ class CardPlanRowTest {
         assertEquals(RunUpRule.ODD_COMPOSED, row.odd)
     }
 
+    // ------------------------------------------------------------------ a lane drawn at the car that is gone by the point
+
+    @Test
+    fun `no words while a lane the map draws at the car ends before the row's point`() {
+        val route = LaneScenes.laneEndsBeforeEdge()
+        val plan = plan(route)
+        val exit = exitOf(route)
+        val edgePoint = plan.topology.points.single { it.station == GORE - 1_000.0 }
+        // The right lane of the five, ended early by the careful reading: drawn at the car until 30 m past the first point.
+        val gone = plan.topology.lanes.single { it.closes < edgePoint.station }
+        val start = plan.seams.single().from
+        val atPoint = requireNotNull(plan.segmentAt(edgePoint.station))
+        for (car in listOf(start + 10.0, gone.closes - LaneTopology.LEAVE_PAST_POINT_METERS - 1.0)) {
+            // The edge point's row lights the plan's lane, the rightmost but one there and the third from the right at the car.
+            val row = rowAt(route, plan, exit, car)
+            assertEquals("${edgePoint.node}", row.key)
+            assertEquals(listOf(edgePoint.lanes.indexOf(requireNotNull(atPoint.named))), row.lanes.lanes.indices.filter { row.lanes.lanes[it].isRecommended })
+            assertEquals(2, plan.segmentAt(car)?.namedFromEdge, "at ${GORE - car} m")
+            assertEquals(1, atPoint.namedFromEdge)
+            assertNull(row.target, "at ${GORE - car} m")
+            assertEquals(RunUpRule.ODD_OPENS_AHEAD, row.odd)
+        }
+        // From the lane's last metres, as for a lane that left at the point just passed: "2nd from right" to the point.
+        for (car in listOf(gone.closes - LaneTopology.LEAVE_PAST_POINT_METERS, edgePoint.station - 1.0)) {
+            val row = rowAt(route, plan, exit, car)
+            assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), row.target, "at ${GORE - car} m")
+            assertNull(row.odd)
+        }
+    }
+
+    @Test
+    fun `no words while a lane comes and goes on the exit's side between the car and the row's point`() {
+        val route = LaneScenes.shortLaneBeforeEdge()
+        val plan = plan(route)
+        val exit = exitOf(route)
+        val edgePoint = plan.topology.points.single { it.station == GORE - 1_000.0 }
+        val comes = plan.topology.lanes.single { it.possibleFrom != null }
+        val possibleFrom = requireNotNull(comes.possibleFrom)
+        assertTrue(comes.closes < edgePoint.station, "gone before the edge point")
+        val start = plan.seams.single().from
+        // Still to come: the plan counts the lit lane the same at the car as at the point, but the lane may begin on the way.
+        val before = rowAt(route, plan, exit, start + 10.0)
+        assertTrue(start + 10.0 < possibleFrom)
+        assertEquals(plan.segmentAt(edgePoint.station)?.namedFromEdge, plan.segmentAt(start + 10.0)?.namedFromEdge)
+        assertNull(before.target)
+        assertEquals(RunUpRule.ODD_OPENS_AHEAD, before.odd)
+        // Drawn at the car, as possible and then known, to its last metres: one lane more on the lit lane's right.
+        for (car in listOf(possibleFrom, comes.opens + 1.0, comes.closes - LaneTopology.LEAVE_PAST_POINT_METERS - 1.0)) {
+            val row = rowAt(route, plan, exit, car)
+            assertNull(row.target, "at ${GORE - car} m")
+            assertEquals(RunUpRule.ODD_OPENS_AHEAD, row.odd)
+        }
+        for (car in listOf(comes.closes - LaneTopology.LEAVE_PAST_POINT_METERS, edgePoint.station - 1.0)) {
+            val row = rowAt(route, plan, exit, car)
+            assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), row.target, "at ${GORE - car} m")
+            assertNull(row.odd)
+        }
+    }
+
+    @Test
+    fun `a lane that comes and goes right of the lane lit at the car holds the words, also where it lies left of the exit's lane`() {
+        val route = LaneScenes.shortLaneBeforeExitLane()
+        val plan = plan(route)
+        val exit = exitOf(route)
+        val gore = plan.topology.points.single { it.node == exit }
+        val exitLane = plan.topology.lanes.single { it.id == plan.segmentAt(gore.station)?.named }
+        val comes = plan.topology.lanes.single { it.possibleFrom != null && it.id != exitLane.id }
+        val possibleFrom = requireNotNull(comes.possibleFrom)
+        // Past the point where the right lane leaves, the plan lights the lane that feeds the exit's lane; the lane to come
+        // lies right of that one and left of the exit's lane, which opens only near the gore.
+        val car = GORE - 1_190.0
+        val lit = plan.topology.lanes.single { it.id == plan.segmentAt(car)?.named }
+        assertEquals(exitLane.fedBy, lit.id)
+        assertTrue(comes.slot > lit.slot && comes.slot < exitLane.slot)
+        assertTrue(car < possibleFrom)
+        // The plan counts the lit lane the same at the car as at the gore; only the lane still to come holds the words.
+        assertEquals(plan.segmentAt(gore.station)?.namedFromEdge, plan.segmentAt(car)?.namedFromEdge)
+        for (at in listOf(car, possibleFrom, comes.closes - LaneTopology.LEAVE_PAST_POINT_METERS - 1.0)) {
+            val row = rowAt(route, plan, exit, at)
+            assertEquals("$exit", row.key)
+            assertNull(row.target, "at ${GORE - at} m")
+            assertEquals(RunUpRule.ODD_OPENS_AHEAD, row.odd)
+        }
+        // Once it is gone, "Right lane": the exit's lane, entered along its taper from the lane lit at the car.
+        for (at in listOf(comes.closes - LaneTopology.LEAVE_PAST_POINT_METERS, GORE - 1.0)) {
+            val row = rowAt(route, plan, exit, at)
+            assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), row.target, "at ${GORE - at} m")
+            assertNull(row.odd)
+        }
+    }
+
     // ------------------------------------------------------------------ where the plan names no lane
 
     @Test
