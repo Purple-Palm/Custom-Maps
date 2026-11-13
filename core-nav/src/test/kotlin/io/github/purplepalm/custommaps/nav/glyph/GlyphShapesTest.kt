@@ -17,17 +17,83 @@ import org.junit.jupiter.api.Test
  * The arrows of the phone's card and the car's routing card, as data. The phone drew them straight
  * from code until they moved here; [Reference] is that code's geometry, point for point, in pixels,
  * so the shapes are shown to be the ones the phone drew, on a square glyph and on one that is not.
+ * The sharp turns are the exception, redrawn on purpose: [Reference.sharpTurn] is their new shape.
  */
 class GlyphShapesTest {
 
     @Test
     fun `a turn is the phone's arrow, with its shaft, pivot, arm and head`() {
-        for (turn in TurnModifier.entries - TurnModifier.U_TURN + listOf<TurnModifier?>(null)) {
+        for (turn in TurnModifier.entries - SHARP - TurnModifier.U_TURN + listOf<TurnModifier?>(null)) {
             for (canvas in CANVASES) {
                 val parts = GlyphShapes.maneuver(ManeuverType.TURN, turn, null)
                 assertSameDrawing(Reference.turn(canvas, Reference.angle(turn), GlyphShapes.MANEUVER_STROKE), parts, canvas, "$turn")
             }
         }
+    }
+
+    @Test
+    fun `a sharp turn goes up its stem past the other turns' bend and back down at its angle, for any kind but the arrival and roundabouts`() {
+        for (kind in listOf(ManeuverType.TURN, ManeuverType.END_OF_ROAD, ManeuverType.FORK, ManeuverType.UNKNOWN)) {
+            for (canvas in CANVASES) {
+                assertSameDrawing(Reference.sharpTurn(canvas, 135f, GlyphShapes.MANEUVER_STROKE), GlyphShapes.maneuver(kind, TurnModifier.SHARP_RIGHT), canvas, "$kind right")
+                assertSameDrawing(Reference.sharpTurn(canvas, -135f, GlyphShapes.MANEUVER_STROKE), GlyphShapes.maneuver(kind, TurnModifier.SHARP_LEFT), canvas, "$kind left")
+            }
+        }
+        assertEquals(0.28f, GlyphShapes.SHARP_PIVOT_Y)
+        assertEquals(0.52f, GlyphShapes.SHARP_LENGTH)
+        assertEquals(0.52f, GlyphShapes.PIVOT_Y)
+        assertEquals(0.34f, GlyphShapes.TURN_LENGTH)
+    }
+
+    @Test
+    fun `the two sharp glyphs differ from the slight and plain ones at a glance`() {
+        for ((sharp, others) in listOf(
+            TurnModifier.SHARP_RIGHT to listOf(TurnModifier.RIGHT, TurnModifier.SLIGHT_RIGHT),
+            TurnModifier.SHARP_LEFT to listOf(TurnModifier.LEFT, TurnModifier.SLIGHT_LEFT),
+        )) {
+            val (stem, arm) = bendOf(GlyphShapes.maneuver(ManeuverType.TURN, sharp))
+            // Bent higher up the stem than any other turn, and its arm comes back down: its tip lies below its bend.
+            assertTrue(stem.last().y < GlyphShapes.PIVOT_Y, "$sharp")
+            assertTrue(arm.y > stem.last().y + 0.3f, "$sharp: $arm")
+            for (other in others) {
+                val (otherStem, otherArm) = bendOf(GlyphShapes.maneuver(ManeuverType.TURN, other))
+                assertEquals(GlyphShapes.PIVOT_Y, otherStem.last().y, "$other")
+                // A plain turn's tip is level with its bend, a slight one's above it.
+                assertTrue(otherArm.y <= otherStem.last().y + 1e-6f, "$other: $otherArm")
+                assertFalse(GlyphShapes.maneuver(ManeuverType.TURN, sharp) == GlyphShapes.maneuver(ManeuverType.TURN, other), "$sharp $other")
+            }
+        }
+        // Left is right seen in a mirror, point for point (a mirrored head runs the other way round).
+        val right = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SHARP_RIGHT).flatMap(::pointsOf)
+        val left = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SHARP_LEFT).flatMap(::pointsOf)
+        assertEquals(right.size, left.size)
+        for (r in right) {
+            assertTrue(left.any { l -> abs(1f - r.x - l.x) < 1e-6f && abs(r.y - l.y) < 1e-6f }, "$r")
+        }
+    }
+
+    @Test
+    fun `a sharp turn's head stays clear of its stem at every width it is drawn, where the old shape's ran into it`() {
+        val widths = listOf(GlyphShapes.MANEUVER_STROKE, GlyphShapes.LANE_STROKE_ACTIVE, GlyphShapes.LANE_STROKE_OTHER, GlyphShapes.LANE_OUTLINE_STROKE)
+        for (sharp in SHARP) {
+            val parts = GlyphShapes.maneuver(ManeuverType.TURN, sharp)
+            for (width in widths) {
+                assertTrue(headClearance(parts) - width > 0.03f, "$sharp at $width: ${headClearance(parts)}")
+            }
+        }
+        // The shape before: its arm left the stem where the other turns' do, and its head reached back across the stem.
+        val old = Reference.turnShares(135f)
+        assertTrue(headClearance(old) - GlyphShapes.MANEUVER_STROKE < 0f, "${headClearance(old)}")
+    }
+
+    @Test
+    fun `a sharp lane arrow is the sharp turn at the lane's width, on the stem every arrow of the lane shares`() {
+        val lane = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SHARP_RIGHT), isRecommended = true, activeIndication = TurnModifier.SHARP_RIGHT)
+        val straight = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.STRAIGHT).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_OTHER), GlyphInk.DIM) }
+        val sharp = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SHARP_RIGHT).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_ACTIVE), GlyphInk.LIT) }
+        assertEquals(straight + sharp, GlyphShapes.lane(lane))
+        // Both stand at the same foot.
+        assertEquals((straight.first().part as GlyphPart.Line).start, (sharp.first().part as GlyphPart.Line).start)
     }
 
     @Test
@@ -142,6 +208,27 @@ class GlyphShapesTest {
         assertTrue(GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true)))
         assertTrue(!GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, designated = true)))
         assertTrue(!GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false)))
+    }
+
+    /** A turn's stem (its start and its bend) and its arm's tip, from its first part. */
+    private fun bendOf(parts: List<GlyphPart>): Pair<List<GlyphPoint>, GlyphPoint> {
+        val line = parts.first() as GlyphPart.Line
+        val points = listOf(line.start) + line.steps.map { (it as GlyphStep.LineTo).to }
+        return points.take(2) to points.last()
+    }
+
+    /** How far the ends of a turn's head ([parts]' second line) lie from its stem, the segment from its foot to its bend. */
+    private fun headClearance(parts: List<GlyphPart>): Float {
+        val (stem, _) = bendOf(parts)
+        val head = parts[1] as GlyphPart.Line
+        val ends = listOf(head.start, (head.steps.last() as GlyphStep.LineTo).to)
+        val (a, b) = stem
+        return ends.minOf { p ->
+            val t = (((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / ((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y))).coerceIn(0f, 1f)
+            val dx = p.x - (a.x + t * (b.x - a.x))
+            val dy = p.y - (a.y + t * (b.y - a.y))
+            kotlin.math.sqrt(dx * dx + dy * dy)
+        }
     }
 
     /** A canvas of [width] by [height] pixels. */
@@ -280,6 +367,31 @@ class GlyphShapesTest {
             return listOf(Drawn.Line(listOf(base, pivot, tip), c.side * share), head(c, tip, degrees, share))
         }
 
+        /** The sharp turns as redrawn: the same stem, bent at 0.28 from the top, the arm 0.52 long, the same head. */
+        fun sharpTurn(c: Canvas, degrees: Float, share: Float): List<Drawn> {
+            val base = point(c, 0.5f, 0.92f)
+            val pivot = point(c, 0.5f, 0.28f)
+            val tip = pointAlong(pivot, degrees, c.side * 0.52f)
+            return listOf(Drawn.Line(listOf(base, pivot, tip), c.side * share), head(c, tip, degrees, share))
+        }
+
+        /** [turn] in shares of the glyph, as parts: the phone's sharp turn before it was redrawn, rotated 135 degrees. */
+        fun turnShares(degrees: Float): List<GlyphPart> {
+            fun along(from: GlyphPoint, d: Float, length: Float): GlyphPoint {
+                val radians = d * PI / 180.0
+                return GlyphPoint(from.x + (length * sin(radians)).toFloat(), from.y - (length * cos(radians)).toFloat())
+            }
+            val base = GlyphPoint(0.5f, 0.92f)
+            val pivot = GlyphPoint(0.5f, 0.52f)
+            val tip = along(pivot, degrees, 0.34f)
+            val left = along(tip, degrees + 180f - 34f, 0.17f)
+            val right = along(tip, degrees + 180f + 34f, 0.17f)
+            return listOf(
+                GlyphPart.Line(base, listOf(GlyphStep.LineTo(pivot), GlyphStep.LineTo(tip)), 0.11f),
+                GlyphPart.Line(left, listOf(GlyphStep.LineTo(tip), GlyphStep.LineTo(right)), 0.11f),
+            )
+        }
+
         fun uTurn(c: Canvas, share: Float): List<Drawn> {
             val base = point(c, 0.64f, 0.92f)
             val up = point(c, 0.64f, 0.42f)
@@ -320,6 +432,9 @@ class GlyphShapesTest {
     }
 
     private companion object {
+        /** The two turns drawn with a higher bend. */
+        val SHARP = listOf(TurnModifier.SHARP_RIGHT, TurnModifier.SHARP_LEFT)
+
         /** The phone's card glyph (72 dp at 2.75x), the Then chip's, and one wider than high. */
         val CANVASES = listOf(Canvas(198f, 198f), Canvas(110f, 110f), Canvas(160f, 96f))
 

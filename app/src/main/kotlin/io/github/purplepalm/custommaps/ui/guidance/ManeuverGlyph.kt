@@ -1,6 +1,14 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -15,14 +23,22 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.nav.glyph.GlyphInk
 import io.github.purplepalm.custommaps.nav.glyph.GlyphPart
 import io.github.purplepalm.custommaps.nav.glyph.GlyphPoint
 import io.github.purplepalm.custommaps.nav.glyph.GlyphShapes
 import io.github.purplepalm.custommaps.nav.glyph.GlyphStep
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Lane
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import io.github.purplepalm.custommaps.ui.theme.LookParameter
+import io.github.purplepalm.custommaps.ui.theme.LookTheme
+import io.github.purplepalm.custommaps.ui.theme.PreviewOnMap
 
 /**
  * The maneuver drawn as a single bold arrow, in the app's own style. At a roundabout the exit is
@@ -143,3 +159,49 @@ private fun DrawScope.pathOf(line: GlyphPart.Line): Path = Path().apply {
 private fun DrawScope.stroke(share: Float) = Stroke(width = size.minDimension * share, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
 private fun DrawScope.point(at: GlyphPoint) = Offset(size.width / 2 + (at.x - 0.5f) * size.minDimension, size.height / 2 + (at.y - 0.5f) * size.minDimension)
+
+/**
+ * Every turn glyph on the card, from sharp left to the U-turn: at the card's size, then at the Then chip's, then lanes
+ * with sharp arrows, lit and dim. A sharp turn bends higher up its stem than the others and comes back down, its head
+ * pointing back at the angle, clear of the stem.
+ */
+@Preview(name = "turn glyphs", widthDp = 360)
+@Composable
+private fun TurnGlyphsPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    PreviewOnMap(look) {
+        val tokens = LookTheme.tokens
+        Surface(shape = RoundedCornerShape(CARD_CORNER), color = tokens.card) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (size in listOf(72.dp, 40.dp)) {
+                    PREVIEW_TURNS.chunked(4).forEach { turns ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            turns.forEach { ManeuverGlyph(ManeuverType.TURN, it, tokens.accentInk, Modifier.size(size)) }
+                        }
+                    }
+                }
+                LanesRow(
+                    LaneInfo(
+                        listOf(
+                            Lane(setOf(TurnModifier.SHARP_LEFT), isRecommended = false),
+                            Lane(setOf(TurnModifier.SHARP_LEFT, TurnModifier.STRAIGHT), isRecommended = false),
+                            Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SHARP_RIGHT), isRecommended = true, activeIndication = TurnModifier.SHARP_RIGHT),
+                            Lane(setOf(TurnModifier.SHARP_RIGHT), isRecommended = true, activeIndication = TurnModifier.SHARP_RIGHT),
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/** The turns as they lie from left to right, and the U-turn. */
+private val PREVIEW_TURNS = listOf(
+    TurnModifier.SHARP_LEFT,
+    TurnModifier.LEFT,
+    TurnModifier.SLIGHT_LEFT,
+    TurnModifier.STRAIGHT,
+    TurnModifier.SLIGHT_RIGHT,
+    TurnModifier.RIGHT,
+    TurnModifier.SHARP_RIGHT,
+    TurnModifier.U_TURN,
+)

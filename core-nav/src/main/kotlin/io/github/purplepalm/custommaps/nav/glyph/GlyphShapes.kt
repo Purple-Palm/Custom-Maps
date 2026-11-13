@@ -70,7 +70,9 @@ data class InkedPart(val part: GlyphPart, val ink: GlyphInk)
  * two screens always show the same arrows, and an arrow added here reaches both.
  *
  * A maneuver is a single bold arrow. At a roundabout the exit is drawn where its degrees put it,
- * falling back to the turn when they are unknown; the arrival is the destination's mark.
+ * falling back to the turn when they are unknown; the arrival is the destination's mark. A sharp turn
+ * goes up the stem past where the other turns bend and comes back down at its angle, its head clear
+ * of the stem, so it reads at a glance as a turn back, also at the card's smaller sizes.
  */
 object GlyphShapes {
 
@@ -102,8 +104,7 @@ object GlyphShapes {
     fun maneuver(type: ManeuverType, turn: TurnModifier?, roundaboutExitDegrees: Double? = null): List<GlyphPart> = when {
         type == ManeuverType.ARRIVE -> destination()
         type in ROUNDABOUTS -> roundabout(roundaboutArmAngle(roundaboutExitDegrees, turn))
-        turn == TurnModifier.U_TURN -> uTurn(MANEUVER_STROKE)
-        else -> turn(turn.angle(), MANEUVER_STROKE)
+        else -> arrow(turn, MANEUVER_STROKE)
     }
 
     /**
@@ -177,8 +178,14 @@ object GlyphShapes {
         TurnModifier.STRAIGHT, TurnModifier.U_TURN, null -> 0f
     }
 
-    private fun laneArrow(turn: TurnModifier, width: Float): List<GlyphPart> =
-        if (turn == TurnModifier.U_TURN) uTurn(width) else turn(turn.angle(), width)
+    private fun laneArrow(turn: TurnModifier, width: Float): List<GlyphPart> = arrow(turn, width)
+
+    /** The arrow of [turn] in lines [width] wide: the U-turn's own, a sharp turn's higher bend, or a plain bend. */
+    private fun arrow(turn: TurnModifier?, width: Float): List<GlyphPart> = when (turn) {
+        TurnModifier.U_TURN -> uTurn(width)
+        TurnModifier.SHARP_RIGHT, TurnModifier.SHARP_LEFT -> bend(turn.angle(), width, SHARP_PIVOT_Y, SHARP_LENGTH)
+        else -> bend(turn.angle(), width, PIVOT_Y, TURN_LENGTH)
+    }
 
     private fun pointAlong(from: GlyphPoint, degrees: Float, length: Float): GlyphPoint {
         val radians = degrees * PI / 180.0
@@ -191,10 +198,14 @@ object GlyphShapes {
         return GlyphPart.Line(left, listOf(GlyphStep.LineTo(tip), GlyphStep.LineTo(right)), width)
     }
 
-    private fun turn(degrees: Float, width: Float): List<GlyphPart> {
-        val base = GlyphPoint(0.5f, 0.92f)
-        val pivot = GlyphPoint(0.5f, 0.52f)
-        val tip = pointAlong(pivot, degrees, TURN_LENGTH)
+    /**
+     * A stem from the bottom up to [pivotY], an arm of [length] from there at [degrees], and the head at its tip. Every bend
+     * stands on the same stem, so a lane's arrows meet at its foot.
+     */
+    private fun bend(degrees: Float, width: Float, pivotY: Float, length: Float): List<GlyphPart> {
+        val base = GlyphPoint(0.5f, BASE_Y)
+        val pivot = GlyphPoint(0.5f, pivotY)
+        val tip = pointAlong(pivot, degrees, length)
         return listOf(GlyphPart.Line(base, listOf(GlyphStep.LineTo(pivot), GlyphStep.LineTo(tip)), width), head(tip, degrees, width))
     }
 
@@ -241,6 +252,21 @@ object GlyphShapes {
     private const val HEAD_LENGTH = 0.17f
     private const val HEAD_SPREAD = 34f
 
+    /** Where every turn's stem stands, from the top. */
+    private const val BASE_Y = 0.92f
+
+    /** Where a turn's arm leaves the stem, from the top. */
+    const val PIVOT_Y = 0.52f
+
     /** How long a turn's arm is past the pivot. */
-    private const val TURN_LENGTH = 0.34f
+    const val TURN_LENGTH = 0.34f
+
+    /**
+     * Where a sharp turn's arm leaves the stem: higher than the other turns' [PIVOT_Y], so the arm has room to come back
+     * down beside the stem with its head clear of it.
+     */
+    const val SHARP_PIVOT_Y = 0.28f
+
+    /** How long a sharp turn's arm is past its pivot: long enough to carry the head clear of the stem. */
+    const val SHARP_LENGTH = 0.52f
 }
