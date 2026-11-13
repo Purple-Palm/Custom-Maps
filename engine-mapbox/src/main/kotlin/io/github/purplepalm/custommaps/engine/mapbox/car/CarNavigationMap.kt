@@ -593,8 +593,17 @@ internal class CarNavigationMap(
         mapName = MAP_NAME,
     )
 
-    /** Whether the host asks for the dark map now. */
-    private fun hostIsDark(): Boolean = carContext.isDarkMode
+    /**
+     * Whether the host asks for the dark map now. A context that cannot say yet (it is asked as the
+     * car map is made) gives the day map, which the next look from the session or the next surface
+     * puts right, instead of an exception in the car's code.
+     */
+    private fun hostIsDark(): Boolean = try {
+        carContext.isDarkMode
+    } catch (e: RuntimeException) {
+        failed("isDarkMode", e)
+        false
+    }
 
     private fun now(): Long = SystemClock.elapsedRealtime()
 
