@@ -237,8 +237,9 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
   them to the location component with no duration, so nothing waits for an animator frame. The
   phone's camera and puck are as before.
 - **Still on Mapbox's animators on the car,** so still standing still while the main thread gets no
-  display frames: the two Mapbox camera styles and the double tap's zoom. Smooth follow, the
-  default, is the car's style.
+  display frames: the two Mapbox camera styles and the double tap's zoom. The camera style chosen in
+  Settings applies to the car too (DECISIONS 26); Smooth follow, the default, is the one that keeps
+  moving.
 - **Frame rates.** The car's surface draws a real 30 frames a second: its cap is `round(30 × 60 /
   rate)`, within 1 and 60, for the rate the display's frames come at (measured from display
   callbacks asked for one right after the other; 60 while the clock is on its timer), set again
