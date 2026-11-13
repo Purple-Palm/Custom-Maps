@@ -713,12 +713,23 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   rate of its own, which the app cannot read, so 60 drawn may look no smoother there than 30. The
   switch is there to compare the two on the car's screen; the car's camera line says what the map
   drew (`render.drawnFps`), and the `thermal` lines what it cost.
+- **The phone's map while the car shows one (step 1c).** During a drive while a car's surface shows
+  the map, the phone shows the list of the maneuvers ahead in place of its map, unless the driver
+  chose the map ([STAGE-2.md](STAGE-2.md), Step 1c). The phone's map is put away meanwhile: its view
+  is out of the window, which stops it, and its camera draws nothing (`MapScene.setAway`): Smooth
+  follow asks for no frames, and the two Mapbox styles start no animation, as their data source's
+  frames do not reach the navigation camera then. The data source goes on taking the positions and
+  the progress, so when the map comes back the camera follows the car from the frame of now: Smooth
+  follow snaps to it on its first frame, the Mapbox styles go to it at once; a camera that was in the
+  overview or left to the driver before follows the car again.
 
 ### Logging
 
 A **camera** line once a second during guidance. The map scene writes it, in every camera style, and
 on the phone only while its map view is shown; the `activity` and `screen` lines show when it was
-not. The car's map writes its own, with `screen` `car`.
+not. While the phone's map is put away for the list of the maneuvers ahead (stage 2's step 1c), the
+phone's line goes on while its screen is on, with `away`. The car's map writes its own, with
+`screen` `car`.
 
 | Field | Meaning | Expected |
 |---|---|---|
@@ -742,6 +753,7 @@ not. The car's map writes its own, with `screen` `car`.
 | `animatorsEnabled` | `ValueAnimator.areAnimatorsEnabled()` | false: the animator scale is 0 and the puck jumps |
 | `hz` | the display's refresh rate; left out on the car, whose host does not say it | |
 | `capped` | the phone's map only: true while it draws at most 60 frames a second because a car's surface shows the map too; left out otherwise | |
+| `away` | the phone's map only: true while it is put away, the phone showing the list of the maneuvers ahead in its place; its view is out of the window and stopped, so `render.frames` is 0, and the camera's and the puck's fields are those it was left with; left out otherwise | `render.frames` 0 |
 | `clock` | the car's map only: the ticks of its frame clock that second, `vsyncTicks` from the display's frames and `timerTicks` from the timer | about 60 together while moving; `timerTicks` 0 while the display sends frames |
 | `maxFps`, `targetFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; the frames a second it is worked out for, 30 or 60 (**Settings → Debug → Car map frames**); where the rate it was worked out for came from, `render` (the render thread's own ticks), `display` or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 to 20 at a target of 30 (30 to 40 at 60), `render` and about 120 on a phone at 120 Hz during a drive |
 | `laneDetails` | the switch for lane details on the map | |
@@ -797,6 +809,11 @@ Other lines:
   phone's own display, also while the car's screen shows the app: `state` (`ON`, `OFF`, `DOZE`,
   `DOZE_SUSPEND`, `VR`, `ON_SUSPEND` or `UNKNOWN`) and `hz`, its refresh rate to a tenth. No position
   and no time of day.
+- A **phone_screen** line at each change of what the phone shows during a drive while a car's screen
+  shows the map (stage 2's step 1c): `screen`, `list` or `map`, and `cause`: `drive` (a drive
+  started with a car showing the map), `car` (a car's surface came or went), `button` (**Map** or
+  **List**) or `end` (the drive ended). Nothing else: no position and no time of day. With no car it
+  is never written.
 - A **camera_state** line on every change of the camera's state, with `state`, `style` and, once a
   change has arrived, `ms`: how long it took. Besides the states above there is `IDLE_FOLLOW`, the
   camera on the car before guidance. For the Mapbox styles a transition that should take 673 ms or

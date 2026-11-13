@@ -10,14 +10,16 @@ Drive logs never go into this repository. These notes leave out addresses, stree
 coordinates and times of day. Places are described ("a big-box store"), positions are distances,
 and times are durations from Start or End.
 
-## Next: the car screen after step 1b (stage 2)
+## Next: the car screen after step 1c (stage 2)
 
 What the next drives with the car screen check, on the Desktop Head Unit with the debug APK or in
 the car with the build from Google Play's internal testing ([README](../README.md), On the car
 screen). Screenshots in the car come from a passenger or a parked car, never from the driver. The
 lines named are in the debug log; every car line has `screen` `car`. Checks 1 to 6 are step 1's,
 with day and night now following the phone; 7 to 13 are step 1b's
-([STAGE-2.md](STAGE-2.md), Step 1b).
+([STAGE-2.md](STAGE-2.md), Step 1b); 14 to 18 are step 1c's ([STAGE-2.md](STAGE-2.md), Step 1c).
+Since step 1c the phone shows the list in place of its map during a drive with the car: for checks
+7 to 13, which look at the phone's map too, press **Map** on the list first.
 
 1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
    the map, or first with a message while the phone has no token or no precise location (the setup
@@ -70,6 +72,34 @@ with day and night now following the phone; 7 to 13 are step 1b's
 13. **Before a drive, with the phone locked:** note whether the car's map shows the position
     (`car_location` says whether positions arrive). With location while in use it may not, until
     "Allow all the time" comes in a later step.
+
+14. **The list during a drive with the car.** A simulated drive started on the phone with the car
+    connected and the phone app in front: the phone shows the list at once, a black page by day too,
+    with light icons in the bars: the card at the top, the turns that follow with their distances
+    from the car going down each second, as many as fit, the replay slider, the guidance bar with
+    **Map** and **End**, and "© Mapbox © OpenStreetMap" at the bottom. Nothing on it moves between
+    updates. Lines: `phone_screen` with `screen` `list` and `cause` `drive`; the phone's camera lines
+    go on with `away` true and `render.frames` 0. **End** on the list ends the drive as End always
+    has: `ui_end`, one trip, and `phone_screen` `map`, `end`.
+15. **Map and List.** **Map** on the list: the phone's map is back within a second, in the app's
+    look of the moment, with the car where it is, the route as driven and the camera following the
+    car; `phone_screen` `map`, `button`, and the camera lines without `away` and with frames again.
+    The guidance bar has **List** then: it goes back to the list, `phone_screen` `list`, `button`.
+    Note how long the map takes to show the car and whether a frame of the old place shows first.
+16. **The car unplugged and plugged in on the list.** Pull the cable during a drive on the list: the
+    phone's map comes back as of that moment (`phone_screen` `map`, `car`); plug it in and open
+    Custom Maps in the car: the list again (`list`, `car`). Then **Map**, and pull and plug the cable
+    again: the map stays, with no `phone_screen` line, and **List** shows only while the car shows
+    the map. A new drive starts with the list again.
+17. **Heat on the list.** Ten minutes of a drive with the car and the phone app in front, on the list:
+    the `thermal` lines and the `device` lines' `thermal`, against check 11's ten minutes with both
+    maps on step 1b's build.
+18. **30 against 60 on the car.** **Settings → Debug → Car map frames** before the drive (Settings
+    opens before Start and after the arrival): a few minutes of a simulated drive at 60, then the
+    same at 30. The car's camera lines: `targetFps`, `maxFps` and `render.drawnFps`, about 30 at 30
+    and about 60, or as many as the phone draws, at 60; a `car_surface` line with `targetFps` at the
+    surface's attach. Say whether 60 looks smoother on the car's screen than 30 (the car may show
+    fewer frames than the map draws), and share the `thermal` lines of both.
 
 Anything wrong on the car screen writes `car_error` or `car_template` with the call and the class of
 what failed; the phone's guidance must go on through all of it. Share the debug log after the drive.

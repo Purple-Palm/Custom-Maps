@@ -9,8 +9,10 @@ The stage is built in steps (DECISIONS 49). Step 1, the car screen, is built: th
 running drive in the car, with Start on the phone; [Step 1 (built)](#step-1-built) says what it has
 and where it settled or changed what follows. Step 1b, the fixes after the owner's first test with
 the car screen, is built too: the car map's own frame clock, its puck on that clock, real frame
-rates, and the phone's look on the car ([Step 1b (built)](#step-1b-built)). The rest is the design
-as decided so far.
+rates, and the phone's look on the car ([Step 1b (built)](#step-1b-built)). Step 1c is built as well:
+during a drive while the car shows the map, the phone shows the turns ahead as a list in place of its
+own map, with the map one tap away ([Step 1c (built)](#step-1c-built)). The rest is the design as
+decided so far.
 **Unverified** marks behaviour that no document or library source settles; it is checked on the
 Desktop Head Unit (DHU) or on the phone before code depends on it.
 
@@ -55,6 +57,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | The real car runs the build from Google Play's internal testing, which came forward from stage 3 on 2026-11-11, instead of Internal App Sharing | [The real car](#the-real-car) | 42 |
 | Trip logs go to a private GitHub repository: a fine-grained token for that repository only, 366 days, a reminder two weeks before it expires, an upload after every trip and Upload now | [GitHub log upload](#github-log-upload) | 35 |
 | A bright, colourful day map in the car, the existing dark map at night; since step 1b the car's map shows the phone's look, Auto by the sun or the driver's choice | [Day and night](#day-and-night) | 36, 48, 50 |
+| No map on the phone while the car shows one during a drive: the list of the maneuvers ahead instead, the map one tap away | [Step 1c (built)](#step-1c-built) | 51 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -294,7 +297,100 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
   animation list until the next display frame, since an animator of no duration still registers
   there. After an hour without display frames that is a few MB and a few percent of a core, gone
   at the first frame. The app's own puck layer of a later step ends it.
-- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1b.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1c.
+
+## Step 1c (built)
+
+The owner asked for no phone map while the car shows one during a drive: the phone shows the turns
+ahead as a list in its place, and the map comes back with one tap (DECISIONS 51). Step 1c also lets
+the owner compare 30 and 60 frames a second on the car's screen.
+
+### What the phone shows while the car shows the map
+
+- **The rule** (`PhoneScreenRule`, `:core-nav` `nav/car`; one for the process in `PhoneScreens`,
+  `:app`): the phone shows the **list** in place of its map while guidance is active and a car's
+  surface shows the map (the engine's `carMapShown`), unless the driver chose the map in this drive.
+  **Map** on the list chooses the map; **List** on the map's guidance bar takes the choice back. A
+  new drive starts with no choice. A car that goes mid-drive brings the map back; a car that comes
+  mid-drive brings the list, unless the map was chosen. The route preview, the arrival and the time
+  before Start always show the map, with a car or without. With no car nothing of the phone changes.
+- **The list** (`ListScreen`, `:app` `ui/map`): a black page in the night look's colours whatever the
+  look, the least power on the phone's own screen; the system bars' icons are light over it. At the
+  top the maneuver card as during guidance, without its Then chip, since the list's first row is
+  that maneuver, and with the offline tab under it when the app is offline. Then the maneuvers ahead
+  in this leg, as many as fit: the app's own arrow, the distance from the car (the distance to the
+  next maneuver plus the maneuver's own after it, rounded as the card rounds its own) and the
+  maneuver's words; all dimmed while the card waits for a new route and while the car is off the
+  route. Then the replay slider during a simulated drive, and the guidance bar with the arrival, the
+  time and distance left, **Map** in place of Overview and **End**, which ends the drive as the
+  guidance bar's End always has. Under it a small static line, "© Mapbox © OpenStreetMap", as the
+  list shows Mapbox's route data with no map and so no logo.
+- **The maneuvers ahead** come with the progress (`RouteProgressSnapshot.upcoming`): every maneuver
+  of the current leg after the next one, through the leg's arrival, each with its distance and time
+  from the next maneuver, read from the route's steps as the Then chip's maneuver is (the first of
+  them is it), a roundabout's way out being no maneuver of its own. A step without a banner or with a
+  length that is not a number ends the list there. The engine builds the list once a step and hands
+  out the same list for every update of that step (`UpcomingManeuvers`); the list's rows are made
+  once a step too, and only their distances change with each update.
+- **Nothing on the list moves by itself:** no animation and no spinner. It is drawn again when the
+  progress changes, about once a second, and the replay slider's dot goes to each position at once
+  instead of gliding.
+- **The car's own screen** is as in step 1: its routing card shows the next maneuver and, when the
+  phone would show Then, the one after it.
+
+### The phone's map put away and brought back
+
+- **Kept, out of the window.** While the list shows, the phone's map is not made again and its style
+  does not load again: its view leaves the window. Mapbox's own lifecycle then takes the view to
+  created, as for a stopped activity (`ViewLifecycleOwner`, Maps 11.34.1: the view's lifecycle drops
+  to created when it is detached, and goes back to the activity's state when it is attached again):
+  the render thread is paused and draws nothing, and the location component stops, cancels its
+  animators and lets go of the puck's positions. Nothing in the app calls the view's lifecycle. Its
+  scene is invisible meanwhile (`MapScene.setAway`): the Smooth follow camera asks for no frames,
+  the two Mapbox camera styles start no animation, and the routes, the progress and the camera's data
+  go on as before, once a second.
+- **No part in the look.** No look is shown on the map while it is away; its close view holds
+  nothing, and the car map's close view holds a switch, as while the phone's activity is stopped
+  (`LookController.onPhoneMapAway`). A theme never waits on the stopped map.
+- **Back as of now.** The same map comes back into the window within a second: the app's current
+  look (the first look shown on it is the one decided meanwhile), the puck where the car is now (the
+  guidance puck gives a returning map its newest position at once), the route line as driven, and the
+  camera following the car, whatever it did before the map went away.
+- **The camera line** goes on once a second while the phone's screen is on, with `away` true and
+  `render.frames` 0, which shows that the map drew nothing.
+
+### The frame target
+
+- **Settings → Debug → Car map frames**, 30 a second, the default, or 60, sets what the car's map
+  aims at, at once, also during a drive ([CAMERA.md](CAMERA.md), Frame target). The car's host may
+  show fewer frames than the map draws, at a rate of its own that the app cannot read: the switch is
+  there to compare the two on the car's screen, with the car's camera line's `render.drawnFps` and
+  the `thermal` lines.
+
+### Lines
+
+- `phone_screen` at each change of what the phone shows during a drive: `screen` (`list` or `map`)
+  and `cause` (`drive`, `car`, `button` or `end`), and nothing else: no position, no time of day.
+- The phone's camera line has `away` true while its map is put away; the car's camera line and
+  every `car_surface` line have `targetFps`, 30 or 60; the `settings` line has the key
+  `car_map_fps`.
+
+### Not in this step
+
+- Search or Start in the car; a list on the car's own screen; the list before Start or after the
+  drive, where search and the route choice need the map.
+- Keeping the phone's screen on: as before it may lock during a drive, which since step 1b is the
+  best case for the car.
+
+### Unverified
+
+- How soon the map is drawn again when it comes back: the surface is made anew, and the first frame
+  may show the camera as it was left until Smooth follow's next frame takes it to the car.
+- The heat with the list in place of the phone's map, against step 1b's two maps (the `thermal`
+  lines over ten minutes).
+- Whether 60 frames a second look smoother than 30 on the car's screen, and what they cost.
+- How the list reads from a phone mount by day and at night.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1c.
 
 ## Modules and dependencies
 
@@ -671,6 +767,9 @@ Other notes:
   colours at once and the basemap's theme after 60 s of the same mode (`CarLookTuning`).
 - Plates, signs and stop pictures drawn on the car's surface follow the map's look, the app's; the
   images on the host's card follow the host.
+- While the phone shows the list in place of its map (step 1c), the phone's map takes no part in the
+  look and the car map's close view holds a switch; the list itself is in the night look's colours
+  on black whatever the look, and the phone's map comes back in the look decided meanwhile.
 - The switch needs no style reload:
   - every basemap key is set on its own with `setStyleImportConfigProperty`, as `MapLook.write`
     does today with the columns of `MapPalette.keys`. The day and the night columns name the same
@@ -711,6 +810,9 @@ Other notes:
   phone's rate; and while a car surface shows the map, the phone's map draws at most 60 frames a
   second (`capped` in its camera line), a cap its own pacing knows the phone's real rate for. The
   DHU streams 30 fps.
+- Built in step 1c ([Step 1c](#step-1c-built)): during a drive while a car's surface shows the map,
+  the phone shows the list of the maneuvers ahead and its map is put away and draws nothing, unless
+  the driver chose the map. The car's frame target can be set to 60 under Debug, to compare.
 - With the phone locked or the app in the background the main thread may get no display frames. The
   car's camera, its zoom buttons' ease and its puck take their frames from the car's frame clock,
   which falls back to a main-thread timer then. Mapbox's background animation thread

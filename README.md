@@ -137,6 +137,14 @@ car's quality guidelines.
    arrival time, the time and the distance left. **End** in the car ends the drive on both screens,
    as the phone's End does. At the destination the car says so until **Done** on the phone.
 4. The map's buttons in the car: pan, zoom in and out, and **Recenter** or the overview.
+5. During a drive while the car shows the map, the phone shows the turns ahead as a list in place of
+   its own map, so that the phone does not draw a second map: the maneuver card at the top, then the
+   turns that follow with their distances from the car, and the guidance bar with **Map** and **End**,
+   on a black page whatever the look. **Map** brings the phone's map back for the rest of the drive, and
+   **List** in the map's guidance bar goes back to the list. Each drive with the car starts with the
+   list. With the car unplugged the phone shows its map again, as of that moment; plugged in again,
+   the list, unless the map was chosen in this drive. Before Start and at the destination the phone
+   shows its map as always.
 
 Day and night on the car's map follow the phone: the same look as on the phone, Auto by the sun or
 Day or Night from **Settings → Day and night**, changing at the same moment on both screens. The
@@ -150,6 +158,10 @@ The drive belongs to the phone: when the car disconnects, guidance goes on there
 navigation app starts in the car, Custom Maps keeps guiding on the phone; opening Custom Maps in the
 car again shows the drive there again. Whether Android Auto reopens Custom Maps by itself when the
 car connects again during a drive is not known yet; open it from the launcher if it does not.
+
+**Settings → Debug → Car map frames** chooses how many frames a second the car's map draws: 30, the
+default, or 60, to compare the two on the car's screen. The car may show fewer frames than the map
+draws, as it shows the app's screen at a rate of its own, and 60 costs the phone more power and heat.
 
 ### Simulated drive
 
@@ -540,4 +552,5 @@ allows moving the logo but not resizing, recolouring or fading it. On the phone 
 button keep a fixed strip at the bottom left, above the navigation bar or the keyboard, and the
 panels stay above it. On the car screen the Mapbox logo and the text attribution sit in the bottom
 left corner of the area Android Auto never covers, so its buttons and cards never cover them or
-move them.
+move them. The phone's list of the turns, which shows Mapbox's route data in place of the map
+during a drive with the car, has the © Mapbox © OpenStreetMap line at its bottom.

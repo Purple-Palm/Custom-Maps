@@ -88,7 +88,7 @@ zoom setting and the trip history with prediction.
   No End or Cancel within the first minute counts as a successful prediction. Each automatic start
   is a billed trip, so daily limits apply.
 
-## Stage 2: Android Auto (steps 1 and 1b built)
+## Stage 2: Android Auto (steps 1, 1b and 1c built)
 
 The full design is in [STAGE-2.md](STAGE-2.md). It is built in steps ([DECISIONS.md](DECISIONS.md),
 49). **Step 1 is built**: Android Auto lists the app; the car shows the app's map, the same scene as
@@ -99,10 +99,13 @@ opening the app in the car again takes the car back. Start stays on the phone. W
 is in STAGE-2's [Step 1 (built)](STAGE-2.md#step-1-built). **Step 1b**, after the owner's first car
 test: the car's map keeps moving with the phone locked or the app in the background (a frame clock
 of its own, with its puck on it), draws a real 30 frames a second while the phone's map draws at
-most 60, and shows the phone's look ([Step 1b (built)](STAGE-2.md#step-1b-built)).
+most 60, and shows the phone's look ([Step 1b (built)](STAGE-2.md#step-1b-built)). **Step 1c**, the
+owner's request: during a drive while the car shows the map, the phone shows the turns ahead as a
+list in place of its own map, which is put away and one tap away; and a Debug switch for 30 or 60
+frames a second on the car ([Step 1c (built)](STAGE-2.md#step-1c-built)).
 
-Owner checks for steps 1 and 1b, on the DHU or in the car with the internal testing build:
-[DRIVES.md](DRIVES.md), The car screen after step 1b.
+Owner checks for steps 1, 1b and 1c, on the DHU or in the car with the internal testing build:
+[DRIVES.md](DRIVES.md), The car screen after step 1c.
 
 The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
 
@@ -115,6 +118,8 @@ The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
   step 1, the phone's look since step 1b (DECISIONS 50).
 - [ ] Turn-by-turn notifications on the car screen while another app is in front.
 - [x] Mapbox logo and © attribution visible on the car map.
+- [x] During a drive while the car shows the map, the phone shows the turns ahead as a list in place
+  of its own map, which is one tap away (step 1c, DECISIONS 51).
 - [x] Start a route on the phone and continue in the car: with the car connected, the phone is the
   search input and the route appears in the car. Search, the route preview and Start in the car
   itself come later.
