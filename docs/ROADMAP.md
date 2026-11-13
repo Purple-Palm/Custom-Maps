@@ -67,8 +67,8 @@ zoom setting and the trip history with prediction.
   Off is what a phone starts with until the owner has checked the app's drawing on a drive. The car
   shows where it is along the road, never in a lane: the phone cannot tell which lane it is in. Built;
   not yet on a drive ([CAMERA.md](CAMERA.md), Lane zoom and The app's own lanes).
-- **The lane the car is in, as research only.** The owner would like to see the lane he is in and
-  his lane changes. The phone's positions alone cannot tell lanes, so on freeways the debug log has
+- **The lane the car is in, as research only.** The owner would like to see the lane the car is in and
+  the car's lane changes. The phone's positions alone cannot tell lanes, so on freeways the debug log has
   kept the phone's own motion beside its position against the matched one since the lane data was
   first logged ([DRIVES.md](DRIVES.md), checks 44 and 45); nothing on the screen shows or claims a
   lane until those logs show that lane changes can be told reliably ([DECISIONS.md](DECISIONS.md), 39).

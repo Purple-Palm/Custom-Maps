@@ -1748,7 +1748,7 @@ its next start. The Debug switch **Draw the app's lanes** of the test builds bef
 the app replaces, is never carried over: its stored value goes with the carry-over's second write or
 with the next choice. With nothing stored nothing is written, and a phone that never chose starts
 with Off. The owner answered yes on 2026-11-11 to Drawn by the app as what a phone starts with,
-after his own checks: the previews, a simulated drive at home and a real drive with the measuring
+after the owner's own checks: the previews, a simulated drive and a real drive with the measuring
 switch on; a later step makes it the default, for phones that never chose too.
 
 With Drawn by the app, Settings says under the camera style that the close view shows the lit lane

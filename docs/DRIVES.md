@@ -749,7 +749,7 @@ Answered on 2026-11-11, after the drive with the missed freeway exit:
 
 Asked on 2026-11-11, with the answers about the app's own lanes:
 
-- **The lane the car is in:** the owner would like to see which lane he is in and when he changes
+- **The lane the car is in:** the owner would like to see which lane the car is in and when it changes
   lanes. The phone's positions alone cannot tell lanes, so for now this is research and logging
   only: on freeways the log has the phone's own motion next to `match.raw` (checks 44 and 45). The
   question is whether lane changes can be counted from a lane the car is known to be in, such as the
@@ -765,8 +765,8 @@ Asked on 2026-11-11, with the answers about the app's own lanes:
   leaves: a lane that becomes the edge lane only on the way, because the lane beyond it leaves at an
   earlier exit, is not lit before the road either. The card's run-up row and the app's own lanes
   read it ([DECISIONS.md](DECISIONS.md), 53; checks 47 and 63).
-- **The app's drawing as the lanes a phone starts with:** yes, after he has looked at the previews,
-  at a simulated drive at home and at a real drive with the measuring switch on (checks 67 to 69),
+- **The app's drawing as the lanes a phone starts with:** yes, once the owner has looked at the previews,
+  at a simulated drive and at a real drive with the measuring switch on (checks 67 to 69),
   with Mapbox's lane details one tap away. Until then Lanes on the map starts at Off and Drawn by the
   app is a choice.
 - **The car over drawn lanes in a close view:** yes to a blue bar across the road at its place along
