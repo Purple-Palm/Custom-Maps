@@ -13,10 +13,13 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.option
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sl
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
+import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.lanes.RouteNode
+import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.RouteLane
 import kotlin.random.Random
 
-/** Made-up approaches to an exit drawn from a seeded random source, for the path's and the drawing's property tests. No place. */
+/** Made-up routes drawn from a seeded random source, for the path's and the drawing's property tests. No place. */
 internal object RandomRoutes {
 
     /** A made-up approach to an exit: random lane points, counts, unusable edge lanes, roads, an exit to either side, a split. */
@@ -123,5 +126,102 @@ internal object RandomRoutes {
             emptyList()
         }
         return LaneScenes.approach(points, exit, maneuver, planMps = rng.nextDouble(22.0, 34.0), rampPoints = rampPoints, rampMeters = 600.0, id = id)
+    }
+
+    /**
+     * A made-up route through two maneuvers: two to four lanes at one or two lane points, a fork to one side about 3 km on that
+     * takes some of them, then up to three more lane points with a lane kept for car pools or buses from a random point on and
+     * edge lanes leaving by roads, and an exit on either side whose lanes may keep that lane, onto a ramp that ends at a street.
+     */
+    fun twoManeuvers(rng: Random, id: String): LaneRoute {
+        val v = rng.nextDouble(22.0, 34.0)
+        val nodes = ArrayList<RouteNode>()
+        nodes.add(LaneScenes.node(0.0, maneuver = LaneScenes.DEPART, planMps = v))
+        val forkLeft = rng.nextBoolean()
+        val n0 = rng.nextInt(4, 7)
+        val goOn = rng.nextInt(2, n0 - 1)
+        val m1 = rng.nextDouble(2_600.0, 3_600.0)
+        var at = m1 - rng.nextDouble(1_200.0, 2_000.0)
+        repeat(rng.nextInt(1, 3)) {
+            nodes.add(LaneScenes.node(at, *Array(n0) { s() }, planMps = v))
+            at += rng.nextDouble(300.0, 700.0)
+            if (at > m1 - 200.0) return@repeat
+        }
+        val forkLanes = Array(n0) { i ->
+            val onSide = if (forkLeft) i < goOn else i >= n0 - goOn
+            if (onSide) (if (forkLeft) sl() else sr()) else (if (forkLeft) sr(false) else sl(false))
+        }
+        nodes.add(
+            LaneScenes.node(
+                m1, *forkLanes, roads = if (forkLeft) EXIT_RIGHT else EXIT_LEFT,
+                maneuver = if (forkLeft) LaneScenes.FORK_LEFT else LaneScenes.FORK_RIGHT, planMps = v,
+            ),
+        )
+        val right = rng.nextBoolean()
+        val bus = rng.nextBoolean()
+        val m2 = m1 + rng.nextDouble(2_000.0, 3_400.0)
+        var count = goOn
+        var lane = -1
+        val keptFrom = rng.nextInt(0, 3)
+        var before = m2 - m1 - rng.nextDouble(250.0, 500.0)
+        var k = 0
+        while (true) {
+            before -= rng.nextDouble(300.0, 1_100.0)
+            if (before < 250.0 || k >= 3) break
+            count = (count + rng.nextInt(-1, 2)).coerceIn(2, 6)
+            if (lane < 0 && k >= keptFrom) lane = rng.nextInt(count)
+            if (lane >= count) lane = count - 1
+            val lanesHere = ArrayList<RouteLane>()
+            repeat(count) { i -> lanesHere.add(if (i == lane) (if (bus) LaneScenes.bus() else hov()) else s()) }
+            val roads = when (rng.nextInt(5)) {
+                0 -> {
+                    if (lane != 0) lanesHere[0] = s(false)
+                    EXIT_LEFT
+                }
+                1 -> {
+                    if (lane != lanesHere.size - 1) lanesHere[lanesHere.size - 1] = s(false)
+                    EXIT_RIGHT
+                }
+                2 -> JOIN_RIGHT
+                else -> THROUGH
+            }
+            nodes.add(LaneScenes.node(m2 - before, *lanesHere.toTypedArray(), roads = roads, planMps = v))
+            k++
+        }
+        nodes.sortBy { it.station }
+        val exit = ArrayList<RouteLane>()
+        val keep = rng.nextBoolean()
+        repeat(count) { i -> exit.add(if (i == lane && keep) (if (bus) LaneScenes.bus() else hov()) else s(false)) }
+        val edge = if (right) exit.size - 1 else 0
+        exit[edge] = if (right) sr() else sl()
+        if (rng.nextBoolean()) {
+            val inner = if (right) edge - 1 else edge + 1
+            if (inner in exit.indices && !exit[inner].designated) exit[inner] = option()
+        }
+        if (rng.nextBoolean()) exit.add(if (right) exit.size else 0, if (right) sr() else sl())
+        nodes.add(LaneScenes.node(m2, *exit.toTypedArray(), road = RoadKind.RAMP, maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT, planMps = 20.0))
+        nodes.add(LaneScenes.node(m2 + 500.0, road = RoadKind.STREET, maneuver = LaneScenes.TURN_LEFT, planMps = 15.0))
+        nodes.add(LaneScenes.node(m2 + 600.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0))
+        return LaneScenes.route(*nodes.toTypedArray(), id = id)
+    }
+
+    /**
+     * Route [k] of a seeded family as the sweeps drew them from [rng]: each route from [route], named [name] and its number,
+     * then eight random bends of its line up to [until] of it, drawn with the same source; that route and its line.
+     */
+    fun nth(
+        rng: Random,
+        k: Int,
+        name: String,
+        route: (Random, String) -> LaneRoute,
+        until: (LaneRoute) -> Double = { LaneScenes.GORE - 400.0 },
+    ): Pair<LaneRoute, List<GeoPoint>> {
+        var out: Pair<LaneRoute, List<GeoPoint>>? = null
+        for (i in 0..k) {
+            val r = route(rng, "$name-$i")
+            val bends = (1..8).map { rng.nextDouble(200.0, until(r)) to rng.nextDouble(-4.0, 4.0) }
+            if (i == k) out = r to SceneLines.line(r.lengthMeters, (bends + SceneLines.bendsOf(r)).sortedBy { it.first })
+        }
+        return requireNotNull(out)
     }
 }

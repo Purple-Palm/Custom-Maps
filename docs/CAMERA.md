@@ -1770,7 +1770,13 @@ drawn yet. Before Start, in the preview, nothing changes.
   where the drawn lanes end, as when the plan names the exit's lane only shortly before the gore,
   ends with them: at the gore the line goes on straight from where it is onto the ramp's line, and
   where the lane data stops it goes back to the road's line from where it is. The lanes' places are
-  rules (3.66 m lanes, laid out around the road's line), not the paint on the road. Away from lanes
+  rules (3.66 m lanes, laid out around the road's line), not the paint on the road. Those rules can
+  lay the drawn carriageway off the road's line, as where lanes leave on one side and join on the
+  other; where no lane can be named before an exit, and over the stretch before it where the line
+  heads for the road's line, the drawn carriageway moves sideways, by the least that puts the
+  road's line at least half a lane inside its edge lines, no faster than the line moves across a
+  lane and smoothed over 40 m, and holds there to the gore, so the line runs on the drawn asphalt
+  and never along or beside an edge line. Away from lanes
   the line lies exactly on the SDK's. The car is where it always is: nothing moves its icon sideways
   ([DECISIONS.md](DECISIONS.md), 39).
 - **How it looks.** Today's line and casing: the SDK's widths up to zoom 16.5 and from there on in

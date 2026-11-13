@@ -500,6 +500,65 @@ class CrossSectionTest {
     }
 
     @Test
+    fun `where no lane is named the carriageway moves onto the road's line, by the least, no faster than a move across a lane`() {
+        assertEquals(RoutePath.ASPHALT_TAPER_METERS, CrossSection.SHIFT_SMOOTH_METERS)
+        // A made-up approach of the drawing's sweeps: lanes leave on one side and join on the other in a careful zone, so the rules
+        // lay every lane metres off the road's line, and no lane can be named before the exit (the lanes to use lie beyond a lane
+        // kept for buses).
+        val (route, _) = RandomRoutes.nth(Random(3_007), 0, "s3", RandomRoutes::keptLane)
+        val plan = SceneLines.planOf(route)
+        val section = CrossSection.of(plan)
+        val approach = plan.noLane.single()
+        // On the approach the road's line lies at least half a lane inside the edge lines, and somewhere just half a lane: the
+        // least move that does.
+        var least = Double.POSITIVE_INFINITY
+        var x = approach.from
+        while (x < approach.to) {
+            val places = section.lanes(x).filter { it.width > 0.0 }
+            val inside = minOf(places.first().left, -places.last().right)
+            assertTrue(inside >= w / 2.0 - 1e-6, "at $x the road's line lies $inside m inside")
+            least = minOf(least, inside)
+            x += 1.0
+        }
+        assertEquals(w / 2.0, least, 0.05)
+        // No faster than the path moves across a lane at the route's planning speed, and with no corner: its slope turns over the
+        // smoothing's length.
+        val slope = w / RoutePath.moveMeters(PlanningSpeed.of(route.nodes.first()), RoadKind.FREEWAY)
+        val step = CrossSection.SHIFT_STEP_METERS
+        var steepest = 0.0
+        var sharpest = 0.0
+        var moved = 0.0
+        var s = 0.0
+        while (s + 2.0 * step < approach.to) {
+            val a = (section.shiftAt(s + step) - section.shiftAt(s)) / step
+            val b = (section.shiftAt(s + 2.0 * step) - section.shiftAt(s + step)) / step
+            steepest = maxOf(steepest, abs(a))
+            sharpest = maxOf(sharpest, abs(b - a))
+            moved = maxOf(moved, abs(section.shiftAt(s)))
+            s += step
+        }
+        assertTrue(moved > w, "it moves: $moved m")
+        assertTrue(steepest <= slope + 1e-9, "slope $steepest against $slope")
+        assertTrue(sharpest <= 2.0 * slope * step / CrossSection.SHIFT_SMOOTH_METERS, "slope turning by $sharpest a step")
+        // Where it need not, it does not: at the route's start, and on the ramp past the gore, laid on its own road's line.
+        assertEquals(0.0, section.shiftAt(1_000.0))
+        assertEquals(0.0, section.shiftAt(approach.to + 90.0))
+    }
+
+    @Test
+    fun `where the road's line lies half a lane inside already, or a lane is named, the carriageway stays where the rules lay it`() {
+        for ((name, route) in LaneScenes.all()) {
+            val plan = SceneLines.planOf(route)
+            val section = CrossSection.of(plan)
+            var x = 0.0
+            while (x < route.lengthMeters) {
+                assertEquals(0.0, section.shiftAt(x), "$name at $x")
+                x += 9.0
+            }
+        }
+    }
+
+    @Test
     fun `lanes lie side by side in order, never over each other, on every scene`() {
         for ((name, route) in LaneScenes.all()) {
             val section = section(route)

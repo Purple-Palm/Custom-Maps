@@ -40,9 +40,10 @@ import kotlin.math.min
  * - **No lane named (C1).** Ahead of an approach where no lane can be named (only a lane kept for car pools or buses
  *   can be used, or the lanes to use lie beyond one), the plan heads for the road's line, where the path runs on that
  *   approach: the band's middle before it leads the path toward the road's line and never past it, so the path reaches
- *   the approach on the line with no move back to it. Where such an approach ends at a turn onto a road with lanes, the
- *   path keeps to the road's line until those lanes lie on the new road ([CrossSection.RampStart]) and moves into its
- *   lane from there.
+ *   the approach on the line with no move back to it. Where the drawn carriageway lies off that line there, the
+ *   cross-section moves it so the line lies at least half a lane inside its edge lines ([CrossSection]). Where such an
+ *   approach ends at a turn onto a road with lanes, the path keeps to the road's line until those lanes lie on the new road
+ *   ([CrossSection.RampStart]) and moves into its lane from there.
  * - **Turns.** Where the route turns onto another road with lanes, the path goes on with its lane straight along the
  *   old road and settles with the lanes onto the new road ([CrossSection.RampStart]), as it settles where the drawing
  *   ends at a turn: the route geometry's diagonal at a gore is never drawn. Only the lanes that go on are drawn past the turn, so a move toward a

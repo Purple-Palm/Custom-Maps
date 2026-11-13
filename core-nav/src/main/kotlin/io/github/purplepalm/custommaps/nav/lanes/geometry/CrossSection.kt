@@ -36,6 +36,11 @@ import kotlin.math.sign
  *   and back would move the route's path back with it. On a two-way street the route's lanes lie from the road's
  *   line to the right and the oncoming half, as wide as those lanes, has no lines ([Carriageway.TWO_WAY]; first
  *   drawn with the streets).
+ * - **Where no lane is named** (C1): the route's path runs on the road's line over such an approach and heads for it
+ *   over the band before it, so there the carriageway that these rules laid off the road's line moves sideways, by the
+ *   least that puts the road's line at least half a lane inside its edge lines, and holds that to the gore. It moves no
+ *   faster than the path moves across a lane ([RoutePath.moveMeters]), anticipating each change of its edges, and
+ *   smoothly over [SHIFT_SMOOTH_METERS]; elsewhere it moves back onto its place the same way ([Shift]).
  * - **Tapers** (4.3), each a half-cosine from the lane's inner edge: a lane that is added opens along the
  *   topology's own taper (a named deceleration lane over [LaneTopology.DECEL_TAPER_METERS], at full width
  *   [LaneTopology.DECEL_LATE_FULL_METERS] before the gore) or [LaneTopology.addedTaperMeters] (8:1 up to 45 mph,
@@ -157,6 +162,9 @@ class CrossSection private constructor(
         /** From, to and how far the left edge moves over each zone. */
         val zones: List<Triple<Double, Double, Double>>,
     ) {
+        /** How far the whole carriageway moves to the left where no lane is named ([Shift]); null where it stays. */
+        var shift: Shift? = null
+
         /** The lanes there at [station], from the left, on this road. */
         fun placesAt(station: Double): List<Place> {
             var edge = leftAt(station)
@@ -176,7 +184,23 @@ class CrossSection private constructor(
             for (d in leftOpening) edge += d.width * d.opened(station)
             for (d in leftClosing) edge -= d.width * d.closed(station)
             for ((from, to, by) in zones) edge += by * ramp(station, from, to)
+            shift?.let { edge += it.at(station) }
             return edge
+        }
+    }
+
+    /**
+     * How far a road's carriageway moves to the left (right where negative) so the road's line lies inside it where no lane
+     * is named: its value every [step] metres from [from], straight between them; the first value before them and the last
+     * after them.
+     */
+    internal class Shift(val from: Double, val step: Double, val values: DoubleArray) {
+        fun at(station: Double): Double {
+            val f = (station - from) / step
+            if (f <= 0.0) return values.first()
+            if (f >= values.size - 1) return values.last()
+            val i = f.toInt()
+            return values[i] + (values[i + 1] - values[i]) * (f - i)
         }
     }
 
@@ -275,6 +299,9 @@ class CrossSection private constructor(
     /** The kind of road at [station] on a run; null off every run. */
     fun roadAt(station: Double): RoadKind? = layoutAt(station)?.road
 
+    /** How far the carriageway at [station] lies moved to the left of where the rules lay it, where no lane is named ([Shift]). */
+    internal fun shiftAt(station: Double): Double = layoutAt(station)?.shift?.at(station) ?: 0.0
+
     /** How the carriageway at [station] sits on its road's line: one-way, or the route's half of a two-way street; null off every run. */
     fun carriagewayAt(station: Double): Carriageway? = layoutAt(station)?.carriageway
 
@@ -319,6 +346,21 @@ class CrossSection private constructor(
 
         /** A ramp's start reaches back to where the arc at its turn begins, at most this far. */
         private const val RAMP_LOOK_BACK_METERS = 50.0
+
+        /**
+         * Where no lane is named, the carriageway's move onto the road's line ([Shift]) is smoothed over this distance: as long
+         * as the asphalt's taper where a drawing begins.
+         */
+        const val SHIFT_SMOOTH_METERS = RoutePath.ASPHALT_TAPER_METERS
+
+        /** That move is worked out every this many metres. */
+        internal const val SHIFT_STEP_METERS = 2.0
+
+        /** Stations closer than this are one. */
+        private const val SAME_STATION = 1e-6
+
+        /** A move smaller than this is none. */
+        private const val SAME_OFFSET = 1e-9
 
         /** The road's line turned this far from the old road's way (the cosine), the straight-on line is no longer read across it. */
         private const val CROSS_LIMIT = 0.1
@@ -455,7 +497,8 @@ class CrossSection private constructor(
 
         fun build(): CrossSection {
             val layouts = ArrayList<Layout>()
-            val starts = ArrayList<RampStart>()
+            // Each turn onto another road whose lanes go on, with the road before it and the road after it.
+            val ramps = ArrayList<Triple<LaneTopology.Point, Layout, Layout>>()
             val drawn = topology.lanes.map { drawnLane(it) }
             for (run in topology.runs) {
                 val kind = carriageway(run.index)
@@ -480,23 +523,210 @@ class CrossSection private constructor(
                     val closing = lanes.filter { it.closeFrom >= from && it.closeFrom < to && leftSide(it, lanes, it.closeFrom, opens = false) }
                     val zones = if (kind == Carriageway.TWO_WAY) emptyList() else zonesOf(run.index, from, to, road)
                     val layout = Layout(run.index, from, to, road, kind, lanes, left, opening, closing, zones)
-                    if (turn != null && previous != null) {
-                        // The lanes that go on, where they lay on the old road and where they lie on the new one.
-                        val old = previous.placesAt(from - 1e-6).filter { p -> lanes.any { it.lane.id == p.lane } }
-                        val new = layout.placesAt(from).filter { p -> old.any { it.lane == p.lane } }
-                        if (old.isNotEmpty() && new.isNotEmpty()) {
-                            val oldMiddle = (old.first().left + old.last().right) / 2.0
-                            val newMiddle = (new.first().left + new.last().right) / 2.0
-                            starts.add(RampStart(turn.node, turn.station, oldMiddle - newMiddle))
-                        }
-                    }
+                    if (turn != null && previous != null) ramps.add(Triple(turn, previous, layout))
                     layouts.add(layout)
                     previous = layout
                     from = to
                 }
             }
             layouts.sortBy { it.from }
+            // Where no lane is named the carriageway moves onto the road's line first: the ramps' starts are read on the roads
+            // as they are drawn.
+            val spans = noLaneSpans()
+            for (layout in layouts) {
+                if (layout.carriageway != Carriageway.ONE_WAY || layout.road == RoadKind.STREET) continue
+                val mine = spans.filter { it.first == layout.run && it.second.endInclusive > layout.from && it.second.start < layout.to }.map { it.second }
+                if (mine.isNotEmpty()) layout.shift = shiftFor(layout, mine)
+            }
+            val starts = ArrayList<RampStart>()
+            for ((turn, previous, layout) in ramps) {
+                // The lanes that go on, where they lay on the old road and where they lie on the new one.
+                val old = previous.placesAt(layout.from - 1e-6).filter { p -> layout.lanes.any { it.lane.id == p.lane } }
+                val new = layout.placesAt(layout.from).filter { p -> old.any { it.lane == p.lane } }
+                if (old.isNotEmpty() && new.isNotEmpty()) {
+                    val oldMiddle = (old.first().left + old.last().right) / 2.0
+                    val newMiddle = (new.first().left + new.last().right) / 2.0
+                    starts.add(RampStart(turn.node, turn.station, oldMiddle - newMiddle))
+                }
+            }
             return CrossSection(topology, layouts, starts)
+        }
+
+        /**
+         * Where the route's path runs on the road's line or heads for it, by run: each approach where no lane is named that is
+         * drawn as a zone (C1) as far as it is drawn, and the band before it, which heads for it, back over its run's stretches
+         * where the plan names no lane in a card window and no other such approach lies, within the drawn stretch that holds
+         * the approach's start.
+         */
+        private fun noLaneSpans(): List<Pair<Int, ClosedFloatingPointRange<Double>>> {
+            if (plan.noLane.none { it.zone }) return emptyList()
+            val drawn = drawnStretches()
+            val segments = plan.segments
+            val out = ArrayList<Pair<Int, ClosedFloatingPointRange<Double>>>()
+            for (n in plan.noLane) {
+                if (!n.zone) continue
+                val k = segments.indexOfFirst { it.to > n.from + SAME_STATION }
+                if (k < 0) continue
+                val run = segments[k].run
+                for (stretch in drawn) {
+                    if (stretch.third != run || stretch.second <= n.from || stretch.first >= n.to) continue
+                    val to = min(n.to, stretch.second)
+                    var from = max(n.from, stretch.first)
+                    if (n.from >= stretch.first - SAME_STATION) {
+                        // The approach begins on this drawn stretch: the band before it heads for it.
+                        for (i in k downTo 0) {
+                            val seg = segments[i]
+                            if (seg.run != run || seg.to <= stretch.first) break
+                            if (seg.from >= n.from - SAME_STATION) continue
+                            // Another approach where no lane is named, or a card window's named lane: the path heads for that.
+                            if (seg.noLane != null && seg.to < n.from - SAME_STATION || seg.noLane == null && seg.inWindow && seg.named != null) {
+                                from = min(from, seg.to)
+                                break
+                            }
+                            if (seg.noLane == null) from = seg.from
+                        }
+                        from = max(from, stretch.first)
+                    }
+                    if (to > from) out.add(run to from..to)
+                }
+            }
+            return out
+        }
+
+        /** The stretches the app draws lanes on ([RoutePath]), by run, merged where they touch: from, to and the run. */
+        private fun drawnStretches(): List<Triple<Double, Double, Int>> {
+            val drawn = ArrayList<Triple<Double, Double, Int>>()
+            for (stretch in evidence.stretches) {
+                if (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED && stretch.kind != LaneEvidence.Kind.ZONE) continue
+                if (stretch.road == RoadKind.STREET || stretch.lanes <= 0) continue
+                for (run in topology.runs) {
+                    val from = max(stretch.from, run.from)
+                    val to = min(stretch.to, run.to)
+                    if (to <= from) continue
+                    val k = drawn.indexOfLast { it.third == run.index }
+                    val last = if (k >= 0) drawn[k] else null
+                    if (last != null && from <= last.second + 1e-6) drawn[k] = Triple(last.first, max(last.second, to), run.index) else drawn.add(Triple(from, to, run.index))
+                }
+            }
+            return drawn
+        }
+
+        /**
+         * How far the carriageway of [layout] moves so the road's line lies at least half a lane inside its edge lines over
+         * [spans] ([Shift]); null where it lies so already. At each sample of the spans the move must lie between the least
+         * that brings the road's line half a lane inside the left edge line and the most that keeps it half a lane inside the
+         * right one (the middle where the carriageway is narrower than a lane), and it is smoothed over [SHIFT_SMOOTH_METERS]:
+         * so it meets the tightest of those bounds within that distance of each sample, and the smoothing keeps it within them.
+         * The move is the one nearest no move within those bounds as they reach along the road at the slope of a move across a
+         * lane, so it begins before each change it needs, as where a lane leaving at the edge narrows the carriageway at once,
+         * and ends after each it no longer does.
+         */
+        private fun shiftFor(layout: Layout, spans: List<ClosedFloatingPointRange<Double>>): Shift? {
+            val n = ((layout.to - layout.from) / SHIFT_STEP_METERS).toInt() + 1
+            if (n < 2) return null
+            val half = laneMeters(layout.road) / 2.0
+            val lo = DoubleArray(n) { Double.NEGATIVE_INFINITY }
+            val hi = DoubleArray(n) { Double.POSITIVE_INFINITY }
+            val inside = { x: Double -> spans.any { x >= it.start && x < it.endInclusive } }
+            // The bounds at [x], into the samples [into]: the least and the most move there.
+            fun bound(x: Double, vararg into: Int) {
+                val places = layout.placesAt(x).filter { it.width > 0.0 }
+                if (places.isEmpty()) return
+                var low = half - places.first().left
+                var high = -half - places.last().right
+                if (low > high) {
+                    // Narrower than a lane: its middle on the line.
+                    low = (low + high) / 2.0
+                    high = low
+                }
+                for (i in into) {
+                    if (i < 0 || i >= n) continue
+                    lo[i] = max(lo[i], low)
+                    hi[i] = min(hi[i], high)
+                }
+            }
+            for (i in 0 until n) {
+                val x = layout.from + i * SHIFT_STEP_METERS
+                if (inside(x)) bound(x, i)
+            }
+            // Where an edge steps or a taper begins between two samples, its bounds hold at both: the move is straight between
+            // them.
+            for (d in layout.lanes) {
+                for (e in doubleArrayOf(d.from, d.openTo, d.possibleTo, d.closeFrom, d.to)) {
+                    if (e <= layout.from || e >= layout.to) continue
+                    val k = ((e - layout.from) / SHIFT_STEP_METERS).toInt()
+                    for (x in doubleArrayOf(e - SAME_STATION, e + SAME_STATION)) if (inside(x)) bound(x, k, k + 1)
+                }
+            }
+            var needed = false
+            var speedFrom = Double.NaN
+            for (i in 0 until n) {
+                if (lo[i] > hi[i]) {
+                    val mid = (lo[i] + hi[i]) / 2.0
+                    lo[i] = mid
+                    hi[i] = mid
+                }
+                if (lo[i] > 0.0 || hi[i] < 0.0) needed = true
+                if (speedFrom.isNaN() && lo[i].isFinite()) speedFrom = layout.from + i * SHIFT_STEP_METERS
+            }
+            if (!needed) return null
+            // The smoothing averages twice over [width] samples on each side: within the tightest bounds of twice that, its
+            // average lies within each sample's own.
+            val width = max(1, (SHIFT_SMOOTH_METERS / SHIFT_STEP_METERS / 2.0).toInt())
+            val low = DoubleArray(n)
+            val high = DoubleArray(n)
+            for (i in 0 until n) {
+                var l = Double.NEGATIVE_INFINITY
+                var h = Double.POSITIVE_INFINITY
+                for (j in max(0, i - 2 * width)..min(n - 1, i + 2 * width)) {
+                    l = max(l, lo[j])
+                    h = min(h, hi[j])
+                }
+                if (l > h) {
+                    l = (l + h) / 2.0
+                    h = l
+                }
+                low[i] = l
+                high[i] = h
+            }
+            // A move across a lane's width takes as long as the path's own move across a lane; where a bound must be met
+            // farther on, it is met from here at that slope.
+            val slope = laneMeters(layout.road) / RoutePath.moveMeters(speedAt(speedFrom), layout.road)
+            val reach = slope * SHIFT_STEP_METERS
+            for (i in 1 until n) {
+                low[i] = max(low[i], low[i - 1] - reach)
+                high[i] = min(high[i], high[i - 1] + reach)
+            }
+            for (i in n - 2 downTo 0) {
+                low[i] = max(low[i], low[i + 1] - reach)
+                high[i] = min(high[i], high[i + 1] + reach)
+            }
+            var values = DoubleArray(n) { i -> if (low[i] <= high[i]) min(max(0.0, low[i]), high[i]) else (low[i] + high[i]) / 2.0 }
+            repeat(2) { values = averaged(values, width) }
+            // Within each sample's own bounds whatever the smoothing did where none could be met; a move too small to be one is none.
+            for (i in 0 until n) {
+                values[i] = min(max(values[i], lo[i]), hi[i])
+                if (abs(values[i]) <= SAME_OFFSET) values[i] = 0.0
+            }
+            val first = values.indexOfFirst { abs(it) > SAME_OFFSET }
+            if (first < 0) return null
+            val last = values.indexOfLast { abs(it) > SAME_OFFSET }
+            val start = max(0, first - 1)
+            val end = min(n - 1, last + 1)
+            return Shift(layout.from + start * SHIFT_STEP_METERS, SHIFT_STEP_METERS, values.copyOfRange(start, end + 1))
+        }
+
+        /** [values] averaged over [width] samples on each side, the first and the last taken again beyond the ends: held there. */
+        private fun averaged(values: DoubleArray, width: Int): DoubleArray {
+            val n = values.size
+            val sums = DoubleArray(n + 1)
+            for (i in 0 until n) sums[i + 1] = sums[i] + values[i]
+            return DoubleArray(n) { i ->
+                val before = max(0, width - i)
+                val after = max(0, i + width - (n - 1))
+                val inside = sums[min(n - 1, i + width) + 1] - sums[max(0, i - width)]
+                (inside + before * values.first() + after * values.last()) / (2 * width + 1)
+            }
         }
 
         /**

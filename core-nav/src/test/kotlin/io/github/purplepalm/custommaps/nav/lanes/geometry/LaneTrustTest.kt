@@ -119,6 +119,32 @@ class LaneTrustTest {
         assertSeen("line", "paint", "named", "toward", "opens", "lit", "tint", "litOnLanes", "litInLane", "simpleLine", "simpleRing", "litOverFold")
     }
 
+    @Test
+    fun `the road's line lies half a lane inside our carriageway where no lane is named, also where the rules laid it off`() {
+        // Routes of the drawing's sweeps where the cross-section's rules laid our carriageway off the road's line before an approach
+        // where no lane is named: lanes that leave on one side and join on the other in a careful zone, a lane leaving at the edge.
+        val routes = listOf(
+            RandomRoutes.nth(Random(3_007), 0, "s3", RandomRoutes::keptLane),
+            RandomRoutes.nth(Random(1_011), 144, "k1", RandomRoutes::keptLane),
+            RandomRoutes.nth(Random(2_011), 2, "k2", RandomRoutes::keptLane),
+            RandomRoutes.nth(Random(6_011), 128, "k6", RandomRoutes::keptLane),
+            RandomRoutes.nth(Random(KEPT_SEED), 120, "kept", RandomRoutes::keptLane),
+        )
+        for ((route, line) in routes) {
+            val built = build(route.routeId, route, line)
+            assertTrue(built.plan.noLane.isNotEmpty(), "${route.routeId}: an approach where no lane is named")
+            check(built)
+        }
+        // Through a fork into a stretch where no lane can be named, a drawing beginning just past the fork's gore: this property
+        // alone, as the asphalt's taper where that drawing begins lies inside the fork's turn, which tapersAtEveryEnd does not
+        // read.
+        val (route, line) = RandomRoutes.nth(Random(4_013), 110, "t4", RandomRoutes::twoManeuvers) { it.nodes.last().station - 800.0 }
+        val built = build(route.routeId, route, line)
+        assertEquals(2, built.plan.noLane.size)
+        roadLineInsideWhereNoLaneIsNamed(built)
+        assertSeen("roadLineInside")
+    }
+
     /**
      * Whether [b] names a lane in a card window, the path neither moving nor in the lane, and lights it only farther on: the
      * path on the road's line beside a lane still opening, or reaching the drawing so, as the plan's lane begins.
@@ -179,6 +205,70 @@ class LaneTrustTest {
         noLoops(b)
         litGoesOn(b)
         lanesSettleAtRampStarts(b)
+        roadLineInsideWhereNoLaneIsNamed(b)
+    }
+
+    // ------------------------------------------------------------------ C1: the road's line inside our carriageway
+
+    /**
+     * Where no lane is named (C1) the path runs on the road's line, and over the band before such an approach it heads for it
+     * (design 3.3: "the line on the road's middle, over no lines of ours"): there the path lies at least half a lane inside
+     * our edge lines, which move sideways where the cross-section's rules laid them off the road's line. Not where the path
+     * turns onto another road and settles there, nor across a gore it reaches on the road's line, nor around a corner where it
+     * keeps to that line.
+     */
+    private fun roadLineInsideWhereNoLaneIsNamed(b: Built) {
+        val path = b.path
+        val skip = path.folds.filter { it.toLine }.map { it.from - RoutePath.RETURN_METERS to it.to + RoutePath.RETURN_METERS } +
+            b.section.rampStarts.mapNotNull { rs ->
+                path.axisAt(rs.station)?.let { axis -> rs.begin(axis) to maxOf(rs.station + CrossSection.RAMP_BLEND_METERS, rs.settled(axis)) }
+            } +
+            path.moves.filter { it.kind == RoutePath.Move.Kind.TURN }.map { it.from to it.to } +
+            path.diagonals.map { it.from to it.to }
+        for (n in b.plan.noLane) {
+            if (!n.zone) continue
+            // The band heads for the approach within the drawing that holds the approach's start.
+            val home = path.drawings.firstOrNull { n.from >= it.from - 1e-6 && n.from < it.to }
+            val from = if (home == null) n.from else maxOf(bandFrom(b.plan, n), home.from)
+            val to = path.axisAt(n.to)?.let { CrossSection.beginOf(it, n.to) } ?: n.to
+            var x = from
+            while (x < to) {
+                if (path.drawings.any { x >= it.from && x < it.to } && skip.none { x >= it.first - 1.0 && x <= it.second + 1.0 }) {
+                    val lanes = b.drawing.lanesAt(x).filter { it.width > 1e-6 }
+                    if (lanes.isNotEmpty()) {
+                        val half = LaneTopology.laneMeters(b.section.roadAt(x) ?: RoadKind.FREEWAY) / 2.0
+                        val t = path.offsetAt(x)
+                        val inside = minOf(lanes.maxOf { it.left } - t, t - lanes.minOf { it.right })
+                        assertTrue(
+                            inside >= half - ROAD_LINE_SLACK_METERS,
+                            "${b.name}: no lane named before ${n.to}; at $x the path lies $inside m inside our edge lines",
+                        )
+                        saw("roadLineInside")
+                    }
+                }
+                x += 2.0
+            }
+        }
+    }
+
+    /**
+     * Where the band that heads for the approach [n] begins: back over the plan's stretches of its run, to where the plan names
+     * a lane in a card window or another such approach ends.
+     */
+    private fun bandFrom(plan: LanePlan, n: LanePlan.NoLane): Double {
+        val segments = plan.segments
+        val k = segments.indexOfFirst { it.to > n.from + 1e-6 }
+        if (k < 0) return n.from
+        val run = segments[k].run
+        var from = n.from
+        for (i in k downTo 0) {
+            val seg = segments[i]
+            if (seg.run != run) break
+            if (seg.from >= n.from - 1e-6) continue
+            if (seg.noLane != null && seg.to < n.from - 1e-6 || seg.noLane == null && seg.inWindow && seg.named != null) return minOf(from, seg.to)
+            if (seg.noLane == null) from = seg.from
+        }
+        return from
     }
 
     // ------------------------------------------------------------------ 1, 2: no line and no ring of ours crosses itself
@@ -1142,5 +1232,11 @@ class LaneTrustTest {
 
         /** The path meets the road's line at a drawing's ends within this. */
         const val END_METERS = 0.01
+
+        /**
+         * Where no lane is named the path lies half a lane inside our edge lines to within this: the move that puts it there is
+         * worked out every [CrossSection.SHIFT_STEP_METERS] and straight between, as the edges curve along their tapers.
+         */
+        const val ROAD_LINE_SLACK_METERS = 0.05
     }
 }
