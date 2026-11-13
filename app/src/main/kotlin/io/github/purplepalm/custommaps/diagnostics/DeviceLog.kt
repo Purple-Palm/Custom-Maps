@@ -10,17 +10,22 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.hardware.display.DisplayManager
 import android.net.ConnectivityManager
 import android.net.TrafficStats
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Debug
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
+import android.view.Display
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
+import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
@@ -32,8 +37,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * The phone's side of a drive, for the debug log: whether the app is on screen, the screen itself,
- * charging, battery saver and Doze, heat, memory pressure, and whether Android's animations run.
+ * The phone's side of a drive, for the debug log: whether the app is on screen, the screen itself
+ * and its display's power state and refresh rate, charging, battery saver and Doze, heat, memory
+ * pressure, and whether Android's animations run.
  * Only changes are logged, plus one [logSample] a minute while guidance runs. The network is logged
  * by its own monitor.
  *
@@ -51,6 +57,27 @@ internal class DeviceLog(
     private val powerManager: PowerManager? = application.getSystemService(PowerManager::class.java)
     private val activityManager: ActivityManager? = application.getSystemService(ActivityManager::class.java)
     private val connectivity: ConnectivityManager? = application.getSystemService(ConnectivityManager::class.java)
+    private val displays: DisplayManager? = application.getSystemService(DisplayManager::class.java)
+
+    /** The default display's power state and refresh rate, read on [reads]. */
+    private val displayState = DisplayStateLog(debugLog) {
+        displays?.getDisplay(Display.DEFAULT_DISPLAY)?.let { DisplayStateLog.Reading(it.state, it.refreshRate) }
+    }
+
+    /** Every display of the phone reports its changes here, the virtual ones of car apps too; only the phone's own screen counts. */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+
+        override fun onDisplayRemoved(displayId: Int) = Unit
+
+        override fun onDisplayChanged(displayId: Int) {
+            try {
+                if (displayId == Display.DEFAULT_DISPLAY) checkDisplay()
+            } catch (e: RuntimeException) {
+                debugLog.log(ERROR_LINE, CarFailure.fields("displayChanged", e))
+            }
+        }
+    }
 
     /** One reading at a time, so the lines keep the order of the events. */
     private val reads = io.limitedParallelism(1)
@@ -89,6 +116,40 @@ internal class DeviceLog(
         ContextCompat.registerReceiver(application, system, systemEvents, ContextCompat.RECEIVER_EXPORTED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) listenToHeat()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) listenToAnimationScale()
+        listenToDisplay()
+    }
+
+    /**
+     * The phone's own screen now, and at every change of its state or its refresh rate
+     * ([DisplayStateLog]). From Android 16 a display's state and refresh rate change as events of
+     * their own, which a listener names when it registers.
+     */
+    private fun listenToDisplay() {
+        checkDisplay()
+        val manager = displays ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                val events = DisplayManager.EVENT_TYPE_DISPLAY_CHANGED or
+                    DisplayManager.EVENT_TYPE_DISPLAY_STATE or
+                    DisplayManager.EVENT_TYPE_DISPLAY_REFRESH_RATE
+                manager.registerDisplayListener(ContextCompat.getMainExecutor(application), events, displayListener)
+            } else {
+                manager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+            }
+        } catch (e: RuntimeException) {
+            debugLog.log(ERROR_LINE, CarFailure.fields("displayListener", e))
+        }
+    }
+
+    /** Reads the default display on [reads], and writes its line if it changed; an exception is written, never thrown. */
+    private fun checkDisplay() {
+        scope.launch(reads) {
+            try {
+                displayState.check()
+            } catch (e: RuntimeException) {
+                debugLog.log(ERROR_LINE, CarFailure.fields("displayState", e))
+            }
+        }
     }
 
     /**
@@ -254,6 +315,9 @@ internal class DeviceLog(
     private companion object {
         const val BYTES_PER_MB = 1024L * 1024L
         const val HEADROOM_FORECAST_SECONDS = 10
+
+        /** The line of an exception caught where the system calls in, as the car's code writes it ([CarFailure]). */
+        const val ERROR_LINE = "car_error"
 
         fun thermalName(status: Int?): String? = when (status) {
             null -> null

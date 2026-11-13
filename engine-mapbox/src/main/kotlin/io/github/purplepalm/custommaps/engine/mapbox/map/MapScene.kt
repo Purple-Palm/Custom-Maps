@@ -74,6 +74,7 @@ import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
+import io.github.purplepalm.custommaps.nav.debug.RenderStats
 import io.github.purplepalm.custommaps.nav.debug.RepeatFolder
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.geo.Geo
@@ -1342,8 +1343,11 @@ internal class MapScene(
      * meters, gaps in milliseconds. A smooth camera moves on every frame ("camUpdates" close to
      * "render.frames", "camGapMs" near one frame); a stepping one shows long gaps and large "steps".
      * "to" is the frame the viewport data source asks for. "laneDp" is how wide a lane of 3.7 m is
-     * on the screen at the camera's center. "renderFps" is the map's own frame rate against the
-     * screen's refresh; "animatorsEnabled" is false when Android's animations are switched off.
+     * on the screen at the camera's center. "render" counts the render thread's calls ("frames",
+     * "fps") and, of those, the frames it drew ("drawn", "drawnFps"): under a frame rate cap some
+     * calls draw nothing. "renderFps" is the map library's own estimate of its rate, worked out
+     * against the display rate it believes, which on the car's surface is not the phone's.
+     * "animatorsEnabled" is false when Android's animations are switched off.
      * "style" is the camera style in use, so drives in different styles can be compared.
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
@@ -1460,8 +1464,10 @@ internal class MapScene(
     }
 
     /**
-     * The frames of the last second: how many the map drew, how long the render thread took for them,
-     * and how many screen refreshes it missed. Mapbox advises sessions of one to two seconds.
+     * The frames of the last second: how often the render thread was called and how many of those
+     * calls drew, the others being skipped on purpose under a frame rate cap ([RenderStats]), how long
+     * the render thread took for them, and how many screen refreshes it missed. Mapbox advises
+     * sessions of one to two seconds.
      */
     @OptIn(MapboxExperimental::class)
     private fun takeFrameStats(): Map<String, Any?>? {
@@ -1470,13 +1476,14 @@ internal class MapScene(
         val stats = recorder.stop()
         recorder.start()
         val frames = stats.frameTimeList
-        return mapOf(
-            "frames" to frames.size,
-            "fps" to Motion.round(frames.size * 1_000.0 / stats.totalTime.coerceAtLeast(1L), 1),
-            "missedVsync" to stats.totalSkippedVsync,
-            "p50Ms" to stats.percentile50?.let { Motion.round(it, 1) },
-            "p95Ms" to stats.percentile95?.let { Motion.round(it, 1) },
-            "maxMs" to frames.maxOrNull()?.let { Motion.round(it, 1) },
+        return RenderStats.fields(
+            callbacks = frames.size,
+            pacedSkips = stats.pacedSkippedVsync,
+            missedVsync = stats.totalSkippedVsync,
+            windowMillis = stats.totalTime,
+            p50Ms = stats.percentile50,
+            p95Ms = stats.percentile95,
+            maxMs = frames.maxOrNull(),
         )
     }
 

@@ -5,6 +5,7 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
+import android.view.Display
 import androidx.annotation.RequiresApi
 
 /** Names for the system settings that both the device and the network lines report. */
@@ -24,6 +25,23 @@ internal object SystemNames {
         UsageStatsManager.STANDBY_BUCKET_RARE -> "RARE"
         UsageStatsManager.STANDBY_BUCKET_RESTRICTED -> "RESTRICTED"
         else -> "BUCKET_$bucket"
+    }
+
+    /**
+     * A display's power state ([Display.getState]): ON, OFF, the always-on DOZE and DOZE_SUSPEND,
+     * VR, ON_SUSPEND, or UNKNOWN.
+     */
+    // The constants are compiled in; phones that predate a state never report it.
+    @SuppressLint("InlinedApi")
+    fun displayStateName(state: Int): String = when (state) {
+        Display.STATE_ON -> "ON"
+        Display.STATE_OFF -> "OFF"
+        Display.STATE_DOZE -> "DOZE"
+        Display.STATE_DOZE_SUSPEND -> "DOZE_SUSPEND"
+        Display.STATE_VR -> "VR"
+        Display.STATE_ON_SUSPEND -> "ON_SUSPEND"
+        Display.STATE_UNKNOWN -> "UNKNOWN"
+        else -> "STATE_$state"
     }
 
     /**
