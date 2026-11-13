@@ -41,6 +41,7 @@ import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarLook
 import io.github.purplepalm.custommaps.nav.car.CarLookStep
 import io.github.purplepalm.custommaps.nav.car.CarLookTuning
+import io.github.purplepalm.custommaps.nav.car.CarOverview
 import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.withFields
@@ -76,8 +77,9 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   phone and the drive share one process, and car-app rethrows an exception of a surface callback on
  *   the main thread. Each surface the host sends ([MapboxCarMapObserver.onAttached]) is a new map:
  *   the car map keeps what it was asked for (the look, the camera style, the lane zoom and details,
- *   the Debug switches, the place, the overview) and gives it to the new scene, with the camera where
- *   the driver left the old one.
+ *   the Debug switches, the place, and an overview the driver asked for during the drive under way
+ *   and has not left, [CarOverview]) and gives it to the new scene, with the camera where the driver
+ *   left the old one.
  * - **The host's areas.** The padding comes from the stable and the visible area and the surface's
  *   size, worked out on every surface ([CarAreas]): following frames the stable area, the overview
  *   the visible one. [setViewportPadding] does nothing here.
@@ -88,7 +90,8 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  * - **Camera and gestures.** The camera of the style chosen in Settings with [CameraTuning.CAR].
  *   The car's scroll, fling and pinch move the map without an animation of their own, so the gesture
  *   handler lets the camera go first ([MapScene.onDriverMoved]); a pinch past the zoom limits is
- *   dropped ([CarZoom]). The zoom buttons come through [zoomBy].
+ *   dropped ([CarZoom]). The zoom buttons come through [zoomBy]. A gesture and a zoom button both
+ *   leave the overview, also for the next surface.
  * - **Day and night** follow the host ([CarContext.isDarkMode]) in two stages ([CarLook]): a
  *   [setLook] with the host's mode writes the light and colours at once and the basemap's theme once
  *   the mode has held for [CarLookTuning.themeHoldMillis]. A "car_look" line says each change.
@@ -120,8 +123,8 @@ internal class CarNavigationMap(
     private var drawOwnLanes = false
     private var place: Place? = null
 
-    /** Whether the driver asked for the overview, which a new surface during a drive shows again. */
-    private var overviewAsked = false
+    /** Whether a new surface during the drive shows the overview again: only one the driver asked for in it and has not left. */
+    private val overview = CarOverview()
 
     /**
      * Where the camera of the last surface was when the host replaced that surface with a new one;
@@ -174,8 +177,8 @@ internal class CarNavigationMap(
         override val refreshRate: Float? get() = null
 
         override fun onStyleLoaded() {
-            // The scene draws the guidance state right after this: an overview asked for before the
-            // surface came is asked for again once that is done.
+            // The scene draws the guidance state right after this: an overview the driver asked for
+            // during this drive, and has not left, is asked for again once that is done.
             scope.launch { guard("restoreOverview") { restoreOverview() } }
         }
 
@@ -208,7 +211,7 @@ internal class CarNavigationMap(
     private val gestures = object : DefaultMapboxCarMapGestureHandler() {
         override fun onScroll(mapboxCarMapSurface: MapboxCarMapSurface, visibleCenter: ScreenCoordinate, distanceX: Float, distanceY: Float) {
             try {
-                scene?.onDriverMoved(KIND_SCROLL)
+                driverMoved(KIND_SCROLL)
                 super.onScroll(mapboxCarMapSurface, visibleCenter, distanceX, distanceY)
             } catch (e: RuntimeException) {
                 failed("onScroll", e)
@@ -217,7 +220,7 @@ internal class CarNavigationMap(
 
         override fun onFling(mapboxCarMapSurface: MapboxCarMapSurface, velocityX: Float, velocityY: Float) {
             try {
-                scene?.onDriverMoved(KIND_FLING)
+                driverMoved(KIND_FLING)
                 super.onFling(mapboxCarMapSurface, velocityX, velocityY)
             } catch (e: RuntimeException) {
                 failed("onFling", e)
@@ -226,7 +229,7 @@ internal class CarNavigationMap(
 
         override fun onScale(mapboxCarMapSurface: MapboxCarMapSurface, focusX: Float, focusY: Float, scaleFactor: Float) {
             try {
-                scene?.onDriverMoved(KIND_SCALE)
+                driverMoved(KIND_SCALE)
                 val zoom = mapboxCarMapSurface.mapSurface.mapboxMap.cameraState.zoom
                 if (CarZoom.scaleAllowed(zoom, scaleFactor.toDouble())) super.onScale(mapboxCarMapSurface, focusX, focusY, scaleFactor)
             } catch (e: RuntimeException) {
@@ -244,11 +247,13 @@ internal class CarNavigationMap(
             // The one surface callback of the app; Mapbox's own, behind a wrapper that catches.
             carContext.getCarService(AppManager::class.java).setSurfaceCallback(GuardedSurfaceCallback(callback, { released }, ::failed))
         }
+        // A drive that ends takes its overview along: the next one starts by following the car.
+        scope.launch { engine.guidanceState.collect { state -> guard("guidance") { overview.onGuidance(state) } } }
     }
 
     override fun setCameraMode(mode: CameraMode) {
         guard("setCameraMode") {
-            overviewAsked = mode == CameraMode.OVERVIEW
+            overview.onButton(mode, engine.guidanceState.value)
             scene?.setCameraMode(mode)
         }
     }
@@ -303,7 +308,11 @@ internal class CarNavigationMap(
     }
 
     override fun zoomBy(delta: Double) {
-        guard("zoomBy") { scene?.zoomBy(delta) }
+        guard("zoomBy") {
+            // The scene lets the camera go before it zooms, as for a gesture.
+            overview.onDriverMoved()
+            scene?.zoomBy(delta)
+        }
     }
 
     override fun release() {
@@ -523,12 +532,19 @@ internal class CarNavigationMap(
         }
     }
 
-    /** During a drive, the overview the driver asked for, again on a new surface. */
+    /**
+     * During a drive, the overview the driver asked for in it and has not left, again on a new
+     * surface ([CarOverview]). The preview needs nothing here: the scene frames its routes on every
+     * surface.
+     */
     private fun restoreOverview() {
-        val guidance = engine.guidanceState.value
-        if (overviewAsked && (guidance == GuidanceState.ACTIVE || guidance == GuidanceState.PREVIEW)) {
-            scene?.setCameraMode(CameraMode.OVERVIEW)
-        }
+        if (overview.restores(engine.guidanceState.value)) scene?.setCameraMode(CameraMode.OVERVIEW)
+    }
+
+    /** The driver took the map with a gesture of [kind]: the camera lets go of it and leaves the overview. */
+    private fun driverMoved(kind: String) {
+        overview.onDriverMoved()
+        scene?.onDriverMoved(kind)
     }
 
     /**

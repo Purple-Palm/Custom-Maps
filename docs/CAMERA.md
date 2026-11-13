@@ -622,7 +622,11 @@ default and the only style designed for the car so far. The rest of the car scre
   its own `MapboxNavigationViewportDataSource`, and a `SmoothNavigationCamera` with
   `CameraTuning.CAR`. `MapboxCarMap` builds a new map surface whenever the host sends a new one, for
   example after a size change, so each attach starts a new data source and controller; the camera
-  starts where it was on the surface before, or else at the newest position the app has.
+  starts where it was on the surface before, or else at the newest position the app has. During a
+  drive it then follows the car, or shows the overview again when the driver asked for it during
+  this drive and has not pressed Recenter, moved the map or zoomed since (`CarOverview`); a drive
+  that ends forgets it, so the next one starts by following the car. In the route preview the
+  scene frames the routes on every surface, so the preview's Recenter is not kept.
 - **Location:** as on the phone, the platform provider before Start (DECISIONS 14) and the engine's
   `GuidancePuck` during guidance.
 - **Padding:** following padding comes from the stable area, which does not change when the action

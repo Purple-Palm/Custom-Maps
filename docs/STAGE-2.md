@@ -123,6 +123,11 @@ screen", with no separate screens for now. Step 1 is that screen.
   callback's exception on the main thread, Mapbox's own map creation included. Still one callback
   for the app; `:car` never calls `setSurfaceCallback`.
 - **The attribution** is a `BitmapWidget` the car map keeps, not a class of its own.
+- **The camera on a new surface.** Of the camera mode, the car map keeps only an overview the
+  driver asked for during the drive under way (`CarOverview` in `:core-nav`): a new surface shows it
+  again until the driver presses Recenter, moves the map or zooms, and a drive that ends forgets it,
+  so the next drive starts by following the car. Otherwise a new surface follows the car during a
+  drive, also one the driver had moved the map on, and frames the routes in the preview.
 - **Car theme:** amber and dark amber, platinum and graphite.
 - **Maneuvers:** besides Mapbox's rules, a U-turn is a left U-turn also where the route calls it
   going on along the road, as the phone's card draws it; an off-ramp or a fork with no turn at all
@@ -459,9 +464,10 @@ Other notes:
 - `CarNavigationMap` is the map's `MapboxCarMapObserver`. Every `onAttached` is a new map: on each
   `onSurfaceAvailable`, which also comes when the size or the DPI changes, the extension builds a new
   `MapSurface` and the style loads again. So the car map keeps its state (dark mode, guidance state,
-  camera mode) and applies it on every attach. Expect a short reload when that happens. If it shows
-  on a real head unit, replace `MapboxCarMap` with an own surface callback that calls
-  `MapSurface.surfaceChanged`.
+  camera mode) and applies it on every attach. Built: of the camera mode, an overview the driver
+  asked for during the drive under way ([Step 1](#where-it-settled-or-changed-the-design)). Expect a
+  short reload when that happens. If it shows on a real head unit, replace `MapboxCarMap` with an
+  own surface callback that calls `MapSurface.surfaceChanged`.
 - `onDetached` releases the scene and removes the widgets. On the `onSurfaceDestroyed` path the
   `MapSurface` is destroyed before `onDetached`, so this only unregisters and cancels; it does not
   touch the map or the style.
