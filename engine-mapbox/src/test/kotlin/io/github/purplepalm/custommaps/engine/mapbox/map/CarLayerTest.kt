@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.map
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -332,13 +333,41 @@ class CarLayerTest {
     @Test
     fun `only the scene's first settings, its release and the car layer set the location component, no camera does`() {
         val root = File("src/main/kotlin/io/github/purplepalm/custommaps/engine/mapbox")
-        val settings = Regex("""location\.updateSettings|locationPuck\s*=""")
         val setters = root.walkTopDown().filter { it.isFile && it.extension == "kt" }
-            .associate { it.relativeTo(root).invariantSeparatorsPath to settings.findAll(code(it.readText())).count() }
-            .filterValues { it > 0 }
-        // MapScene: its first settings (enabled, the puck, its bearing) and turning it off at release; CarLayer: the puck
-        // invisible at Start and back at the drive's end. No camera, no lane zoom, nothing else.
-        assertEquals(mapOf("map/CarLayer.kt" to 4, "map/MapScene.kt" to 3), setters)
+            .associate { file ->
+                val found = LOCATION_SETTINGS.findAll(code(file.readText())).map { it.value.replace(Regex("\\s+"), "") }
+                file.relativeTo(root).invariantSeparatorsPath to found.toList()
+            }
+            .filterValues { it.isNotEmpty() }
+        // MapScene: its first settings (one call that sets the puck, whether its bearing shows and which bearing) and turning it
+        // off at release; CarLayer: the puck invisible at Start and back at the drive's end. No camera, no lane zoom, nothing
+        // else.
+        val hideOrShow = listOf("location.updateSettings", "locationPuck=")
+        val first = listOf("location.updateSettings", "locationPuck=", "puckBearingEnabled=", "puckBearing=")
+        assertEquals(mapOf("map/CarLayer.kt" to hideOrShow + hideOrShow, "map/MapScene.kt" to first + "location.updateSettings"), setters)
+    }
+
+    @Test
+    fun `the scan finds a setting changed through any name of the location component, a setter or a block`() {
+        for (line in listOf(
+            "locationComponent.updateSettings { puckBearingEnabled = true }",
+            "plugins.location.puckBearingEnabled = true",
+            "mapView.location.enabled = false",
+            "location.pulsingEnabled = true",
+            "plugins.location.apply { showAccuracyRing = true }",
+            "with(plugins.location) { locationPuck = puck }",
+            "carLocation.slot = \"top\"",
+        )) {
+            assertTrue(LOCATION_SETTINGS.containsMatchIn(line), line)
+        }
+        for (line in listOf(
+            "if (location.enabled == true) return",
+            "val bearing = location.bearing",
+            "ownLine.enabled = true",
+            "layer.onPosition(latitude, longitude, puckBearing, swapped, bar)",
+        )) {
+            assertFalse(LOCATION_SETTINGS.containsMatchIn(line), line)
+        }
     }
 
     /** [text] without its comments: what the compiler reads. */
@@ -346,6 +375,20 @@ class CarLayerTest {
         text.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), " ").replace(Regex("//[^\n]*"), " ")
 
     private companion object {
+        /** Every location-component setting the SDK has: each change rebuilds the puck and cancels its glide. */
+        private const val SETTINGS = "enabled|locationPuck|puckBearing|puckBearingEnabled|pulsingEnabled|pulsingColor|pulsingMaxRadius|" +
+            "showAccuracyRing|accuracyRingColor|accuracyRingBorderColor|layerAbove|layerBelow|slot"
+
+        /** The settings no other object of the app has a property of: set in a block, whatever the block's receiver. */
+        private const val OWN_SETTINGS = "locationPuck|puckBearing|puckBearingEnabled|pulsingEnabled|pulsingColor|pulsingMaxRadius|" +
+            "showAccuracyRing|accuracyRingColor|accuracyRingBorderColor"
+
+        /**
+         * A change of a location-component setting: `updateSettings` or a setter on anything named for the location component,
+         * and an assignment to one of its own settings anywhere (inside `updateSettings`, `apply` or `with`).
+         */
+        val LOCATION_SETTINGS = Regex("""\b\w*[Ll]ocation\w*\s*\.\s*(updateSettings\b|($SETTINGS)\s*=(?!=))|(?<![.\w])($OWN_SETTINGS)\s*=(?!=)""")
+
         /** A display frame of 60 Hz, in nanoseconds. */
         const val FRAME = 16_666_667L
 
