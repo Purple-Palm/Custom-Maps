@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.map
 import android.animation.ValueAnimator
 import android.content.Context
 import android.os.SystemClock
+import android.view.Choreographer
 import com.mapbox.common.Cancelable
 import com.mapbox.api.directions.v5.models.ManeuverModifier
 import com.mapbox.common.location.Location
@@ -20,7 +21,6 @@ import com.mapbox.maps.StyleDataLoadedType
 import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
-import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.MapAnimationOwnerRegistry
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.delegates.MapPluginProviderDelegate
@@ -71,6 +71,8 @@ import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
+import io.github.purplepalm.custommaps.nav.camera.easeInOut
+import io.github.purplepalm.custommaps.nav.camera.lerp
 import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
@@ -340,6 +342,9 @@ internal class MapScene(
 
     /** Moves the map during guidance and in the route preview, in the way of [cameraStyle]. */
     private var camera: GuidanceCamera
+
+    /** The zoom buttons' ease, on the map's own frames. */
+    private val zoomEase = ZoomEase()
 
     /** The route the data source frames: the first of the preview, or the navigator's; null without one. */
     private var framedRoute: NavigationRoute? = null
@@ -661,6 +666,8 @@ internal class MapScene(
      * the map.
      */
     fun onDriverMoved(kind: String) {
+        // A gesture moves the map itself from here on.
+        if (kind != ZOOM_KIND) zoomEase.cancel()
         idleFollow.onMapMoved()
         if (camera.isIdle) return
         debugLog.log("camera_taken", mapOf("owner" to DRIVER_OWNER, "animator" to kind, "from" to camera.state))
@@ -669,17 +676,55 @@ internal class MapScene(
 
     /**
      * The zoom buttons: the camera lets go of the map ([onDriverMoved]) and the zoom eases by [delta]
-     * levels, within [CarZoom.MIN] and [CarZoom.MAX].
+     * levels, within [CarZoom.MIN] and [CarZoom.MAX], from where an ease under way has got to. The ease
+     * runs on the map's own frames ([frames]), not on an animator: the car's go on while Android gives
+     * the main thread no frames, when an animator would wait.
      */
     fun zoomBy(delta: Double) {
+        zoomEase.cancel()
         onDriverMoved(ZOOM_KIND)
         val from = mapboxMap.cameraState.zoom
         val to = CarZoom.after(from, delta)
         if (to == from) return
-        plugins.camera.easeTo(
-            CameraOptions.Builder().zoom(to).build(),
-            MapAnimationOptions.Builder().owner(ZOOM_OWNER).duration(ZOOM_EASE_MS).build(),
-        )
+        zoomEase.start(from, to)
+    }
+
+    /**
+     * The zoom buttons' ease from one zoom to another over [ZOOM_EASE_MS], one camera write a frame.
+     * It writes only while no camera has the map: Recenter, a new route or the next zoom button stop
+     * it, and so does a gesture.
+     */
+    private inner class ZoomEase : Choreographer.FrameCallback {
+        private var from = 0.0
+        private var to = 0.0
+        private var startedAt = 0L
+        private var posted = false
+
+        fun start(from: Double, to: Double) {
+            this.from = from
+            this.to = to
+            startedAt = System.nanoTime()
+            if (!posted) {
+                posted = true
+                frames.post(this)
+            }
+        }
+
+        fun cancel() {
+            if (posted) frames.remove(this)
+            posted = false
+        }
+
+        override fun doFrame(frameTimeNanos: Long) {
+            posted = false
+            if (!camera.isIdle || !mapboxMap.isValid()) return
+            val fraction = ((frameTimeNanos - startedAt) / (ZOOM_EASE_MS * NANOS_PER_MILLI.toDouble())).coerceIn(0.0, 1.0)
+            mapboxMap.setCamera(CameraOptions.Builder().zoom(lerp(from, to, easeInOut(fraction))).build())
+            if (fraction < 1.0) {
+                posted = true
+                frames.post(this)
+            }
+        }
     }
 
     override fun setCameraStyle(style: CameraStyle) {
@@ -798,6 +843,7 @@ internal class MapScene(
 
     /** Stops listening to the navigator. The map itself follows the lifecycle of its host. */
     fun release() {
+        zoomEase.cancel()
         // A wait for the map to settle after a look ends without an answer.
         onLookSettled = null
         endLookSettled(null)
@@ -1544,9 +1590,8 @@ internal class MapScene(
         /** Who moved the map in a "camera_taken" line of a gesture without an animation of its own. */
         private const val DRIVER_OWNER = "driver"
 
-        /** The zoom buttons, as a kind of the driver's moves, and the owner and length of their ease. */
+        /** The zoom buttons, as a kind of the driver's moves, and the length of their ease. */
         const val ZOOM_KIND = "zoom"
-        private const val ZOOM_OWNER = "custommaps-zoom"
         private const val ZOOM_EASE_MS = 300L
     }
 }
