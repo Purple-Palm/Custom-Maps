@@ -58,6 +58,19 @@ class PuckTrackTest {
     }
 
     @Test
+    fun `a new update half way through a glide of three key points goes on from the second point`() {
+        val track = placed()
+        // A sixth, a third and a half of the way: the second point is reached half way through the time.
+        track.onPosition(doubleArrayOf(0.0, 0.0, 0.0003), doubleArrayOf(0.0001, 0.0003, 0.0003), 3, SECOND, 0L)
+        track.onPosition(doubleArrayOf(0.0), doubleArrayOf(0.0007), 1, SECOND, SECOND / 2)
+        // The third point is never reached: the puck turns from the second toward the new target.
+        assertAt(0.0 to 0.0003, track.positionAt(SECOND / 2))
+        assertAt(0.0 to 0.0005, track.positionAt(SECOND))
+        assertAt(0.0 to 0.0007, track.positionAt(SECOND * 3 / 2))
+        assertFalse(track.at(SECOND * 3 / 2))
+    }
+
+    @Test
     fun `a new update in the middle of a glide goes on from where the puck is`() {
         val track = placed()
         track.onPosition(doubleArrayOf(0.0), doubleArrayOf(0.001), 1, SECOND, 0L)
