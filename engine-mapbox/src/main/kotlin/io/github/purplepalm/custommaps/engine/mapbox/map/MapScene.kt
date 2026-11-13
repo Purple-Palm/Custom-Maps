@@ -75,6 +75,7 @@ import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.camera.easeInOut
 import io.github.purplepalm.custommaps.nav.camera.lerp
 import io.github.purplepalm.custommaps.nav.car.CarZoom
+import io.github.purplepalm.custommaps.nav.car.PhoneFrameCap
 import io.github.purplepalm.custommaps.nav.debug.Cadence
 import io.github.purplepalm.custommaps.nav.debug.CameraSteps
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -173,8 +174,8 @@ internal class MapScene(
      */
     private val puckRelay: PuckRelay? = null,
     /**
-     * Whether the map draws at most [PHONE_FPS_WITH_CAR] frames a second while a car's surface shows
-     * the map too ([MapboxNavigationEngine.carMapShown]): the phone's map, not the car's.
+     * Whether the map draws at most [PhoneFrameCap.CAPPED_FPS] frames a second while a car's surface
+     * shows the map too ([MapboxNavigationEngine.carMapShown]): the phone's map, not the car's.
      */
     private val capWhileCarShows: Boolean = false,
 ) : MapRenderer {
@@ -435,8 +436,8 @@ internal class MapScene(
     private var paddingChanges = 0
     private var transitionStartedAt = 0L
 
-    /** Whether the map is held to [PHONE_FPS_WITH_CAR] frames a second now, while a car's surface shows the map too. */
-    private var cappedForCar = false
+    /** The map's frame rate cap while a car's surface shows the map too; the phone's map only. */
+    private val phoneCap = PhoneFrameCap()
 
     // The map's own frame rate, reported about once a second on the render thread while it draws.
     @Volatile private var renderFps = Double.NaN
@@ -647,15 +648,15 @@ internal class MapScene(
     }
 
     /**
-     * The phone's map draws at most [PHONE_FPS_WITH_CAR] frames a second while a car's surface shows
-     * the map too: two maps at once, the phone's at its display's full rate, make the phone hot
-     * quickly. The cap goes again when the car's surface does.
+     * The phone's map draws at most [PhoneFrameCap.CAPPED_FPS] frames a second while a car's surface
+     * shows the map too, and as before when no car surface does ([PhoneFrameCap]). A cap that could
+     * not be set does not count as set.
      */
     private fun capForCar(carShown: Boolean) {
-        if (carShown == cappedForCar) return
+        val fps = phoneCap.capFor(carShown) ?: return
         try {
-            controllable.setMaximumFps(if (carShown) PHONE_FPS_WITH_CAR else UNCAPPED_FPS)
-            cappedForCar = carShown
+            controllable.setMaximumFps(fps)
+            phoneCap.onSet(carShown)
         } catch (e: RuntimeException) {
             debugLog.error("phoneFrameCap", e)
         }
@@ -1461,11 +1462,12 @@ internal class MapScene(
      * against the display rate it believes, which on the car's surface is not the phone's.
      * "animatorsEnabled" is false when Android's animations are switched off.
      * "style" is the camera style in use, so drives in different styles can be compared. "capped"
-     * is true while the phone's map draws at most [PHONE_FPS_WITH_CAR] frames a second, because a
-     * car's surface shows the map too. The screen adds its own at the end ([Host.cameraFields]): the
-     * car its frame clock's ticks of the second ("clock" with "vsyncTicks" and "timerTicks"), the cap
-     * on its surface's frames ("maxFps"), where the rate it was worked out for came from ("capFrom":
-     * render, display or timer) and the display rate measured now ("measuredHz").
+     * is true while the phone's map draws at most [PhoneFrameCap.CAPPED_FPS] frames a second,
+     * because a car's surface shows the map too. The screen adds its own at the end
+     * ([Host.cameraFields]): the car its frame clock's ticks of the second ("clock" with "vsyncTicks"
+     * and "timerTicks"), the cap on its surface's frames ("maxFps"), where the rate it was worked out
+     * for came from ("capFrom": render, display or timer) and the display rate measured now
+     * ("measuredHz").
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
@@ -1547,7 +1549,7 @@ internal class MapScene(
             "animatorsEnabled" to ValueAnimator.areAnimatorsEnabled(),
             "hz" to host.refreshRate?.let { Math.round(it) },
             // Only while a car's surface shows the map too.
-            "capped" to true.takeIf { cappedForCar },
+            "capped" to true.takeIf { phoneCap.capped },
         ) + host.cameraFields()
         fixes = 0
         paddingChanges = 0
@@ -1642,15 +1644,6 @@ internal class MapScene(
 
         /** How long a write of the theme waits for the map to settle before it says it did not. */
         private const val LOOK_SETTLE_MS = 10_000L
-
-        /** The most frames a second the phone's map draws while a car's surface shows the map too. */
-        const val PHONE_FPS_WITH_CAR = 60
-
-        /**
-         * A cap above any display's rate, which draws at the display's own rate as with no cap: the
-         * map library's way back to none is for its own libraries only.
-         */
-        private const val UNCAPPED_FPS = Int.MAX_VALUE
 
         /** Who moved the map in a "camera_taken" line of a gesture without an animation of its own. */
         private const val DRIVER_OWNER = "driver"

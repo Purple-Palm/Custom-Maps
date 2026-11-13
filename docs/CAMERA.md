@@ -438,6 +438,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `CarPuck`, `PuckRelay` | `:engine-mapbox`, `car/CarPuck.kt`, `map/camera/PuckRelay.kt` | The car's location provider: follows the platform's location or the guidance puck and, on each tick of the car's clock, hands the location component the puck's place and bearing with no duration. |
 | `CarFrameRate`, `VsyncRate` | `:core-nav`, `nav/car/CarFrameRate.kt` | The cap of the car's surface for a rate, `round(30 × 60 / rate)`, and the rate of the display's frames. |
 | `CarFrameCap` | `:core-nav`, `nav/car/CarFrameCap.kt` | The car's cap held at a real 30 frames a second: from the render thread's own ticks during guidance, else from the display's rate, 60 on the timer. |
+| `CarSurfaces`, `PhoneFrameCap` | `:core-nav`, `nav/car/PhoneFrameCap.kt` | The car surfaces that show the map, one count for the process in the engine, and each phone map's cap: 60 while any does, none set before the first, lifted when the last goes. |
 
 The math is pure Kotlin on the Java 8 API in `:core-nav` (DECISIONS 4) and is tested on the JVM.
 Everything that touches Mapbox types stays in `:engine-mapbox` (DECISIONS 12).

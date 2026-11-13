@@ -45,6 +45,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
+import io.github.purplepalm.custommaps.nav.car.CarSurfaces
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.LaneRowLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
@@ -331,7 +332,7 @@ internal class MapboxNavigationEngine(
     val previewRoutes: StateFlow<List<NavigationRoute>> = _previewRoutes.asStateFlow()
 
     /** Car surfaces that show the map now ([onCarSurface]). */
-    private var carSurfaces = 0
+    private val carSurfaces = CarSurfaces()
 
     private val _carMapShown = MutableStateFlow(false)
 
@@ -343,8 +344,7 @@ internal class MapboxNavigationEngine(
 
     /** A car's surface came ([shown]) or went; each one that came goes once. Main thread. */
     internal fun onCarSurface(shown: Boolean) {
-        carSurfaces = (carSurfaces + if (shown) 1 else -1).coerceAtLeast(0)
-        _carMapShown.value = carSurfaces > 0
+        _carMapShown.value = carSurfaces.onCarSurface(shown)
     }
 
     /**
