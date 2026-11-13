@@ -12,6 +12,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -43,12 +44,17 @@ internal object SceneLines {
         if (degrees == 0.0) null else node.station to degrees
     }
 
-    /** A line [length] metres long from 0, 0 due north, turning by each of [bends] (station to degrees, left positive). */
-    fun line(length: Double, bends: List<Pair<Double, Double>> = emptyList()): List<GeoPoint> = local(length, bends).map { geo(it) }
+    /**
+     * A line [length] metres long from 0, 0 due north, turning by each of [bends] (station to degrees, left positive); a vertex
+     * every [STEP] metres but where it would lie within [clearOfBends] metres of a bend.
+     */
+    fun line(length: Double, bends: List<Pair<Double, Double>> = emptyList(), clearOfBends: Double = 0.0): List<GeoPoint> =
+        local(length, bends, clearOfBends).map { geo(it) }
 
     /** The same in local metres of 0, 0. */
-    fun local(length: Double, bends: List<Pair<Double, Double>> = emptyList()): List<LocalPoint> {
-        val stops = (generateSequence(0.0) { it + STEP }.takeWhile { it < length }.toList() + bends.map { it.first } + length)
+    fun local(length: Double, bends: List<Pair<Double, Double>> = emptyList(), clearOfBends: Double = 0.0): List<LocalPoint> {
+        val steps = generateSequence(0.0) { it + STEP }.takeWhile { it < length }.filter { s -> s == 0.0 || bends.none { abs(it.first - s) < clearOfBends } }
+        val stops = (steps.toList() + bends.map { it.first } + length)
             .filter { it in 0.0..length }.distinct().sorted()
         val out = ArrayList<LocalPoint>()
         var heading = Math.PI / 2.0 // north, counterclockwise from east

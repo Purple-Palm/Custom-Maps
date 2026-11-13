@@ -151,6 +151,23 @@ class RoadAxis private constructor(
     fun straightAt(station: Double): Boolean = pieces[pieceIndex(station.coerceIn(from, to))] is Line
 
     /**
+     * The arc that replaces the polyline's vertex at [station], where the route turns: the fillet whose vertex lies nearest to
+     * it, within [SAME_TURN_METERS]; null where no vertex turns there. A turn's node and that vertex are measured along the
+     * same shapes, so their stations differ by the rounding of the sums that measure them, never by a metre.
+     */
+    fun filletAt(station: Double): Fillet? {
+        var lo = 0
+        var hi = fillets.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (fillets[mid].station < station) lo = mid + 1 else hi = mid
+        }
+        // The first vertex at or after the station, and the one before it.
+        val near = listOfNotNull(fillets.getOrNull(lo - 1), fillets.getOrNull(lo)).minByOrNull { abs(it.station - station) } ?: return null
+        return near.takeIf { abs(it.station - station) <= SAME_TURN_METERS }
+    }
+
+    /**
      * Stations to sample the axis at: every piece's ends, and within each piece at most [stepMeters] of
      * stations apart and, on an arc, at most [SAMPLE_DEGREES] of turn apart, so even a tight arc's offset is
      * drawn round. Ascending, from [from] to [to], none repeated.
@@ -200,6 +217,12 @@ class RoadAxis private constructor(
 
         /** And on an arc at most this much turn apart, in degrees. */
         const val SAMPLE_DEGREES = 5.0
+
+        /**
+         * A turn's node and the polyline's vertex at it are one place within this, in stations ([filletAt]): a millimetre, far
+         * more than the rounding between two sums along the same shapes (micrometres over a few kilometres).
+         */
+        const val SAME_TURN_METERS = 1e-3
 
         /** Points of the polyline closer than this, in metres, are one point. */
         private const val SAME_POINT_METERS = 1e-6

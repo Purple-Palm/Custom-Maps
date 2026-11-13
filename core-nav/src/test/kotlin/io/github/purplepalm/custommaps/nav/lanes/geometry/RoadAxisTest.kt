@@ -199,6 +199,26 @@ class RoadAxisTest {
     }
 
     @Test
+    fun `a turn finds the arc of its vertex within a millimetre of the vertex's station, the nearest of two`() {
+        // A turn's node and its vertex measured along the same shapes differ by the rounding of two sums: micrometres.
+        val road = corner(17.0)
+        val vertex = road.fillets.single()
+        assertEquals(40.0, vertex.station, 1e-12)
+        assertEquals(0.001, RoadAxis.SAME_TURN_METERS, 1e-15)
+        for (d in listOf(0.0, 3e-6, -3e-6, 0.999e-3, -0.999e-3)) assertEquals(vertex, road.filletAt(40.0 + d), "at 40 + $d")
+        for (d in listOf(1.001e-3, -1.001e-3, 0.5, 10.0)) assertEquals(null, road.filletAt(40.0 + d), "at 40 + $d")
+        // Two bends of 2 degrees 0.3 m apart: each turn finds its own.
+        val a = Math.toRadians(2.0)
+        val c = 0.3 * cos(a) to 0.3 * sin(a)
+        val two = axis(-40.0 to 0.0, 0.0 to 0.0, c, c.first + 40.0 * cos(2.0 * a) to c.second + 40.0 * sin(2.0 * a))
+        val (first, second) = two.fillets
+        assertEquals(0.3, second.station - first.station, 1e-9)
+        assertEquals(first, two.filletAt(first.station + 2e-4))
+        assertEquals(second, two.filletAt(second.station - 2e-4))
+        assertEquals(null, axis(0.0 to 0.0, 30.0 to 40.0).filletAt(27.0))
+    }
+
+    @Test
     fun `a road that goes straight on between its bends has no arc there`() {
         // Vertices every 100 m, turning 17 degrees right at 1 km and 8 degrees left at 1.5 km: two arcs, none at the
         // vertices between, where the way out is the way in to the last bit (acos of their dot product is not).

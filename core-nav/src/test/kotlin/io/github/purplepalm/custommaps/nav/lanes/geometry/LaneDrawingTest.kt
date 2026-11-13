@@ -477,6 +477,34 @@ class LaneDrawingTest {
     }
 
     @Test
+    fun `a turn whose vertex lies a few micrometres past its node gets the stub, the taper and the gore all the same`() {
+        // IW31 along a line whose bends lie 3 micrometres past their nodes' stations, as the rounding of long sums puts them:
+        // each turn finds its arc, so the gore and the split are drawn as along the line whose bends lie on the nodes.
+        val route = LaneScenes.iw31()
+        val plain = draw(route)
+        val bends = SceneLines.bendsOf(route).map { it.first + 3e-6 to it.second }
+        val drifted = draw(route, SceneLines.line(route.lengthMeters, bends, clearOfBends = 1.0))
+        val axis = requireNotNull(drifted.path.axisAt(gore))
+        val vertex = axis.fillets.minByOrNull { abs(it.station - gore) }!!
+        val drift = vertex.station - gore
+        assertTrue(drift > 1e-6 && drift < RoadAxis.SAME_TURN_METERS, "the gore's vertex $drift m past its node")
+        assertEquals(vertex.from, CrossSection.beginOf(axis, gore), 1e-12)
+        assertTrue(vertex.from < gore - 1.0)
+        // Both gores, with their stubs and noses, as along the plain line.
+        assertEquals(listOf(gore, gore + 260.0), drifted.drawing.gores().map { Math.round(it * 1e3) / 1e3 })
+        assertEquals(2, drifted.drawing.noses.size)
+        for ((a, b) in plain.drawing.noses.zip(drifted.drawing.noses)) {
+            assertEquals(a.first, b.first, 0.01)
+            assertEquals(a.second, b.second, 0.01)
+        }
+        // The three lanes the route does not take go on for the stub's length with their lines, their asphalt tapering past it.
+        val stub = drifted.features.filter { it.part == Part.STUB && it.from < gore + 1.0 }
+        assertEquals(listOf(Pair(0, 1), Pair(1, 2)), stub.filter { it.kind == Kind.LANE_LINE }.map { it.between })
+        assertEquals(gore + LaneDrawing.STUB_METERS + RoutePath.ASPHALT_TAPER_METERS, stub.single { it.kind == Kind.ASPHALT }.to, 1e-6)
+        assertEquals(plain.features.count { it.part == Part.STUB }, drifted.features.count { it.part == Part.STUB })
+    }
+
+    @Test
     fun `past a turn without lane data the lanes the route takes narrow to one lane by where the path is on the new road`() {
         val d = draw(LaneScenes.ia())
         val beyond = d.of(Kind.ASPHALT, Part.BEYOND).single()

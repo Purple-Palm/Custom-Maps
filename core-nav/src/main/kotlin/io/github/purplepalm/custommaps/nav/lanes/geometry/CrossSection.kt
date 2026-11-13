@@ -388,11 +388,11 @@ class CrossSection private constructor(
             return Settling(from, min(station + RAMP_START_MAX_METERS, from + 3.0 * abs(offset) / closing), offset)
         }
 
-        /** Where the arc at the turn at [station] begins along [axis]: the turn itself where the road does not bend there. */
-        internal fun beginOf(axis: RoadAxis, station: Double): Double {
-            val fillet = axis.fillets.firstOrNull { abs(it.station - station) < 1e-6 }
-            return max(axis.from, fillet?.from ?: station)
-        }
+        /**
+         * Where the arc at the turn at [station] begins along [axis] ([RoadAxis.filletAt]): the turn itself where the road does not
+         * bend there.
+         */
+        internal fun beginOf(axis: RoadAxis, station: Double): Double = max(axis.from, axis.filletAt(station)?.from ?: station)
 
         /** The offset at [at] of the line straight on from [shift] to the left of the axis at [begin]; null where it is no longer read across. */
         internal fun lineOffset(axis: RoadAxis, begin: Double, shift: Double, at: Double): Double? {

@@ -72,7 +72,7 @@ class LaneTrustTest {
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
     }
 
     @Test
@@ -84,7 +84,7 @@ class LaneTrustTest {
             check(build("random-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
         }
         assertSeen("line", "paint", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "gore")
     }
 
     @Test
@@ -102,7 +102,7 @@ class LaneTrustTest {
         // careful reading of a few of these routes; never on the scenes or the approaches above.
         assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
         assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
-        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp")
+        assertSeen("lit", "tint", "litBeyond", "wedge", "litOnLanes", "litInLane", "bareGore", "bareRamp", "gore")
     }
 
     @Test
@@ -178,6 +178,41 @@ class LaneTrustTest {
         litAndTints(b)
         litOnTheNamedLane(b)
         bareWhereReachedOnTheLine(b)
+        goreWhereLanesAreLeft(b)
+    }
+
+    // ------------------------------------------------------------------ 8: past a gore the old road's lanes go on and taper away
+
+    /**
+     * At every ramp's start inside a drawing where lanes of the old road beyond the lanes that go on, on the far side from the
+     * exit's edge, do not go on onto the new road, those lanes go on for the stub's length past a gore and taper away: the
+     * gore's two channelizing lines end at a nose within the stub, and the stub's asphalt tapers into the map's band past it,
+     * whatever the turn's arc.
+     */
+    private fun goreWhereLanesAreLeft(b: Built) {
+        val topology = b.plan.topology
+        for (start in b.section.rampStarts) {
+            if (b.path.drawings.none { start.station > it.from && start.station < it.to }) continue
+            val edge = topology.points.firstOrNull { it.node == start.node }?.edge ?: continue
+            val after = b.section.lanes(start.station + 1e-3).filter { it.width > 1e-6 }.map { it.lane }.toSet()
+            if (after.isEmpty()) continue
+            val slots = after.map { topology.lanes[it].slot }
+            val left = b.section.lanes(start.station - 1e-3).filter { p ->
+                val slot = topology.lanes[p.lane].slot
+                p.width > 1e-6 && p.lane !in after && if (edge == LaneEdge.RIGHT) slot < slots.min() else slot > slots.max()
+            }
+            if (left.isEmpty()) continue
+            assertTrue(
+                b.drawing.noses.any { (_, nose) -> nose >= start.station - 1e-6 && nose <= start.station + LaneDrawing.STUB_METERS + 1e-6 },
+                "${b.name}: no gore at the ramp's start at ${start.station}, where lanes ${left.map { it.lane }} go on along the old road",
+            )
+            val taperEnd = start.station + LaneDrawing.STUB_METERS + RoutePath.ASPHALT_TAPER_METERS
+            assertTrue(
+                b.features.any { it.kind == Kind.ASPHALT && it.part == Part.STUB && abs(it.to - taperEnd) < 1e-6 },
+                "${b.name}: the old road's asphalt does not taper away to $taperEnd past the ramp's start at ${start.station}",
+            )
+            saw("gore")
+        }
     }
 
     // ------------------------------------------------------------------ 1: lane lines only where the data gives the count

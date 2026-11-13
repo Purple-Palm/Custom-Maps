@@ -148,11 +148,14 @@ class RoutePathTest {
         // It reaches the ramp's start in its lane, not on the road's line: no diagonal.
         assertEquals(gore, iw31.section.rampStarts.single().station, 1e-9)
         assertTrue(path.diagonals.isEmpty())
-        // At the split it goes on straight in its lane and onto the left branch's line.
+        // At the split it goes on straight in its lane from where the split's arc begins, and onto the left branch's line.
         val turn = path.moves.last()
         assertEquals(RoutePath.Move.Kind.TURN, turn.kind)
-        assertEquals(gore + 260.0, turn.from, 1.0)
-        assertEquals(0.0, path.offsetAt(drawing.back), 1e-9)
+        val split = requireNotNull(path.axisAt(gore + 260.0)?.filletAt(gore + 260.0))
+        assertTrue(split.from < gore + 260.0 - 10.0)
+        assertEquals(split.from, turn.from, 1e-9)
+        // Back on the road's line within the micrometre the path counts as on it.
+        assertEquals(0.0, path.offsetAt(drawing.back), 1e-6)
         assertEquals(2, path.moves.size)
     }
 
