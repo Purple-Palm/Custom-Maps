@@ -180,6 +180,8 @@ class LaneDrawingTest {
         val d = draw(LaneScenes.carpoolEnds())
         val wide = d.of(Kind.LANE_LINE).filter { it.width == Width.WIDE }
         assertEquals(1, wide.size, "one line, never a double one")
+        // One part: a second one beside it would be drawn as a double line too.
+        assertEquals(1, wide.single().parts.size, "one line, never a double one")
         assertEquals(Pattern.SOLID, wide.single().pattern)
         assertEquals(Pair(0, 1), wide.single().between)
         val hov = d.plan.topology.lanes[0]
@@ -221,6 +223,8 @@ class LaneDrawingTest {
         for (line in beside) {
             assertEquals(Pattern.SOLID, line.pattern)
             assertEquals(Width.NORMAL, line.width)
+            // One line, never a double one.
+            assertEquals(1, line.parts.size)
         }
         assertTrue(d.of(Kind.ARROW).none { it.lane == bus.id })
         assertTrue(d.of(Kind.DIAMOND).isEmpty())

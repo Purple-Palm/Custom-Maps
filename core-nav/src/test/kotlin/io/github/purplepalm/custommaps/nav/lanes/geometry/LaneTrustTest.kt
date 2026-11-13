@@ -71,7 +71,7 @@ class LaneTrustTest {
     @Test
     fun `every trust property holds on every scene`() {
         for ((name, route) in LaneScenes.all() + extraScenes()) check(build(name, route))
-        assertSeen("line", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
+        assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
         assertSeen("lit", "tint", "litBeyond", "wedge")
     }
 
@@ -83,7 +83,7 @@ class LaneTrustTest {
             val bends = (1..8).map { rng.nextDouble(200.0, gore - 400.0) to rng.nextDouble(-4.0, 4.0) }
             check(build("random-$k", route, SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })))
         }
-        assertSeen("line", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
+        assertSeen("line", "paint", "stub", "diamond", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "turns", "beyond")
         assertSeen("lit", "tint", "litBeyond", "wedge")
     }
 
@@ -101,7 +101,7 @@ class LaneTrustTest {
         // 6: the plan names a lane farther from the exit's edge than the one before only where it flags that itself, on the
         // careful reading of a few of these routes; never on the scenes or the approaches above.
         assertTrue(flagged <= KEPT_FLAGGED_BACK, "$flagged routes whose plan moves back")
-        assertSeen("line", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
+        assertSeen("line", "paint", "stub", "diamond", "kept", "arrow", "named", "toward", "opens", "possible", "leaves", "begins", "ends", "turns", "beyond")
         assertSeen("lit", "tint", "litBeyond", "wedge")
     }
 
@@ -207,6 +207,10 @@ class LaneTrustTest {
                 val between = requireNotNull(f.between)
                 assertTrue(between.first in b.plan.topology.lanes.indices && between.second in b.plan.topology.lanes.indices)
             }
+            // A solid line is one line: a second part beside it would be drawn as a double line.
+            if ((f.kind == Kind.LANE_LINE || f.kind == Kind.EDGE_LINE) && f.pattern == LaneDrawing.Pattern.SOLID) {
+                assertEquals(1, f.parts.size, "${b.name}: a solid ${f.kind} ${f.between ?: f.side} in ${f.parts.size} parts over ${f.from}..${f.to}")
+            }
         }
         // One line on each boundary at a time.
         for (part in Part.entries) {
@@ -229,6 +233,15 @@ class LaneTrustTest {
                         here.count { (it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE) && it.side == side } <= 1,
                         "${b.name} at $x: two lines at the $side edge",
                     )
+                }
+                // Across the road, the paint itself: each boundary is crossed by at most one line, solid, broken or dotted,
+                // whatever the features it comes in.
+                val axis = b.path.axisAt(x) ?: continue
+                val paint = here.filter { it.kind == Kind.LANE_LINE || it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE }
+                val crossings = DrawingProbe.across(axis, x, paint.flatMap { it.parts })
+                for ((a, c) in crossings.zipWithNext()) {
+                    assertTrue(c - a >= DOUBLE_LINE_METERS, "${b.name} at $x: two lines ${c - a} m apart, at $a and $c")
+                    saw("paint")
                 }
             }
         }
@@ -785,6 +798,13 @@ class LaneTrustTest {
 
         /** A lane line is checked this often along its run. */
         const val LINE_SAMPLE_METERS = 2.0
+
+        /**
+         * Two lines across the road lie at least this far apart: a line beside a lane is drawn only where the lane is half its
+         * width or more (1.83 m on a freeway, a lane for bicycles 1.8 m), while a double line's two lines lie a line or two
+         * apart.
+         */
+        const val DOUBLE_LINE_METERS = 1.0
 
         /** A possible lane opens from nothing along its taper: it is checked this far past where it may begin. */
         const val POSSIBLE_SHOWN_METERS = 5.0
