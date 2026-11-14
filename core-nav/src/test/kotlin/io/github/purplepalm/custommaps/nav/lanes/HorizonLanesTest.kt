@@ -351,11 +351,17 @@ class HorizonLanesTest {
         val plan = SceneLines.planOf(route)
         fun pairs(vararg edges: HorizonEdge?) = HorizonLanes.of(plan, horizon(route.routeId, *edges)).between.filter { it.before == 0 }
         val rest = arrayOf(edge(1_050.0, 6), edge(400.0, 2, ramp = true))
+        // A ramp the horizon also calls a motorway (it reports the two flags separately): a link, not one carriageway.
+        assertTrue(pairs(edge(1_100.0, 5), edge(1_200.0, 5, ramp = true, motorway = true), edge(1_200.0, 5), *rest).isEmpty())
         assertTrue(pairs(edge(1_100.0, 5), edge(1_200.0, 5, ramp = true), edge(1_200.0, 5), *rest).isEmpty())
         assertTrue(pairs(edge(1_100.0, 5), edge(1_200.0, 5, motorway = false), edge(1_200.0, 5), *rest).isEmpty())
         assertTrue(pairs(edge(1_100.0, 5), edge(1_200.0, null), edge(1_200.0, 5), *rest).isEmpty())
         // No metadata for an edge: the stretches end there, short of the second point.
         assertTrue(pairs(edge(1_100.0, 5), edge(1_200.0, 5), null, *rest).isEmpty())
+        // The stretches end 15 m before the second point, an edge end within the tolerance of it, with nothing known past
+        // it: an edge end that may lie just past the point is not known yet. Reaching 32 m past it, the pair is taken.
+        assertTrue(pairs(edge(1_100.0, 5), edge(1_200.0, 5), edge(1_185.0, 5)).isEmpty())
+        assertEquals(1, pairs(edge(1_100.0, 5), edge(1_200.0, 5), edge(1_185.0, 5), edge(47.0, 5)).size)
         // The car past the first point: its approach is behind.
         assertTrue(HorizonLanes.of(plan, HorizonAhead.of(route.routeId, p + 12.0, 0.0, gapEdges(5, 5, 5).drop(1))).between.none { it.before == 0 })
         // A node where the route turns between two points: two runs, nothing between them.
@@ -370,6 +376,24 @@ class HorizonLanesTest {
         )
         val forkPlan = SceneLines.planOf(fork)
         assertTrue(HorizonLanes.of(forkPlan, horizon(fork.routeId, *gapEdges(5, 5, 5))).between.none { it.from == p })
+        // A lane point where the route forks onto another freeway, its two usable lanes going on to the next point on the
+        // branch, one run: nothing is taken from a point where the route turns, though the horizon agrees with both.
+        val forkAt = LaneScenes.route(
+            LaneScenes.node(0.0, maneuver = LaneScenes.DEPART, planMps = 27.0),
+            LaneScenes.node(p, LaneScenes.sl(), LaneScenes.sl(), s(false), s(false), s(false), roads = LaneScenes.EXIT_RIGHT, maneuver = LaneScenes.FORK_LEFT, planMps = 27.0),
+            LaneScenes.node(q, s(), s(), planMps = 27.0),
+            LaneScenes.node(GORE, s(false), LaneScenes.option(), LaneScenes.sr(), road = RoadKind.RAMP, maneuver = LaneScenes.OFF_RIGHT, planMps = 20.0),
+            LaneScenes.node(GORE + 400.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0),
+            id = "fork-at-point",
+        )
+        val forkAtPlan = SceneLines.planOf(forkAt)
+        val first = forkAtPlan.topology.points[0]
+        val second = forkAtPlan.topology.points[1]
+        assertTrue(first.turns)
+        assertEquals(first.run, second.run)
+        assertEquals(listOf(p, q), listOf(first.station, second.station))
+        val branch = horizon(forkAt.routeId, edge(1_100.0, 5), edge(2_400.0, 2), edge(1_050.0, 3), edge(400.0, 2, ramp = true))
+        assertTrue(HorizonLanes.of(forkAtPlan, branch).between.none { it.before == 0 })
         // Another route's horizon gives nothing.
         assertTrue(HorizonLanes.of(plan, HorizonAhead.of("another", p - 550.0, 0.5, gapEdges(5, 5, 5).toList())).between.isEmpty())
     }
