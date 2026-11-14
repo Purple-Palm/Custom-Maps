@@ -199,6 +199,35 @@ class LaneTrustTest {
     }
 
     @Test
+    fun `every trust property holds on seeded random streets whose sources tell street by street`() {
+        // Each street told by a source or by none, one-way or two-way, now and then otherwise than the road's first: a drawing
+        // that begins and ends at intersections, and the approaches to card windows drawn all or none.
+        val rng = Random(WAYS_SEED)
+        var cut = 0
+        repeat(WAYS_ROUTES) { k ->
+            val route = RandomRoutes.street(rng, "ways-$k")
+            val bends = (1..6).map { rng.nextDouble(200.0, gore - 200.0) to rng.nextDouble(-4.0, 4.0) }
+            val line = SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })
+            val road = rng.nextBoolean()
+            val told = HashMap<Int, StreetWays.Way>()
+            for (n in route.nodes.indices) {
+                when (rng.nextInt(5)) {
+                    0 -> Unit
+                    1 -> told[n] = StreetWays.Way(StreetWays.carriageway(!road), StreetWays.Source.HORIZON)
+                    else -> told[n] = StreetWays.Way(StreetWays.carriageway(road), StreetWays.Source.HORIZON)
+                }
+            }
+            val built = build("ways-$k", route, line, StreetWays.taken(route, told))
+            // Drawn where its streets are, never where one is listed undrawn.
+            for (u in built.section.undrawnStreets) assertFalse(built.section.drawsAt((u.from + u.to) / 2.0), "ways-$k: drawn in $u")
+            if (built.section.drawnStreets.isNotEmpty() && built.section.undrawnStreets.isNotEmpty()) cut++
+            check(built)
+        }
+        assertTrue(cut >= WAYS_ROUTES / 4, "drawn and undrawn streets together on $cut routes")
+        assertSeen("line", "named", "lit", "arrow", "stopLine", "twoWayLine", "junctionEnd", "begins", "ends", "interiorPlain")
+    }
+
+    @Test
     fun `11 the same route gives byte-equal features, whole and in windows`() {
         for (route in listOf(LaneScenes.iw31(), LaneScenes.ia(), LaneScenes.carpoolEnds(), LaneScenes.thirdLaneForCarPools())) {
             val one = build(route.routeId, route)
@@ -921,10 +950,16 @@ class LaneTrustTest {
             val from = d.asphaltFrom
             // A street junction the drawing goes on through that it begins inside, or just past.
             val before = interiors.lastOrNull { it.start <= d.from + 1e-6 && it.endInclusive > from + 1e-6 }
+            // A drawing before it on the route whose asphalt reaches where this one's begins, past a street no source tells of:
+            // the asphalt there is that drawing's way out.
+            val reached = b.path.drawings.any { it.from < d.from - 1e-6 && it.asphaltTo > from - 1e-6 }
             if (d.junctionStart) {
                 assertEquals(d.from, from, 0.0, "${b.name}: the asphalt past a junction begins at its far side")
                 assertTrue(asphalt.any { it.part == Part.ROUTE && abs(it.from - from) < 1e-6 }, "${b.name}: no asphalt from the junction's far side at $from")
                 saw("junctionStart")
+            } else if (reached) {
+                assertTrue(asphalt.any { it.part == Part.ROUTE && it.from <= d.from + 1e-6 && it.to > d.from } || inside(d.from), "${b.name}: no asphalt where the drawing begins at ${d.from}")
+                saw("beginsInAnother")
             } else if (before != null) {
                 // Square at that junction's far side, with nothing of it before.
                 val first = asphalt.filter { it.part == Part.ROUTE && it.to > from + 1e-6 && it.from < before.endInclusive + 1e-6 }.minByOrNull { it.from }
@@ -1469,6 +1504,10 @@ class LaneTrustTest {
         /** Seeded random streets, and how many. */
         const val STREET_SEED = 61
         const val STREET_ROUTES = 120
+
+        /** Seeded random streets whose sources tell street by street, and how many. */
+        const val WAYS_SEED = 62
+        const val WAYS_ROUTES = 120
 
         /** How far across the road a feature crossing a junction's inside is looked for. */
         const val INTERIOR_REACH_METERS = 30.0

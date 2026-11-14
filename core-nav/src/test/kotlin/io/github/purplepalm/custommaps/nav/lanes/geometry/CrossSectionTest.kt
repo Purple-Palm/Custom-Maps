@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.lanes.CardWindows
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
@@ -404,13 +405,18 @@ class CrossSectionTest {
     }
 
     @Test
-    fun `where the sources of one stretch disagree none of it is drawn, and a road sits as its first told stretch`() {
+    fun `a road sits as the first of its streets a source tells of, and a street told otherwise is not drawn`() {
         val route = LaneScenes.streetTurn()
-        // One-way up to the intersection 200 m before the turn and two-way past it, as the horizon reads each street's middle.
+        // One-way up to the intersection 200 m before the turn and two-way past it, as the horizon reads each street's middle:
+        // the road is one-way, as its first street; the last street is not drawn, nor the one before it with it, over the
+        // turn's card window and the drawing's way back to the road's line before it.
         val mixed = CrossSection.of(SceneLines.planOf(route), streets = StreetWays.of(route) { it < gore - 200.0 })
-        assertFalse(mixed.drawsAt(gore - 500.0))
+        assertTrue(mixed.drawsAt(gore - 500.0))
+        assertEquals(CrossSection.Carriageway.ONE_WAY, mixed.carriagewayAt(gore - 500.0))
+        assertFalse(mixed.drawsAt(gore - 300.0))
         assertFalse(mixed.drawsAt(gore - 100.0))
-        assertEquals(listOf(CrossSection.UndrawnStreet(gore - 650.0, gore, mixed = true)), mixed.undrawnStreets)
+        assertEquals(listOf(gore - 650.0..gore - 400.0), mixed.drawnStreets)
+        assertEquals(listOf(CrossSection.UndrawnStreet(gore - 400.0, gore, mixed = true)), mixed.undrawnStreets)
         // Two stretches of one road apart, the first street one-way, the second two-way: the road sits as the first, the
         // second is not drawn.
         val apart = LaneScenes.route(
@@ -433,6 +439,40 @@ class CrossSectionTest {
         val alike = CrossSection.of(plan, streets = StreetWays.of(apart) { false })
         assertTrue(alike.undrawnStreets.isEmpty())
         for (stretch in known) assertTrue(alike.drawsAt((stretch.from + stretch.to) / 2.0))
+    }
+
+    @Test
+    fun `each street is drawn where a source tells of it, and a card window's approach all or none`() {
+        val route = LaneScenes.streetTurn()
+        val plan = SceneLines.planOf(route)
+        val window = plan.windows.single()
+        assertEquals(gore - CardWindows.streetWindowMeters()..gore, window.from..window.to)
+        val twoWay = StreetWays.Way(CrossSection.Carriageway.TWO_WAY, StreetWays.Source.HORIZON)
+        fun told(vararg nodes: Int) = CrossSection.of(plan, streets = StreetWays.taken(route, nodes.associateWith { twoWay }))
+        // The streets that leave the intersections at 0, 400 and 200 m before the turn (nodes 0, 1 and 2) lie over the lanes
+        // from 650 m before it; the last two over the card window and the 60 m before it.
+        assertTrue(window.from - CrossSection.CARD_LEAD_METERS in gore - 400.0..gore - 200.0)
+        val stretches = CrossSection.streetStretches(plan)
+        assertEquals(listOf(gore - 650.0 to gore - 400.0, gore - 400.0 to gore), stretches.map { it.from to it.to })
+        assertEquals(listOf(listOf(0), listOf(1, 2)), stretches.map { it.nodes })
+        // The first street without a source: the approach is drawn from where its streets begin, the first is listed.
+        val late = told(1, 2)
+        assertFalse(late.drawsAt(gore - 500.0))
+        assertTrue(late.drawsAt(gore - 300.0) && late.drawsAt(gore - 100.0))
+        assertEquals(CrossSection.Carriageway.TWO_WAY, late.carriagewayAt(gore - 100.0))
+        assertEquals(listOf(gore - 400.0..gore), late.drawnStreets)
+        assertEquals(listOf(CrossSection.UndrawnStreet(gore - 650.0, gore - 400.0, mixed = false)), late.undrawnStreets)
+        // A street of the approach without a source: none of the approach is drawn, all of it listed as told by none.
+        for (gap in listOf(1, 2)) {
+            val cut = told(*intArrayOf(0, 1, 2).filter { it != gap }.toIntArray())
+            assertTrue(cut.drawsAt(gore - 500.0), "without node $gap")
+            assertFalse(cut.drawsAt(gore - 300.0) || cut.drawsAt(gore - 100.0), "without node $gap")
+            assertEquals(listOf(gore - 650.0..gore - 400.0), cut.drawnStreets)
+            assertEquals(listOf(CrossSection.UndrawnStreet(gore - 400.0, gore, mixed = false)), cut.undrawnStreets)
+        }
+        // Every street told: all of it drawn as one stretch.
+        assertEquals(listOf(gore - 650.0..gore), told(0, 1, 2).drawnStreets)
+        assertTrue(told(0, 1, 2).undrawnStreets.isEmpty())
     }
 
     @Test

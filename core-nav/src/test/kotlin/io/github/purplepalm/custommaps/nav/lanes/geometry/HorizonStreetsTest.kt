@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.lanes.CardWindows
 import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEdge
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
@@ -223,6 +224,53 @@ class HorizonStreetsTest {
         assertFalse(first.next(horizon(route, 300.0) { it == 5 }, 500.0, emptyList()).drawsAs(first))
         // A horizon that says nothing of the streets: the same as none.
         assertTrue(empty.next(horizon(route, 3_400.0) { false }, 500.0, emptyList()).drawsAs(empty))
+    }
+
+    /**
+     * One long street with an intersection every 100 m, each a lane point of two lanes from 500 m to 2,500 m, and a right turn
+     * at 2,600 m with its junction view's card window; the arrival at 3,000 m. Its lanes are one stretch of evidence from 400 m
+     * to the turn, over 22 streets.
+     */
+    private fun longStretch(): LaneRoute {
+        val nodes = ArrayList<RouteNode>()
+        nodes.add(street(0.0, maneuver = DEPART))
+        for (k in 1..25) nodes.add(if (k >= 5) street(k * 100.0, s(), s(), roads = CROSSING) else street(k * 100.0, roads = CROSSING))
+        nodes.add(street(2_600.0, s(false), right(), roads = CROSSING, maneuver = TURN_RIGHT, signal = true))
+        nodes.add(street(3_000.0, maneuver = ARRIVE))
+        return LaneScenes.route(*nodes.toTypedArray(), id = "long-stretch")
+    }
+
+    @Test
+    fun `a stretch the window on screen ends inside is drawn street by street past the send's start`() {
+        val route = longStretch()
+        val plan = SceneLines.planOf(route)
+        val window = plan.windows.single()
+        assertEquals(2_600.0 - CardWindows.streetWindowMeters()..2_600.0, window.from..window.to)
+        // Each street alone, but the three over the card window's approach together, from 60 m before the window.
+        val stretches = CrossSection.streetStretches(plan)
+        assertEquals(400.0, stretches.first().from)
+        assertEquals(listOf(2_300.0 to 2_600.0), stretches.filter { it.nodes.size > 1 }.map { it.from to it.to })
+        assertTrue(stretches.filter { it.nodes.size == 1 }.all { it.to - it.from == 100.0 })
+        val empty = HorizonEvidence.of(plan)
+        // The window on screen ends at 1,200 m: the streets from 1,300 m on take the horizon's way; the one from 1,200 m begins
+        // before the send's start and keeps having none.
+        val first = empty.next(horizon(route, 0.0) { false }, 1_200.0, emptyList())
+        val drawn = section(plan, first)
+        assertFalse(drawn.drawsAt(1_250.0))
+        assertTrue(drawn.drawsAt(1_350.0) && drawn.drawsAt(2_550.0))
+        assertEquals(listOf(1_300.0..2_600.0), drawn.drawnStreets)
+        assertEquals(listOf(CrossSection.UndrawnStreet(400.0, 1_300.0, mixed = false)), drawn.undrawnStreets)
+        // A later send keeps them: the window on screen now ends at 2,320 m, inside the card window's approach, which keeps
+        // what it had as a whole however the horizon reads its streets now.
+        val later = first.next(horizon(route, 1_500.0) { it >= 23 }, 2_320.0, emptyList())
+        assertTrue(section(plan, later).drawsAt(2_550.0))
+        assertEquals(Carriageway.TWO_WAY, section(plan, later).carriagewayAt(2_550.0))
+        // From nothing told, a send whose start lies past the approach's first street leaves the whole approach undrawn,
+        // though two of its streets begin past the start.
+        val late = empty.next(horizon(route, 1_500.0) { false }, 2_320.0, emptyList())
+        assertTrue(HorizonEvidence.startFor(2_320.0, plan.windows.map { it.from..it.to }) in 2_300.0..2_400.0)
+        assertFalse(section(plan, late).drawsAt(2_450.0) || section(plan, late).drawsAt(2_550.0))
+        assertTrue(section(plan, late).drawnStreets.isEmpty())
     }
 
     /**

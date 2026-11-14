@@ -18,9 +18,10 @@ import kotlin.math.min
  *
  * The same holds for the route's streets ([streets], the own lanes' design 3.3): where the route's own access field does not
  * tell whether a street is one-way or two-way, a send takes the horizon's one-way flag along it ([HorizonAhead.oneWayAlong])
- * for each street stretch the drawing would draw that begins past [startFor] ([CrossSection.StreetStretch]), and keeps what
- * the stretches before it had, an answer or none: so a street the map draws, or leaves to the map's own road, stays as it
- * is. A road sits as its first stretch told alike does ([CrossSection]): a stretch past the start told otherwise is not drawn.
+ * for each street stretch the drawing draws whole or not at all that begins past [startFor] ([CrossSection.StreetStretch]: a
+ * street, or the streets over a card window's approach), and keeps what the stretches before it had, an answer or none: so a
+ * street the map draws, or leaves to the map's own road, stays as it is. A road sits as the first of its streets told does
+ * ([CrossSection]): a street past the start told otherwise is not drawn.
  *
  * Pure and never changed once made; built on a worker with the drawing, never stored. The plan is the one the route
  * already has: neither it nor the card change ([LanePlan.evidence]).
@@ -105,9 +106,10 @@ class HorizonEvidence private constructor(
      * How the route's streets sit for a send from [start] on, with [ahead] the newest update of the horizon along this route
      * (null for none) and [evidence] the one the drawing is built from: each street stretch that begins before [start] keeps
      * the answers of this holder, an answer or none; each one from [start] on takes the horizon's one-way flag along each of
-     * its streets the route's own access field does not tell. A road sits as its first stretch told alike does, and a later
-     * one told otherwise is not drawn ([CrossSection]), so what the stretches from [start] on are told never changes whether
-     * one before it is drawn: nothing the window on screen may hold changes. With the stretches whose answers it took.
+     * its streets the route's own access field does not tell. A road sits as the first of its streets told does, a later one
+     * told otherwise is not drawn, and the streets over a card window's approach are drawn all or none ([CrossSection]), so
+     * what the stretches from [start] on are told never changes whether one before it is drawn: nothing the window on screen
+     * may hold changes. With the stretches whose answers it took.
      */
     private fun streetsFor(
         ahead: HorizonAhead?,
