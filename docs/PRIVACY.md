@@ -35,15 +35,17 @@ Last updated: 2026-11-14. It describes the app as it is today; see [Changes](#ch
 - **Settings:** day and night, camera style, lane zoom, lanes on the map (off, Mapbox's lane details
   or drawn by the app), lane counts between lane points (whether the app takes them from Mapbox's
   electronic horizon), and the switches for the simulated drive, for the app's own route line, for
-  measuring the drawn lanes, for how many frames a second the car's map draws and for a lighter car
-  map while the phone is hot, under Debug.
+  measuring the drawn lanes, for asking routes for the side roads' access and form of way, for how many
+  frames a second the car's map draws and for a lighter car map while the phone is hot, under Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads with the lanes the app would
   take on them and how it drew the route line and its own lanes (counts, sizes and times only: the
-  drawing itself stays in memory with its route and is never stored), the lane counts Mapbox's
+  drawing itself stays in memory with its route and is never stored), with the switch for the side
+  roads' fields how many of each route's intersections came with them and how much of the route's size
+  they take (counts and sizes only: the fields stay in memory with their route), the lane counts Mapbox's
   electronic horizon gave the roads ahead against the route's own (counts, distances and kinds of
   road only: what the horizon gives stays in memory and is never stored), whether the app or Mapbox
   drew the car and why that changed (in words only), with the switch for measuring the drawn lanes
@@ -95,6 +97,11 @@ With **Lane counts between lane points** on in Settings, Guidance, as it is unle
 Mapbox software also tells the app during guidance how many lanes the roads ahead have: Mapbox's
 electronic horizon, a beta. The Mapbox software works it out on the phone from the road data it
 already loads for the drive, and the app sends nothing new for it.
+
+With **Side-road fields on routes** on in Settings, Debug (off unless turned on), the route requests
+the app sends anyway, and the new routes during guidance, also ask Mapbox whether each road at the
+routes' intersections is one-way and what kind of road it is. That is two more yes-or-no settings on
+the same requests: no request is added, and nothing more about you or the phone is sent.
 
 Mapbox uses this data to provide, secure and improve its services, to prevent fraud and to bill, and
 to compute de-identified, aggregated data such as traffic. Mapbox says that it does not sell personal
@@ -201,7 +208,9 @@ on the map in place of the lane details switch, and the switch for measuring the
 the settings; who drew the car, and the measured frames of the drawn lanes, in the debug log.
 2026-11-14: lane counts between lane points from Mapbox's electronic horizon among the settings, and
 the counts it gave, against the route's own, in the debug log; the switch for a lighter car map while
-the phone is hot among the settings, and whether the car's map was the lighter one, in the debug log.
+the phone is hot among the settings, and whether the car's map was the lighter one, in the debug log;
+the switch for the side roads' fields among the settings, what the route requests ask with it, and
+what came of the fields on each route, in counts and sizes, in the debug log.
 
 ## Contact
 
