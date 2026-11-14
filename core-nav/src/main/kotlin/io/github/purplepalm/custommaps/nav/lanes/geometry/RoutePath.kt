@@ -10,6 +10,8 @@ import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
@@ -26,7 +28,9 @@ import kotlin.math.min
  *   the plan names no lane, on the road's line. The app draws lanes on freeways and ramps where the evidence has them
  *   (known, bridged or a zone), and on streets where a source also tells whether they are one-way or two-way
  *   ([CrossSection.drawsAt]). A junction the route reaches on a street and turns at ends the drawing before it and
- *   begins the one after it [JUNCTION_FAR_SIDE_METERS] past its node: its inside is the map's own road.
+ *   begins the one after it [JUNCTION_FAR_SIDE_METERS] past its node: its inside is the map's own road, which the path
+ *   crosses on its own curve into the receiving road's lane, or onto its line where none is claimed ([Junction]); at a
+ *   roundabout it keeps to the road's line, with no curve of its own.
  * - **Moves.** Inside drawn lanes and zones the path moves only toward the lane the plan heads for, the first named
  *   lane of the card window ahead, and never past it: the first move may go either way, then never back. A move
  *   between lanes is a half-cosine S of [moveMeters] per lane crossed (clamp(v x [MOVE_SECONDS_FREEWAY], 80, 270 m) on
@@ -160,6 +164,13 @@ class RoutePath private constructor(
      * off the road's line at the near side to [offsetTo] off the new road's line at the far side, along the road's way at
      * both ends, never along the road's line, which turns in a corner at the node. Between [from] and [to] the path is these
      * points; [offsetAt] does not tell where it lies there.
+     *
+     * It ends in the middle of [receiving], the receiving road's lane, where the route turns at the junction from a lane the
+     * plan names into a road drawn from the far side on: the nearest of its lanes open to every car, counted from the turn's
+     * inside as the named lane is among the lanes the turn can be made from (k-th to k-th). Elsewhere, and always at a
+     * U-turn, it ends on the new road's line, [receiving] null: where no lane is drawn past the junction no lane is claimed
+     * there, and after a U-turn the route's line runs in the receiving carriageway's middle. At a roundabout there is no
+     * curve: nothing of the app's own lies inside one, and the path is the route's line there.
      */
     class Junction(
         val node: Int,
@@ -169,6 +180,7 @@ class RoutePath private constructor(
         val offsetTo: Double,
         val points: List<GeoPoint>,
         val stations: DoubleArray,
+        val receiving: Int? = null,
     )
 
     /** One drawing window: its axis and the path's offset at each of its samples. */
@@ -246,6 +258,15 @@ class RoutePath private constructor(
          * way to where the two ways meet: a quarter circle's own share, so a right-angled turn is all but round.
          */
         const val JUNCTION_PULL = 0.55
+
+        /** The maneuvers into, round or out of a roundabout: no curve of the app's own there. */
+        private val ROUNDABOUT_TYPES = setOf(
+            ManeuverType.ROUNDABOUT, ManeuverType.ROUNDABOUT_TURN, ManeuverType.ROTARY, ManeuverType.EXIT_ROUNDABOUT, ManeuverType.EXIT_ROTARY,
+        )
+
+        /** A right turn's modifiers. */
+        private val RIGHT_TURNS = setOf(TurnModifier.SLIGHT_RIGHT, TurnModifier.RIGHT, TurnModifier.SHARP_RIGHT)
+
 
         /** The ways at a junction's two sides meet ahead of both only where they cross at more than this sine (about 6 degrees). */
         private const val JUNCTION_MEET_SINE = 0.1
@@ -386,8 +407,11 @@ class RoutePath private constructor(
         /** Where the path was, [offset], held: where a return begins, or a band the next band takes over from. */
         data class Held(val offset: Double) : Piece()
 
-        /** Across a street junction, where the path is the junction's own curve ([Junction]): on the road's line for the solve. */
-        object Across : Piece()
+        /**
+         * Across a street junction, where the path is the junction's own curve ([Junction]): on the road's line for the solve,
+         * which goes on past the far side from [offset], where the curve ends, in the receiving road's lane or on its line.
+         */
+        data class Across(val offset: Double) : Piece()
     }
 
     /** Where the plan heads from before [station] on the run [run]: the middle of [lane], or the road's line where it is null (C1). */
@@ -618,7 +642,7 @@ class RoutePath private constructor(
             // Across each street junction, its own curve in place of the samples.
             for (d in region.drawings) {
                 if (!d.junctionEnd) continue
-                val junction = junctionOf(d, axes, windowSamples, offsets, min(back, d.to + JUNCTION_FAR_SIDE_METERS)) ?: continue
+                val junction = junctionOf(region, d, axes, windowSamples, offsets, min(back, d.to + JUNCTION_FAR_SIDE_METERS)) ?: continue
                 junctions.add(junction)
                 out.removeAll { it.second > junction.from + SAME_STATION && it.second < junction.to - SAME_STATION }
                 val at = out.indexOfFirst { it.second > junction.from + SAME_STATION }.let { if (it < 0) out.size else it }
@@ -651,10 +675,19 @@ class RoutePath private constructor(
          * or so, at stations from the near side to [far] by their share of its length. Null where the junction lies off the
          * region's windows or its two sides do not lie apart.
          */
-        private fun junctionOf(d: Drawing, axes: List<RoadAxis>, samples: List<DoubleArray>, offsets: List<DoubleArray>, far: Double): Junction? {
+        private fun junctionOf(
+            region: Region,
+            d: Drawing,
+            axes: List<RoadAxis>,
+            samples: List<DoubleArray>,
+            offsets: List<DoubleArray>,
+            far: Double,
+        ): Junction? {
             val near = d.carriagewayTo
             if (far <= near + SAME_STATION) return null
             val node = nodes.indexOfFirst { abs(it.station - d.to) < 1e-6 && LaneEvidence.planTurns(it) }
+            // Nothing of the app's own inside a roundabout: the path is the route's line there.
+            if (node >= 0 && nodes[node].maneuver?.type in ROUNDABOUT_TYPES) return null
             val a = axes.lastOrNull { near >= it.from - 1e-9 && near <= it.to + 1e-9 } ?: return null
             val b = axes.lastOrNull { far >= it.from - 1e-9 && far <= it.to + 1e-9 } ?: return null
             val t0 = offsetIn(axes, samples, offsets, near)
@@ -695,7 +728,38 @@ class RoutePath private constructor(
             val total = lengths.last()
             val stations = DoubleArray(local.size) { k -> if (total > 0.0) near + (far - near) * lengths[k] / total else near }
             stations[local.size - 1] = far
-            return Junction(node, near, far, t0, t1, local.map { a.toGeo(it) }, stations)
+            val receiving = receivingOf(region, d, b).second
+            return Junction(node, near, far, t0, t1, local.map { a.toGeo(it) }, stations, receiving)
+        }
+
+        /** For each street junction a drawing ends at, by its node's station: where its curve ends, and in which lane. */
+        private val receiving = HashMap<Double, Pair<Double, Int?>>()
+
+        /**
+         * Where the curve across the street junction that ends the drawing [d] of [region] ends at the junction's far side, along
+         * [axis]: in the middle of the receiving road's lane ([Junction.receiving]) and that lane; on the new road's line and
+         * null where no lane is named at the near side, the road past the junction is not drawn from its far side, at a U-turn
+         * or at a roundabout.
+         */
+        private fun receivingOf(region: Region, d: Drawing, axis: RoadAxis): Pair<Double, Int?> = receiving.getOrPut(d.to) {
+            val none = 0.0 to null
+            val far = d.to + JUNCTION_FAR_SIDE_METERS
+            val node = nodes.indexOfFirst { abs(it.station - d.to) < 1e-6 && LaneEvidence.planTurns(it) }
+            val maneuver = nodes.getOrNull(node)?.maneuver ?: return@getOrPut none
+            val modifier = maneuver.modifier
+            if (modifier == TurnModifier.U_TURN || maneuver.type in ROUNDABOUT_TYPES) return@getOrPut none
+            if (region.drawings.none { it.junctionStart && abs(it.from - far) < 1e-6 }) return@getOrPut none
+            val named = plan.segmentAt(d.carriagewayTo - SAME_STATION)?.takeIf { it.inWindow && it.noLane == null }?.named ?: return@getOrPut none
+            val lanes = section.lanes(far, axis).filter { it.width > SAME_OFFSET_METERS && !topology.lanes[it.lane].designated }
+            if (lanes.isEmpty()) return@getOrPut none
+            // The named lane's place among the lanes the turn can be made from, counted from the turn's inside.
+            val slot = topology.lanes[named].slot
+            val usable = topology.points.firstOrNull { it.node == node }?.allowed.orEmpty().filter { !topology.lanes[it].designated }
+            // From the right for a right turn; from the left for a left turn, and straight across.
+            val right = modifier in RIGHT_TURNS
+            val k = if (right) usable.count { topology.lanes[it].slot > slot } else usable.count { topology.lanes[it].slot < slot }
+            val lane = if (right) lanes[max(0, lanes.size - 1 - k)] else lanes[min(lanes.size - 1, k)]
+            lane.centre to lane.lane
         }
 
         /** The path's offset at [station] as the solve left it, along whichever of [axes] holds it. */
@@ -848,11 +912,19 @@ class RoutePath private constructor(
                     val hold = layers.last().hold
                     // A turn goes straight on from where the path is: its piece and the moves still under way.
                     val next = pieceAt(region, station, axis, piece, settled) { pathOf(layers, station) }
-                    if (next == Piece.Across && piece != Piece.Across) {
+                    if (next is Piece.Across && piece !is Piece.Across) {
                         // Into a street junction: its curve takes over the moves under way, and the solve is on the road's line.
                         layers.clear()
-                        layers.add(Layer(Piece.Across, 0.0, 0.0, 0.0, 0, false))
+                        layers.add(Layer(next, 0.0, 0.0, 0.0, 0, false))
                     } else if (next != piece) {
+                        // Out of a street junction: on from where its curve ends.
+                        if (piece is Piece.Across) {
+                            layers.last().let {
+                                it.piece = Piece.Held(piece.offset)
+                                it.hold = piece.offset
+                                it.value = piece.offset
+                            }
+                        }
                         // The old piece's value here; the band's middle never steps back behind it either. Between two bands,
                         // where the path was: a lane that ends at its edge with no taper takes the old band's middle with it.
                         val bands = piece is Piece.Band && next is Piece.Band
@@ -883,7 +955,7 @@ class RoutePath private constructor(
                             section.place(next.lane, station, axis)?.state == CrossSection.State.OPENING
                         if (!turns && (abs(jump) > SAME_OFFSET_METERS || opening && !returns)) {
                             val kind = when {
-                                piece == Piece.Middle || piece is Piece.Turn || piece == Piece.Across -> Move.Kind.ENTER
+                                piece == Piece.Middle || piece is Piece.Turn || piece is Piece.Across -> Move.Kind.ENTER
                                 returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
@@ -976,7 +1048,9 @@ class RoutePath private constructor(
         private fun pieceAt(region: Region, station: Double, axis: RoadAxis, current: Piece, settled: MutableSet<Double>, drawn: () -> Double): Piece {
             // Across a street junction: the junction's own curve, from its near side to its far side.
             for (d in region.drawings) {
-                if (d.junctionEnd && station > d.carriagewayTo + SAME_STATION && station < d.to + JUNCTION_FAR_SIDE_METERS - SAME_STATION) return Piece.Across
+                if (d.junctionEnd && station > d.carriagewayTo + SAME_STATION && station < d.to + JUNCTION_FAR_SIDE_METERS - SAME_STATION) {
+                    return Piece.Across(receivingOf(region, d, axis).first)
+                }
             }
             // At a drawing's end where the route turns: straight on from where the turn's arc begins, until the path is on the
             // new road's line, where a drawing that begins within the turn's reach takes over.
@@ -1041,7 +1115,7 @@ class RoutePath private constructor(
             }
             is Piece.Turn -> CrossSection.turnOff(axis, piece.turn, piece.offset, station)
             is Piece.Held -> piece.offset
-            Piece.Across -> 0.0
+            is Piece.Across -> 0.0
         }
 
         /**

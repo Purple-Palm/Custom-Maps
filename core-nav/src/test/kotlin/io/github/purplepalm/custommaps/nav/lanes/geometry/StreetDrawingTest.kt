@@ -1,10 +1,12 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.lanes.CardWindows
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
+import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Kind
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Paint
@@ -342,9 +344,10 @@ class StreetDrawingTest {
                 assertTrue(abs(d.path.offsetAt(x + 0.5) - d.path.offsetAt(x)) < 0.2, "a step in the path at $x")
                 x += 0.5
             }
-            // The lit lane runs on across where the pocket opens: one lit stretch from the window's start to the stop line.
+            // The lit lane runs on across where the pocket opens, and across the junction into the receiving road's lane: one lit
+            // stretch from the window's start to the junction's far side.
             assertEquals(1, d.drawing.litStretches().size)
-            assertEquals(gore - 10.0, d.drawing.litStretches().single().endInclusive, MM)
+            assertEquals(gore + RoutePath.JUNCTION_FAR_SIDE_METERS, d.drawing.litStretches().single().endInclusive, MM)
             // Beside the lit lane a dotted extension from where the possible pocket is half wide to where the path is in it,
             // solid from there to the stop line, which the signal's flag gives.
             val beside = d.of(Kind.LANE_LINE).filter { it.between == pocket.id to feeder || it.between == feeder to pocket.id }.sortedBy { it.from }
@@ -370,6 +373,118 @@ class StreetDrawingTest {
             // One-way, the possible pocket widens the asphalt on the left; two-way it opens into the oncoming half.
             val asphalt = requireNotNull(d.drawing.asphaltAt(gore - 70.0))
             if (oneWay) assertTrue(asphalt.first > lane + apron + 1e-6) else assertEquals(2.0 * lane + apron, asphalt.first, MM)
+        }
+    }
+
+    @Test
+    fun `the lit lane crosses a street junction along the path's curve into the receiving road's nearest lane`() {
+        for (oneWay in listOf(false, true)) {
+            val d = draw(LaneScenes.streetTurn(receiving = true), oneWay)
+            val junction = d.path.junctions.single()
+            // The road past the turn: its first lane from its line, or about it one-way; the curve ends in its middle.
+            val receiving = requireNotNull(junction.receiving)
+            val place = d.section.lanes(junction.to).single { it.lane == receiving }
+            assertEquals(place.centre, junction.offsetTo, MM)
+            assertEquals(if (oneWay) 0.0 else -0.5 * lane, junction.offsetTo, MM)
+            assertEquals(junction.offsetTo, d.path.offsetAt(junction.to + 5.0), PATH_METERS)
+            // Lit all the way across, one stretch from the window's start to the far side, its edges half a lane off the curve.
+            val stretch = d.drawing.litStretches().single()
+            assertEquals(gore + RoutePath.JUNCTION_FAR_SIDE_METERS, stretch.endInclusive, MM)
+            val lit = d.of(Kind.LIT).filter { it.to > junction.from + MM }
+            assertEquals(gore + RoutePath.JUNCTION_FAR_SIDE_METERS, lit.maxOf { it.to }, MM)
+            val edges = d.of(Kind.LIT_EDGE).filter { it.from >= junction.from - MM }
+            assertEquals(2, edges.size)
+            val k = junction.points.size / 2
+            val middle = SceneLines.local(junction.points[k])
+            for (edge in edges) {
+                val nearest = edge.parts.single().minOf { SceneLines.local(it).distanceTo(middle) }
+                assertEquals(lane / 2.0, nearest, 0.1, "the lit edge ${edge.side} off the curve's middle")
+            }
+            // The maneuver's arrow along the lit turn, from 4 m before the stop line's place to 30 m past the node.
+            assertEquals(listOf(gore), d.drawing.turns())
+            val arrow = GoreArrow.alongTurn(d.path.points, d.path.stations, gore)
+            assertEquals(gore - 14.0, SceneLines.local(arrow.first()).y, 0.05)
+            assertTrue(arrow.size > 3)
+            // No tint across the junction, nothing of the receiving road's own inside it.
+            assertTrue(d.of(Kind.TINT).none { it.to > junction.from + MM })
+            assertNull(d.drawing.asphaltAt(gore))
+        }
+        // Without a drawn road past the turn no lane is claimed there: the curve ends on its line, nothing is lit across.
+        val alone = draw(LaneScenes.streetTurn(), oneWay = false)
+        assertNull(alone.path.junctions.single().receiving)
+        assertEquals(0.0, alone.path.junctions.single().offsetTo, MM)
+        assertEquals(gore - 10.0, alone.drawing.litStretches().single().endInclusive, MM)
+        assertTrue(alone.drawing.turns().isEmpty())
+    }
+
+    @Test
+    fun `from two turn lanes the curve ends in the receiving lane counted from the turn's inside as the named one is`() {
+        // Two right-turn lanes; the route prefers the inner one, so the plan names it: the second from the inside.
+        fun scene(innerActive: Boolean) = LaneScenes.route(
+            LaneScenes.street(0.0, maneuver = LaneScenes.DEPART),
+            LaneScenes.street(gore - 300.0, s(), s(), s()),
+            LaneScenes.street(
+                gore, s(false), LaneScenes.right(active = innerActive), LaneScenes.right(active = !innerActive),
+                roads = LaneScenes.CROSSING, maneuver = LaneScenes.TURN_RIGHT,
+            ),
+            LaneScenes.street(gore + 150.0, s(), s()),
+            LaneScenes.street(gore + 300.0, maneuver = LaneScenes.ARRIVE),
+            id = "double-right",
+        )
+        for (innerActive in listOf(false, true)) {
+            val d = draw(scene(innerActive), oneWay = false)
+            val junction = d.path.junctions.single()
+            val receiving = d.section.lanes(junction.to).filter { it.width > 1e-6 }
+            assertEquals(2, receiving.size, "both turn lanes go on onto the new road")
+            val named = requireNotNull(d.plan.segmentAt(junction.from - MM)?.named)
+            val turnLanes = d.plan.topology.points.single { it.node == junction.node }.allowed
+            val fromInside = turnLanes.count { d.plan.topology.lanes[it].slot > d.plan.topology.lanes[named].slot }
+            assertEquals(if (innerActive) 1 else 0, fromInside, "the plan names the lane the route prefers")
+            assertEquals(receiving[receiving.size - 1 - fromInside].lane, junction.receiving)
+            assertEquals(receiving[receiving.size - 1 - fromInside].centre, junction.offsetTo, MM)
+        }
+    }
+
+    @Test
+    fun `a U-turn ends the lit lane where the U begins and claims no lane past it`() {
+        for (oneWay in listOf(false, true)) {
+            val d = draw(LaneScenes.streetUTurn(), oneWay)
+            val junction = d.path.junctions.single()
+            // The road back is drawn from the far side, yet no lane is named or lit there: the route's line goes on into the
+            // receiving carriageway's middle.
+            assertTrue(d.path.drawings.any { it.junctionStart })
+            assertNull(junction.receiving)
+            assertEquals(0.0, junction.offsetTo, MM)
+            assertTrue(d.of(Kind.LIT).none { it.to > junction.from + MM })
+            assertEquals(gore - 10.0, d.drawing.litStretches().single().endInclusive, MM)
+            // The navigation SDK's own U-turn arrow: none of ours.
+            assertTrue(d.drawing.turns().isEmpty())
+        }
+    }
+
+    @Test
+    fun `nothing of ours lies inside a roundabout, its approach a zone from where the junction view begins`() {
+        for (oneWay in listOf(false, true)) {
+            val d = draw(LaneScenes.roundabout(), oneWay)
+            val entry = gore
+            val exit = gore + 60.0
+            // No lane named from the window's start, the junction view's, to the way out: a zone there, nothing lit or tinted.
+            val window = d.plan.windows.single { abs(it.to - entry) < MM }
+            assertEquals(entry - CardWindows.streetWindowMeters(), window.from, MM)
+            assertTrue(d.plan.segments.filter { it.to > window.from + MM && it.from < exit }.all { it.named == null })
+            assertTrue(d.evidence.stretches.any { it.kind == LaneEvidence.Kind.ZONE && abs(it.from - window.from) < MM })
+            assertTrue(d.of(Kind.LIT).isEmpty() && d.of(Kind.TINT).isEmpty())
+            // No curve of ours into it, nothing of ours from the approach's near side to the way out.
+            assertTrue(d.path.junctions.isEmpty())
+            assertTrue(d.features.none { it.to > entry - 10.0 + MM && it.from < exit }, "${d.features.filter { it.to > entry - 10.0 + MM }.map { it.kind }}")
+            assertTrue(d.drawing.turns().isEmpty())
+            // The path keeps to the road's line from the zone into it, as the route's own line does (rounded at a corner only by
+            // the road's axis), and is the route's own line past the way out.
+            var x = window.from + 1.0
+            while (x < exit) {
+                assertEquals(0.0, d.path.offsetAt(x), 1e-9, "the path off the road's line at $x")
+                x += 1.0
+            }
         }
     }
 

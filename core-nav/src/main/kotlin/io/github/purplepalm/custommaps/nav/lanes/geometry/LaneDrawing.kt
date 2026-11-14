@@ -89,7 +89,11 @@ import kotlin.math.sin
  * - **The lit lane** ([Kind.LIT], 2.2 and 4.3), inside card windows only, wherever the plan names a lane: that lane's full
  *   width about the route's path, square to it, so it moves from lane to lane with the path's S and follows a lane
  *   entered along its taper; its two edges ([Kind.LIT_EDGE], [LIT_EDGE_METERS]). Never a designated lane, never on an
- *   approach where no lane is named. Only where it is that lane: where the path lies within half a lane of the lane's
+ *   approach where no lane is named. Where the route turns at a street junction from the lit lane into a road drawn past
+ *   it, the lit lane goes on across the junction along the path's curve into the receiving road's lane
+ *   ([RoutePath.Junction.receiving]), over the map's own road, to the junction's far side ([turns]); not at a U-turn, where
+ *   it ends at the near side and the route's line goes on into the receiving carriageway's middle, and never inside a
+ *   roundabout. Only where it is that lane: where the path lies within half a lane of the lane's
  *   drawn middle (or in its feeder along its taper) or moves, and the lit lane lies on the drawn lanes ([LIT_FIT_METERS]);
  *   elsewhere, as where the path waits on the road's line beside a lane still opening or keeps to it around a fold, the
  *   route line shows instead.
@@ -273,6 +277,14 @@ class LaneDrawing private constructor(
      * SDK's own arrow follows that same line.
      */
     fun gores(): List<Double> = builder.goreStations()
+
+    /**
+     * The route stations of the street junctions where the lit lane crosses the junction into the receiving road's lane, in
+     * route order: the map lays the maneuver's arrow along the path there ([GoreArrow.alongTurn]), from
+     * [GoreArrow.STOP_LINE_BEFORE_METERS] before the stop line's place. Not at a U-turn or a roundabout, where the navigation
+     * SDK's own arrow shows.
+     */
+    fun turns(): List<Double> = builder.turnStations()
 
     /**
      * The lanes drawn on the route's carriageway at [station], from the left: none outside the drawn stretches; inside a street
@@ -843,6 +855,17 @@ class LaneDrawing private constructor(
         fun noses(): List<Pair<Double, Double>> = gores.filter { it.stub.isNotEmpty() }.map { it.stubNose to it.routeNose }
 
         fun goreStations(): List<Double> = gores.filter { it.stub.isNotEmpty() && !it.onLine }.map { it.station }
+
+        fun turnStations(): List<Double> = path.junctions.filter { litTurn(it) != null }.map { nodes[it.node].station }
+
+        /**
+         * The lane lit across the street junction [j]: the lane lit at its near side, where the path's curve ends in the
+         * receiving road's lane ([RoutePath.Junction.receiving]); null elsewhere.
+         */
+        private fun litTurn(j: RoutePath.Junction): Int? {
+            if (j.receiving == null) return null
+            return litLane(j.from - SAME_STATION)
+        }
 
         /** Each run of the lit lane, from its edges, which run where it does; runs that meet are one. */
         fun litStretches(): List<ClosedFloatingPointRange<Double>> {
@@ -1610,6 +1633,7 @@ class LaneDrawing private constructor(
          * and along a taper; cut into pieces at multiples of [PIECE_METERS] ([litId]), with its two edges ([Kind.LIT_EDGE]).
          */
         private fun lit(a: Double, b: Double, out: MutableList<Feature>) {
+            litTurns(a, b, out)
             for ((s0, s1, _) in litRanges(a, b)) {
                 val pieces = Pieces(Kind.LIT, out)
                 val edges = Strip()
@@ -1631,6 +1655,65 @@ class LaneDrawing private constructor(
                 pieces.close()
                 litEdges(edges, lane, out)
             }
+        }
+
+        /**
+         * The lit lane across each street junction between [a] and [b] where it crosses into the receiving road's lane
+         * ([litTurn]): its full width about the path's curve, square to the curve, in the same pieces as the lit lane before it,
+         * with its edges.
+         */
+        private fun litTurns(a: Double, b: Double, out: MutableList<Feature>) {
+            for (j in path.junctions) {
+                val named = litTurn(j) ?: continue
+                val from = max(a, j.from)
+                val to = min(b, j.to)
+                if (to - from <= SAME_STATION) continue
+                val half = CrossSection.laneMeters(RoadKind.STREET, topology.lanes[named].kinds) / 2.0
+                val axis = axisAt(j.from)
+                val local = j.points.map { axis.toLocal(it) }
+                val pieces = Pieces(Kind.LIT, out)
+                val edges = Strip()
+                for ((s, k) in curveSamples(j.stations, from, to)) {
+                    // The curve's point at [s], between its points k and k + 1, and its way there.
+                    val i = min(k, local.size - 2)
+                    val span = j.stations[i + 1] - j.stations[i]
+                    val f = if (span > 0.0) ((s - j.stations[i]) / span).coerceIn(0.0, 1.0) else 0.0
+                    val px = local[i].x + (local[i + 1].x - local[i].x) * f
+                    val py = local[i].y + (local[i + 1].y - local[i].y) * f
+                    val dx = local[i + 1].x - local[i].x
+                    val dy = local[i + 1].y - local[i].y
+                    val norm = hypot(dx, dy)
+                    if (norm == 0.0) continue
+                    val nx = -dy / norm
+                    val ny = dx / norm
+                    val l = axis.toGeo(LocalPoint(px + nx * half, py + ny * half))
+                    val r = axis.toGeo(LocalPoint(px - nx * half, py - ny * half))
+                    pieces.add(s, l, r, named) { litId(it) }
+                    edges.stations.add(s)
+                    edges.left.add(l)
+                    edges.right.add(r)
+                }
+                pieces.close()
+                litEdges(edges, named, out)
+            }
+        }
+
+        /**
+         * The stations to sample a junction's curve at between [from] and [to]: both ends and each of the curve's own [stations]
+         * between them, and each piece's start ([PIECE_METERS]), each with the index of the curve's point at or before it.
+         */
+        private fun curveSamples(stations: DoubleArray, from: Double, to: Double): List<Pair<Double, Int>> {
+            val at = ArrayList<Double>()
+            at.add(from)
+            for (x in stations) if (x > from + SAME_STATION && x < to - SAME_STATION) at.add(x)
+            var k = pieceOf(from) + 1
+            while (k * PIECE_METERS < to - SAME_STATION) {
+                if (k * PIECE_METERS > from + SAME_STATION) at.add(k * PIECE_METERS)
+                k++
+            }
+            at.add(to)
+            at.sort()
+            return at.distinct().map { x -> x to max(0, RoutePath.indexAtOrBefore(stations, x)) }
         }
 
         /** The lit lane's edges along [edges] as two lines without their small loops ([untangle]), and [edges] emptied. */

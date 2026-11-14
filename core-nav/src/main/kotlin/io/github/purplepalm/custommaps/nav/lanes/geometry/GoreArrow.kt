@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import kotlin.math.abs
 import kotlin.math.max
@@ -10,8 +11,10 @@ import kotlin.math.min
  * The maneuver arrow at a gore of the app's own lanes (the own lanes' design 5.3, D11). The navigation SDK's arrow of a
  * maneuver follows the route's own line, which at a gore cuts across the lanes to the ramp; where the app draws the lanes,
  * the arrow follows its path instead, in the lit lane up to the gore and on into the ramp past it, from [BEFORE_METERS]
- * before the gore to [AFTER_METERS] after it. Pure; built once with the path, off the main thread, and kept in memory
- * with it, never stored.
+ * before the gore to [AFTER_METERS] after it. At a street turn where the lit lane crosses the junction into the receiving
+ * road's lane ([LaneDrawing.turns]) it follows the path the same way, from [STOP_LINE_BEFORE_METERS] before the stop line's
+ * place, so the lane's own painted arrow stays in sight ([alongTurn]). Pure; built once with the path, off the main thread,
+ * and kept in memory with it, never stored.
  */
 object GoreArrow {
 
@@ -20,6 +23,9 @@ object GoreArrow {
 
     /** It ends this far past the gore. */
     const val AFTER_METERS = 30.0
+
+    /** At a street turn it begins this far before the stop line's place ([LaneTopology.STOP_LINE_METERS] before the node). */
+    const val STOP_LINE_BEFORE_METERS = 4.0
 
     /** The arrow's last piece is at least this long, so its head points the way the path goes; shorter ones are dropped. */
     const val HEAD_PIECE_METERS = 1.0
@@ -32,11 +38,21 @@ object GoreArrow {
      * (ascending): a point where it begins, [BEFORE_METERS] before the gore, the path's points after it, and a point where
      * it ends, [AFTER_METERS] past the gore; cut where the path ends. Empty where it would have fewer than two points.
      */
-    fun along(points: List<GeoPoint>, stations: DoubleArray, gore: Double): List<GeoPoint> {
+    fun along(points: List<GeoPoint>, stations: DoubleArray, gore: Double): List<GeoPoint> = between(points, stations, gore - BEFORE_METERS, gore + AFTER_METERS)
+
+    /**
+     * The arrow of the street turn at the node at route station [node], along the path of [points] at [stations]: from
+     * [STOP_LINE_BEFORE_METERS] before the stop line's place to [AFTER_METERS] past the node, as [along] lays it.
+     */
+    fun alongTurn(points: List<GeoPoint>, stations: DoubleArray, node: Double): List<GeoPoint> =
+        between(points, stations, node - LaneTopology.STOP_LINE_METERS - STOP_LINE_BEFORE_METERS, node + AFTER_METERS)
+
+    /** The arrow along the path of [points] at [stations] from route station [start] to [end], cut where the path ends. */
+    private fun between(points: List<GeoPoint>, stations: DoubleArray, start: Double, end: Double): List<GeoPoint> {
         require(points.size == stations.size) { "A station for every point" }
         if (points.size < 2) return emptyList()
-        val from = max(stations.first(), gore - BEFORE_METERS)
-        val to = min(stations.last(), gore + AFTER_METERS)
+        val from = max(stations.first(), start)
+        val to = min(stations.last(), end)
         if (to <= from) return emptyList()
         val out = ArrayList<GeoPoint>()
         out.add(at(points, stations, from))

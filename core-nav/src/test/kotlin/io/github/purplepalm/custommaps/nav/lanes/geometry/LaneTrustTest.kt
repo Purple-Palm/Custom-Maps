@@ -19,6 +19,7 @@ import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Kind
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Part
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteLane
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -167,7 +168,7 @@ class LaneTrustTest {
             for (oneWay in listOf(false, true)) check(build("$name-${if (oneWay) "one-way" else "two-way"}", route, streets = LaneScenes.ways(route, oneWay)))
         }
         assertSeen("line", "named", "lit", "arrow", "kept", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
-        assertSeen("pocketLine", "pocketTint", "pocketEntry", "pocketPossible")
+        assertSeen("pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout", "roadLineTwoWay")
     }
 
     @Test
@@ -194,7 +195,7 @@ class LaneTrustTest {
         }
         assertTrue(undrawn > 0)
         assertSeen("line", "named", "lit", "tint", "arrow", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
-        assertSeen("litAcross", "beginsPastJunction", "pocketLine", "pocketTint", "pocketEntry", "pocketPossible")
+        assertSeen("litAcross", "beginsPastJunction", "pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout")
     }
 
     @Test
@@ -229,6 +230,7 @@ class LaneTrustTest {
         noDoubleNoCentreNoChevron(b)
         streetLines(b)
         junctionInteriorsPlain(b)
+        litTurnIntoTheReceivingLane(b)
         designatedByKind(b)
         namedLaneDrawn(b)
         movesTowardThePlansLane(b)
@@ -277,12 +279,19 @@ class LaneTrustTest {
                     if (lanes.isNotEmpty()) {
                         val half = LaneTopology.laneMeters(b.section.roadAt(x) ?: RoadKind.FREEWAY) / 2.0
                         val t = path.offsetAt(x)
-                        val inside = minOf(lanes.maxOf { it.left } - t, t - lanes.minOf { it.right })
-                        assertTrue(
-                            inside >= half - ROAD_LINE_SLACK_METERS,
-                            "${b.name}: no lane named before ${n.to}; at $x the path lies $inside m inside our edge lines",
-                        )
-                        saw("roadLineInside")
+                        if (b.section.carriagewayAt(x) == CrossSection.Carriageway.TWO_WAY) {
+                            // On a two-way street the road's line is the line between its halves, where no line of ours lies: the
+                            // path keeps to it or to our half, never over the oncoming one, at least half a lane inside our right edge.
+                            assertTrue(t <= 1e-6 && t >= lanes.minOf { it.right } + half - ROAD_LINE_SLACK_METERS, "${b.name}: no lane named before ${n.to}; at $x the path at $t")
+                            saw("roadLineTwoWay")
+                        } else {
+                            val inside = minOf(lanes.maxOf { it.left } - t, t - lanes.minOf { it.right })
+                            assertTrue(
+                                inside >= half - ROAD_LINE_SLACK_METERS,
+                                "${b.name}: no lane named before ${n.to}; at $x the path lies $inside m inside our edge lines",
+                            )
+                            saw("roadLineInside")
+                        }
                     }
                 }
                 x += 2.0
@@ -582,6 +591,64 @@ class LaneTrustTest {
                 assertNull(b.drawing.asphaltAt(s), "${b.name}: asphalt inside the junction at $s")
                 saw("interiorPlain")
             }
+        }
+    }
+
+    /**
+     * Where the route turns at a street junction from the lit lane into a road drawn from the junction's far side, the lit lane
+     * goes on across the junction along the path's curve, and the curve ends in the middle of the receiving road's lane: one
+     * open to every car, the nearest from the turn's inside, never in the oncoming half. At a U-turn no lane is claimed past
+     * the junction: the curve ends on the route's line and nothing is lit across. At a roundabout there is no curve, and
+     * nothing of ours lies past its approach's near side until the way round it ends.
+     */
+    private fun litTurnIntoTheReceivingLane(b: Built) {
+        val nodes = b.route.nodes
+        for (j in b.path.junctions) {
+            val maneuver = requireNotNull(nodes[j.node].maneuver)
+            assertFalse(maneuver.type in ROUNDABOUTS, "${b.name}: a curve of ours into a roundabout at ${j.from}")
+            val lane = j.receiving
+            if (maneuver.modifier == TurnModifier.U_TURN) {
+                assertNull(lane, "${b.name}: a receiving lane past the U-turn at ${j.from}")
+                assertEquals(0.0, j.offsetTo, 1e-9, "${b.name}: the U-turn's curve off the route's line")
+                saw("uTurn")
+            }
+            val lit = b.features.filter { it.kind == Kind.LIT && it.to > j.from + 1e-6 && it.from < j.to - 1e-6 }
+            if (lane == null) {
+                assertEquals(0.0, j.offsetTo, 1e-9, "${b.name}: the curve at ${j.from} off the new road's line with no lane there")
+                assertTrue(lit.isEmpty(), "${b.name}: lit across the junction at ${j.from} with no receiving lane")
+                continue
+            }
+            // The receiving lane: drawn there, open to every car, the curve's end in its middle, in our half.
+            val places = b.section.lanes(j.to).filter { it.width > 1e-6 }
+            val place = requireNotNull(places.firstOrNull { it.lane == lane }) { "${b.name}: the receiving lane $lane not drawn at ${j.to}" }
+            assertFalse(b.plan.topology.lanes[lane].designated, "${b.name}: the receiving lane $lane is designated")
+            assertEquals(place.centre, j.offsetTo, 0.01, "${b.name}: the curve's end off the receiving lane's middle")
+            assertTrue(j.offsetTo <= places.first().left + 1e-9 && j.offsetTo >= places.last().right - 1e-9, "${b.name}: the curve ends off our lanes")
+            val general = places.filter { !b.plan.topology.lanes[it.lane].designated }
+            val modifier = maneuver.modifier
+            if (modifier == TurnModifier.RIGHT || modifier == TurnModifier.SLIGHT_RIGHT || modifier == TurnModifier.SHARP_RIGHT) {
+                if (b.plan.topology.points.single { it.node == j.node }.allowed.size == 1) assertEquals(general.last().lane, lane, "${b.name}: not the nearest lane")
+            } else if (modifier == TurnModifier.LEFT || modifier == TurnModifier.SLIGHT_LEFT || modifier == TurnModifier.SHARP_LEFT) {
+                if (b.plan.topology.points.single { it.node == j.node }.allowed.size == 1) assertEquals(general.first().lane, lane, "${b.name}: not the nearest lane")
+            }
+            // Lit across where the lane before it is lit at the near side, all the way to the far side.
+            val litNear = b.features.any { it.kind == Kind.LIT && it.from < j.from - 1e-6 && it.to >= j.from - 1e-6 }
+            if (litNear) {
+                assertTrue(lit.isNotEmpty(), "${b.name}: the lit lane stops at the junction's near side at ${j.from}")
+                assertEquals(j.to, lit.maxOf { it.to }, 1e-6, "${b.name}: the lit turn short of the far side")
+                assertTrue(j.to - 1e-6 <= b.drawing.litStretches().first { it.start <= j.from && it.endInclusive >= j.from }.endInclusive)
+                assertTrue(nodes[j.node].station in b.drawing.turns(), "${b.name}: no arrow along the lit turn at ${j.from}")
+                saw("litTurn")
+            }
+        }
+        // A roundabout: nothing of ours from its approach's near side to the end of the way round it.
+        for ((i, node) in nodes.withIndex()) {
+            if (node.maneuver?.type !in ROUNDABOUTS || node.maneuver?.type in ROUNDABOUT_EXITS || i == 0) continue
+            val exit = nodes.drop(i + 1).firstOrNull { it.maneuver?.type in ROUNDABOUT_EXITS }?.station ?: continue
+            val inside = b.features.filter { it.to > node.station - LaneTopology.STOP_LINE_METERS + 1e-6 && it.from < exit }
+            assertTrue(inside.isEmpty(), "${b.name}: ${inside.map { it.kind }} inside the roundabout at ${node.station}")
+            assertTrue(b.drawing.turns().none { it == node.station })
+            saw("roundabout")
         }
     }
 
@@ -970,12 +1037,16 @@ class LaneTrustTest {
         val ids = HashSet<Long>()
         val turning = turns(b) + folds(b)
         val moving = b.path.moves.map { it.from - 1e-6 to it.to + 1e-6 }
-        val windows = merged(b.plan.windows.map { it.from to it.to })
+        // Across a street junction into the receiving road's lane the lit lane goes on to the junction's far side.
+        val crossings = b.path.junctions.filter { it.receiving != null }.map { it.from to it.to }
+        val windows = merged(b.plan.windows.map { it.from to it.to } + crossings)
+        val drawn = merged(b.path.drawings.map { it.from to it.to } + crossings)
         for (f in b.features) {
             if (f.kind != Kind.LIT && f.kind != Kind.TINT && f.kind != Kind.LIT_EDGE) continue
-            // Only inside card windows, and on our asphalt.
+            // Only inside card windows, and on our asphalt or across a junction into the receiving road's lane.
             assertTrue(windows.any { f.from >= it.first - 1e-6 && f.to <= it.second + 1e-6 }, "${b.name}: a ${f.kind} over ${f.from}..${f.to} outside the card windows")
-            assertTrue(b.path.drawings.any { f.from >= it.from - 1e-6 && f.to <= it.to + 1e-6 }, "${b.name}: a ${f.kind} over ${f.from}..${f.to} outside the drawings")
+            assertTrue(drawn.any { f.from >= it.first - 1e-6 && f.to <= it.second + 1e-6 }, "${b.name}: a ${f.kind} over ${f.from}..${f.to} outside the drawings")
+            if (f.kind == Kind.TINT) assertTrue(crossings.none { f.to > it.first + 1e-6 && f.from < it.second - 1e-6 }, "${b.name}: a tint across a junction at ${f.from}")
             val lane = lanes[requireNotNull(f.lane)]
             // 3: never a designated lane.
             assertFalse(lane.designated, "${b.name}: a ${f.kind} on the designated lane ${lane.id}")
@@ -997,6 +1068,9 @@ class LaneTrustTest {
             }
             val middle = (f.from + f.to) / 2.0
             for (x in middles) {
+                // Across a street junction the lit lane is the turn's own, checked apart ([litTurnIntoTheReceivingLane]); a part
+                // along the junction's curve projects onto the road's axis a little off the curve's own stations.
+                if (crossings.any { x > it.first - SQUARE_SEARCH_METERS && x < it.second + SQUARE_SEARCH_METERS }) continue
                 val seg = requireNotNull(b.plan.segmentAt(x))
                 if (f.kind == Kind.TINT) {
                     val place = b.drawing.lanesAt(x).firstOrNull { it.lane == lane.id }
@@ -1026,8 +1100,8 @@ class LaneTrustTest {
             val half = CrossSection.laneMeters(road, lane.kinds) / 2.0
             for (p in f.parts.flatten()) {
                 val (s, _) = DrawingProbe.project(b.path.axes, middle, p)
-                // Not within the foot's search of a street junction, where the path is the junction's own curve, not an offset.
-                if (b.path.junctions.any { s > it.from - SQUARE_SEARCH_METERS && s < it.to }) continue
+                // Not within the foot's search of a street junction's curve, where the path is that curve, not an offset.
+                if (b.path.junctions.any { s > it.from - SQUARE_SEARCH_METERS && s < it.to + SQUARE_SEARCH_METERS }) continue
                 assertEquals(half, squareFromPath(b, p, s), LIT_CORNER_METERS, "${b.name}: a corner of the lit lane at $s")
             }
             saw("lit")
@@ -1145,8 +1219,11 @@ class LaneTrustTest {
     private fun litOnTheNamedLane(b: Built) {
         val lanes = b.plan.topology.lanes
         val moving = b.path.moves.map { it.from - 1e-6 to it.to + 1e-6 }
+        val crossings = b.path.junctions.filter { it.receiving != null }
         for (run in b.drawing.litStretches()) {
             for (x in along(run.start + LIT_END_METERS, run.endInclusive - LIT_END_METERS, 1.0)) {
+                // Across a street junction the lit lane is the turn's own, checked apart ([litTurnIntoTheReceivingLane]).
+                if (crossings.any { x >= it.from - 1e-6 && x <= it.to + 1e-6 }) continue
                 val named = requireNotNull(b.plan.segmentAt(x)?.named) { "${b.name}: lit at $x where no lane is named" }
                 val places = b.drawing.lanesAt(x)
                 assertTrue(places.isNotEmpty(), "${b.name}: lit at $x where no lane is drawn")
@@ -1348,6 +1425,9 @@ class LaneTrustTest {
         "street-turn-bicycle-bus" to LaneScenes.streetTurn(bicycle = true, bus = true),
         "street-turn-receiving" to LaneScenes.streetTurn(receiving = true),
         "street-pocket" to LaneScenes.streetPocket(),
+        "junction-pocket" to LaneScenes.junctionPocket(),
+        "street-u-turn" to LaneScenes.streetUTurn(),
+        "street-roundabout" to LaneScenes.roundabout(),
     )
 
     /**
@@ -1386,6 +1466,12 @@ class LaneTrustTest {
 
         /** How far across the road a feature crossing a junction's inside is looked for. */
         const val INTERIOR_REACH_METERS = 30.0
+
+        /** The maneuvers into, round and out of a roundabout... */
+        val ROUNDABOUTS = setOf(ManeuverType.ROUNDABOUT, ManeuverType.ROUNDABOUT_TURN, ManeuverType.ROTARY, ManeuverType.EXIT_ROUNDABOUT, ManeuverType.EXIT_ROTARY)
+
+        /** ...and out of one. */
+        val ROUNDABOUT_EXITS = setOf(ManeuverType.EXIT_ROUNDABOUT, ManeuverType.EXIT_ROTARY)
 
         /** A second seed of approaches, and how many. */
         const val OPENING_SEED = 232

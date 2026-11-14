@@ -57,6 +57,7 @@ internal object LaneScenes {
     val FORK_RIGHT = NodeManeuver(ManeuverType.FORK, slightRight, viewStaysUp = true)
     val TURN_LEFT = NodeManeuver(ManeuverType.TURN, TurnModifier.LEFT)
     val TURN_RIGHT = NodeManeuver(ManeuverType.TURN, TurnModifier.RIGHT)
+    val U_TURN = NodeManeuver(ManeuverType.TURN, TurnModifier.U_TURN)
 
     /** The posted speed of a road the own lanes plan at [planMps]. */
     fun posted(planMps: Double) = planMps - PlanningSpeed.MARGIN_MPH * PlanningSpeed.MPS_PER_MPH
@@ -628,6 +629,9 @@ internal object LaneScenes {
     /** A lane only for bicycles. */
     fun bike() = RouteLane(setOf(straight), valid = false, active = false, kinds = setOf(DesignatedKind.BICYCLE))
 
+    /** A lane with a U-turn's arrow. */
+    fun uTurn() = RouteLane(setOf(TurnModifier.U_TURN), valid = true, active = true)
+
     /** A road that crosses the route's street at a junction, both of its arms open to cars. */
     val CROSSING = Roads(90 to true, 270 to true)
 
@@ -688,6 +692,19 @@ internal object LaneScenes {
         nodes.add(street(GORE + 300.0, maneuver = ARRIVE, planMps = v))
         return route(*nodes.toTypedArray(), id = "pocket-$mph-${junctionBack ?: 0}")
     }
+
+    /**
+     * A U-turn at [GORE] from the left of two lanes, at a junction where a road crosses, and the road back with two lanes to a
+     * lane point 150 m on: the route's line turns back there.
+     */
+    fun streetUTurn(): LaneRoute = route(
+        street(0.0, maneuver = DEPART),
+        street(GORE - 300.0, s(), s()),
+        street(GORE, uTurn(), s(false), roads = CROSSING, maneuver = U_TURN, signal = true),
+        street(GORE + 150.0, s(), s()),
+        street(GORE + 300.0, maneuver = ARRIVE),
+        id = "street-u-turn",
+    )
 
     /** Every scene of the planner's tests, by name. */
     fun all(): Map<String, LaneRoute> = linkedMapOf(

@@ -44,6 +44,16 @@ class GoreArrowTest {
     }
 
     @Test
+    fun `at a street turn the arrow runs from 4 m before the stop line's place to 30 m past the node`() {
+        val (points, stations) = straight((0..40).map { it * 9.0 })
+        // The node at 204 m: the stop line's place 10 m before it, the arrow from 4 m before that.
+        val arrow = GoreArrow.alongTurn(points, stations, node = 204.0)
+        assertEquals(listOf(190.0, 198.0, 207.0, 216.0, 225.0, 234.0), norths(arrow))
+        assertEquals(LaneTopology.STOP_LINE_METERS + GoreArrow.STOP_LINE_BEFORE_METERS + GoreArrow.AFTER_METERS, Geo.meters(arrow.first(), arrow.last()), 1e-6)
+        assertEquals(4.0, GoreArrow.STOP_LINE_BEFORE_METERS)
+    }
+
+    @Test
     fun `near the path's ends the arrow is cut short, and with no length left there is none`() {
         val (points, stations) = straight((0..8).map { it * 9.0 })
         assertEquals(listOf(0.0, 9.0, 18.0, 27.0, 35.0), norths(GoreArrow.along(points, stations, 5.0)))
