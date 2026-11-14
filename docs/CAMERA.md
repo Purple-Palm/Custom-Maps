@@ -2082,13 +2082,16 @@ views rest is in the swap below.
   is a zone ending at the edge end where the count changes (twice the lane's taper and 60 m), and
   where the count is not the plan's lanes, a rule's bridge is a zone too, and a stretch without
   lane data where it lies between drawn stretches and is at most 600 m long, or in a card window.
-  A lane the plan adds on the side away from the exit, where the horizon has that one rise, opens
-  at the edge end where the count rises, its taper before it inside the zone, instead of late
-  before the point that lists it; a lane on the exit's side and every lane that ends stay where
-  the plan has them, so the lit lane counts from the edge as the card does. A lane point's own reach
-  stays as the route's list draws it. The counts come only with the next window's send, from 40 m
-  past the window on screen on and past a card window there, never while nothing is drawn at the
-  car and never into a window already sent: the window that is due is built off the main thread
+  A lane the plan adds on the side away from the exit, where the horizon has that one rise by every
+  lane it adds (under the reading of the lanes open to every car, never with a lane kept for car
+  pools among them), opens at the edge end where the count rises, its taper before it inside the
+  zone, instead of late before the point that lists it; a lane on the exit's side and every lane
+  that ends stay where the plan has them, so the lit lane counts from the edge as the card does. A
+  lane point's own reach stays as the route's list draws it. The counts come only with the next
+  window's send, from 40 m past the window on screen on and past a card window there, also between
+  two lane points whose first the window on screen holds, with the edges behind the car that the
+  horizon's earlier updates gave (kept up to 3.5 km back), never while nothing is drawn at the car
+  and never into a window already sent: the window that is due is built off the main thread
   with the route's path built anew past the window on screen, its points up to that window's end
   kept as they are, and the path and the window go to the map together, the line drawn as it is
   until both have loaded; Mapbox's line is not shown for it. Where the newest counts change nothing
