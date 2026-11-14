@@ -24,7 +24,9 @@ import kotlin.math.min
  *   inside card windows, through zones too. Where no lane works (a conflict the plan flags), on the middle of the lanes
  *   drawn there, so the path stays on the drawn carriageway where it moves off the road's line. On a C1 approach, where
  *   the plan names no lane, on the road's line. The app draws lanes on freeways and ramps where the evidence has them
- *   (known, bridged or a zone); streets wait for a one-way or two-way source.
+ *   (known, bridged or a zone), and on streets where a source also tells whether they are one-way or two-way
+ *   ([CrossSection.drawsAt]). A junction the route reaches on a street and turns at ends the drawing before it and
+ *   begins the one after it [JUNCTION_FAR_SIDE_METERS] past its node: its inside is the map's own road.
  * - **Moves.** Inside drawn lanes and zones the path moves only toward the lane the plan heads for, the first named
  *   lane of the card window ahead, and never past it: the first move may go either way, then never back. A move
  *   between lanes is a half-cosine S of [moveMeters] per lane crossed (clamp(v x [MOVE_SECONDS_FREEWAY], 80, 270 m) on
@@ -88,16 +90,32 @@ class RoutePath private constructor(
     /** The stretches past a ramp's start where the path keeps to the road's line, having reached the turn on it. */
     val diagonals: List<Diagonal>,
     private val windows: List<Window>,
+    /** Every street junction the path crosses on its own curve ([Junction]), in route order. */
+    val junctions: List<Junction> = emptyList(),
 ) {
 
     /**
      * A stretch from [from] to [to] where the app draws lanes; the path leaves the road's line at [from] and is back
      * on it at [back]; the drawing's asphalt runs from [asphaltFrom] to [asphaltTo]. [turnsAtEnd]: it ends where the
      * route turns onto a road without lanes, and the path goes on straight in its lane and blends onto that road.
+     * [junctionEnd]: it ends where the route turns at a junction it reaches on a street, and its carriageway ends at the
+     * junction's near side ([carriagewayTo]), where a stop line would stand; [junctionStart]: it begins on the road the
+     * route turns onto at such a junction, at the junction's far side, and its asphalt begins there without a taper. The
+     * inside of a street junction is the map's own road.
      */
-    data class Drawing(val from: Double, val to: Double, val back: Double, val turnsAtEnd: Boolean) {
-        val asphaltFrom: Double get() = from - ASPHALT_TAPER_METERS
+    data class Drawing(
+        val from: Double,
+        val to: Double,
+        val back: Double,
+        val turnsAtEnd: Boolean,
+        val junctionEnd: Boolean = false,
+        val junctionStart: Boolean = false,
+    ) {
+        val asphaltFrom: Double get() = if (junctionStart) from else from - ASPHALT_TAPER_METERS
         val asphaltTo: Double get() = back + ASPHALT_TAPER_METERS
+
+        /** Where its carriageway ends: at a street junction its near side, else where the drawing ends. */
+        val carriagewayTo: Double get() = if (junctionEnd) to - LaneTopology.STOP_LINE_METERS else to
     }
 
     /** A move of the path from [from] to [to] (stations), from the offset [offsetFrom] to [offsetTo], of [kind]. */
@@ -133,6 +151,24 @@ class RoutePath private constructor(
      * line and lights no lane there, so the diagonal crosses no line of the app's.
      */
     data class Diagonal(val from: Double, val to: Double)
+
+    /**
+     * Where the path crosses a junction the route reaches on a street and turns at ([Drawing.junctionEnd]), the junction at
+     * the intersection [node]: from [from], the junction's near side, to [to], its far side ([JUNCTION_FAR_SIDE_METERS]
+     * past the node), it runs along [points], each at the route station of [stations], ascending: a curve from [offsetFrom]
+     * off the road's line at the near side to [offsetTo] off the new road's line at the far side, along the road's way at
+     * both ends, never along the road's line, which turns in a corner at the node. Between [from] and [to] the path is these
+     * points; [offsetAt] does not tell where it lies there.
+     */
+    class Junction(
+        val node: Int,
+        val from: Double,
+        val to: Double,
+        val offsetFrom: Double,
+        val offsetTo: Double,
+        val points: List<GeoPoint>,
+        val stations: DoubleArray,
+    )
 
     /** One drawing window: its axis and the path's offset at each of its samples. */
     internal class Window(val axis: RoadAxis, val stations: DoubleArray, val offsets: DoubleArray)
@@ -197,6 +233,27 @@ class RoutePath private constructor(
 
         /** Then the asphalt tapers over this distance into the map's own road (and the same before the drawing begins). */
         const val ASPHALT_TAPER_METERS = 40.0
+
+        /**
+         * The inside of a street junction reaches this far past its node, as far as its near side, where a stop line would
+         * stand, lies before it ([LaneTopology.STOP_LINE_METERS]): the road the route turns onto is drawn from there.
+         */
+        const val JUNCTION_FAR_SIDE_METERS = LaneTopology.STOP_LINE_METERS
+
+        /**
+         * A street junction's curve ([Junction]) leaves each side along the road's way, its handles reaching this share of the
+         * way to where the two ways meet: a quarter circle's own share, so a right-angled turn is all but round.
+         */
+        const val JUNCTION_PULL = 0.55
+
+        /** The ways at a junction's two sides meet ahead of both only where they cross at more than this sine (about 6 degrees). */
+        private const val JUNCTION_MEET_SINE = 0.1
+
+        /** A junction's curve is drawn with a point about this often... */
+        private const val JUNCTION_STEP_METERS = 1.0
+
+        /** ...and with at least this many pieces. */
+        private const val JUNCTION_MIN_POINTS = 8
 
         /** A drawing window is at most this long, one origin for its local metres. */
         const val WINDOW_METERS = 3_000.0
@@ -327,6 +384,9 @@ class RoutePath private constructor(
 
         /** Where the path was, [offset], held: where a return begins, or a band the next band takes over from. */
         data class Held(val offset: Double) : Piece()
+
+        /** Across a street junction, where the path is the junction's own curve ([Junction]): on the road's line for the solve. */
+        object Across : Piece()
     }
 
     /** Where the plan heads from before [station] on the run [run]: the middle of [lane], or the road's line where it is null (C1). */
@@ -399,11 +459,12 @@ class RoutePath private constructor(
         private val moves = ArrayList<Move>()
         private val folds = ArrayList<Fold>()
         private val diagonals = ArrayList<Diagonal>()
+        private val junctions = ArrayList<Junction>()
 
         fun build(): RoutePath {
             val routeId = route.routeId
             if (line.size < 2 || length <= 0.0) {
-                return RoutePath(routeId, version, line, lineStations, line, lineStations, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+                return RoutePath(routeId, version, line, lineStations, line, lineStations, emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
             }
             val regions = regions()
             val windows = ArrayList<Window>()
@@ -433,31 +494,35 @@ class RoutePath private constructor(
                 stations.add(lineStations[next])
                 next++
             }
-            return RoutePath(routeId, version, line, lineStations, points, stations.toDoubleArray(), drawings, moves, folds, diagonals, windows)
+            return RoutePath(routeId, version, line, lineStations, points, stations.toDoubleArray(), drawings, moves, folds, diagonals, windows, junctions)
         }
 
         /** The stretches the app draws lanes on, merged, and the regions they need with their returns. */
         private fun regions(): List<Region> {
-            // The drawn stretches of each run, merged where they touch: a run's lanes are one drawing, another run's another.
+            // The drawn stretches of each run, merged where they touch: a run's lanes are one drawing, another run's another. A
+            // street's stretches only where the cross-section draws its lanes, where a source tells how it sits.
             val drawn = ArrayList<Triple<Double, Double, Int>>()
             for (stretch in evidence.stretches) {
                 if (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED && stretch.kind != LaneEvidence.Kind.ZONE) continue
-                if (stretch.road == RoadKind.STREET || stretch.lanes <= 0) continue
+                if (stretch.lanes <= 0) continue
                 for (run in topology.runs) {
                     val from = max(stretch.from, run.from)
                     val to = min(min(stretch.to, run.to), length)
                     if (to <= from) continue
-                    val k = drawn.indexOfLast { it.third == run.index }
-                    val last = if (k >= 0) drawn[k] else null
-                    if (last != null && from <= last.second + 1e-6) drawn[k] = Triple(last.first, max(last.second, to), run.index) else drawn.add(Triple(from, to, run.index))
+                    val parts = if (stretch.road == RoadKind.STREET) section.streetParts(from, to, run.index).map { it.start to it.endInclusive } else listOf(from to to)
+                    for ((a, b) in parts) {
+                        val k = drawn.indexOfLast { it.third == run.index }
+                        val last = if (k >= 0) drawn[k] else null
+                        if (last != null && a <= last.second + 1e-6) drawn[k] = Triple(last.first, max(last.second, b), run.index) else drawn.add(Triple(a, b, run.index))
+                    }
                 }
             }
             drawn.sortBy { it.first }
             val regions = ArrayList<Region>()
-            for ((from, to, _) in drawn) {
+            for ((from, to, junctionEnd, junctionStart) in drawn.flatMap { (from, to, _) -> atJunctions(from, to) }) {
                 val turns = to < length - 1e-6 && nodes.any { abs(it.station - to) < 1e-6 && LaneEvidence.planTurns(it) }
                 val reach = if (turns) CrossSection.RAMP_START_MAX_METERS + CrossSection.RAMP_BLEND_METERS + 1.0 else RETURN_METERS
-                val drawing = Drawing(from, to, min(length, to + reach), turns)
+                val drawing = Drawing(from, to, min(length, to + reach), turns, junctionEnd, junctionStart)
                 val end = min(length, to + reach)
                 val last = regions.lastOrNull()
                 if (last != null && from <= last.to) {
@@ -468,6 +533,30 @@ class RoutePath private constructor(
                 }
             }
             return regions
+        }
+
+        /** A drawn stretch from [from] to [to], and whether it ends at a street junction's near side or begins at its far side. */
+        private data class DrawnPart(val from: Double, val to: Double, val junctionEnd: Boolean, val junctionStart: Boolean)
+
+        /**
+         * The drawn stretch from [from] to [to] cut at every junction the route reaches on a street and turns at
+         * ([LaneEvidence.planTurns]): the stretch before it ends at the junction, whose inside is the map's own road, and the
+         * one after it begins [JUNCTION_FAR_SIDE_METERS] past the junction's node; nothing of it within that of the node.
+         */
+        private fun atJunctions(from: Double, to: Double): List<DrawnPart> {
+            val out = ArrayList<DrawnPart>()
+            var start = from
+            var startsAtJunction = false
+            for ((i, node) in nodes.withIndex()) {
+                if (i == 0 || node.station < from - 1e-6 || node.station > to + 1e-6) continue
+                if (!LaneEvidence.planTurns(node) || route.approachRoad(i) != RoadKind.STREET) continue
+                // A stretch whose carriageway would end before it begins, at the junction's near side, is none.
+                if (node.station - LaneTopology.STOP_LINE_METERS > start + 1e-6) out.add(DrawnPart(start, node.station, junctionEnd = true, junctionStart = startsAtJunction))
+                start = max(start, node.station + JUNCTION_FAR_SIDE_METERS)
+                startsAtJunction = true
+            }
+            if (to > start + 1e-6) out.add(DrawnPart(start, to, junctionEnd = false, junctionStart = startsAtJunction))
+            return out
         }
 
         /** The region's windows and points, or null where nothing could be built. */
@@ -518,9 +607,21 @@ class RoutePath private constructor(
                     .filter { it >= st.first() - CrossSection.RAMP_START_MAX_METERS && it <= st.last() + CrossSection.RAMP_START_MAX_METERS }
                     .map { CrossSection.beginOf(axis, it) }
                 val arcStart = { i: Int -> arcs.any { abs(at[i] - it) < SAME_STATION } }
+                // A street junction's two sides, where its curve takes over the path.
+                val sides = region.drawings.filter { it.junctionEnd }.flatMap { listOf(it.carriagewayTo, it.to + JUNCTION_FAR_SIDE_METERS) }
+                val side = { i: Int -> sides.any { abs(at[i] - it) < SAME_STATION } }
                 // Every sample of the last metres before the path is back on the route's own line: one chord over them would
                 // turn at the join.
-                for (i in simplify(local) { at[it] >= back - BACK_SAMPLED_METERS || twice(it) || arcStart(it) }) out.add(axis.toGeo(local[i]) to at[i])
+                for (i in simplify(local) { at[it] >= back - BACK_SAMPLED_METERS || twice(it) || arcStart(it) || side(it) }) out.add(axis.toGeo(local[i]) to at[i])
+            }
+            // Across each street junction, its own curve in place of the samples.
+            for (d in region.drawings) {
+                if (!d.junctionEnd) continue
+                val junction = junctionOf(d, axes, windowSamples, offsets, min(back, d.to + JUNCTION_FAR_SIDE_METERS)) ?: continue
+                junctions.add(junction)
+                out.removeAll { it.second > junction.from + SAME_STATION && it.second < junction.to - SAME_STATION }
+                val at = out.indexOfFirst { it.second > junction.from + SAME_STATION }.let { if (it < 0) out.size else it }
+                out.addAll(at, junction.points.indices.drop(1).dropLast(1).map { junction.points[it] to junction.stations[it] })
             }
             // Each drawing is back on the road's line where its return or its turn ends (at its end where nothing was left);
             // the region's last where the path is the route's own line again.
@@ -528,6 +629,8 @@ class RoutePath private constructor(
                 val d = region.drawings[i]
                 val end = if (i == region.drawings.size - 1) {
                     back
+                } else if (d.junctionEnd) {
+                    d.to + JUNCTION_FAR_SIDE_METERS
                 } else {
                     moves.lastOrNull {
                         (it.kind == Move.Kind.RETURN && abs(it.from - d.to) < 1e-6) ||
@@ -539,6 +642,74 @@ class RoutePath private constructor(
             return windows to out
         }
 
+        /**
+         * The curve across the street junction that ends the drawing [d], from its near side ([Drawing.carriagewayTo]) to [far]:
+         * from where the path lies at the near side, along the road's way there, to where it lies at [far], along the new road's
+         * way there; a cubic whose handles reach [JUNCTION_PULL] of the way to where the two ways would meet, or a third of the
+         * way across where they do not meet ahead of both (a road that goes straight on, or turns back). Its points every metre
+         * or so, at stations from the near side to [far] by their share of its length. Null where the junction lies off the
+         * region's windows or its two sides do not lie apart.
+         */
+        private fun junctionOf(d: Drawing, axes: List<RoadAxis>, samples: List<DoubleArray>, offsets: List<DoubleArray>, far: Double): Junction? {
+            val near = d.carriagewayTo
+            if (far <= near + SAME_STATION) return null
+            val node = nodes.indexOfFirst { abs(it.station - d.to) < 1e-6 && LaneEvidence.planTurns(it) }
+            val a = axes.lastOrNull { near >= it.from - 1e-9 && near <= it.to + 1e-9 } ?: return null
+            val b = axes.lastOrNull { far >= it.from - 1e-9 && far <= it.to + 1e-9 } ?: return null
+            val t0 = offsetIn(axes, samples, offsets, near)
+            val t1 = offsetIn(axes, samples, offsets, far)
+            val p0 = a.offset(near, t0)
+            val at0 = a.at(near)
+            val p3 = a.toLocal(b.toGeo(b.offset(far, t1)))
+            val at3 = b.at(far)
+            val chord = p0.distanceTo(p3)
+            if (chord < SAME_OFFSET_METERS) return null
+            // Where the two ways meet: p0 + u t0 = p3 - v t3, for u and v ahead of both.
+            val cross = at0.tx * at3.ty - at0.ty * at3.tx
+            var u = chord / 3.0
+            var v = chord / 3.0
+            if (abs(cross) > JUNCTION_MEET_SINE) {
+                val dx = p3.x - p0.x
+                val dy = p3.y - p0.y
+                val toMeet0 = (dx * at3.ty - dy * at3.tx) / cross
+                val toMeet3 = (dx * at0.ty - dy * at0.tx) / cross
+                if (toMeet0 > 0.0 && toMeet3 > 0.0) {
+                    u = JUNCTION_PULL * toMeet0
+                    v = JUNCTION_PULL * toMeet3
+                }
+            }
+            val p1 = LocalPoint(p0.x + at0.tx * u, p0.y + at0.ty * u)
+            val p2 = LocalPoint(p3.x - at3.tx * v, p3.y - at3.ty * v)
+            val n = max(JUNCTION_MIN_POINTS, ceil(chord / JUNCTION_STEP_METERS).toInt())
+            val local = (0..n).map { k ->
+                val t = k.toDouble() / n
+                val w = 1.0 - t
+                LocalPoint(
+                    w * w * w * p0.x + 3.0 * w * w * t * p1.x + 3.0 * w * t * t * p2.x + t * t * t * p3.x,
+                    w * w * w * p0.y + 3.0 * w * w * t * p1.y + 3.0 * w * t * t * p2.y + t * t * t * p3.y,
+                )
+            }
+            val lengths = DoubleArray(local.size)
+            for (k in 1 until local.size) lengths[k] = lengths[k - 1] + local[k].distanceTo(local[k - 1])
+            val total = lengths.last()
+            val stations = DoubleArray(local.size) { k -> if (total > 0.0) near + (far - near) * lengths[k] / total else near }
+            stations[local.size - 1] = far
+            return Junction(node, near, far, t0, t1, local.map { a.toGeo(it) }, stations)
+        }
+
+        /** The path's offset at [station] as the solve left it, along whichever of [axes] holds it. */
+        private fun offsetIn(axes: List<RoadAxis>, samples: List<DoubleArray>, offsets: List<DoubleArray>, station: Double): Double {
+            for (k in axes.indices.reversed()) {
+                val st = samples[k]
+                if (st.isEmpty() || station < st.first() - 1e-9 || station > st.last() + 1e-9) continue
+                val j = indexAtOrBefore(st, station + 1e-9).coerceIn(0, st.size - 1)
+                if (abs(st[j] - station) < 1e-6 || j == st.size - 1) return offsets[k][j]
+                val f = (station - st[j]) / (st[j + 1] - st[j])
+                return offsets[k][j] + (offsets[k][j + 1] - offsets[k][j]) * f
+            }
+            return 0.0
+        }
+
         /** Each window's samples: its axis' own, and [extra] stations that lie inside it. */
         private fun samplesOf(axes: List<RoadAxis>, extra: List<Double>): List<DoubleArray> = axes.map { axis ->
             val base = axis.stations()
@@ -548,7 +719,7 @@ class RoutePath private constructor(
 
         /** Where the path is back on the road's line for good at the region's end: on a straight piece, not before the last drawing's end. */
         private fun backAt(region: Region, axes: List<RoadAxis>, samples: List<DoubleArray>, offsets: List<DoubleArray>): Double {
-            var back = region.drawings.last().to
+            var back = region.drawings.last().let { if (it.junctionEnd) min(length, it.to + JUNCTION_FAR_SIDE_METERS) else it.to }
             search@ for (k in axes.indices.reversed()) {
                 val s = samples[k]
                 val o = offsets[k]
@@ -640,6 +811,10 @@ class RoutePath private constructor(
             for (d in region.drawings) {
                 out.add(d.from)
                 out.add(d.to)
+                if (d.junctionEnd) {
+                    out.add(d.carriagewayTo)
+                    out.add(d.to + JUNCTION_FAR_SIDE_METERS)
+                }
             }
             for (ref in refs) if (ref.station > region.from && ref.station < region.to) out.add(ref.station)
             return out
@@ -672,7 +847,11 @@ class RoutePath private constructor(
                     val hold = layers.last().hold
                     // A turn goes straight on from where the path is: its piece and the moves still under way.
                     val next = pieceAt(region, station, axis, piece, settled) { pathOf(layers, station) }
-                    if (next != piece) {
+                    if (next == Piece.Across && piece != Piece.Across) {
+                        // Into a street junction: its curve takes over the moves under way, and the solve is on the road's line.
+                        layers.clear()
+                        layers.add(Layer(Piece.Across, 0.0, 0.0, 0.0, 0, false))
+                    } else if (next != piece) {
                         // The old piece's value here; the band's middle never steps back behind it either. Between two bands,
                         // where the path was: a lane that ends at its edge with no taper takes the old band's middle with it.
                         val bands = piece is Piece.Band && next is Piece.Band
@@ -703,7 +882,7 @@ class RoutePath private constructor(
                             section.place(next.lane, station, axis)?.state == CrossSection.State.OPENING
                         if (!turns && (abs(jump) > SAME_OFFSET_METERS || opening && !returns)) {
                             val kind = when {
-                                piece == Piece.Middle || piece is Piece.Turn -> Move.Kind.ENTER
+                                piece == Piece.Middle || piece is Piece.Turn || piece == Piece.Across -> Move.Kind.ENTER
                                 returns -> Move.Kind.RETURN
                                 else -> Move.Kind.LANE
                             }
@@ -794,10 +973,14 @@ class RoutePath private constructor(
          * A turn is over once the path has settled onto the new road's line: [settled] keeps the stations of those turns.
          */
         private fun pieceAt(region: Region, station: Double, axis: RoadAxis, current: Piece, settled: MutableSet<Double>, drawn: () -> Double): Piece {
+            // Across a street junction: the junction's own curve, from its near side to its far side.
+            for (d in region.drawings) {
+                if (d.junctionEnd && station > d.carriagewayTo + SAME_STATION && station < d.to + JUNCTION_FAR_SIDE_METERS - SAME_STATION) return Piece.Across
+            }
             // At a drawing's end where the route turns: straight on from where the turn's arc begins, until the path is on the
             // new road's line, where a drawing that begins within the turn's reach takes over.
             for (d in region.drawings) {
-                if (!d.turnsAtEnd || d.to in settled) continue
+                if (!d.turnsAtEnd || d.junctionEnd || d.to in settled) continue
                 val begin = CrossSection.beginOf(axis, d.to)
                 if (station >= begin && station <= d.back) {
                     if (current !is Piece.Turn || current.turn != d.to) return Piece.Turn(d.to, drawn())
@@ -857,6 +1040,7 @@ class RoutePath private constructor(
             }
             is Piece.Turn -> CrossSection.turnOff(axis, piece.turn, piece.offset, station)
             is Piece.Held -> piece.offset
+            Piece.Across -> 0.0
         }
 
         /** The named [lane]'s middle; into a lane its neighbour feeds, along its taper from the feeder's middle. */

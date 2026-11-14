@@ -14,8 +14,10 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.lanes.StreetWays
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -28,8 +30,9 @@ class CrossSectionTest {
     private val w = LaneTopology.FREEWAY_LANE_METERS
     private val gore = LaneScenes.GORE
 
+    /** The cross-section of [route], every street of it one-way or two-way as [carriageway] says. */
     private fun section(route: LaneRoute, carriageway: CrossSection.Carriageway = CrossSection.Carriageway.ONE_WAY) =
-        CrossSection.of(SceneLines.planOf(route), carriageway = { carriageway })
+        CrossSection.of(SceneLines.planOf(route), streets = StreetWays.of(route) { carriageway == CrossSection.Carriageway.ONE_WAY })
 
     private fun bounds(places: List<CrossSection.Place>) = listOf(places.first().left) + places.map { it.right }
 
@@ -371,6 +374,98 @@ class CrossSectionTest {
         assertBounds(listOf(street, 0.0, -street, -2.0 * street), atTurn)
         // One-way, the same lanes are centred on the line.
         assertBounds(listOf(street, 0.0, -street), section(pocket).lanes(before))
+    }
+
+    @Test
+    fun `a street no source tells is laid out but not drawn, and listed`() {
+        val route = LaneScenes.streetTurn()
+        val street = 3.35
+        val none = CrossSection.of(SceneLines.planOf(route))
+        // Laid out one-way, so the plan's lanes have their places, but drawn nowhere.
+        assertBounds(listOf(street, 0.0, -street), none.lanes(gore - 500.0))
+        assertEquals(CrossSection.Carriageway.ONE_WAY, none.carriagewayAt(gore - 500.0))
+        assertFalse(none.drawsAt(gore - 500.0))
+        assertEquals(listOf(CrossSection.UndrawnStreet(gore - 650.0, gore, mixed = false)), none.undrawnStreets)
+        assertEquals(650.0, none.undrawnStreets.single().meters, 1e-9)
+        val run = requireNotNull(none.runAt(gore - 500.0))
+        assertTrue(none.streetParts(0.0, gore + 300.0, run).isEmpty())
+        // Told, it is drawn where the evidence has lanes, and nothing is left undrawn.
+        for (carriageway in CrossSection.Carriageway.entries) {
+            val told = section(route, carriageway)
+            assertTrue(told.drawsAt(gore - 500.0))
+            assertFalse(told.drawsAt(gore - 700.0))
+            assertTrue(told.undrawnStreets.isEmpty())
+            assertEquals(listOf(gore - 650.0..gore), told.streetParts(0.0, gore + 300.0, run))
+            assertEquals(listOf(gore - 600.0..gore - 300.0), told.streetParts(gore - 600.0, gore - 300.0, run))
+            assertEquals(carriageway, told.carriagewayAt(gore - 500.0))
+        }
+        // Freeways need no source.
+        assertTrue(CrossSection.of(SceneLines.planOf(LaneScenes.ia())).drawsAt(1_000.0))
+    }
+
+    @Test
+    fun `where the sources of one road disagree none of it is drawn`() {
+        val route = LaneScenes.streetTurn()
+        // One-way up to the intersection 200 m before the turn and two-way past it, as the horizon reads each street's middle.
+        val mixed = CrossSection.of(SceneLines.planOf(route), streets = StreetWays.of(route) { it < gore - 200.0 })
+        assertFalse(mixed.drawsAt(gore - 500.0))
+        assertFalse(mixed.drawsAt(gore - 100.0))
+        assertEquals(listOf(CrossSection.UndrawnStreet(gore - 650.0, gore, mixed = true)), mixed.undrawnStreets)
+        // Two stretches of one road apart, the second street two-way: neither is drawn.
+        val apart = LaneScenes.route(
+            LaneScenes.street(0.0, maneuver = LaneScenes.DEPART),
+            LaneScenes.street(3_000.0, s(), s()),
+            LaneScenes.street(4_500.0, s(), s()),
+            LaneScenes.street(5_000.0, maneuver = LaneScenes.ARRIVE),
+            id = "street-apart",
+        )
+        val plan = SceneLines.planOf(apart)
+        val known = plan.evidence().stretches.filter { it.kind == LaneEvidence.Kind.KNOWN }
+        val both = CrossSection.of(plan, streets = StreetWays.of(apart) { it < 2_000.0 })
+        assertEquals(2, both.undrawnStreets.size, "${both.undrawnStreets}")
+        assertTrue(both.undrawnStreets.all { it.mixed })
+        assertEquals(known.minOf { it.from }, both.undrawnStreets.first().from, 1e-9)
+        for (stretch in known) assertFalse(both.drawsAt((stretch.from + stretch.to) / 2.0))
+        // All alike, both are drawn.
+        val alike = CrossSection.of(plan, streets = StreetWays.of(apart) { false })
+        assertTrue(alike.undrawnStreets.isEmpty())
+        for (stretch in known) assertTrue(alike.drawsAt((stretch.from + stretch.to) / 2.0))
+    }
+
+    @Test
+    fun `the oncoming half of a two-way street is as wide as the route's lanes where its road begins, or as far as they reach`() {
+        val street = 3.35
+        val turn = LaneScenes.streetTurn()
+        assertEquals(2.0 * street, requireNotNull(section(turn, CrossSection.Carriageway.TWO_WAY).oncomingEdge(gore - 500.0)), 1e-9)
+        assertNull(section(turn).oncomingEdge(gore - 500.0))
+        // With a lane kept for buses and one only for bicycles.
+        val kept = section(LaneScenes.streetTurn(bicycle = true, bus = true), CrossSection.Carriageway.TWO_WAY)
+        assertEquals(3.0 * street + 1.8, requireNotNull(kept.oncomingEdge(gore - 500.0)), 1e-9)
+        // Two left pockets on a street with one lane each way open past it.
+        val double = LaneScenes.route(
+            LaneScenes.street(0.0, maneuver = LaneScenes.DEPART),
+            LaneScenes.street(gore - 200.0, s()),
+            LaneScenes.street(gore, LaneScenes.left(), LaneScenes.left(), s(false), roads = LaneScenes.CROSSING, maneuver = LaneScenes.TURN_LEFT),
+            LaneScenes.street(gore + 300.0, maneuver = LaneScenes.ARRIVE),
+            id = "street-double-left",
+        )
+        val twoWay = section(double, CrossSection.Carriageway.TWO_WAY)
+        assertEquals(street, requireNotNull(twoWay.oncomingEdge(gore - 150.0)), 1e-9)
+        assertEquals(2.0 * street, requireNotNull(twoWay.oncomingEdge(gore - 15.0)), 1e-9)
+        assertEquals(2.0 * street, twoWay.lanes(gore - 15.0).first().left, 1e-9)
+        assertEquals(CrossSection.Edges(2.0 * street, -street, 2.0 * street + 1.2, -street - 1.2), twoWay.edges(gore - 15.0))
+    }
+
+    @Test
+    fun `a junction the route turns at on a street is no ramp's start, and the road after it lies from its line`() {
+        val route = LaneScenes.streetTurn(receiving = true)
+        for (carriageway in CrossSection.Carriageway.entries) {
+            val section = section(route, carriageway)
+            assertTrue(section.rampStarts.isEmpty())
+            val after = section.lanes(gore + 15.0)
+            assertEquals(1, after.size)
+            assertEquals(if (carriageway == CrossSection.Carriageway.TWO_WAY) 0.0 else 3.35 / 2.0, after.single().left, 1e-9)
+        }
     }
 
     @Test

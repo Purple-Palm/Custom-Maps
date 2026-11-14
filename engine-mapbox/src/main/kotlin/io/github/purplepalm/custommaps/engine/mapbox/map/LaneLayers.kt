@@ -86,7 +86,7 @@ internal object LaneLayers {
         /** A line's or a symbol's paint: [PAINT_WHITE] or [PAINT_YELLOW]. */
         const val PAINT = "paint"
 
-        /** A line's width: [WIDTH_NORMAL], [WIDTH_WIDE] or [WIDTH_EDGE]. */
+        /** A line's width: [WIDTH_NORMAL], [WIDTH_WIDE], [WIDTH_EDGE] or [WIDTH_STOP]. */
         const val WIDTH = "width"
 
         const val PAINT_WHITE = "white"
@@ -94,6 +94,9 @@ internal object LaneLayers {
         const val WIDTH_NORMAL = "normal"
         const val WIDTH_WIDE = "wide"
         const val WIDTH_EDGE = "edge"
+
+        /** A stop line's ([LaneDrawing.Kind.STOP_LINE]); no layer draws it yet: the app draws no street's lanes so far. */
+        const val WIDTH_STOP = "stop"
 
         /** The feature state of a tint's piece the car has passed: true, and the piece is not drawn. */
         const val STATE_BEHIND = "behind"
@@ -171,6 +174,7 @@ internal object LaneLayers {
         LaneDrawing.Width.NORMAL -> Key.WIDTH_NORMAL
         LaneDrawing.Width.WIDE -> Key.WIDTH_WIDE
         LaneDrawing.Width.EDGE -> Key.WIDTH_EDGE
+        LaneDrawing.Width.STOP -> Key.WIDTH_STOP
     }
 
     /** The value of [Key.PAINT] for [paint]. */

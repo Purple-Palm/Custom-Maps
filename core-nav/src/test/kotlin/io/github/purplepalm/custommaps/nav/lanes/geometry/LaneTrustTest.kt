@@ -14,6 +14,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.lanes.StreetWays
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Kind
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing.Part
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
@@ -22,6 +23,7 @@ import io.github.purplepalm.custommaps.nav.model.RouteLane
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.abs
@@ -59,10 +61,10 @@ class LaneTrustTest {
         val features: List<LaneDrawing.Feature>,
     )
 
-    private fun build(name: String, route: LaneRoute, line: List<GeoPoint> = SceneLines.of(route)): Built {
+    private fun build(name: String, route: LaneRoute, line: List<GeoPoint> = SceneLines.of(route), streets: StreetWays? = null): Built {
         val plan = SceneLines.planOf(route)
         val evidence = plan.evidence()
-        val section = CrossSection.of(plan, evidence)
+        val section = CrossSection.of(plan, evidence, streets)
         val path = RoutePath.of(plan, line, version = 1, evidence = evidence, section = section)
         val drawing = LaneDrawing.of(plan, path, evidence, section)
         return Built(name, route, plan, evidence, section, path, drawing, drawing.features())
@@ -160,6 +162,41 @@ class LaneTrustTest {
     }
 
     @Test
+    fun `every trust property holds on the street scenes, two-way and one-way`() {
+        for ((name, route) in streetScenes()) {
+            for (oneWay in listOf(false, true)) check(build("$name-${if (oneWay) "one-way" else "two-way"}", route, streets = LaneScenes.ways(route, oneWay)))
+        }
+        assertSeen("line", "named", "lit", "arrow", "kept", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
+    }
+
+    @Test
+    fun `every trust property holds on seeded random streets, two-way, one-way and without a source`() {
+        val rng = Random(STREET_SEED)
+        var undrawn = 0
+        repeat(STREET_ROUTES) { k ->
+            val route = RandomRoutes.street(rng, "street-$k")
+            val bends = (1..6).map { rng.nextDouble(200.0, gore - 200.0) to rng.nextDouble(-4.0, 4.0) }
+            val line = SceneLines.line(route.lengthMeters, (bends + SceneLines.bendsOf(route)).sortedBy { it.first })
+            val streets = when (rng.nextInt(6)) {
+                0 -> null
+                1, 2 -> LaneScenes.ways(route, oneWay = true)
+                else -> LaneScenes.ways(route, oneWay = false)
+            }
+            val built = build("street-$k", route, line, streets)
+            if (streets == null) {
+                // Without a source nothing of a street is drawn, and the path is the route's own line.
+                assertTrue(built.path.drawings.isEmpty() && built.features.isEmpty(), "street-$k drawn without a source")
+                assertEquals(built.path.route, built.path.points)
+                undrawn++
+            }
+            check(built)
+        }
+        assertTrue(undrawn > 0)
+        assertSeen("line", "named", "lit", "tint", "arrow", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
+        assertSeen("litAcross", "beginsPastJunction")
+    }
+
+    @Test
     fun `11 the same route gives byte-equal features, whole and in windows`() {
         for (route in listOf(LaneScenes.iw31(), LaneScenes.ia(), LaneScenes.carpoolEnds(), LaneScenes.thirdLaneForCarPools())) {
             val one = build(route.routeId, route)
@@ -189,6 +226,8 @@ class LaneTrustTest {
     private fun check(b: Built) {
         linesOnData(b)
         noDoubleNoCentreNoChevron(b)
+        streetLines(b)
+        junctionInteriorsPlain(b)
         designatedByKind(b)
         namedLaneDrawn(b)
         movesTowardThePlansLane(b)
@@ -393,8 +432,10 @@ class LaneTrustTest {
     // ------------------------------------------------------------------ 2: no double line, no centre line, no chevron
 
     private fun noDoubleNoCentreNoChevron(b: Built) {
+        // No crosswalk among them: the route gives no crossing.
         val known = setOf(
             Kind.ASPHALT, Kind.KEPT_LANE, Kind.TINT, Kind.LIT, Kind.LIT_EDGE, Kind.LANE_LINE, Kind.EDGE_LINE, Kind.CHANNEL_LINE, Kind.DIAMOND, Kind.ARROW,
+            Kind.STOP_LINE,
         )
         for (f in b.features) {
             assertTrue(f.kind in known, "${b.name}: ${f.kind}")
@@ -453,6 +494,83 @@ class LaneTrustTest {
                     assertTrue(c - a >= DOUBLE_LINE_METERS, "${b.name} at $x: two lines ${c - a} m apart, at $a and $c")
                     saw("paint")
                 }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 2 on streets: no centre line, no oncoming line, stop lines from flags
+
+    /**
+     * On a two-way street no line marks the road's line or anything of the oncoming half: no edge line at all (the left one
+     * would be a centre line of a kind the data does not give), and no line left of the route's leftmost lane. A stop line
+     * stands only before an intersection whose flags give a traffic signal or a stop sign, [LaneTopology.STOP_LINE_METERS]
+     * before it, [LaneDrawing.STOP_LINE_METERS] deep, white, from edge to edge of the route's lanes there; never one where the
+     * route reaches the intersection on no street.
+     */
+    private fun streetLines(b: Built) {
+        val nodes = b.route.nodes
+        for (f in b.features) {
+            if (f.part != Part.ROUTE) continue
+            if (f.kind == Kind.STOP_LINE) {
+                val node = nodes.indices.firstOrNull { abs(nodes[it].station - LaneTopology.STOP_LINE_METERS - f.to) < 1e-6 }
+                assertTrue(node != null && (nodes[node].trafficSignal || nodes[node].stopSign), "${b.name}: a stop line to ${f.to} without a flag")
+                assertEquals(RoadKind.STREET, b.route.approachRoad(requireNotNull(node)), "${b.name}: a stop line off a street")
+                assertEquals(LaneDrawing.STOP_LINE_METERS, f.to - f.from, 1e-9)
+                assertEquals(LaneDrawing.Width.STOP, f.width)
+                assertEquals(LaneDrawing.Paint.WHITE, f.paint)
+                val middle = f.from + LaneDrawing.STOP_LINE_METERS / 2.0
+                val axis = requireNotNull(b.path.axisAt(middle))
+                val ends = f.parts.single().map { offsetOf(axis, middle, it) }.sorted()
+                val lanes = b.drawing.lanesAt(middle)
+                assertEquals(lanes.minOf { it.right }, ends.first(), 1e-6, "${b.name}: the stop line's right end at $middle")
+                assertEquals(lanes.maxOf { it.left }, ends.last(), 1e-6, "${b.name}: the stop line's left end at $middle")
+                saw("stopLine")
+                continue
+            }
+            if (f.kind != Kind.LANE_LINE && f.kind != Kind.EDGE_LINE && f.kind != Kind.CHANNEL_LINE) continue
+            for (part in f.parts) {
+                for (p in part) {
+                    val (station, offset) = DrawingProbe.project(b.path.axes, (f.from + f.to) / 2.0, p)
+                    if (b.section.carriagewayAt(station) != CrossSection.Carriageway.TWO_WAY || station < f.from - 1.0 || station > f.to + 1.0) continue
+                    assertTrue(f.kind == Kind.LANE_LINE, "${b.name}: a ${f.kind} ${f.side} on a two-way street at $station")
+                    val lanes = b.drawing.lanesAt(station)
+                    if (lanes.isEmpty()) continue
+                    assertTrue(offset <= lanes.maxOf { it.left } + 0.01, "${b.name}: a line at $offset over the oncoming half at $station")
+                    saw("twoWayLine")
+                }
+            }
+        }
+        // Every flagged intersection on a drawn street approach has its stop line where the route's lanes are drawn there.
+        for ((i, node) in nodes.withIndex()) {
+            if (i == 0 || !(node.trafficSignal || node.stopSign) || b.route.approachRoad(i) != RoadKind.STREET) continue
+            val station = node.station - LaneTopology.STOP_LINE_METERS
+            val inside = b.drawing.junctionInteriors.any { station - LaneDrawing.STOP_LINE_METERS < it.endInclusive && station > it.start }
+            val drawn = b.path.drawings.any { station - LaneDrawing.STOP_LINE_METERS >= it.from && station <= it.carriagewayTo } &&
+                b.drawing.lanesAt(station - LaneDrawing.STOP_LINE_METERS).isNotEmpty() && !inside
+            assertEquals(drawn, b.drawing.stopLines.any { it.node == i }, "${b.name}: the stop line before intersection $i")
+        }
+    }
+
+    /**
+     * Inside a street junction the drawing goes on through, the map's own road shows (the design's junction interiors): no
+     * asphalt, line, darker lane, arrow, stop line or tint of ours lies across the road there, only the lit lane on the path;
+     * the lanes go on as laid out, undrawn.
+     */
+    private fun junctionInteriorsPlain(b: Built) {
+        for (interior in b.drawing.junctionInteriors) {
+            for (s in listOf(interior.start + 0.5, (interior.start + interior.endInclusive) / 2.0, interior.endInclusive - 0.5)) {
+                val axis = b.path.axisAt(s) ?: continue
+                for (f in b.features) {
+                    if (f.from > interior.endInclusive || f.to < interior.start) continue
+                    val across = DrawingProbe.across(axis, s, f.parts).filter { abs(it) < INTERIOR_REACH_METERS }
+                    if (f.kind == Kind.LIT || f.kind == Kind.LIT_EDGE) {
+                        if (across.isNotEmpty()) saw("litAcross")
+                        continue
+                    }
+                    assertTrue(across.isEmpty(), "${b.name}: a ${f.kind} inside the junction from ${interior.start} to ${interior.endInclusive}, at $s")
+                }
+                assertNull(b.drawing.asphaltAt(s), "${b.name}: asphalt inside the junction at $s")
+                saw("interiorPlain")
             }
         }
     }
@@ -519,7 +637,7 @@ class LaneTrustTest {
             for (x in along(window.from, window.to, 2.0)) {
                 val seg = b.plan.segmentAt(x) ?: continue
                 val named = seg.named ?: continue
-                if (!seg.inWindow || seg.noLane != null || b.path.drawings.none { x >= it.from && x < it.to }) continue
+                if (!seg.inWindow || seg.noLane != null || b.path.drawings.none { x >= it.from && x < it.carriagewayTo }) continue
                 val lanes = b.drawing.lanesAt(x)
                 val lane = b.plan.topology.lanes[named]
                 assertFalse(lane.designated, "${b.name}: the designated lane $named named at $x")
@@ -555,8 +673,8 @@ class LaneTrustTest {
             var first = 0.0 // the first move's direction while it lasts; 2 once it is over
             var prev = b.path.offsetAt(station)
             var approach = approachOf(b, station)
-            while (station < drawing.to) {
-                station = minOf(drawing.to, station + 1.0)
+            while (station < drawing.carriagewayTo) {
+                station = minOf(drawing.carriagewayTo, station + 1.0)
                 val now = b.path.offsetAt(station)
                 val here = approachOf(b, station)
                 if (here != approach) {
@@ -705,17 +823,47 @@ class LaneTrustTest {
     private fun tapersAtEveryEnd(b: Built) {
         val end = b.path.routeStations.last()
         val asphalt = b.features.filter { it.kind == Kind.ASPHALT }
+        val interiors = b.drawing.junctionInteriors
+        fun inside(s: Double) = interiors.any { s > it.start + 1e-6 && s < it.endInclusive - 1e-6 }
         for (d in b.path.drawings) {
-            // From the map's band where the drawing begins, if the route does not begin with it.
+            // From the map's band where the drawing begins, if the route does not begin with it; square at a street junction's far
+            // side, where the junction's inside is the map's own road.
             val from = d.asphaltFrom
-            if (from > 0.0) {
+            // A street junction the drawing goes on through that it begins inside, or just past.
+            val before = interiors.lastOrNull { it.start <= d.from + 1e-6 && it.endInclusive > from + 1e-6 }
+            if (d.junctionStart) {
+                assertEquals(d.from, from, 0.0, "${b.name}: the asphalt past a junction begins at its far side")
+                assertTrue(asphalt.any { it.part == Part.ROUTE && abs(it.from - from) < 1e-6 }, "${b.name}: no asphalt from the junction's far side at $from")
+                saw("junctionStart")
+            } else if (before != null) {
+                // Square at that junction's far side, with nothing of it before.
+                val first = asphalt.filter { it.part == Part.ROUTE && it.to > from + 1e-6 && it.from < before.endInclusive + 1e-6 }.minByOrNull { it.from }
+                assertEquals(before.endInclusive, requireNotNull(first) { "${b.name}: no asphalt past the junction at ${before.endInclusive}" }.from, 1e-6, "${b.name}: the asphalt where the drawing begins at ${d.from}")
+                saw("beginsPastJunction")
+            } else if (from > 0.0) {
                 val first = requireNotNull(asphalt.firstOrNull { it.part == Part.ROUTE && abs(it.from - from) < 1e-6 }) { "${b.name}: no asphalt from $from" }
-                assertTrue(first.to > d.from, "${b.name}: the asphalt from $from ends at ${first.to}")
+                assertTrue(first.to > d.from || interiors.any { abs(it.start - first.to) < 1e-6 }, "${b.name}: the asphalt from $from ends at ${first.to}")
                 assertEquals(bandAt(b, from), width(b.drawing.asphaltAt(from)), 1e-6, "${b.name}: the asphalt's width where it begins at $from")
                 saw("begins")
             }
-            assertEquals(carriageway(b, d.from), width(b.drawing.asphaltAt(d.from)), 1e-6, "${b.name}: the asphalt's width where the drawing begins at ${d.from}")
-            if (d.turnsAtEnd) {
+            if (!inside(d.from)) {
+                assertEquals(carriageway(b, d.from), width(b.drawing.asphaltAt(d.from)), 1e-6, "${b.name}: the asphalt's width where the drawing begins at ${d.from}")
+            }
+            if (d.junctionEnd) {
+                // At a street junction the carriageway ends square at its near side, at the drawn lanes' own width, and nothing
+                // of the drawing's own lies past it but the next drawing beyond the junction; or at the near side of a junction
+                // it goes on through just before.
+                val near = interiors.firstOrNull { it.start < d.carriagewayTo - 1e-6 && it.endInclusive > d.carriagewayTo - 1e-6 }?.start ?: d.carriagewayTo
+                val main = asphalt.filter { it.part == Part.ROUTE && it.from < d.carriagewayTo && it.to > d.from }.maxByOrNull { it.to } ?: continue
+                assertEquals(near, main.to, 1e-6, "${b.name}: the asphalt before the junction at ${d.to}")
+                assertEquals(carriageway(b, near), width(b.drawing.asphaltAt(near)), 1e-6, "${b.name}: square at the junction's near side")
+                assertTrue(
+                    asphalt.none { it.from > d.carriagewayTo + 1e-6 && it.from < d.to + RoutePath.JUNCTION_FAR_SIDE_METERS - 1e-6 },
+                    "${b.name}: asphalt inside the junction at ${d.to}",
+                )
+                assertTrue(b.drawing.lanesAt(d.carriagewayTo + 0.5).isEmpty(), "${b.name}: lanes inside the junction at ${d.to}")
+                saw("junctionEnd")
+            } else if (d.turnsAtEnd) {
                 // At a turn the stub and the lanes beyond take the asphalt over across the same cut.
                 val main = asphalt.filter { it.part == Part.ROUTE && it.from < d.to && it.to > d.from }.maxByOrNull { it.to } ?: continue
                 assertTrue(
@@ -723,7 +871,7 @@ class LaneTrustTest {
                     "${b.name}: nothing takes the asphalt over at ${main.to}, where the drawing ending at ${d.to} turns",
                 )
                 saw("turns")
-            } else if (d.asphaltTo < end) {
+            } else if (d.asphaltTo < end && !inside(d.asphaltTo)) {
                 // Into the map's band where it ends on its road.
                 assertTrue(asphalt.any { it.part == Part.ROUTE && abs(it.to - d.asphaltTo) < 1e-6 }, "${b.name}: no asphalt to ${d.asphaltTo}")
                 assertEquals(bandAt(b, d.asphaltTo - 1e-3), width(b.drawing.asphaltAt(d.asphaltTo)), 1e-6, "${b.name}: the asphalt's width where it ends at ${d.asphaltTo}")
@@ -754,7 +902,7 @@ class LaneTrustTest {
             var station = window.from
             while (station < window.to) {
                 val seg = b.plan.segmentAt(station)
-                val drawn = b.path.drawings.any { station >= it.from && station < it.to }
+                val drawn = b.path.drawings.any { station >= it.from && station < it.carriagewayTo }
                 if (seg != null && seg.inWindow && seg.named != null && seg.noLane == null && drawn && excluded.none { station >= it.first && station <= it.second }) {
                     val offset = b.path.offsetAt(station)
                     val sign = edgeSign(b, station) ?: 0.0
@@ -782,7 +930,7 @@ class LaneTrustTest {
                 val seg = b.plan.segmentAt(x) ?: continue
                 val named = seg.named ?: continue
                 val edge = seg.edge ?: continue
-                if (b.path.drawings.none { x >= it.from && x < it.to }) continue
+                if (b.path.drawings.none { x >= it.from && x < it.carriagewayTo }) continue
                 val run = topology.lanes[named].run
                 val beyond = topology.lanes.any { lane ->
                     val from = lane.possibleFrom
@@ -854,6 +1002,8 @@ class LaneTrustTest {
             val half = CrossSection.laneMeters(road, lane.kinds) / 2.0
             for (p in f.parts.flatten()) {
                 val (s, _) = DrawingProbe.project(b.path.axes, middle, p)
+                // Not within the foot's search of a street junction, where the path is the junction's own curve, not an offset.
+                if (b.path.junctions.any { s > it.from - SQUARE_SEARCH_METERS && s < it.to }) continue
                 assertEquals(half, squareFromPath(b, p, s), LIT_CORNER_METERS, "${b.name}: a corner of the lit lane at $s")
             }
             saw("lit")
@@ -892,6 +1042,8 @@ class LaneTrustTest {
                 }
                 if (!stops) continue
                 val x = to - WEDGE_TIP_METERS
+                // Inside a street junction the drawing goes on through no tint is drawn; the wedge goes on past it.
+                if (b.drawing.junctionInteriors.any { x > it.start && x < it.endInclusive }) continue
                 val place = b.drawing.lanesAt(x).firstOrNull { it.lane == lane } ?: continue
                 val across = DrawingProbe.across(requireNotNull(b.path.axisAt(x)), x, pieces.filter { x >= it.from && x <= it.to }.flatMap { it.parts })
                 assertEquals(2, across.size, "${b.name}: lane $lane's tint at $x")
@@ -1012,7 +1164,7 @@ class LaneTrustTest {
             val from = a.endInclusive
             val to = c.start
             if (windows.none { from >= it.first - 1e-6 && to <= it.second + 1e-6 }) continue
-            if (b.path.drawings.none { from >= it.from && to <= it.to }) continue
+            if (b.path.drawings.none { from >= it.from && to <= it.carriagewayTo }) continue
             val between = b.plan.segments.filter { it.to > from && it.from < to }
             val named = between.firstOrNull()?.named ?: continue
             val goesOn = between.all { it.named == named && it.noLane == null && it.inWindow }
@@ -1036,7 +1188,8 @@ class LaneTrustTest {
      */
     private fun bareWhereReachedOnTheLine(b: Built) {
         val lines = b.features.filter { it.kind == Kind.LANE_LINE || it.kind == Kind.EDGE_LINE || it.kind == Kind.CHANNEL_LINE }
-        val gores = b.section.rampStarts.map { it.station } + b.path.drawings.filter { it.turnsAtEnd }.map { it.to }
+        // A street junction is no gore: the carriageway ends at its near side.
+        val gores = b.section.rampStarts.map { it.station } + b.path.drawings.filter { it.turnsAtEnd && !it.junctionEnd }.map { it.to }
         for (g in gores) {
             if (b.plan.segmentAt(g - 1e-6)?.noLane == null || b.path.drawings.none { g > it.from && g <= it.to }) continue
             assertTrue(b.drawing.gores().none { abs(it - g) < GoreArrow.SAME_PLACE_METERS }, "${b.name}: the app's own arrow at the gore at $g")
@@ -1099,13 +1252,18 @@ class LaneTrustTest {
     /** The width of the drawn carriageway at [station] with its aprons. */
     private fun carriageway(b: Built, station: Double): Double {
         val lanes = b.drawing.lanesAt(station)
-        return lanes.first().left - lanes.last().right + 2.0 * CrossSection.APRON_METERS
+        // On a two-way street the oncoming half beside the route's lanes.
+        val left = b.section.oncomingEdge(station, b.path.axisAt(station)) ?: lanes.first().left
+        return left - lanes.last().right + 2.0 * CrossSection.APRON_METERS
     }
 
     /** The map's own band of the road at [station]. */
     private fun bandAt(b: Built, station: Double): Double {
-        val road = b.route.nodes.lastOrNull { it.station <= station }?.road ?: RoadKind.FREEWAY
-        return if (road == RoadKind.FREEWAY) LaneDrawing.STANDARD_FREEWAY_BAND_METERS else LaneDrawing.STANDARD_RAMP_BAND_METERS
+        return when (b.route.nodes.lastOrNull { it.station <= station }?.road ?: RoadKind.FREEWAY) {
+            RoadKind.FREEWAY -> LaneDrawing.STANDARD_FREEWAY_BAND_METERS
+            RoadKind.RAMP -> LaneDrawing.STANDARD_RAMP_BAND_METERS
+            RoadKind.STREET -> LaneDrawing.STANDARD_STREET_BAND_METERS
+        }
     }
 
     /** The stretches where the route turns onto another road with lanes, and the path's turns: the path's rules do not hold across them. */
@@ -1152,6 +1310,14 @@ class LaneTrustTest {
         "tight-fork-before-exit" to LaneScenes.tightForkBeforeExit(),
     )
 
+    /** The street scenes of the geometry's tests. */
+    private fun streetScenes(): Map<String, LaneRoute> = linkedMapOf(
+        "street-turn" to LaneScenes.streetTurn(),
+        "street-turn-bicycle-bus" to LaneScenes.streetTurn(bicycle = true, bus = true),
+        "street-turn-receiving" to LaneScenes.streetTurn(receiving = true),
+        "street-pocket" to LaneScenes.streetPocket(),
+    )
+
     /**
      * [LaneScenes.carpoolBeyond]'s left exit beyond a car-pool lane, no lane named on its approach, with lane data on its ramp:
      * two lanes the ramp splits into [split] metres past the gore, the route keeping left. Within its run-up's reach of the
@@ -1181,6 +1347,13 @@ class LaneTrustTest {
         const val RANDOM_ROUTES = 60
         const val KEPT_SEED = 7
         const val KEPT_ROUTES = 200
+
+        /** Seeded random streets, and how many. */
+        const val STREET_SEED = 61
+        const val STREET_ROUTES = 120
+
+        /** How far across the road a feature crossing a junction's inside is looked for. */
+        const val INTERIOR_REACH_METERS = 30.0
 
         /** A second seed of approaches, and how many. */
         const val OPENING_SEED = 232

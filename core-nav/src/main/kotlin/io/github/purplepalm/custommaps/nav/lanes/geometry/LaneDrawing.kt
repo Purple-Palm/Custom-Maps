@@ -22,16 +22,31 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * The app's own lanes on freeways and ramps, as features in metres (the design's 2.2 to 2.5, 3.2, 3.3 and 4.2 to 4.3):
- * what the map draws under the route where the route's own lane data says how many lanes there are. Every element is
- * the route's data, a rule with a named constant, or not drawn; nothing is drawn as a lane that the data does not give.
- * Every lateral position comes from the one [CrossSection], laid along the [RoutePath]'s own axes, so the lane lines,
- * the asphalt and the route's path agree by construction.
+ * The app's own lanes on freeways, ramps and streets, as features in metres (the design's 2.2 to 2.5, 3.2, 3.3 and 4.2 to
+ * 4.3): what the map draws under the route where the route's own lane data says how many lanes there are. Every element
+ * is the route's data, a rule with a named constant, or not drawn; nothing is drawn as a lane that the data does not
+ * give. Every lateral position comes from the one [CrossSection], laid along the [RoutePath]'s own axes, so the lane
+ * lines, the asphalt and the route's path agree by construction.
+ *
+ * - **Streets** are drawn only where a source tells whether they are one-way or two-way ([CrossSection.drawsAt]), with
+ *   the elements below at a street lane's width ([LaneTopology.STREET_LANE_METERS]). On a two-way street the route's
+ *   lanes lie from the road's line to the right and the oncoming half beside them is asphalt only: no centre line of any
+ *   kind (which kind it is, or whether a shared turn lane lies there, is not in the data), no lane line and no edge line of
+ *   the oncoming half, no edge line of the route's half; a one-way street's lanes lie around the road's line with the edge
+ *   lines of a one-way carriageway. A lane point's arrows lie [STREET_ARROW_BEFORE_STOP_METERS] before where its stop line
+ *   stands ([LaneTopology.STOP_LINE_METERS] before its node), at a street arrow's size; a stop line ([Kind.STOP_LINE],
+ *   [STOP_LINE_METERS] along the road, across the route's lanes, ending there) only where the route's flags give a
+ *   traffic signal or a stop sign at the node. A junction's inside is the map's own road ([junctionInteriors]): where the
+ *   route goes on through one on a street, its asphalt, lines and darker lanes end square at the junction's near side,
+ *   where the stop line would stand, and begin again square at its far side, the lit lane crossing on the path; where it
+ *   turns at one, the carriageway ends square at the near side and the road after it begins square at the far side
+ *   ([RoutePath.Drawing.junctionStart]). No crosswalk is drawn: the route gives none.
  *
  * - **Asphalt** ([Kind.ASPHALT]): one opaque fill per drawn stretch, its lanes ([LaneTopology.FREEWAY_LANE_METERS] each)
- *   and [CrossSection.APRON_METERS] of apron outside each edge line. A stretch begins with a taper over
- *   [RoutePath.ASPHALT_TAPER_METERS] from the map's own road band ([STANDARD_FREEWAY_BAND_METERS], on ramps
- *   [STANDARD_RAMP_BAND_METERS]) and ends with one: where the drawing ends on its road, after the path's return to the
+ *   and [CrossSection.APRON_METERS] of apron outside each edge line, and on a two-way street the oncoming half
+ *   ([CrossSection.oncomingEdge]). A stretch begins with a taper over [RoutePath.ASPHALT_TAPER_METERS] from the map's own
+ *   road band ([STANDARD_FREEWAY_BAND_METERS], on ramps [STANDARD_RAMP_BAND_METERS], on streets
+ *   [STANDARD_STREET_BAND_METERS]) and ends with one: where the drawing ends on its road, after the path's return to the
  *   road's line over asphalt without lines. A zone between two drawn stretches is part of the stretch: no taper there.
  * - **Lane lines** ([Kind.LANE_LINE]), only where the route's lane points give the count (a known or bridged stretch, or
  *   one the electronic horizon bridged where its count is the lanes the plan draws: [LaneEvidence.Stretch.horizon]),
@@ -41,9 +56,9 @@ import kotlin.math.sin
  *   freeway (its arrows all point to one side, at that edge) dotted, [DOTTED_DASH_METERS] on [DOTTED_GAP_METERS], wide
  *   where a lane that went on through before drops at the exit, else normal (an added lane). A line is drawn only where
  *   both its lanes are at least [LINE_LANE_SHARE] of their width, so it begins and ends half way along a taper.
- * - **Edge lines** ([Kind.EDGE_LINE]): solid, left yellow and right white; not in a zone where nothing explains the
- *   lanes (a change of the count, a gap), kept on an approach where no lane is named (C1), broken for
- *   [JUNCTION_GAP_METERS] on each side of an intersection where a road meets that side, and wherever the edge
+ * - **Edge lines** ([Kind.EDGE_LINE]): solid, left yellow and right white; not on a two-way street; not in a zone where
+ *   nothing explains the lanes (a change of the count, a gap), kept on an approach where no lane is named (C1), broken
+ *   for [JUNCTION_GAP_METERS] on each side of an intersection where a road meets that side, and wherever the edge
  *   steps sideways (a lane leaving at the edge) rather than run across it.
  * - **Designated lanes** by kind: a car-pool lane (its kinds include car pools) with its wide line and a diamond
  *   outline [DIAMOND_WIDTH_METERS] by [DIAMOND_LENGTH_METERS] every [DIAMOND_EVERY_METERS] ([Kind.DIAMOND]); a lane
@@ -75,9 +90,9 @@ import kotlin.math.sin
  *   route line shows instead.
  * - **The tints** ([Kind.TINT]): in the same windows, where a lane is lit, each other lane of the plan's band as it is
  *   drawn, where the data gives the lanes (not in a zone, nor where only the horizon's count does), never a designated
- *   lane or one only possible. Where its lane stops working (it leaves the band while it is still there, or in a zone that
- *   begins where the tint ends) its far edge from the lit lane slides onto its near edge over [WEDGE_METERS], or the whole
- *   tint where it is shorter: a wedge pointing at the lit lane.
+ *   lane or one only possible, and not inside a street junction ([junctionInteriors]). Where its lane stops working (it
+ *   leaves the band while it is still there, or in a zone that begins where the tint ends) its far edge from the lit lane
+ *   slides onto its near edge over [WEDGE_METERS], or the whole tint where it is shorter: a wedge pointing at the lit lane.
  * - Both are cut into pieces at multiples of [PIECE_METERS] from the route's start, with ids that stay the same in every
  *   window ([litId], [tintId]): the map hides a tint behind the car and gives a lit piece its traffic by feature state.
  * - **A curve too sharp for the lanes** (3.3): where a line or an edge of the asphalt, a lane, a tint or the lit lane lies
@@ -139,6 +154,9 @@ class LaneDrawing private constructor(
 
         /** A lane arrow. */
         ARROW(true, "arrow"),
+
+        /** A stop line across the route's lanes, where the route's flags give a traffic signal or a stop sign ([STOP_LINE_METERS]). */
+        STOP_LINE(false, "stop_line"),
     }
 
     /** The paint of a line or a symbol. */
@@ -149,6 +167,7 @@ class LaneDrawing private constructor(
         NORMAL(LINE_METERS),
         WIDE(WIDE_LINE_METERS),
         EDGE(LIT_EDGE_METERS),
+        STOP(STOP_LINE_METERS),
     }
 
     /** How a line is cut: solid, or into dashes of [dashMeters] with [gapMeters] between them. */
@@ -203,12 +222,35 @@ class LaneDrawing private constructor(
 
     /**
      * The features that lie between route stations [from] and [to], cut there: asphalt first, next the lanes drawn darker,
-     * the lines, the diamonds and the arrows, each in route order. A symbol (an arrow, a diamond) is in where it begins.
+     * the lines, the diamonds, the arrows and the stop lines, each in route order. A symbol (an arrow, a diamond, a stop line)
+     * is in where it begins.
      */
     fun features(from: Double = Double.NEGATIVE_INFINITY, to: Double = Double.POSITIVE_INFINITY): List<Feature> = builder.features(from, to)
 
+    /**
+     * Where a stop line stands: before the intersection [node], its stop edge at route station [station], [LaneTopology.STOP_LINE_METERS]
+     * before the node; the line itself ([Kind.STOP_LINE]) is [STOP_LINE_METERS] deep before it.
+     */
+    data class StopLine(val node: Int, val station: Double)
+
+    /**
+     * The stop lines the drawing draws, in route order: before each intersection the route reaches on a drawn street where its
+     * flags give a traffic signal or a stop sign, across the route's lanes drawn there. Where the app draws a street's
+     * approach, the stop line's place for whatever stands at it.
+     */
+    val stopLines: List<StopLine> get() = builder.stopLines
+
     /** The route stations the drawing covers: every drawn stretch from where its asphalt begins to where it ends, in route order. */
     val spans: List<ClosedFloatingPointRange<Double>> get() = builder.spans
+
+    /**
+     * The insides of the street junctions the drawn streets go on through, in route order: from each junction's near side,
+     * [LaneTopology.STOP_LINE_METERS] before its node, where a stop line stands when one is flagged, to its far side,
+     * [RoutePath.JUNCTION_FAR_SIDE_METERS] past it, merged where they meet; at every intersection reached on a street where a
+     * road other than the route's meets it. The map's own road shows there: no asphalt, line, darker lane, arrow, stop line
+     * or tint of the app's; only the lit lane crosses, on the path. The lanes go on as laid out ([lanesAt]), undrawn.
+     */
+    val junctionInteriors: List<ClosedFloatingPointRange<Double>> get() = builder.interiors.map { it.first..it.second }
 
     /**
      * The route stations where a lane is lit, each stretch from where the lit lane begins to where it ends, in route
@@ -225,10 +267,17 @@ class LaneDrawing private constructor(
      */
     fun gores(): List<Double> = builder.goreStations()
 
-    /** The lanes drawn on the route's carriageway at [station], from the left: none outside the drawn stretches. */
+    /**
+     * The lanes drawn on the route's carriageway at [station], from the left: none outside the drawn stretches; inside a street
+     * junction the drawing goes on through ([junctionInteriors]), the lanes as laid out, which the lit lane and the car's bar
+     * cross on.
+     */
     internal fun lanesAt(station: Double): List<CrossSection.Place> = builder.lanesAt(station)
 
-    /** The asphalt's left and right edges at [station] on the route's carriageway, as offsets from the axis; null where none is drawn. */
+    /**
+     * The asphalt's left and right edges at [station] on the route's carriageway, as offsets from the axis; null where none is
+     * drawn, as inside a street junction ([junctionInteriors]).
+     */
     internal fun asphaltAt(station: Double): Pair<Double, Double>? = builder.asphaltAt(station)
 
     /**
@@ -299,6 +348,27 @@ class LaneDrawing private constructor(
         /** ...and no farther than this. */
         const val ARROW_FAR_MAX_METERS = 230.0
 
+        /** A street's lane arrow (the turn arrow of eight feet)... */
+        const val STREET_ARROW_LENGTH_METERS = 2.44
+
+        /** ...a street's arrow straight on only, a little longer... */
+        const val STREET_THROUGH_ARROW_LENGTH_METERS = 2.9
+
+        /** ...its head's length... */
+        const val STREET_ARROW_HEAD_LENGTH_METERS = 0.75
+
+        /** ...its head's width... */
+        const val STREET_ARROW_HEAD_WIDTH_METERS = 0.6
+
+        /** ...and its stem's width. */
+        const val STREET_ARROW_STEM_METERS = 0.15
+
+        /** On a street, a lane point's arrows begin this far before where its stop line stands ([LaneTopology.STOP_LINE_METERS] before it). */
+        const val STREET_ARROW_BEFORE_STOP_METERS = 9.0
+
+        /** A stop line's width along the road (24 inches): it ends where the stop line stands, [LaneTopology.STOP_LINE_METERS] before its node. */
+        const val STOP_LINE_METERS = 0.60
+
         /** The road the route leaves at a gore is drawn on for this far with its lanes; past it, it tapers into the map's band. */
         const val STUB_METERS = 100.0
 
@@ -307,6 +377,9 @@ class LaneDrawing private constructor(
 
         /** The same for a ramp. */
         const val STANDARD_RAMP_BAND_METERS = 5.5
+
+        /** The same for a street. */
+        const val STANDARD_STREET_BAND_METERS = 7.0
 
         /** An edge line is broken this far before and after an intersection where a road meets its side. */
         const val JUNCTION_GAP_METERS = 15.0
@@ -550,6 +623,9 @@ class LaneDrawing private constructor(
         /** For each side, the stretches where an edge line is broken at an intersection. */
         private val junctionGaps: Map<LaneEdge, List<Pair<Double, Double>>> = junctions()
 
+        /** The insides of the street junctions the drawings go on through ([LaneDrawing.junctionInteriors]), in route order. */
+        val interiors: List<Pair<Double, Double>> = interiorsOf()
+
         /** The drawing's gores: each ramp start inside a drawing, and each drawing's end at a turn. */
         private val gores = ArrayList<Gore>()
 
@@ -599,7 +675,8 @@ class LaneDrawing private constructor(
                 for (start in section.rampStarts) {
                     if (start.station > d.from && start.station < d.to) goreAt(d, start.node, start.station, false)?.let { gores.add(it) }
                 }
-                if (d.turnsAtEnd) {
+                // At a street junction the carriageway ends at the junction's near side: no gore, no lanes beyond.
+                if (d.turnsAtEnd && !d.junctionEnd) {
                     val node = nodes.indexOfFirst { abs(it.station - d.to) < SAME_STATION && LaneEvidence.planTurns(it) }
                     if (node >= 0) goreAt(d, node, d.to, true)?.let {
                         gores.add(it)
@@ -632,8 +709,13 @@ class LaneDrawing private constructor(
                 e.add(d.from)
                 e.add(d.to)
                 e.add(d.back)
+                e.add(d.carriagewayTo)
             }
             for ((_, gaps) in junctionGaps) for ((a, b) in gaps) {
+                e.add(a)
+                e.add(b)
+            }
+            for ((a, b) in interiors) {
                 e.add(a)
                 e.add(b)
             }
@@ -663,7 +745,7 @@ class LaneDrawing private constructor(
                 val d = drawings[i]
                 val gore = ends[i]
                 val stubEnd = gore?.let { if (it.stub.isNotEmpty()) it.station + STUB_METERS + RoutePath.ASPHALT_TAPER_METERS else 0.0 } ?: 0.0
-                max(0.0, d.asphaltFrom)..max(d.asphaltTo, stubEnd)
+                max(0.0, d.asphaltFrom)..if (d.junctionEnd) d.carriagewayTo else max(d.asphaltTo, stubEnd)
             }
         }
 
@@ -682,6 +764,7 @@ class LaneDrawing private constructor(
             }
             diamonds(a, b, out)
             arrows(a, b, out)
+            stopLineFeatures(a, b, out)
             lit(a, b, out)
             tints(a, b, out)
             // Stable: within a kind, the order the features were made in, which is route order.
@@ -710,13 +793,13 @@ class LaneDrawing private constructor(
 
         /** The route's carriageway at [station], from the left, as the drawing lays it. */
         fun lanesAt(station: Double): List<CrossSection.Place> {
-            val k = drawings.indexOfFirst { station >= it.from && station <= it.to }
+            val k = drawings.indexOfFirst { station >= it.from && station <= it.carriagewayTo }
             if (k < 0) return emptyList()
             return placesAt(drawings[k], ends[k], station, axisAt(station))
         }
 
         fun edgesAt(station: Double): Pair<GeoPoint, GeoPoint>? {
-            val k = drawings.indexOfFirst { station >= it.from && station <= it.to }
+            val k = drawings.indexOfFirst { station >= it.from && station <= it.carriagewayTo }
             if (k < 0) return null
             val end = ends[k]
             val places = placesAt(drawings[k], end, station, axisAt(station)).filter { it.width > NO_WIDTH }
@@ -729,9 +812,10 @@ class LaneDrawing private constructor(
         }
 
         fun asphaltAt(station: Double): Pair<Double, Double>? {
+            if (inInterior(station)) return null
             for (k in drawings.indices) {
                 val d = drawings[k]
-                if (station < max(0.0, d.asphaltFrom) || station > d.asphaltTo) continue
+                if (station < max(0.0, d.asphaltFrom) || station > d.asphaltTo || d.junctionEnd && station > d.carriagewayTo) continue
                 val end = ends[k]
                 // Past the arc of the turn a drawing ends at, its stub and the lanes beyond hold the asphalt: the route's
                 // carriageway there is the next drawing's, where one begins that soon after the turn.
@@ -796,34 +880,41 @@ class LaneDrawing private constructor(
             }
         }
 
-        /** The carriageway's asphalt edges at [s], with its aprons. */
+        /** The carriageway's asphalt edges at [s], with its aprons, and on a two-way street the oncoming half beside the route's lanes. */
         private fun carriageway(d: RoutePath.Drawing, end: Gore?, s: Double): Pair<Double, Double>? {
-            val places = placesAt(d, end, s, axisAt(s))
+            val axis = axisAt(s)
+            val places = placesAt(d, end, s, axis)
             if (places.isEmpty()) return null
-            return Pair(places.first().left + CrossSection.APRON_METERS, places.last().right - CrossSection.APRON_METERS)
+            val left = section.oncomingEdge(s, axis) ?: places.first().left
+            return Pair(left + CrossSection.APRON_METERS, places.last().right - CrossSection.APRON_METERS)
         }
 
         private fun mainAsphalt(d: RoutePath.Drawing, end: Gore?, a: Double, b: Double, out: MutableList<Feature>) {
             val from = max(a, max(0.0, d.asphaltFrom))
             // At a turn the drawing ends at, the stub and the lanes beyond take the asphalt over where the turn's arc begins,
-            // so all three meet across the same normal.
-            val to = min(b, end?.begin ?: d.asphaltTo)
+            // so all three meet across the same normal; at a street junction it ends square at the junction's near side.
+            val to = min(b, end?.begin ?: if (d.junctionEnd) d.carriagewayTo else d.asphaltTo)
             if (to <= from) return
-            val strip = Strip()
-            for (s in samples(from, to)) {
-                val edges = asphaltEdges(d, end, s) ?: continue
-                val axis = axisAt(s)
-                strip.stations.add(s)
-                strip.left.add(axis.toGeo(axis.offset(s, edges.first)))
-                strip.right.add(axis.toGeo(axis.offset(s, edges.second)))
+            // Across a street junction it goes on through, square at the near side and again at the far side; where the drawing
+            // begins inside one or just past one, at its far side, with no taper before it.
+            for ((p, q) in outsideInteriors(from, to)) {
+                if (q < to && q <= d.from) continue
+                val strip = Strip()
+                for (s in samples(p, q)) {
+                    val edges = asphaltEdges(d, end, s) ?: continue
+                    val axis = axisAt(s)
+                    strip.stations.add(s)
+                    strip.left.add(axis.toGeo(axis.offset(s, edges.first)))
+                    strip.right.add(axis.toGeo(axis.offset(s, edges.second)))
+                }
+                polygon(strip, Kind.ASPHALT, Part.ROUTE, null)?.let { out.add(it) }
             }
-            polygon(strip, Kind.ASPHALT, Part.ROUTE, null)?.let { out.add(it) }
         }
 
         /** The lines and the darker lanes of the drawing [d] between [a] and [b]. */
         private fun mainLines(d: RoutePath.Drawing, end: Gore?, a: Double, b: Double, out: MutableList<Feature>) {
             val from = max(a, d.from)
-            val to = min(b, d.to)
+            val to = min(b, d.carriagewayTo)
             if (to <= from) return
             val runs = LinkedHashMap<Any, Run>()
             val kept = LinkedHashMap<Int, Strip>()
@@ -835,8 +926,9 @@ class LaneDrawing private constructor(
                 val stretch = if (s < d.to) stretchAt(s) else null
                 val road = roadAt(s)
                 val here = LinkedHashMap<Any, Pair<Style, Double>>()
-                // Where the carriageway is bare the path crosses the lanes, which still go on straight along the old road: no line.
-                val bareHere = onBare(s)
+                // Where the carriageway is bare the path crosses the lanes, which still go on straight along the old road: no line;
+                // nor inside a street junction, where the map's own road shows.
+                val bareHere = onBare(s) || inInterior(s)
                 if (!bareHere) for (k in 0 until places.size - 1) {
                     val l = places[k]
                     val r = places[k + 1]
@@ -936,9 +1028,12 @@ class LaneDrawing private constructor(
             return BROKEN_LINE
         }
 
-        /** The style of the edge line on [side] at [s] of [stretch]; null where it is not drawn. */
+        /**
+         * The style of the edge line on [side] at [s] of [stretch]; null where it is not drawn. None on a two-way street: its
+         * left edge is the road's line, where a centre line of a kind the data does not give would stand.
+         */
         private fun edgeLine(side: LaneEdge, s: Double, stretch: LaneEvidence.Stretch?): Style? {
-            if (stretch == null) return null
+            if (stretch == null || section.carriagewayAt(s) == CrossSection.Carriageway.TWO_WAY) return null
             when (stretch.kind) {
                 LaneEvidence.Kind.KNOWN, LaneEvidence.Kind.BRIDGED -> Unit
                 LaneEvidence.Kind.ZONE -> {
@@ -1215,13 +1310,13 @@ class LaneDrawing private constructor(
             if (hov.isEmpty()) return
             for (d in drawings) {
                 val from = max(a, d.from)
-                val to = min(b, d.to)
+                val to = min(b, d.carriagewayTo)
                 if (to <= from) continue
                 var k = Math.ceil(from / DIAMOND_EVERY_METERS - 1e-9).toLong()
                 while (k * DIAMOND_EVERY_METERS + DIAMOND_LENGTH_METERS <= to) {
                     val s = k * DIAMOND_EVERY_METERS
                     k++
-                    if (s < from) continue
+                    if (s < from || overlapsInterior(s, s + DIAMOND_LENGTH_METERS)) continue
                     for (lane in hov) {
                         val middle = fullAt(d, s, lane.id, DIAMOND_LENGTH_METERS) ?: continue
                         val axis = axisAt(s)
@@ -1240,7 +1335,7 @@ class LaneDrawing private constructor(
          * stretch; null otherwise.
          */
         private fun fullAt(d: RoutePath.Drawing, s: Double, lane: Int, length: Double): Middle? {
-            if (s < d.from || s + length > d.to) return null
+            if (s < d.from || s + length > d.carriagewayTo) return null
             // Never where the carriageway is bare, where the path crosses the lanes.
             if (bare.any { it.first < s + length && it.second > s }) return null
             val centres = DoubleArray(3)
@@ -1274,27 +1369,75 @@ class LaneDrawing private constructor(
             }
         }
 
-        /** The lane arrows of every lane point between [a] and [b]. */
+        /**
+         * The stop lines: before each intersection reached on a street where the route's flags give a traffic signal or a stop
+         * sign, where the drawing lays lanes all along the line's depth, not on a bare stretch.
+         */
+        val stopLines: List<StopLine> by lazy {
+            val out = ArrayList<StopLine>()
+            for ((i, node) in nodes.withIndex()) {
+                if (i == 0 || !(node.trafficSignal || node.stopSign) || route.approachRoad(i) != RoadKind.STREET) continue
+                val station = node.station - LaneTopology.STOP_LINE_METERS
+                val begins = station - STOP_LINE_METERS
+                val k = drawings.indexOfFirst { begins >= it.from - SAME_STATION && station <= it.carriagewayTo + SAME_STATION }
+                if (k < 0 || onBare(begins) || onBare(station - SAME_STATION) || overlapsInterior(begins, station)) continue
+                val d = drawings[k]
+                val drawn = listOf(begins, station - STOP_LINE_METERS / 2.0, station).all { x ->
+                    placesAt(d, ends[k], min(x, d.carriagewayTo), axisAt(x)).isNotEmpty()
+                }
+                if (drawn) out.add(StopLine(i, station))
+            }
+            out
+        }
+
+        /** The stop lines between [a] and [b]: each a line across the route's lanes, at its middle, [STOP_LINE_METERS] wide. */
+        private fun stopLineFeatures(a: Double, b: Double, out: MutableList<Feature>) {
+            for (line in stopLines) {
+                val from = line.station - STOP_LINE_METERS
+                if (from < a || from >= b) continue
+                val s = line.station - STOP_LINE_METERS / 2.0
+                val k = drawings.indexOfFirst { from >= it.from - SAME_STATION && line.station <= it.carriagewayTo + SAME_STATION }
+                if (k < 0) continue
+                val axis = axisAt(s)
+                val places = placesAt(drawings[k], ends[k], s, axis)
+                if (places.isEmpty()) continue
+                val across = listOf(axis.toGeo(axis.offset(s, places.first().left)), axis.toGeo(axis.offset(s, places.last().right)))
+                out.add(Feature(Kind.STOP_LINE, from, line.station, listOf(across), Paint.WHITE, Width.STOP, Pattern.SOLID))
+            }
+        }
+
+        /**
+         * The lane arrows of every lane point between [a] and [b]: on a freeway or a ramp in the near and the far row, on a
+         * street in one row [STREET_ARROW_BEFORE_STOP_METERS] before where its stop line stands, at a street arrow's size.
+         */
         private fun arrows(a: Double, b: Double, out: MutableList<Feature>) {
             for (point in topology.points) {
                 val node = nodes[point.node]
+                val street = route.approachRoad(point.node) == RoadKind.STREET
+                // The row's room: its longest arrow's.
+                val size = if (street) ArrowSize.STREET_THROUGH else ArrowSize.FREEWAY
                 val rows = ArrayList<Double>()
-                if (!point.turns) rows.add(point.station - ARROW_NEAR_METERS)
-                rows.add(farRow(point))
+                if (street) {
+                    rows.add(point.station - LaneTopology.STOP_LINE_METERS - STREET_ARROW_BEFORE_STOP_METERS)
+                } else {
+                    if (!point.turns) rows.add(point.station - ARROW_NEAR_METERS)
+                    rows.add(farRow(point))
+                }
                 for (tail in rows) {
                     if (tail.isNaN() || tail < a || tail >= b) continue
-                    val d = drawings.firstOrNull { tail >= it.from && tail + ARROW_LENGTH_METERS <= it.to } ?: continue
-                    if (!ownStretch(point.node, tail)) continue
+                    val d = drawings.firstOrNull { tail >= it.from && tail + size.length <= it.carriagewayTo } ?: continue
+                    if (!ownStretch(point.node, tail, size.length) || overlapsInterior(tail, tail + size.length)) continue
                     for ((i, lane) in node.lanes.withIndex()) {
                         if (lane.designated || lane.indications.isEmpty()) continue
                         val id = point.lanes.getOrNull(i) ?: continue
-                        val middle = fullAt(d, tail, id, ARROW_LENGTH_METERS) ?: continue
+                        val own = if (!street) size else if (lane.indications == setOf(TurnModifier.STRAIGHT)) ArrowSize.STREET_THROUGH else ArrowSize.STREET
+                        val middle = fullAt(d, tail, id, own.length) ?: continue
                         val axis = axisAt(tail)
-                        val rings = arrowRings(lane.indications).map { ring -> ring.map { (u, v) -> axis.toGeo(axis.offset(tail + u, middle.at(u) + v)) } }
+                        val rings = arrowRings(lane.indications, own).map { ring -> ring.map { (u, v) -> axis.toGeo(axis.offset(tail + u, middle.at(u) + v)) } }
                         if (rings.isEmpty()) continue
                         out.add(
                             Feature(
-                                Kind.ARROW, tail, tail + ARROW_LENGTH_METERS, rings.map { ccw(it) }, Paint.WHITE,
+                                Kind.ARROW, tail, tail + own.length, rings.map { ccw(it) }, Paint.WHITE,
                                 lane = id, indications = lane.indications.sortedBy { it.ordinal },
                             ),
                         )
@@ -1316,10 +1459,10 @@ class LaneDrawing private constructor(
             return Double.NaN
         }
 
-        /** Whether an arrow from [tail] lies in the known stretch of the lane point at [node], all of it. */
-        private fun ownStretch(node: Int, tail: Double): Boolean {
+        /** Whether an arrow [length] long from [tail] lies in the known stretch of the lane point at [node], all of it. */
+        private fun ownStretch(node: Int, tail: Double, length: Double = ARROW_LENGTH_METERS): Boolean {
             val a = stretchAt(tail) ?: return false
-            val b = stretchAt(tail + ARROW_LENGTH_METERS) ?: return false
+            val b = stretchAt(tail + length) ?: return false
             return a === b && a.kind == LaneEvidence.Kind.KNOWN && a.point == node
         }
 
@@ -1331,7 +1474,7 @@ class LaneDrawing private constructor(
             for ((i, d) in drawings.withIndex()) {
                 for ((w0, w1) in windowSpans) {
                     val s0 = max(max(a, w0), d.from)
-                    val s1 = min(min(b, w1), d.to)
+                    val s1 = min(min(b, w1), d.carriagewayTo)
                     if (s1 - s0 > SAME_STATION) out.add(Triple(s0, s1, i))
                 }
             }
@@ -1586,6 +1729,11 @@ class LaneDrawing private constructor(
                 val wedge = if (span.leaves) wedgeMeters(span.to - span.from) else 0.0
                 val pieces = Pieces(Kind.TINT, out)
                 for (s in litSamples(s0, s1)) {
+                    // Not inside a street junction the drawing goes on through: the tint, and its wedge, go on past it.
+                    if (inInterior(s)) {
+                        pieces.close()
+                        continue
+                    }
                     val axis = axisAt(s)
                     val place = if (end != null && s >= end.begin) {
                         placesAt(d, end, s, axis).firstOrNull { it.lane == span.lane }
@@ -1765,7 +1913,11 @@ class LaneDrawing private constructor(
         /** The kind of road at [s]: the cross-section's, else the road that leaves the last intersection before it. */
         private fun roadAt(s: Double): RoadKind = section.roadAt(s) ?: nodes.lastOrNull { it.station <= s + SAME_STATION }?.road ?: RoadKind.FREEWAY
 
-        private fun bandOf(road: RoadKind): Double = if (road == RoadKind.FREEWAY) STANDARD_FREEWAY_BAND_METERS else STANDARD_RAMP_BAND_METERS
+        private fun bandOf(road: RoadKind): Double = when (road) {
+            RoadKind.FREEWAY -> STANDARD_FREEWAY_BAND_METERS
+            RoadKind.RAMP -> STANDARD_RAMP_BAND_METERS
+            RoadKind.STREET -> STANDARD_STREET_BAND_METERS
+        }
 
         /** Whether [lane] is kept for vehicles other than car pools and bicycles: drawn darker. */
         private fun kept(lane: Int): Boolean {
@@ -1828,6 +1980,67 @@ class LaneDrawing private constructor(
                 }
             }
             return mapOf(LaneEdge.LEFT to left, LaneEdge.RIGHT to right)
+        }
+
+        /**
+         * The insides of the street junctions the drawings go on through: about each intersection reached on a street where the
+         * route does not turn and a road other than its own meets it, from [LaneTopology.STOP_LINE_METERS] before the node to
+         * [RoutePath.JUNCTION_FAR_SIDE_METERS] past it, where a drawing lays lanes; merged where they meet, in route order.
+         */
+        private fun interiorsOf(): List<Pair<Double, Double>> {
+            val out = ArrayList<Pair<Double, Double>>()
+            for ((i, node) in nodes.withIndex()) {
+                if (i == 0 || route.approachRoad(i) != RoadKind.STREET || LaneEvidence.planTurns(node)) continue
+                if (node.bearings.indices.none { it != node.inIndex && it != node.outIndex && node.bearings[it] != null }) continue
+                val a = node.station - LaneTopology.STOP_LINE_METERS
+                val b = node.station + RoutePath.JUNCTION_FAR_SIDE_METERS
+                if (drawings.none { a < it.carriagewayTo && b > it.from }) continue
+                val last = out.lastOrNull()
+                if (last != null && a <= last.second) out[out.size - 1] = last.first to max(last.second, b) else out.add(a to b)
+            }
+            return out
+        }
+
+        /** Whether [s] lies inside a street junction the drawing goes on through ([interiors]), its two sides out. */
+        private fun inInterior(s: Double): Boolean {
+            val k = interiorAtOrBefore(s)
+            return k >= 0 && s > interiors[k].first && s < interiors[k].second
+        }
+
+        /** Whether the stretch from [a] to [b] reaches inside a street junction the drawing goes on through ([interiors]). */
+        private fun overlapsInterior(a: Double, b: Double): Boolean {
+            val k = interiorAtOrBefore(b)
+            return k >= 0 && a < interiors[k].second && b > interiors[k].first
+        }
+
+        /** The last of [interiors] that begins before [s]; -1 where none does. */
+        private fun interiorAtOrBefore(s: Double): Int {
+            var lo = 0
+            var hi = interiors.size - 1
+            var found = -1
+            while (lo <= hi) {
+                val mid = (lo + hi) ushr 1
+                if (interiors[mid].first < s) {
+                    found = mid
+                    lo = mid + 1
+                } else {
+                    hi = mid - 1
+                }
+            }
+            return found
+        }
+
+        /** The stretches of [from] to [to] outside the street junctions the drawing goes on through ([interiors]), in route order. */
+        private fun outsideInteriors(from: Double, to: Double): List<Pair<Double, Double>> {
+            val out = ArrayList<Pair<Double, Double>>()
+            var start = from
+            for ((a, b) in interiors) {
+                if (b <= start || a >= to) continue
+                if (a > start) out.add(start to a)
+                start = max(start, b)
+            }
+            if (to > start) out.add(start to to)
+            return out
         }
 
         // ------------------------------------------------------------------ features from samples
@@ -2046,13 +2259,39 @@ private fun ccw(ring: List<GeoPoint>): List<GeoPoint> {
     return if (area >= 0.0) ring else ring.reversed()
 }
 
+/** The size of a lane arrow: its [length], its head's length and width, and its stem's width, in metres. */
+private class ArrowSize(val length: Double, val headLength: Double, val headWidth: Double, val stem: Double) {
+    companion object {
+        /** A freeway's and a ramp's arrow. */
+        val FREEWAY = ArrowSize(
+            LaneDrawing.ARROW_LENGTH_METERS, LaneDrawing.ARROW_HEAD_LENGTH_METERS, LaneDrawing.ARROW_HEAD_WIDTH_METERS, LaneDrawing.ARROW_STEM_METERS,
+        )
+
+        /** A street's arrow. */
+        val STREET = ArrowSize(
+            LaneDrawing.STREET_ARROW_LENGTH_METERS,
+            LaneDrawing.STREET_ARROW_HEAD_LENGTH_METERS,
+            LaneDrawing.STREET_ARROW_HEAD_WIDTH_METERS,
+            LaneDrawing.STREET_ARROW_STEM_METERS,
+        )
+
+        /** A street's arrow straight on only. */
+        val STREET_THROUGH = ArrowSize(
+            LaneDrawing.STREET_THROUGH_ARROW_LENGTH_METERS,
+            LaneDrawing.STREET_ARROW_HEAD_LENGTH_METERS,
+            LaneDrawing.STREET_ARROW_HEAD_WIDTH_METERS,
+            LaneDrawing.STREET_ARROW_STEM_METERS,
+        )
+    }
+}
+
 /**
- * The rings of a lane arrow with [indications], in metres: [u] along the lane from the tail, [v] across it, left
+ * The rings of a lane arrow with [indications] of [size], in metres: [u] along the lane from the tail, [v] across it, left
  * positive; one ring per arrow it shows (a straight arrow and a bent one share the tail). A U-turn shows none.
  */
-private fun arrowRings(indications: Set<TurnModifier>): List<List<Pair<Double, Double>>> {
+private fun arrowRings(indications: Set<TurnModifier>, size: ArrowSize): List<List<Pair<Double, Double>>> {
     val out = ArrayList<List<Pair<Double, Double>>>()
-    val length = LaneDrawing.ARROW_LENGTH_METERS
+    val length = size.length
     for (m in indications.sortedBy { it.ordinal }) {
         val side = when (m) {
             TurnModifier.SLIGHT_RIGHT, TurnModifier.RIGHT, TurnModifier.SHARP_RIGHT -> -1.0
@@ -2060,7 +2299,7 @@ private fun arrowRings(indications: Set<TurnModifier>): List<List<Pair<Double, D
             else -> 0.0
         }
         val centre: List<Pair<Double, Double>> = when (m) {
-            TurnModifier.STRAIGHT -> listOf(0.0 to 0.0, length - LaneDrawing.ARROW_HEAD_LENGTH_METERS to 0.0, length to 0.0)
+            TurnModifier.STRAIGHT -> listOf(0.0 to 0.0, length - size.headLength to 0.0, length to 0.0)
             TurnModifier.SLIGHT_RIGHT, TurnModifier.SLIGHT_LEFT -> {
                 val stem = SLIGHT_STEM * length
                 val a = Math.toRadians(SLIGHT_TURN_DEGREES)
@@ -2083,13 +2322,13 @@ private fun arrowRings(indications: Set<TurnModifier>): List<List<Pair<Double, D
             }
             else -> continue
         }
-        out.add(arrowRing(centre))
+        out.add(arrowRing(centre, size))
     }
     return out
 }
 
-/** One arrow along [centre] (its last point the tip): a stem of [LaneDrawing.ARROW_STEM_METERS] and a head at the tip. */
-private fun arrowRing(centre: List<Pair<Double, Double>>): List<Pair<Double, Double>> {
+/** One arrow along [centre] (its last point the tip): a stem of [size]'s width and a head at the tip. */
+private fun arrowRing(centre: List<Pair<Double, Double>>, size: ArrowSize): List<Pair<Double, Double>> {
     val tip = centre.last()
     val before = centre[centre.size - 2]
     val dx = tip.first - before.first
@@ -2097,7 +2336,7 @@ private fun arrowRing(centre: List<Pair<Double, Double>>): List<Pair<Double, Dou
     val len = hypot(dx, dy)
     val ux = dx / len
     val uy = dy / len
-    val headLength = LaneDrawing.ARROW_HEAD_LENGTH_METERS
+    val headLength = size.headLength
     val base = (tip.first - ux * headLength) to (tip.second - uy * headLength)
     // The stem's centre line up to the head's base, offset to each side with mitred corners.
     val stem = ArrayList<Pair<Double, Double>>()
@@ -2118,7 +2357,7 @@ private fun arrowRing(centre: List<Pair<Double, Double>>): List<Pair<Double, Dou
         walked += seg
         stem.add(centre[i])
     }
-    val half = LaneDrawing.ARROW_STEM_METERS / 2.0
+    val half = size.stem / 2.0
     val right = ArrayList<Pair<Double, Double>>()
     val left = ArrayList<Pair<Double, Double>>()
     for (i in stem.indices) {
@@ -2126,7 +2365,7 @@ private fun arrowRing(centre: List<Pair<Double, Double>>): List<Pair<Double, Dou
         right.add((stem[i].first - nx * half * k) to (stem[i].second - ny * half * k))
         left.add((stem[i].first + nx * half * k) to (stem[i].second + ny * half * k))
     }
-    val hw = LaneDrawing.ARROW_HEAD_WIDTH_METERS / 2.0
+    val hw = size.headWidth / 2.0
     // The normal to the head's way, left positive.
     val hx = -uy
     val hy = ux

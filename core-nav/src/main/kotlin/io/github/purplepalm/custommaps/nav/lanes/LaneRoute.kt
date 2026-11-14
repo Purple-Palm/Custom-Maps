@@ -116,6 +116,16 @@ data class RouteNode(
     val maneuver: NodeManeuver? = null,
     /** The posted speed of the road that leaves it, in metres a second; null where the route gives none. */
     val postedMps: Double? = null,
+    /**
+     * Whether the road that leaves it is one-way (true) or two-way (false) by the route's own access field for that road
+     * (the side-road fields, `intersection_link_access`); null where the route does not say. Where it is a street, the
+     * app draws its lanes only where this or another source tells ([StreetWays]).
+     */
+    val oneWay: Boolean? = null,
+    /** The route's flags say there is a traffic signal at the intersection. */
+    val trafficSignal: Boolean = false,
+    /** The route's flags say there is a stop sign at the intersection. */
+    val stopSign: Boolean = false,
 ) {
     /** The kind of road that leaves the intersection. */
     val road: RoadKind get() = RoadKind.of(freeway, ramp)

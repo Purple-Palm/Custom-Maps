@@ -13,6 +13,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.option
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sl
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.sr
+import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.lanes.RouteNode
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
@@ -202,6 +203,71 @@ internal object RandomRoutes {
         nodes.add(LaneScenes.node(m2, *exit.toTypedArray(), road = RoadKind.RAMP, maneuver = if (right) LaneScenes.OFF_RIGHT else LaneScenes.OFF_LEFT, planMps = 20.0))
         nodes.add(LaneScenes.node(m2 + 500.0, road = RoadKind.STREET, maneuver = LaneScenes.TURN_LEFT, planMps = 15.0))
         nodes.add(LaneScenes.node(m2 + 600.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0))
+        return LaneScenes.route(*nodes.toTypedArray(), id = id)
+    }
+
+    /**
+     * A made-up street to a turn at [LaneScenes.GORE] to either side, planned at 25 to 45 mph: one to three general lanes, a
+     * lane kept for buses at the left edge in a fifth of the routes and one only for bicycles at the right edge in a third;
+     * two to four junctions before the turn, 120 to 400 m apart, each with a road crossing it and a traffic signal or a stop
+     * sign at random, a lane point in four of five; the turn from the general lane at its side, at a signal, a stop sign or
+     * neither; in two of five a lane point 60 to 240 m along the road after it; the arrival 300 m past the turn.
+     */
+    fun street(rng: Random, id: String): LaneRoute {
+        val v = rng.nextDouble(25.0, 45.0) * PlanningSpeed.MPS_PER_MPH
+        val general = rng.nextInt(1, 4)
+        val bus = rng.nextDouble() < 0.2
+        val bike = rng.nextDouble() < 1.0 / 3.0
+        val right = rng.nextBoolean()
+        fun lanes(turn: Boolean): Array<RouteLane> {
+            val out = ArrayList<RouteLane>()
+            if (bus) out.add(LaneScenes.bus())
+            val edge = if (right) general - 1 else 0
+            repeat(general) { i ->
+                out.add(
+                    when {
+                        !turn -> s()
+                        i == edge -> if (right) LaneScenes.right() else LaneScenes.left()
+                        else -> s(false)
+                    },
+                )
+            }
+            if (bike) out.add(LaneScenes.bike())
+            return out.toTypedArray()
+        }
+        fun flags(): Pair<Boolean, Boolean> = when (rng.nextInt(3)) {
+            0 -> true to false
+            1 -> false to true
+            else -> false to false
+        }
+        val nodes = ArrayList<RouteNode>()
+        nodes.add(LaneScenes.street(0.0, maneuver = LaneScenes.DEPART, planMps = v))
+        val stations = ArrayList<Double>()
+        var at = LaneScenes.GORE
+        repeat(rng.nextInt(2, 5)) {
+            at -= rng.nextDouble(120.0, 400.0)
+            stations.add(at)
+        }
+        for (station in stations.sorted()) {
+            val (signal, stop) = flags()
+            val withLanes = rng.nextDouble() < 0.8
+            nodes.add(
+                if (withLanes) {
+                    LaneScenes.street(station, *lanes(false), roads = LaneScenes.CROSSING, signal = signal, stop = stop, planMps = v)
+                } else {
+                    LaneScenes.street(station, roads = LaneScenes.CROSSING, signal = signal, stop = stop, planMps = v)
+                },
+            )
+        }
+        val (signal, stop) = flags()
+        nodes.add(
+            LaneScenes.street(
+                LaneScenes.GORE, *lanes(true), roads = LaneScenes.CROSSING, maneuver = if (right) LaneScenes.TURN_RIGHT else LaneScenes.TURN_LEFT,
+                signal = signal, stop = stop, planMps = v,
+            ),
+        )
+        if (rng.nextDouble() < 0.4) nodes.add(LaneScenes.street(LaneScenes.GORE + rng.nextDouble(60.0, 240.0), *Array(rng.nextInt(1, 3)) { s() }, planMps = v))
+        nodes.add(LaneScenes.street(LaneScenes.GORE + 300.0, maneuver = LaneScenes.ARRIVE, planMps = v))
         return LaneScenes.route(*nodes.toTypedArray(), id = id)
     }
 

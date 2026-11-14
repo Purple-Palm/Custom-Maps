@@ -614,6 +614,54 @@ internal object LaneScenes {
         )
     }
 
+    // ------------------------------------------------------------------ streets (OL6)
+
+    /** Every street of [route] one-way, or two-way, as a source would tell ([StreetWays]). */
+    fun ways(route: LaneRoute, oneWay: Boolean): StreetWays = StreetWays.of(route) { oneWay }
+
+    /** The planning speed of the streets below: 35 mph. */
+    val STREET_MPS = 35.0 * PlanningSpeed.MPS_PER_MPH
+
+    /** A lane with the right turn's arrow, as a right turn's lane at a junction lists it. */
+    fun right(valid: Boolean = true, active: Boolean? = valid) = RouteLane(setOf(TurnModifier.RIGHT), valid = valid, active = active)
+
+    /** A lane only for bicycles. */
+    fun bike() = RouteLane(setOf(straight), valid = false, active = false, kinds = setOf(DesignatedKind.BICYCLE))
+
+    /** A road that crosses the route's street at a junction, both of its arms open to cars. */
+    val CROSSING = Roads(90 to true, 270 to true)
+
+    /** A node on a street planned at [planMps], with a traffic [signal] or a [stop] sign where given. */
+    fun street(
+        at: Double,
+        vararg lanes: RouteLane,
+        roads: Roads = THROUGH,
+        maneuver: NodeManeuver? = null,
+        signal: Boolean = false,
+        stop: Boolean = false,
+        planMps: Double = STREET_MPS,
+    ) = node(at, *lanes, roads = roads, road = RoadKind.STREET, maneuver = maneuver, planMps = planMps).copy(trafficSignal = signal, stopSign = stop)
+
+    /**
+     * A street with two lanes to a right turn at [GORE]: a junction it goes straight through 400 m before the turn, where a
+     * road crosses it and a traffic signal stands; a lane point 200 m before the turn; and the turn, at a stop sign, whose
+     * right lane turns. The arrival lies 300 m past the turn. [bicycle] adds a lane only for bicycles at the right edge all
+     * along, [bus] one kept for buses at the left edge; [receiving] gives the road after the turn a lane point 150 m on, with
+     * two lanes.
+     */
+    fun streetTurn(bicycle: Boolean = false, bus: Boolean = false, receiving: Boolean = false, id: String = "street-turn"): LaneRoute {
+        fun lanes(vararg general: RouteLane): Array<RouteLane> =
+            ((if (bus) listOf(bus()) else emptyList()) + general.toList() + (if (bicycle) listOf(bike()) else emptyList())).toTypedArray()
+        val nodes = ArrayList<RouteNode>()
+        nodes.add(street(0.0, maneuver = DEPART))
+        nodes.add(street(GORE - 400.0, *lanes(s(), s()), roads = CROSSING, signal = true))
+        nodes.add(street(GORE - 200.0, *lanes(s(), s())))
+        nodes.add(street(GORE, *lanes(s(false), right()), roads = CROSSING, maneuver = TURN_RIGHT, stop = true))
+        if (receiving) nodes.add(street(GORE + 150.0, s(), s()))
+        nodes.add(street(GORE + 300.0, maneuver = ARRIVE))
+        return route(*nodes.toTypedArray(), id = id)
+    }
+
     /** Every scene of the planner's tests, by name. */
     fun all(): Map<String, LaneRoute> = linkedMapOf(
         "ia" to ia(),

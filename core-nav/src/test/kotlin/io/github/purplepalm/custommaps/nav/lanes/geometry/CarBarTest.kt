@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.nav.lanes.geometry
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes
+import io.github.purplepalm.custommaps.nav.lanes.StreetWays
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -25,10 +26,10 @@ class CarBarTest {
 
     private class Drawn(val path: RoutePath, val section: CrossSection, val drawing: LaneDrawing, val bar: CarBar)
 
-    private fun draw(route: LaneRoute, carriageway: CrossSection.Carriageway = CrossSection.Carriageway.ONE_WAY): Drawn {
+    private fun draw(route: LaneRoute, streets: StreetWays? = null): Drawn {
         val plan = SceneLines.planOf(route)
         val evidence = plan.evidence()
-        val section = CrossSection.of(plan, evidence) { carriageway }
+        val section = CrossSection.of(plan, evidence, streets)
         val path = RoutePath.of(plan, SceneLines.of(route), version = 1, evidence = evidence, section = section)
         val drawing = LaneDrawing.of(plan, path, evidence, section)
         return Drawn(path, section, drawing, CarBar.of(drawing, 0.0, route.lengthMeters))
@@ -157,9 +158,10 @@ class CarBarTest {
 
     @Test
     fun `on a two-way street the bar spans our direction's lanes only`() {
-        // IA laid as the route's half of a two-way road (OL6's streets): the lanes from the road's line to the right.
-        val d = draw(LaneScenes.ia(), CrossSection.Carriageway.TWO_WAY)
-        for (station in listOf(gore - 2_300.0, gore - 1_500.0)) {
+        // The route's half of a two-way street: the lanes from the road's line to the right.
+        val route = LaneScenes.streetTurn()
+        val d = draw(route, LaneScenes.ways(route, oneWay = false))
+        for (station in listOf(gore - 300.0, gore - 100.0)) {
             assertTrue(d.bar.at(station), "at $station")
             val lanes = d.drawing.lanesAt(station).filter { it.width > 0.0 }
             val left = lanes.maxOf { it.left }
@@ -173,9 +175,14 @@ class CarBarTest {
             assertTrue(-middle(d.bar).x + d.bar.width / 2.0 <= left + 1e-3)
             assertTrue(d.bar.twoWay)
         }
-        // Before the first change at an edge the route's lanes begin at the road's line itself.
-        assertTrue(d.bar.at(gore - 2_300.0))
+        // The route's lanes begin at the road's line itself.
+        assertTrue(d.bar.at(gore - 300.0))
         assertEquals(0.0, -middle(d.bar).x + d.bar.width / 2.0, 1e-3)
+        // A one-way street's bar is a one-way carriageway's, about the road's line.
+        val oneWay = draw(route, LaneScenes.ways(route, oneWay = true))
+        assertTrue(oneWay.bar.at(gore - 300.0))
+        assertFalse(oneWay.bar.twoWay)
+        assertEquals(0.0, middle(oneWay.bar).x, 1e-3)
     }
 
     @Test
