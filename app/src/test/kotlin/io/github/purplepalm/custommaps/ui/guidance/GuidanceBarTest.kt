@@ -68,14 +68,52 @@ class GuidanceBarTest {
 
     @Test
     fun `a List button stays beside Overview and End while the three fit, and takes a row of its own when they do not`() {
-        // While a car's screen shows the map: the three buttons, their gaps and Recenter's extra room,
-        // exactly as wide as the bar inside its padding, stay in one row.
+        // While a car's screen shows the map: the three buttons and their gaps, exactly as wide as the
+        // bar inside its padding, stay in one row. Overview always says Overview, so it keeps no room
+        // for another word.
         assertFalse(listRowOfItsOwn(width = 304, buttonsRow = 304))
         assertTrue(listRowOfItsOwn(width = 304, buttonsRow = 305))
-        // Overview (141) and End (77) at the largest font with their gap take 226 of the 304: a List
-        // button of Material's 58 dp at least, its gap and Recenter's room must fit in the 78 left.
-        assertFalse(listRowOfItsOwn(width = 304, buttonsRow = 226 + 8 + 58 + 12))
-        assertTrue(listRowOfItsOwn(width = 304, buttonsRow = 226 + 8 + 58 + 13))
+        // At 1.3 List (63), Overview (111) and End (65) with their gaps take 255 of the 304.
+        assertFalse(listRowOfItsOwn(width = 304, buttonsRow = 63 + 8 + 111 + 8 + 65))
+        // At the largest font Overview (141) and End (77) with their gap take 226: List (75) and its
+        // gap would need 83 of the 78 left.
+        assertTrue(listRowOfItsOwn(width = 304, buttonsRow = 75 + 8 + 141 + 8 + 77))
+    }
+
+    @Test
+    fun `Recenter in the numbers' place keeps the rows the numbers take, at every font scale`() {
+        // Recenter's label with its widest count, "Recenter 20", at 11 sp (60 at 1.0, 69 at 1.15, 78 at
+        // 1.3, 91 at 1.5, 109 at 1.8, 121 at 2.0), with 4 dp of padding a side, against the numbers at
+        // their smallest (70, 79, 88, 101, 114, 126), beside Overview and End.
+        class Scale(val toggle: Int, val end: Int, val list: Int, val numbers: Int, val recenterLabel: Int)
+        val scales = listOf(
+            Scale(toggle = 91, end = 58, list = 58, numbers = 70, recenterLabel = 60),
+            Scale(toggle = 101, end = 61, list = 59, numbers = 79, recenterLabel = 69),
+            Scale(toggle = 111, end = 65, list = 63, numbers = 88, recenterLabel = 78),
+            Scale(toggle = 124, end = 70, list = 68, numbers = 101, recenterLabel = 91),
+            Scale(toggle = 134, end = 75, list = 72, numbers = 114, recenterLabel = 109),
+            Scale(toggle = 141, end = 77, list = 75, numbers = 126, recenterLabel = 121),
+        )
+        val rows = scales.map { scale ->
+            val slot = maxOf(scale.numbers, recenterMinWidth(scale.recenterLabel, padding = 4, minWidth = 58))
+            val alone = buttons(scale.toggle, scale.end)
+            val withList = scale.list + 8 + alone
+            assertEquals(barRows(304, alone, scale.numbers), barRows(304, alone, slot))
+            assertEquals(barRows(304, withList, scale.numbers), barRows(304, withList, slot))
+            barRows(304, alone, slot) to barRows(304, withList, slot)
+        }
+        // Beside the buttons up to 1.3, and with List at the phone's own font; in a row of their own
+        // from 1.5 on, where Recenter has the whole bar.
+        assertEquals(listOf(BarRows.ONE, BarRows.ONE, BarRows.ONE, BarRows.TWO, BarRows.TWO, BarRows.TWO), rows.map { it.first })
+        assertEquals(listOf(BarRows.ONE, BarRows.TWO, BarRows.TWO, BarRows.TWO, BarRows.TWO, BarRows.TWO), rows.map { it.second })
+    }
+
+    @Test
+    fun `Recenter keeps room for its label at the smallest with its padding, never less than Material's least button`() {
+        assertEquals(68, recenterMinWidth(labelWidth = 60, padding = 4, minWidth = 58))
+        assertEquals(58, recenterMinWidth(labelWidth = 40, padding = 4, minWidth = 58))
+        assertEquals(58, recenterMinWidth(labelWidth = 50, padding = 4, minWidth = 58))
+        assertEquals(59, recenterMinWidth(labelWidth = 51, padding = 4, minWidth = 58))
     }
 
     @Test

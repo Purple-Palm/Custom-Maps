@@ -66,7 +66,17 @@
     <string name="guidance_remaining">%1$s · %2$s</string>
     <string name="guidance_starting">Starting guidance…</string>
     <string name="guidance_overview">Overview</string>
+    <!-- What TalkBack reads for the Overview button, a switch: the drive view is Overview, or Normal. -->
+    <string name="guidance_overview_on">Overview, on</string>
+    <string name="guidance_overview_off">Overview, off</string>
     <string name="guidance_recenter">Recenter</string>
+    <!-- While the driver holds the map during a drive: the whole seconds until it goes back by itself. -->
+    <string name="guidance_recenter_count">Recenter %1$d</string>
+    <!-- What TalkBack reads for Recenter while it counts down; it is not read out again at each second. -->
+    <plurals name="guidance_recenter_said">
+        <item quantity="one">Recenter. The map comes back in %1$d second.</item>
+        <item quantity="other">Recenter. The map comes back in %1$d seconds.</item>
+    </plurals>
     <string name="guidance_end">End</string>
     <!-- While the car shows the map during a drive: the phone's map in place of the list of the maneuvers ahead, and back. -->
     <string name="guidance_map">Map</string>

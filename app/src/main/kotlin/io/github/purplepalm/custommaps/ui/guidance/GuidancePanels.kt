@@ -1,5 +1,11 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -10,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,10 +30,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.res.stringResource
@@ -50,6 +62,8 @@ import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.guidance.CardLanes
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
@@ -59,6 +73,7 @@ import io.github.purplepalm.custommaps.nav.model.LanesAhead
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
@@ -363,7 +378,7 @@ private fun LaneLabel(text: String, style: TextStyle, minSize: TextUnit, modifie
 }
 
 /** Leaves the arrival time more room than the default button padding would. */
-private val COMPACT_BUTTON_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+internal val COMPACT_BUTTON_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
 
 /** A lane's width at full size, including the gap around its arrows. */
 private val LANE_SLOT = 44.dp
@@ -426,27 +441,36 @@ internal const val WIDE_TIME_LEFT = "9 hr 59 min"
 /**
  * Arrival time, time and distance left, and the controls to change view or end guidance. The
  * numbers shrink if they have to, never below [ARRIVAL_MIN_SIZE] and [REMAINING_MIN_SIZE], and stand
- * beside the two buttons where they fit there at those sizes. Where they do not, as with the largest
+ * beside the buttons where they fit there at those sizes. Where they do not, as with the largest
  * font sizes on a narrow phone, they take a row of their own across the bar, above the buttons
  * ([barRows]), so that no number is ever cut. That depends on the phone's width and font, not on the
  * drive: the bar keeps room for the widest numbers a drive shows ([WIDEST_ARRIVALS], [WIDE_TIME_LEFT],
- * or the drive's own where they are wider) and for the wider of Overview and Recenter, so it keeps
- * one layout from the start of a drive to its end, and one height once the numbers show, and the
- * camera's padding with it.
+ * or the drive's own where they are wider) and for Recenter with its widest count at its smallest
+ * ([WIDE_RECENTER_COUNT], [RECENTER_MIN_SIZE]), so it keeps one layout from the start of a drive to
+ * its end, and one height once the numbers show, and the camera's padding with it.
+ *
+ * Two view buttons (W21). Overview ([OverviewToggle]) switches the drive view and always says
+ * Overview; it reads [driveView] itself. Recenter ([RecenterButton]) shows only while the driver holds
+ * the map, in the numbers' place, and reads [recenter] itself: the numbers stay laid out meanwhile,
+ * undrawn and hidden from TalkBack, so the bar's height never changes, and the two swap in a
+ * [SWAP_MILLIS] crossfade, at once with the system's animations off. The bar itself reads only
+ * whether the map is held, so neither a change of drive view nor the count's tick composes it.
  * Overview has a border of its own and a label in the card's ink in both looks: Material's outlined
  * button would draw a border the card hardly shows (1.28:1 at night) and a muted label.
  *
  * While a car's screen shows the map during a drive, two more buttons take the driver between the
  * phone's map and the list of the maneuvers ahead ([io.github.purplepalm.custommaps.nav.car.PhoneScreenRule]):
- * with [onList] the map's bar has a List button left of Overview, where it stays when Overview turns
- * into Recenter; with [onMap] the list's bar has Map in place of Overview and Recenter, and
- * [following] and [onToggleOverview] count for nothing. Without either the bar is as it always was.
+ * with [onList] the map's bar has a List button left of Overview; with [onMap] the list's bar has Map
+ * in place of Overview and no Recenter, and [driveView], [recenter], [onToggleView] and [onRecenter]
+ * count for nothing. Without either the bar is as it always was.
  */
 @Composable
 fun GuidanceBar(
     progress: RouteProgressSnapshot?,
-    following: Boolean,
-    onToggleOverview: () -> Unit,
+    driveView: State<DriveViewControl>,
+    recenter: State<RecenterControl?>,
+    onToggleView: () -> Unit,
+    onRecenter: () -> Unit,
     onEnd: () -> Unit,
     modifier: Modifier = Modifier,
     onList: (() -> Unit)? = null,
@@ -456,34 +480,29 @@ fun GuidanceBar(
     // The numbers read at a glance a step heavier than Material's, for sunlight.
     val arrivalStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = TABULAR_DIGITS)
     val remainingStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
-    // What Material's buttons set their labels in.
-    val labelStyle = MaterialTheme.typography.labelLarge
     val arrival = progress?.let { ImperialFormat.arrivalTime(ZonedDateTime.now(), it.durationRemaining) }
     val time = progress?.let { ImperialFormat.duration(it.durationRemaining) }
     val distance = progress?.let { ImperialFormat.distance(it.distanceRemaining).toString() }
-    // On the list the toggle is the Map button, which has no other label to keep room for.
-    val toggleLabel = stringResource(
-        when {
-            onMap != null -> R.string.guidance_map
-            following -> R.string.guidance_overview
-            else -> R.string.guidance_recenter
-        },
-    )
-    val otherLabel = stringResource(
-        when {
-            onMap != null -> R.string.guidance_map
-            following -> R.string.guidance_recenter
-            else -> R.string.guidance_overview
-        },
-    )
-    // How wide the numbers are at their smallest, and how much wider the toggle's other label is
-    // than the one it shows, in pixels; the measurer keeps what it has measured.
+    // The list's bar has Map in Overview's place, and no map to hold.
+    val views = onMap == null
+    // Whether the driver holds the map, and no more: the count's tick composes Recenter alone.
+    val held by remember(recenter) { derivedStateOf { recenter.value != null } }
+    val recentering = views && held
+    // How wide the numbers are at their smallest, and Recenter's label with its widest count at its
+    // smallest, in pixels; the measurer keeps what it has measured.
     val measurer = rememberTextMeasurer()
     val numbers = maxOf(
         (WIDEST_ARRIVALS + listOfNotNull(arrival)).maxOf { measurer.widthOf(it, arrivalStyle.copy(fontSize = ARRIVAL_MIN_SIZE)) },
         listOfNotNull(WIDE_TIME_LEFT, time).maxOf { measurer.widthOf(it, remainingStyle.copy(fontSize = REMAINING_MIN_SIZE)) },
     )
-    val toggleSlack = (measurer.widthOf(otherLabel, labelStyle) - measurer.widthOf(toggleLabel, labelStyle)).coerceAtLeast(0)
+    val recenterLabelWidth = if (views) {
+        measurer.widthOf(stringResource(R.string.guidance_recenter_count, WIDE_RECENTER_COUNT), recenterStyle().copy(fontSize = RECENTER_MIN_SIZE))
+    } else {
+        0
+    }
+    // One transition for both sides of the swap; its values are read only where the layers are drawn.
+    val swap = updateTransition(targetState = recentering, label = "recenter")
+    val numbersAlpha by swap.animateFloat(transitionSpec = { tween(SWAP_MILLIS) }, label = "numbers") { if (it) 0f else 1f }
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -492,22 +511,45 @@ fun GuidanceBar(
     ) {
         Layout(
             content = {
-                Column(Modifier.layoutId(BarPart.NUMBERS)) {
-                    if (arrival != null && time != null && distance != null) {
-                        Text(
-                            text = arrival,
-                            style = arrivalStyle,
-                            color = tokens.glanceAccent,
-                            maxLines = 1,
-                            autoSize = TextAutoSize.StepBased(minFontSize = ARRIVAL_MIN_SIZE, maxFontSize = arrivalStyle.fontSize),
-                        )
-                        RemainingLine(time = time, distance = distance, style = remainingStyle, color = tokens.onCardMuted)
-                    } else {
-                        Text(
-                            text = stringResource(R.string.guidance_starting),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = tokens.onCardMuted,
-                        )
+                // The numbers' place, as wide as it is given, so Recenter takes all of it, and never
+                // lower than Recenter, so the bar's height stays when Recenter comes.
+                Box(
+                    Modifier
+                        .layoutId(BarPart.NUMBERS)
+                        .fillMaxWidth()
+                        .heightIn(min = RECENTER_HEIGHT),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Column(
+                        Modifier
+                            .graphicsLayer { alpha = numbersAlpha }
+                            .then(if (recentering) Modifier.clearAndSetSemantics {} else Modifier),
+                    ) {
+                        if (arrival != null && time != null && distance != null) {
+                            Text(
+                                text = arrival,
+                                style = arrivalStyle,
+                                color = tokens.glanceAccent,
+                                maxLines = 1,
+                                autoSize = TextAutoSize.StepBased(minFontSize = ARRIVAL_MIN_SIZE, maxFontSize = arrivalStyle.fontSize),
+                            )
+                            RemainingLine(time = time, distance = distance, style = remainingStyle, color = tokens.onCardMuted)
+                        } else {
+                            Text(
+                                text = stringResource(R.string.guidance_starting),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = tokens.onCardMuted,
+                            )
+                        }
+                    }
+                    if (views) {
+                        swap.AnimatedVisibility(
+                            visible = { it },
+                            enter = fadeIn(tween(SWAP_MILLIS)),
+                            exit = fadeOut(tween(SWAP_MILLIS)),
+                        ) {
+                            RecenterButton(recenter, onRecenter, Modifier.fillMaxWidth())
+                        }
                     }
                 }
                 if (onList != null) {
@@ -521,14 +563,18 @@ fun GuidanceBar(
                         Text(stringResource(R.string.guidance_list))
                     }
                 }
-                OutlinedButton(
-                    onClick = onMap ?: onToggleOverview,
-                    modifier = Modifier.layoutId(BarPart.TOGGLE),
-                    border = BorderStroke(1.dp, tokens.outline),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
-                    contentPadding = COMPACT_BUTTON_PADDING,
-                ) {
-                    Text(toggleLabel)
+                if (onMap != null) {
+                    OutlinedButton(
+                        onClick = onMap,
+                        modifier = Modifier.layoutId(BarPart.TOGGLE),
+                        border = BorderStroke(1.dp, tokens.outline),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.onCard),
+                        contentPadding = COMPACT_BUTTON_PADDING,
+                    ) {
+                        Text(stringResource(R.string.guidance_map))
+                    }
+                } else {
+                    OverviewToggle(driveView, onToggleView, Modifier.layoutId(BarPart.TOGGLE))
                 }
                 Button(
                     onClick = onEnd,
@@ -547,13 +593,19 @@ fun GuidanceBar(
             val end = measurables.first { it.layoutId == BarPart.END }.measure(loose)
             val list = measurables.firstOrNull { it.layoutId == BarPart.LIST }?.measure(loose)
             val numbersPart = measurables.first { it.layoutId == BarPart.NUMBERS }
-            // The List button and its gap, left of the room the toggle keeps for its wider label.
+            // The List button and its gap, left of Overview.
             val listWidth = if (list != null) list.width + gap else 0
-            // The buttons and the gaps beside them, with room for the toggle's wider label.
-            val buttons = gap + listWidth + toggle.width + toggleSlack + gap + end.width
-            val listX = { width: Int -> width - end.width - gap - toggle.width - toggleSlack - listWidth }
+            // The buttons and the gaps beside them. Each says the same word all the drive.
+            val buttons = gap + listWidth + toggle.width + gap + end.width
+            // What the numbers' place holds at its smallest: the numbers, or Recenter in their place.
+            val slot = if (views) {
+                maxOf(numbers, recenterMinWidth(recenterLabelWidth, RECENTER_SIDE_PADDING.roundToPx(), ButtonDefaults.MinWidth.roundToPx()))
+            } else {
+                numbers
+            }
+            val listX = { width: Int -> width - end.width - gap - toggle.width - listWidth }
             val bounded = constraints.hasBoundedWidth
-            if (!bounded || barRows(constraints.maxWidth, buttons, numbers) == BarRows.ONE) {
+            if (!bounded || barRows(constraints.maxWidth, buttons, slot) == BarRows.ONE) {
                 val room = if (bounded) (constraints.maxWidth - buttons).coerceAtLeast(0) else Constraints.Infinity
                 val column = numbersPart.measure(loose.copy(maxWidth = room))
                 val width = if (bounded) constraints.maxWidth else column.width + buttons
@@ -594,23 +646,23 @@ fun GuidanceBar(
 /** The parts of the guidance bar, by which its layout finds them. */
 private enum class BarPart { NUMBERS, LIST, TOGGLE, END }
 
-/** Where the guidance bar's numbers stand: beside its two buttons, or in a row of their own above them. */
+/** Where the guidance bar's numbers stand: beside its buttons, or in a row of their own above them. */
 internal enum class BarRows { ONE, TWO }
 
 /**
  * Where the numbers go in a guidance bar [width] wide inside its padding, all in pixels: beside its
- * buttons, [buttons] wide with the gaps beside them, when [numbers], the widest the arrival time and
- * the time left are at their smallest sizes, fit into what the buttons leave; otherwise in a row of
- * their own across the whole bar, above the buttons, so that no number is ever cut.
+ * buttons, [buttons] wide with the gaps beside them, when [numbers], the widest the numbers' place
+ * holds at its smallest (the arrival time, the time left, or Recenter in their place), fits into what
+ * the buttons leave; otherwise in a row of their own across the whole bar, above the buttons, so that
+ * no number is ever cut.
  */
 internal fun barRows(width: Int, buttons: Int, numbers: Int): BarRows =
     if (numbers <= width - buttons) BarRows.ONE else BarRows.TWO
 
 /**
  * Whether the List button stands in a row of its own above the other two buttons, in a guidance bar
- * [width] wide inside its padding whose buttons take [buttonsRow] side by side, gaps and the room
- * the toggle keeps for its wider label included, all in pixels: only where they do not fit, so that
- * no button is ever cut.
+ * [width] wide inside its padding whose buttons take [buttonsRow] side by side, gaps included, all in
+ * pixels: only where they do not fit, so that no button is ever cut.
  */
 internal fun listRowOfItsOwn(width: Int, buttonsRow: Int): Boolean = buttonsRow > width
 
@@ -934,11 +986,13 @@ private fun RunUpPreview(look: Look, maneuver: Maneuver, row: RunUpLanes) {
 }
 
 /**
- * The guidance bar while the camera follows the car and in the overview, on a long drive, and
- * before the first progress, on a narrow phone, also with a large and the largest font: Overview's
- * border and label read in both looks, and the time and distance left shrink to fit, never below
- * 12 sp, or show the time alone. With the largest font the numbers, and the words before the first
- * progress, take a row of their own above the buttons.
+ * The guidance bar in the Normal and the Overview drive view, while the driver holds the map with
+ * Recenter counting down and with Recenter by itself off, on a long drive, and before the first
+ * progress, on a narrow phone, also with a large and the largest font: Overview's border and label
+ * read in both looks, off and on, Recenter takes the numbers' place at the bar's own height, and the
+ * time and distance left shrink to fit, never below 12 sp, or show the time alone. With the largest
+ * font the numbers, Recenter, and the words before the first progress take a row of their own above
+ * the buttons.
  */
 @Preview(name = "guidance bar", widthDp = 360)
 @Preview(name = "guidance bar, large font", widthDp = 360, fontScale = 1.3f)
@@ -947,24 +1001,31 @@ private fun RunUpPreview(look: Look, maneuver: Maneuver, row: RunUpLanes) {
 private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Look) {
     PreviewOnMap(look) {
         Column {
-            GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {})
+            PreviewBar(previewExitProgress(), DriveView.NORMAL)
             Spacer(Modifier.height(12.dp))
-            GuidanceBar(previewExitProgress(), following = false, onToggleOverview = {}, onEnd = {})
+            PreviewBar(previewExitProgress(), DriveView.OVERVIEW)
+            Spacer(Modifier.height(12.dp))
+            PreviewBar(previewExitProgress(), DriveView.NORMAL, RecenterControl(secondsLeft = 7))
+            Spacer(Modifier.height(12.dp))
+            PreviewBar(previewExitProgress(), DriveView.OVERVIEW, RecenterControl(secondsLeft = 10))
+            Spacer(Modifier.height(12.dp))
+            PreviewBar(previewExitProgress(), DriveView.OVERVIEW, RecenterControl(secondsLeft = null))
             Spacer(Modifier.height(12.dp))
             // A long drive: with a large font only the time fits beside the buttons; with the
             // largest, both fit in the row of their own.
             val long = previewExitProgress().copy(distanceRemaining = Distance.miles(48.0), durationRemaining = 75.minutes)
-            GuidanceBar(long, following = true, onToggleOverview = {}, onEnd = {})
+            PreviewBar(long, DriveView.NORMAL)
             Spacer(Modifier.height(12.dp))
-            GuidanceBar(progress = null, following = true, onToggleOverview = {}, onEnd = {})
+            PreviewBar(progress = null, DriveView.NORMAL)
         }
     }
 }
 
 /**
- * The guidance bar while a car's screen shows the map: on the phone's map with the List button, on a
- * narrow phone with a large and the largest font, where the numbers take a row of their own; and on
- * the list with Map in place of Overview.
+ * The guidance bar while a car's screen shows the map: on the phone's map with the List button, in
+ * the Normal and the Overview drive view and with Recenter counting down, on a narrow phone with a
+ * large and the largest font, where the numbers take a row of their own; and on the list with Map in
+ * place of Overview.
  */
 @Preview(name = "guidance bar with the car", widthDp = 360)
 @Preview(name = "guidance bar with the car, large font", widthDp = 360, fontScale = 1.3f)
@@ -973,13 +1034,36 @@ private fun GuidanceBarPreview(@PreviewParameter(LookParameter::class) look: Loo
 private fun GuidanceBarCarPreview(@PreviewParameter(LookParameter::class) look: Look) {
     PreviewOnMap(look) {
         Column {
-            GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {}, onList = {})
+            PreviewBar(previewExitProgress(), DriveView.NORMAL, onList = {})
             Spacer(Modifier.height(12.dp))
-            GuidanceBar(previewExitProgress(), following = false, onToggleOverview = {}, onEnd = {}, onList = {})
+            PreviewBar(previewExitProgress(), DriveView.OVERVIEW, onList = {})
             Spacer(Modifier.height(12.dp))
-            GuidanceBar(previewExitProgress(), following = true, onToggleOverview = {}, onEnd = {}, onMap = {})
+            PreviewBar(previewExitProgress(), DriveView.OVERVIEW, RecenterControl(secondsLeft = 10), onList = {})
+            Spacer(Modifier.height(12.dp))
+            PreviewBar(previewExitProgress(), DriveView.NORMAL, onMap = {})
         }
     }
+}
+
+/** A bar of the previews, in [driveView], with the map held while [held] says so. */
+@Composable
+private fun PreviewBar(
+    progress: RouteProgressSnapshot?,
+    driveView: DriveView,
+    held: RecenterControl? = null,
+    onList: (() -> Unit)? = null,
+    onMap: (() -> Unit)? = null,
+) {
+    GuidanceBar(
+        progress = progress,
+        driveView = fixedState(DriveViewControl(driveView, turnZoom = true)),
+        recenter = fixedState(held),
+        onToggleView = {},
+        onRecenter = {},
+        onEnd = {},
+        onList = onList,
+        onMap = onMap,
+    )
 }
 
 @Preview(name = "arrived", widthDp = 360)

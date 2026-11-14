@@ -38,6 +38,12 @@ class LookContrastTest {
         Pair("the arrival time on the guidance bar", { it.glanceAccent }, { it.card }, GLANCE),
         Pair("the selected route's minutes on its row", { it.glanceAccent }, { it.cardRaised }, GLANCE),
         Pair("a selected segment's label", { it.onAccentContainer }, { it.accentContainer }, TEXT),
+        // The guidance bar's two view buttons: Overview on is the tonal fill ringed in amber ink, which
+        // the fill alone could not show (1.20:1 by day); Recenter's count is read at a glance.
+        Pair("Overview on: its border on the guidance bar", { it.accentInk }, { it.card }, GRAPHIC),
+        Pair("Overview on: its border on its own fill", { it.accentInk }, { it.accentContainer }, GRAPHIC),
+        Pair("Overview on: its label", { it.onAccentContainer }, { it.accentContainer }, TEXT),
+        Pair("Recenter's count on its amber fill", { it.onAccent }, { it.accent }, GLANCE),
         Pair("a lane to take on the card", { it.laneOn }, { it.card }, GRAPHIC),
         Pair("a lane not to take on the card", { it.laneOff }, { it.card }, GRAPHIC),
         Pair("danger on a card", { it.danger }, { it.card }, TEXT),

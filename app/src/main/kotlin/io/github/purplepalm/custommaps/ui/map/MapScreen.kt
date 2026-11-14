@@ -79,7 +79,9 @@ import io.github.purplepalm.custommaps.nav.car.PhoneScreen
 import io.github.purplepalm.custommaps.nav.car.PhoneScreenState
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.model.CameraMode
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.network.OfflineReason
@@ -186,8 +188,6 @@ fun MapScreen(
         // Settings over the map: it draws on underneath, unseen.
         LaunchedEffect(phoneMap, settingsOpen) { phoneMap.setCovered(settingsOpen) }
     }
-    // What the camera does, for the guidance bar on the map; there is no camera before the map.
-    val cameraMode by (if (phoneMap != null) phoneMap.cameraMode.collectAsStateWithLifecycle() else NO_CAMERA)
     // The pin of the place picked from search, of the routes, the drive and the arrival. It goes
     // when the place does: the place card closed, guidance ended.
     val pinnedPlace = state.pinnedPlace
@@ -410,6 +410,11 @@ fun MapScreen(
                 )
             }
 
+            // What the bar's two view buttons show, passed on unread: Overview reads the drive view and
+            // Recenter its count, each in its own button, so neither a move of the camera nor a tick of
+            // the count composes this screen.
+            val driveView = phoneMap.driveViewControl.collectAsStateWithLifecycle()
+            val recenter = phoneMap.recenterControl.collectAsStateWithLifecycle()
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -440,10 +445,11 @@ fun MapScreen(
                     )
                     state.guidance == GuidanceState.ACTIVE -> GuidanceBarSlot(
                         progress = progress,
-                        following = cameraMode == CameraMode.FOLLOWING,
-                        onToggleOverview = {
-                            phoneMap.setCameraMode(if (cameraMode == CameraMode.FOLLOWING) CameraMode.OVERVIEW else CameraMode.FOLLOWING)
-                        },
+                        driveView = driveView,
+                        recenter = recenter,
+                        // The map has the other drive view at once, for this drive.
+                        onToggleView = { phoneMap.toggleDriveView() },
+                        onRecenter = phoneMap::recenter,
                         onEnd = viewModel::onEnd,
                         onList = onListButton.takeIf { phoneScreen.listButton },
                     )
@@ -591,16 +597,29 @@ private fun ReplaySlot(replay: State<ReplayPosition?>, onSeek: (Double) -> Unit)
     if (simulated) ReplaySlider(position = replay, onSeek = onSeek, modifier = Modifier.padding(bottom = 4.dp))
 }
 
-/** The guidance bar, reading the progress itself; with [onList], while a car's screen shows the map, its List button. */
+/**
+ * The guidance bar, reading the progress itself; its Overview and Recenter read [driveView] and
+ * [recenter] themselves. With [onList], while a car's screen shows the map, its List button.
+ */
 @Composable
 private fun GuidanceBarSlot(
     progress: State<RouteProgressSnapshot?>,
-    following: Boolean,
-    onToggleOverview: () -> Unit,
+    driveView: State<DriveViewControl>,
+    recenter: State<RecenterControl?>,
+    onToggleView: () -> Unit,
+    onRecenter: () -> Unit,
     onEnd: () -> Unit,
     onList: (() -> Unit)?,
 ) {
-    GuidanceBar(progress = progress.value, following = following, onToggleOverview = onToggleOverview, onEnd = onEnd, onList = onList)
+    GuidanceBar(
+        progress = progress.value,
+        driveView = driveView,
+        recenter = recenter,
+        onToggleView = onToggleView,
+        onRecenter = onRecenter,
+        onEnd = onEnd,
+        onList = onList,
+    )
 }
 
 @Composable
@@ -626,11 +645,6 @@ private fun UserMessage.textRes(): Int = when (this) {
     UserMessage.PLACE_NOT_FOUND -> R.string.message_place_not_found
     UserMessage.START_FAILED -> R.string.message_start_failed
     UserMessage.TOKEN_REJECTED -> R.string.message_token_rejected
-}
-
-/** The camera of a screen that has no map yet, having started on the list: none, so idle. */
-private val NO_CAMERA: State<CameraMode> = object : State<CameraMode> {
-    override val value: CameraMode get() = CameraMode.IDLE
 }
 
 /** Lowest bottom inset for the Mapbox logo, so a rounded screen corner never clips it. */

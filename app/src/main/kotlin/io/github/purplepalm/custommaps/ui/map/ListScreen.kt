@@ -39,11 +39,14 @@ import io.github.purplepalm.custommaps.nav.format.ImperialFormat
 import io.github.purplepalm.custommaps.nav.guidance.ManeuverList
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import io.github.purplepalm.custommaps.nav.network.OfflineReason
@@ -55,6 +58,7 @@ import io.github.purplepalm.custommaps.ui.guidance.ReplaySlider
 import io.github.purplepalm.custommaps.ui.guidance.TABULAR_DIGITS
 import io.github.purplepalm.custommaps.ui.guidance.THEN_CHIP_BAND
 import io.github.purplepalm.custommaps.ui.guidance.arrivalSideRes
+import io.github.purplepalm.custommaps.ui.guidance.fixedState
 import io.github.purplepalm.custommaps.ui.guidance.thenDirectionRes
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import io.github.purplepalm.custommaps.ui.theme.LookParameter
@@ -257,11 +261,25 @@ private fun ListReplay(replay: State<ReplayPosition?>, onSeek: (Double) -> Unit)
     if (simulated) ReplaySlider(position = replay, onSeek = onSeek, modifier = Modifier.padding(bottom = 4.dp), glides = false)
 }
 
-/** The guidance bar, reading the progress itself, with Map in place of Overview. */
+/** The guidance bar, reading the progress itself, with Map in place of Overview and no Recenter: the list has no map to hold. */
 @Composable
 private fun ListBar(progress: State<RouteProgressSnapshot?>, onMap: () -> Unit, onEnd: () -> Unit) {
-    GuidanceBar(progress = progress.value, following = true, onToggleOverview = onMap, onEnd = onEnd, onMap = onMap)
+    GuidanceBar(
+        progress = progress.value,
+        driveView = NO_DRIVE_VIEW,
+        recenter = NOTHING_HELD,
+        onToggleView = {},
+        onRecenter = {},
+        onEnd = onEnd,
+        onMap = onMap,
+    )
 }
+
+/** The list's bar shows Map where the map's shows Overview: no drive view to show. */
+private val NO_DRIVE_VIEW: State<DriveViewControl> = fixedState(DriveViewControl(DriveView.NORMAL, turnZoom = true))
+
+/** Nobody holds a map the list does not show. */
+private val NOTHING_HELD: State<RecenterControl?> = fixedState(null)
 
 /** More rows than any phone's screen holds: the rest of a long leg is not even made. */
 private const val MOST_ROWS = 16
