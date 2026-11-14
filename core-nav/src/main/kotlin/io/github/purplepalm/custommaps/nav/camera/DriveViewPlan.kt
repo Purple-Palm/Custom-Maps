@@ -377,6 +377,9 @@ class DriveViewPlanner(
     val planSpeed: Double
         get() = point?.let { DriveViewRule.planSpeed(it, speed) } ?: Double.NaN
 
+    /** The car's matched speed at the latest update on the route; null without one. */
+    val speedMps: Double? get() = speed
+
     /**
      * Whether an overview asked for now would stand at least [DriveViewTuning.buttonOverviewSeconds]
      * before the next approach, with no point near; true while no point is known.
