@@ -18,9 +18,23 @@ data class CameraTuning(
     val cruisePitch: Double = 45.0,
     /** The tilt over a maneuver: straight down onto the junction. */
     val maneuverPitch: Double = 0.0,
-    /** How far before a maneuver the navigation SDK starts to frame the maneuver instead of the road. */
+    /**
+     * How far before a maneuver the navigation SDK starts to frame the maneuver instead of the road,
+     * as it does in the two Mapbox styles. Smooth follow frames a junction no later than this.
+     */
     val maneuverFramingMeters: Double = 180.0,
-    /** The tilt goes down over this long and is down when the car reaches [maneuverFramingMeters]. */
+    /**
+     * Smooth follow: a plain junction ([FocusKind.TURN]) is flat and framed this long before it, at the
+     * car's speed, within the two distances ([FocusWindow]): 0.15 mi in town, 0.2 mi at speed.
+     */
+    val turnFramingSeconds: Double = 12.0,
+    val turnFramingMinMeters: Double = 240.0,
+    val turnFramingMaxMeters: Double = 320.0,
+    /** The same for a junction that takes longer to read ([FocusKind.COMPLEX]): about 3 s more. */
+    val complexFramingSeconds: Double = 15.0,
+    val complexFramingMinMeters: Double = 280.0,
+    val complexFramingMaxMeters: Double = 400.0,
+    /** The tilt goes down over this long and is down when the car reaches the framing distance ([FocusWindow]). */
     val descentSeconds: Double = 3.5,
     val ascentSeconds: Double = 3.0,
     /** After the maneuver the view stays down for at least this far and this long. */
@@ -305,12 +319,19 @@ fun guidancePitch(tuning: CameraTuning, laneShare: Double, junctionFocus: Double
  * every frame. The tilt is lerp(cruisePitch, maneuverPitch, focus), and the Large lane zoom goes
  * close to the junction along the same curve ([ZoomPlanner]).
  *
- * It keeps the navigation SDK's rule for which maneuvers count and where the view is down, and
- * replaces the SDK's one-step change of tilt with timed, eased moves:
- * - Down over [CameraTuning.descentSeconds], starting [windowMeters] before the maneuver,
- *   maneuverFramingMeters + speed × descentSeconds, so the view is down as the SDK starts to frame
- *   the maneuver. Once started for a step it stays: braking never tilts the view back up before the
- *   turn.
+ * It decides, once for each step, whether and from where the view looks down onto the junction at
+ * its end, and when the navigation SDK frames that junction ([framesManeuver]); the map hands the
+ * SDK that decision, so the tilt and the frame come from one latched rule. In timed, eased moves:
+ * - Which junctions count, and how far before them, comes from the step's own maneuver
+ *   ([ManeuverFacts], [FocusRule]): none for a step that goes straight on, a merge or a split on a
+ *   freeway; a plain junction's distance for a turn; a few seconds more for one that takes longer to
+ *   read ([FocusWindow]). Past a step the view stays up for, it goes down for the junction after it
+ *   once that comes within its window ([Latch.AHEAD]), so the view is down by the junction's step.
+ * - Down over [CameraTuning.descentSeconds], starting at the window ([FocusWindow.windowMeters]), so
+ *   the view is flat at the framing distance ([framingMeters]), which is fixed when the view latches.
+ *   Once started for a step it stays: braking never tilts the view back up before the turn.
+ * - Framed from the first update at the framing distance until the step changes: a car standing at
+ *   that distance, its position wobbling by a meter, keeps its frame.
  * - Held through the turn, for at least holdAfterManeuverMeters and holdAfterManeuverSeconds into
  *   the next step.
  * - Up over [CameraTuning.ascentSeconds], unless the next counted maneuver is already inside its own
@@ -326,7 +347,12 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     private var start = 0.0
     private var duration = 1.0
     private var stepKey: String? = null
+
+    /** The step whose junction the view is latched down for: the one the car is on, or the next one, latched ahead. */
     private var latchedStep: String? = null
+
+    /** The step a latch ahead was made on, past whose end its junction lies; null for a latch of the step itself. */
+    private var aheadFrom: String? = null
     private var holdStep: String? = null
     private var holdUntil = 0.0
 
@@ -336,13 +362,29 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     /** When the view stayed down past the hold for a next maneuver not framed yet; not a number otherwise. */
     private var keptDownSince = Double.NaN
 
+    /** The step whose junction is framed, from its first update at the framing distance to the step's end. */
+    private var framedStep: String? = null
+
     /** The focus being moved to: 0 or 1. */
     var goal = 0.0
         private set
 
-    /** How the step the car is on latched the view down, for the log; null while it has not. */
+    /** How the view latched down for the junction of this step, for the log; null while it has not. */
     var latchedBy: Latch? = null
         private set
+
+    /**
+     * How far before the junction of this step its frame begins, in meters: fixed when the view
+     * latched down for it; until then as the window puts it at the last update. For a junction past a
+     * step the view stays up for, it is measured from that junction. Not a number on a step that has
+     * no junction the view goes down for.
+     */
+    var framingMeters = Double.NaN
+        private set
+
+    /** Whether the navigation SDK is to frame the junction now: from the framing distance on, to the end of the step. */
+    val framesManeuver: Boolean
+        get() = framedStep != null && framedStep == stepKey
 
     fun focusAt(now: Double) = lerp(from, to, easeInOut((now - start) / duration))
 
@@ -362,20 +404,21 @@ class ManeuverFocus(private val tuning: CameraTuning) {
 
     /**
      * True on the step after a maneuver the view went down for, until the next maneuver of that
-     * step takes the view: the car is past the junction, and the frame of the navigation SDK shows
-     * the road beyond it. The Large lane zoom keeps the junction's zoom meanwhile and lets it go as
-     * the focus comes back.
+     * step, or the junction past it, takes the view: the car is past the junction, and the frame of
+     * the navigation SDK shows the road beyond it. The Large lane zoom keeps the junction's zoom
+     * meanwhile and lets it go as the focus comes back.
      */
     val afterManeuver: Boolean
-        get() = holdStep != null && holdStep == stepKey && latchedStep != stepKey
+        get() = holdStep != null && holdStep == stepKey && !latchedHere()
 
     /**
      * @param stepKey the route, leg and step. It must include the route's id: a reroute is then a
      *   new step even when its leg and step numbers repeat.
      * @param metersToManeuver what is left of the step
      * @param metersOnStep how far the car is into the step
-     * @param maneuverType the type of the maneuver that ends the step, as the route's banner names it
-     * @param excludedTypes the maneuver types the view stays up for
+     * @param facts the maneuver at the end of the step, from the step's own maneuver
+     * @param capMeters the longest approach the junction's frame fits ([FocusWindow.capMeters]); not a
+     *   number for a map not laid out yet, which frames at the navigation SDK's own distance
      * @param speedMps the car's speed; unknown counts as slow
      */
     fun onProgress(
@@ -383,8 +426,8 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         stepKey: String,
         metersToManeuver: Double,
         metersOnStep: Double,
-        maneuverType: String?,
-        excludedTypes: Collection<String>,
+        facts: ManeuverFacts,
+        capMeters: Double,
         speedMps: Double?,
     ) {
         if (stepKey != this.stepKey) {
@@ -396,44 +439,102 @@ class ManeuverFocus(private val tuning: CameraTuning) {
             this.stepKey = stepKey
             holdOver = false
             keptDownSince = Double.NaN
-            latchedBy = null
-        }
-        val inTurn = holdStep == stepKey && (metersOnStep < tuning.holdAfterManeuverMeters || now < holdUntil)
-        // The first update past the hold after the last maneuver, with the view still down.
-        val holdEnds = holdStep == stepKey && !inTurn && !holdOver
-        if (holdEnds) holdOver = true
-        val counts = maneuverType != null && maneuverType !in excludedTypes
-        if (counts && latchedStep != stepKey) {
-            val window = windowMeters(tuning, speedMps)
-            if (metersToManeuver <= window) {
-                latch(stepKey, Latch.WINDOW)
-            } else if (holdEnds && goal == 1.0 && metersToManeuver <= window + bridgeMeters(tuning, speedMps)) {
-                // The bridge: going up now, the view would have to come straight back down.
-                latch(stepKey, Latch.BRIDGE)
+            // A junction latched ahead from the step before keeps its latch and its framing distance.
+            if (latchedStep != stepKey) {
+                latchedBy = null
+                framingMeters = Double.NaN
             }
         }
-        // The view stays down past the hold for a next maneuver the navigation SDK does not frame yet:
-        // the last junction's close zoom is let go from here.
-        if (holdEnds && goal == 1.0 && latchedStep == stepKey && metersToManeuver > tuning.maneuverFramingMeters) keptDownSince = now
-        val newGoal = if (latchedStep == stepKey || inTurn) 1.0 else 0.0
+        val speed = speedMps ?: 0.0
+        val inTurn = holdStep == stepKey && (metersOnStep < tuning.holdAfterManeuverMeters || now < holdUntil)
+        // The first update past the hold after the last maneuver.
+        val holdEnds = holdStep == stepKey && !inTurn && !holdOver
+        if (holdEnds) holdOver = true
+        // The junction the view goes down for from this step: its own maneuver, or past a step the
+        // view stays up for, the maneuver after it.
+        val own = facts.kind != FocusKind.NONE
+        val junction = if (own) facts else facts.next?.takeIf { it.kind != FocusKind.NONE }
+        val junctionKey = if (own) stepKey else facts.nextKey
+        val metersToJunction = if (own) metersToManeuver else metersToManeuver + facts.nextMeters
+        if (junction != null && junctionKey != null && latchedStep != junctionKey) {
+            val framing = FocusWindow.framingMeters(junction.kind, speed, capMeters, tuning)
+            val window = FocusWindow.windowMeters(junction.kind, speed, capMeters, tuning)
+            framingMeters = framing
+            val by = when {
+                metersToJunction <= window -> if (own) Latch.WINDOW else Latch.AHEAD
+                // The bridge: going up now, the view would have to come straight back down.
+                holdEnds && goal == 1.0 && metersToJunction <= window + FocusWindow.bridgeMeters(speed, tuning) -> Latch.BRIDGE
+                else -> null
+            }
+            if (by != null) {
+                latchedStep = junctionKey
+                aheadFrom = if (own) null else stepKey
+                latchedBy = by
+            }
+        } else if (junction == null && !latchedHere()) {
+            framingMeters = Double.NaN
+        }
+        // Once the junction is framed, it stays framed to the end of the step. Past a step the view
+        // stays up for, the SDK frames the junction with this step's end where the step between is short.
+        if (framedStep != stepKey && latchedHere()) {
+            val framed = if (latchedStep == stepKey) {
+                metersToManeuver <= framingMeters
+            } else {
+                facts.nextMeters <= FocusWindow.COALESCE_METERS && metersToJunction <= framingMeters
+            }
+            if (framed) framedStep = stepKey
+        }
+        // The view stays down past the hold for a junction the SDK does not frame yet: the last
+        // junction's close zoom is let go from here.
+        if (holdEnds && goal == 1.0 && latchedHere() && !framesManeuver) keptDownSince = now
+        val newGoal = if (latchedHere() || inTurn) 1.0 else 0.0
         if (newGoal != goal) animateTo(newGoal, now)
+    }
+
+    /**
+     * As [onProgress] from the banner's maneuver type alone, as the camera knew it before the facts:
+     * a maneuver not in [excludedTypes] is a plain junction, framed at the navigation SDK's own
+     * distance. Kept for the camera until it hands the facts over.
+     */
+    fun onProgress(
+        now: Double,
+        stepKey: String,
+        metersToManeuver: Double,
+        metersOnStep: Double,
+        maneuverType: String?,
+        excludedTypes: Collection<String>,
+        speedMps: Double?,
+    ) {
+        val kind = if (maneuverType != null && maneuverType !in excludedTypes) FocusKind.TURN else FocusKind.NONE
+        onProgress(now, stepKey, metersToManeuver, metersOnStep, ManeuverFacts(stepKey, kind), Double.NaN, speedMps)
+    }
+
+    /**
+     * Puts the focus at its goal at once, with no move of its own: a move of the camera that runs now
+     * takes the tilt with it, so the tilt has one motion only.
+     */
+    fun settle(now: Double) {
+        from = goal
+        to = goal
+        start = now
     }
 
     /** Guidance ended or the route was cleared: back to the road view from where the focus is. */
     fun reset(now: Double) {
         stepKey = null
         latchedStep = null
+        aheadFrom = null
         holdStep = null
         holdOver = false
         keptDownSince = Double.NaN
+        framedStep = null
         latchedBy = null
+        framingMeters = Double.NaN
         if (goal != 0.0) animateTo(0.0, now)
     }
 
-    private fun latch(stepKey: String, by: Latch) {
-        latchedStep = stepKey
-        latchedBy = by
-    }
+    /** Whether the view is latched down for this step: for its own junction, or for the one after it. */
+    private fun latchedHere(): Boolean = latchedStep != null && (latchedStep == stepKey || aheadFrom == stepKey)
 
     private fun animateTo(newGoal: Double, now: Double) {
         val current = focusAt(now)
@@ -445,26 +546,9 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         goal = newGoal
     }
 
-    companion object {
-        /** A car that is slower than this, or stopped, still gets a window that opens before the maneuver. */
-        private const val MIN_SPEED_MPS = 3.0
-
+    private companion object {
         /** The shortest move, so a reversal right after a start is not a jerk. */
-        private const val MIN_MOVE_SECONDS = 0.3
-
-        /**
-         * How far before a maneuver the tilt starts down: [CameraTuning.maneuverFramingMeters] plus what
-         * the car covers in [CameraTuning.descentSeconds], so the view is flat as the navigation SDK
-         * starts to frame the maneuver. A car slower than 3 m/s, or with no speed yet, counts as 3 m/s.
-         *
-         * @param speedMps the car's speed; unknown counts as slow
-         */
-        fun windowMeters(tuning: CameraTuning, speedMps: Double?): Double =
-            tuning.maneuverFramingMeters + (speedMps ?: 0.0).coerceAtLeast(MIN_SPEED_MPS) * tuning.descentSeconds
-
-        /** How far past its window a next maneuver still keeps the view down as the hold ends: [CameraTuning.bridgeSeconds] of driving. */
-        fun bridgeMeters(tuning: CameraTuning, speedMps: Double?): Double =
-            (speedMps ?: 0.0).coerceAtLeast(MIN_SPEED_MPS) * tuning.bridgeSeconds
+        const val MIN_MOVE_SECONDS = 0.3
     }
 
     /** How a step latched the view down, by its name in the log. */
@@ -474,5 +558,9 @@ class ManeuverFocus(private val tuning: CameraTuning) {
 
         /** As the hold after the last maneuver ended, the maneuver lay within its window plus the bridge. */
         BRIDGE("bridge"),
+
+        /** Past a step the view stays up for, the junction after it came within its window. */
+        AHEAD("ahead"),
     }
 }
+

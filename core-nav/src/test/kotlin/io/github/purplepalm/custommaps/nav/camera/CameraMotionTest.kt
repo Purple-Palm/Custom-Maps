@@ -303,10 +303,10 @@ class CameraMotionTest {
     }
 
     @Test
-    fun `the tilt starts down exactly at the window the camera names`() {
-        // Standing, slow, at town speed and on a freeway: the latch opens at the named distance and no farther out.
+    fun `without the facts the tilt starts down exactly at the SDK's framing distance plus the descent`() {
+        // Standing, slow, at town speed and on a freeway: the latch opens at the window and no farther out.
         for (speed in listOf(0.0, 3.0, 13.0, 30.0)) {
-            val window = ManeuverFocus.windowMeters(tuning, speed)
+            val window = FocusWindow.windowMeters(FocusKind.TURN, speed, Double.NaN, tuning)
             assertEquals(tuning.maneuverFramingMeters + maxOf(speed, 3.0) * tuning.descentSeconds, window, 1e-9, "speed $speed")
             val outside = ManeuverFocus(tuning)
             outside.onProgress(0.0, "r/0/0", window + 0.01, 0.0, "turn", excluded, speed)
@@ -316,9 +316,7 @@ class CameraMotionTest {
             assertEquals(1.0, at.goal, "speed $speed")
         }
         // 180 m and 3.5 s at 13 m/s.
-        assertEquals(225.5, ManeuverFocus.windowMeters(tuning, 13.0), 1e-9)
-        // No speed yet is a slow car.
-        assertEquals(ManeuverFocus.windowMeters(tuning, 0.0), ManeuverFocus.windowMeters(tuning, null), 1e-9)
+        assertEquals(225.5, FocusWindow.windowMeters(FocusKind.TURN, 13.0, Double.NaN, tuning), 1e-9)
     }
 
     @Test
@@ -434,6 +432,242 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `with today's numbers the facts latch and frame where the banner's type did`() {
+        val today = tuning.copy(turnFramingMinMeters = 180.0, turnFramingMaxMeters = 180.0, complexFramingMinMeters = 180.0, complexFramingMaxMeters = 180.0)
+        for (v in (1..40).map { it.toDouble() }) {
+            for (phase in (0 until 10).map { it / 10.0 }) {
+                val byFacts = ManeuverFocus(today)
+                val byBanner = ManeuverFocus(tuning)
+                var k = 0
+                while (true) {
+                    val t = phase + k
+                    val d = 1_500.0 - v * t
+                    if (d < 0.0) break
+                    byFacts.onProgress(t, "r/0/0", d, 3_000.0 - d, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, v)
+                    byBanner.onProgress(t, "r/0/0", d, 3_000.0 - d, "turn", excluded, v)
+                    assertEquals(byBanner.goal, byFacts.goal, "$v m/s phase $phase at $d m")
+                    assertEquals(d <= 180.0 + maxOf(v, 3.0) * tuning.descentSeconds, byFacts.goal == 1.0, "$v m/s phase $phase at $d m")
+                    // The SDK framed today's maneuvers from 180 m on.
+                    assertEquals(d <= 180.0, byFacts.framesManeuver, "$v m/s phase $phase at $d m")
+                    assertEquals(d <= 180.0, byBanner.framesManeuver, "$v m/s phase $phase at $d m")
+                    k += 1
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `the view latches within one update of its window, a complex junction about 3 s earlier`() {
+        for (v in listOf(5.0, 10.0, 13.4, 20.1, 29.1, 35.0)) {
+            for (kind in listOf(FocusKind.TURN, FocusKind.COMPLEX)) {
+                val window = FocusWindow.windowMeters(kind, v, Double.POSITIVE_INFINITY, tuning)
+                for (phase in phases) {
+                    val focus = ManeuverFocus(tuning)
+                    var k = 0
+                    var latchedAt = Double.NaN
+                    while (latchedAt.isNaN()) {
+                        val d = 1_500.0 - v * (phase + k)
+                        focus.onProgress(phase + k, "r/0/0", d, 0.0, ManeuverFacts("r/0/0", kind), Double.POSITIVE_INFINITY, v)
+                        if (focus.goal == 1.0) latchedAt = d
+                        k += 1
+                    }
+                    assertTrue(latchedAt <= window && latchedAt > window - v, "$kind $v m/s phase $phase: $latchedAt, window $window")
+                    assertEquals(ManeuverFocus.Latch.WINDOW, focus.latchedBy)
+                    assertEquals(FocusWindow.framingMeters(kind, v, Double.POSITIVE_INFINITY, tuning), focus.framingMeters, 1e-9)
+                }
+            }
+            val turn = FocusWindow.windowMeters(FocusKind.TURN, v, Double.POSITIVE_INFINITY, tuning)
+            val complex = FocusWindow.windowMeters(FocusKind.COMPLEX, v, Double.POSITIVE_INFINITY, tuning)
+            assertTrue(complex - turn >= 2.0 * v && complex - turn <= 4.0 * v + 40.0, "$v m/s: $turn and $complex")
+        }
+    }
+
+    @Test
+    fun `the frame begins at the framing distance and is kept through braking`() {
+        val focus = ManeuverFocus(tuning)
+        val facts = ManeuverFacts("r/0/0", FocusKind.TURN)
+        var t = 0.0
+        var d = 800.0
+        var v = 50.0
+        // At 50 m/s the window opens at 320 + 175 m.
+        while (focus.goal == 0.0) {
+            focus.onProgress(t, "r/0/0", d, 900.0 - d, facts, Double.POSITIVE_INFINITY, v)
+            assertFalse(focus.framesManeuver)
+            t += 1.0
+            d -= v
+        }
+        assertEquals(320.0, focus.framingMeters, 1e-9)
+        // Hard braking to a crawl: at 3 m/s a junction would be framed from 240 m, this one stays at its 320 m.
+        for (slower in listOf(20.0, 10.0, 3.0)) {
+            v = slower
+            focus.onProgress(t, "r/0/0", d, 900.0 - d, facts, Double.POSITIVE_INFINITY, v)
+            t += 1.0
+            d -= v
+        }
+        var framedFrom = Double.NaN
+        while (d > 0.0) {
+            focus.onProgress(t, "r/0/0", d, 900.0 - d, facts, Double.POSITIVE_INFINITY, v)
+            assertEquals(d <= 320.0, focus.framesManeuver, "at $d m")
+            if (focus.framesManeuver && framedFrom.isNaN()) framedFrom = d
+            assertEquals(1.0, focus.goal)
+            assertEquals(320.0, focus.framingMeters, 1e-9)
+            t += 1.0
+            d -= v
+        }
+        assertTrue(framedFrom <= 320.0 && framedFrom > 317.0, "framed from $framedFrom m")
+    }
+
+    @Test
+    fun `a car standing at the framing distance with a meter of wobble keeps its frame`() {
+        val focus = ManeuverFocus(tuning)
+        val facts = ManeuverFacts("r/0/0", FocusKind.TURN)
+        // Up to the light at 10 m/s, then standing with the matched position wobbling by 1.3 m.
+        focus.onProgress(0.0, "r/0/0", 300.0, 0.0, facts, Double.POSITIVE_INFINITY, 10.0)
+        focus.onProgress(1.0, "r/0/0", 270.0, 30.0, facts, Double.POSITIVE_INFINITY, 10.0)
+        focus.onProgress(2.0, "r/0/0", 250.0, 50.0, facts, Double.POSITIVE_INFINITY, 4.0)
+        assertEquals(240.0, focus.framingMeters, 1e-9)
+        var changes = 0
+        var last = focus.framesManeuver
+        for (i in 0 until 20) {
+            val d = if (i % 2 == 0) 240.8 else 239.5
+            focus.onProgress(3.0 + i, "r/0/0", d, 300.0 - d, facts, Double.POSITIVE_INFINITY, 0.0)
+            if (focus.framesManeuver != last) changes += 1
+            last = focus.framesManeuver
+        }
+        assertEquals(1, changes)
+        assertTrue(focus.framesManeuver)
+        // The next step starts unframed.
+        focus.onProgress(30.0, "r/0/1", 900.0, 0.0, ManeuverFacts("r/0/1", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertFalse(focus.framesManeuver)
+    }
+
+    @Test
+    fun `a step the view stays up for never latches for itself`() {
+        val focus = ManeuverFocus(tuning)
+        var d = 600.0
+        var t = 0.0
+        while (d >= 0.0) {
+            focus.onProgress(t, "r/0/0", d, 600.0 - d, ManeuverFacts("r/0/0", FocusKind.NONE), Double.POSITIVE_INFINITY, 10.0)
+            assertEquals(0.0, focus.goal, "at $d m")
+            assertFalse(focus.framesManeuver)
+            assertEquals(null, focus.latchedBy)
+            assertTrue(focus.framingMeters.isNaN())
+            d -= 10.0
+            t += 1.0
+        }
+    }
+
+    @Test
+    fun `past a straight name change 100 m before a turn the view is flat by 240 m before the turn`() {
+        val v = 30.0 * MPH
+        val turn = ManeuverFacts("r/0/1", FocusKind.TURN, turnDegrees = 90.0)
+        val nameChange = ManeuverFacts("r/0/0", FocusKind.NONE, next = turn, nextMeters = 100.0)
+        val window = FocusWindow.windowMeters(FocusKind.TURN, v, Double.POSITIVE_INFINITY, tuning)
+        for (phase in phases) {
+            val focus = ManeuverFocus(tuning)
+            var latchedAt = Double.NaN
+            var framedAt = Double.NaN
+            var k = 0
+            while (true) {
+                val t = phase + k
+                val s = v * t
+                val toTurn = 1_100.0 - s
+                if (toTurn < 0.0) break
+                if (s < 1_000.0) {
+                    focus.onProgress(t, "r/0/0", 1_000.0 - s, s, nameChange, Double.POSITIVE_INFINITY, v)
+                } else {
+                    focus.onProgress(t, "r/0/1", toTurn, s - 1_000.0, turn, Double.POSITIVE_INFINITY, v)
+                }
+                if (focus.goal == 1.0 && latchedAt.isNaN()) latchedAt = toTurn
+                if (focus.framesManeuver && framedAt.isNaN()) framedAt = toTurn
+                if (!latchedAt.isNaN()) {
+                    assertEquals(1.0, focus.goal, "phase $phase at $toTurn m")
+                    assertEquals(ManeuverFocus.Latch.AHEAD, focus.latchedBy, "phase $phase at $toTurn m")
+                }
+                k += 1
+            }
+            // Latched on the name change's step, at the turn's own window; the descent of 3.5 s ends at 240 m.
+            assertTrue(latchedAt <= window && latchedAt > window - v, "phase $phase: latched at $latchedAt m")
+            val flatAt = latchedAt - v * tuning.descentSeconds
+            assertTrue(flatAt <= 240.0 + 1e-9 && flatAt > 240.0 - v, "phase $phase: flat at $flatAt m")
+            // The step between is short: the SDK frames the turn with the name change's end, from the framing distance.
+            assertTrue(framedAt <= 240.0 && framedAt > 240.0 - v, "phase $phase: framed at $framedAt m")
+        }
+    }
+
+    @Test
+    fun `past a longer step the junction is framed from its own step`() {
+        val v = 10.0
+        val turn = ManeuverFacts("r/0/1", FocusKind.TURN)
+        val nameChange = ManeuverFacts("r/0/0", FocusKind.NONE, next = turn, nextMeters = 200.0)
+        val focus = ManeuverFocus(tuning)
+        // 240 m + 35 m before the turn the view goes down, 75 m before the name change.
+        focus.onProgress(0.0, "r/0/0", 80.0, 0.0, nameChange, Double.POSITIVE_INFINITY, v)
+        assertEquals(0.0, focus.goal)
+        focus.onProgress(1.0, "r/0/0", 70.0, 10.0, nameChange, Double.POSITIVE_INFINITY, v)
+        assertEquals(1.0, focus.goal)
+        assertEquals(ManeuverFocus.Latch.AHEAD, focus.latchedBy)
+        // Inside the framing distance, but 200 m of step lie between: the SDK could not frame the turn yet.
+        focus.onProgress(4.0, "r/0/0", 30.0, 50.0, nameChange, Double.POSITIVE_INFINITY, v)
+        assertFalse(focus.framesManeuver)
+        // On the turn's own step it is framed at once, and the view stays down from the step change on.
+        focus.onProgress(7.0, "r/0/1", 200.0, 0.0, turn, Double.POSITIVE_INFINITY, v)
+        assertTrue(focus.framesManeuver)
+        assertEquals(1.0, focus.goal)
+        assertEquals(ManeuverFocus.Latch.AHEAD, focus.latchedBy)
+        assertEquals(240.0, focus.framingMeters, 1e-9)
+        assertFalse(focus.afterManeuver)
+    }
+
+    @Test
+    fun `settled, the focus is at its goal and does not move`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 200.0, 0.0, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(1.0, focus.goal)
+        assertTrue(focus.isAnimating(0.5))
+        focus.settle(0.5)
+        assertEquals(1.0, focus.focusAt(0.5), 1e-12)
+        assertFalse(focus.isAnimating(0.5))
+        assertEquals(tuning.maneuverPitch, focus.pitchAt(0.6), 1e-12)
+        // Settling with nothing latched leaves the road view where it is.
+        val road = ManeuverFocus(tuning)
+        road.settle(3.0)
+        assertEquals(0.0, road.focusAt(3.0), 1e-12)
+        assertFalse(road.isAnimating(3.0))
+    }
+
+    @Test
+    fun `with the junction view's windows the bridge reaches 400 m at 30 mph and 480 m at 45 mph`() {
+        for ((mph, gaps) in listOf(30.0 to listOf(300.0, 350.0, 400.0), 45.0 to listOf(300.0, 350.0, 400.0, 450.0))) {
+            for (gap in gaps) {
+                for (phase in phases) assertEquals(0, closeTurns(gap, mph * MPH, phase, byFacts = true).moves, "$gap m at $mph mph, phase $phase")
+            }
+        }
+        for ((mph, gap) in listOf(30.0 to 420.0, 45.0 to 520.0)) {
+            for (phase in phases) assertEquals(2, closeTurns(gap, mph * MPH, phase, byFacts = true).moves, "$gap m at $mph mph, phase $phase")
+        }
+    }
+
+    @Test
+    fun `a capped frame begins later, never later than the navigation SDK's own distance`() {
+        val focus = ManeuverFocus(tuning)
+        val facts = ManeuverFacts("r/0/0", FocusKind.TURN)
+        focus.onProgress(0.0, "r/0/0", 400.0, 0.0, facts, 214.0, 10.0)
+        assertEquals(214.0, focus.framingMeters, 1e-9)
+        assertEquals(0.0, focus.goal)
+        focus.onProgress(1.0, "r/0/0", 214.0 + 35.0, 151.0, facts, 214.0, 10.0)
+        assertEquals(1.0, focus.goal)
+        val small = ManeuverFocus(tuning)
+        small.onProgress(0.0, "r/0/0", 215.0, 0.0, facts, 120.0, 10.0)
+        assertEquals(1.0, small.goal)
+        assertEquals(180.0, small.framingMeters, 1e-9)
+        // A map not laid out yet frames at the SDK's distance too.
+        val unknown = ManeuverFocus(tuning)
+        unknown.onProgress(0.0, "r/0/0", 400.0, 0.0, facts, Double.NaN, 10.0)
+        assertEquals(180.0, unknown.framingMeters, 1e-9)
+    }
+
+    @Test
     fun `a reroute with the same indices is a new step`() {
         val focus = ManeuverFocus(tuning)
         focus.onProgress(0.0, "a/0/0", 150.0, 0.0, "turn", excluded, 10.0)
@@ -508,7 +742,7 @@ class CameraMotionTest {
      * goal changed from the first time it went down until the car reached the second turn, and how
      * the step to the second turn latched.
      */
-    private fun closeTurns(gap: Double, speed: Double, phase: Double, tuning: CameraTuning = this.tuning): CloseTurns {
+    private fun closeTurns(gap: Double, speed: Double, phase: Double, tuning: CameraTuning = this.tuning, byFacts: Boolean = false): CloseTurns {
         val focus = ManeuverFocus(tuning)
         val first = 600.0
         val second = first + gap
@@ -524,7 +758,11 @@ class CameraMotionTest {
             if (s >= second) break
             val step = if (s < first) 0 else 1
             val end = if (step == 0) first else second
-            focus.onProgress(t, "r/0/$step", end - s, if (step == 0) s else s - first, "turn", excluded, speed)
+            if (byFacts) {
+                focus.onProgress(t, "r/0/$step", end - s, if (step == 0) s else s - first, ManeuverFacts("r/0/$step", FocusKind.TURN), Double.POSITIVE_INFINITY, speed)
+            } else {
+                focus.onProgress(t, "r/0/$step", end - s, if (step == 0) s else s - first, "turn", excluded, speed)
+            }
             if (down && focus.goal != last) moves += 1
             if (focus.goal == 1.0) down = true
             last = focus.goal
