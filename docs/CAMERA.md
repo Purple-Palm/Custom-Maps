@@ -1414,7 +1414,7 @@ map where the overview could not stand 10 s more
   before its camera is asked for anything: near a turn it comes back in the normal view, with no
   overview first.
 - **The camera style changed during a drive:** the new camera gets what the drive view wants; a map
-  the driver holds stays his.
+  the driver holds stays the driver's.
 - **The look of a later step** (`DriveCamera.onLook`, for the routes badge): the overview for 10 s as
   a hold; none while a point is near or where the overview could not stand 10 s. Nothing calls it
   yet.
