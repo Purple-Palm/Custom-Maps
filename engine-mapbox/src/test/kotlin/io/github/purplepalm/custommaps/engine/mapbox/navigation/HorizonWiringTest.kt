@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
 import io.github.purplepalm.custommaps.engine.mapbox.map.SourceText
 import java.io.File
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -41,6 +42,38 @@ class HorizonWiringTest {
         assertTrue(SourceText.hasStatement(engine, "private fun onTripSessionStoppedOutsideApp()", "updateHorizon()"))
         val outside = body("private fun onTripSessionStoppedOutsideApp()")
         assertTrue(outside.indexOf("tripSessionRunning = false") in 0 until outside.indexOf("updateHorizon()"))
+    }
+
+    @Test
+    fun `the switch is stored as it comes before the engine asks again, and what was held goes once it stops listening`() {
+        // The switch's own value, unconditionally, then the question whether to listen.
+        val set = "internal fun setLaneCountsHorizon(on: Boolean)"
+        assertTrue(SourceText.hasStatement(engine, set, "laneCountsHorizon = on"))
+        val setBody = body(set)
+        assertTrue(setBody.indexOf("laneCountsHorizon = on") in 0 until setBody.indexOf("updateHorizon()"), "stored before it is read")
+        // Once not listening, by the switch or any other condition, the stretches held go with it.
+        val update = "private fun updateHorizon()"
+        assertTrue(SourceText.hasStatement(engine, update, "if (!horizon.listening) routeHorizon.clear()"))
+        val updateBody = body(update)
+        assertTrue(updateBody.indexOf("horizon.listen(navigation.takeIf { wanted })") in 0 until updateBody.indexOf("if (!horizon.listening) routeHorizon.clear()"))
+    }
+
+    @Test
+    fun `each update the reader lays out goes to the route's holder, and the car's station carries its moment`() {
+        // The reader's result reaches what the map's own line asks for its next window.
+        val result = "override fun onResult(result: HorizonResult) {"
+        assertTrue(SourceText.hasStatement(engine, result, "routeHorizon.take(result.ahead)"))
+        val resultBody = body(result)
+        assertTrue(resultBody.indexOf("if (_guidanceState.value != GuidanceState.ACTIVE) return") in 0 until resultBody.indexOf("routeHorizon.take(result.ahead)"))
+        // The plan's lookup takes the station's time with the station: a horizon update moves it on from there.
+        val look = "private fun lookUpPlan(progress: RouteProgress)"
+        assertTrue(SourceText.hasStatement(engine, look, "lanePlanStation = car"))
+        assertTrue(SourceText.hasStatement(engine, look, "lanePlanStationNanos = SystemClock.elapsedRealtimeNanos()"))
+        val lookBody = body(look)
+        assertEquals(lookBody.indexOf("lanePlanStation = car") + 1, lookBody.indexOf("lanePlanStationNanos = SystemClock.elapsedRealtimeNanos()"))
+        assertTrue(
+            "val age = (SystemClock.elapsedRealtimeNanos() - lanePlanStationNanos) / NANOS_PER_SECOND" in body("private fun horizonCar(): HorizonCar?"),
+        )
     }
 
     @Test
