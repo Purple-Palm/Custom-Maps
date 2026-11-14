@@ -279,10 +279,12 @@ class LaneDrawing private constructor(
     fun gores(): List<Double> = builder.goreStations()
 
     /**
-     * The route stations of the street junctions where the lit lane crosses the junction into the receiving road's lane, in
-     * route order: the map lays the maneuver's arrow along the path there ([GoreArrow.alongTurn]), from
-     * [GoreArrow.STOP_LINE_BEFORE_METERS] before the stop line's place. Not at a U-turn or a roundabout, where the navigation
-     * SDK's own arrow shows.
+     * The route stations of the street junctions the path crosses on its own curve ([RoutePath.junctions]), in route order:
+     * where the lit lane crosses into the receiving road's lane, and where the curve ends on the new road's line with no lane
+     * claimed past the junction. The map lays the maneuver's arrow along the path there ([GoreArrow.alongTurn]), from
+     * [GoreArrow.STOP_LINE_BEFORE_METERS] before the stop line's place, so it comes out of the lane the path is in, not the
+     * road's line. Not at a U-turn, whose arrow is the app's own curve from the route's shape, nor at a roundabout, where the
+     * path takes no curve of its own and the navigation SDK's arrow shows.
      */
     fun turns(): List<Double> = builder.turnStations()
 
@@ -856,7 +858,8 @@ class LaneDrawing private constructor(
 
         fun goreStations(): List<Double> = gores.filter { it.stub.isNotEmpty() && !it.onLine }.map { it.station }
 
-        fun turnStations(): List<Double> = path.junctions.filter { litTurn(it) != null }.map { nodes[it.node].station }
+        fun turnStations(): List<Double> =
+            path.junctions.filter { nodes[it.node].maneuver?.modifier != TurnModifier.U_TURN }.map { nodes[it.node].station }
 
         /**
          * The lane lit across the street junction [j]: the lane lit at its near side, where the path's curve ends in the

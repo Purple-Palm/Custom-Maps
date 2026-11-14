@@ -409,12 +409,16 @@ class StreetDrawingTest {
             assertTrue(d.of(Kind.TINT).none { it.to > junction.from + MM })
             assertNull(d.drawing.asphaltAt(gore))
         }
-        // Without a drawn road past the turn no lane is claimed there: the curve ends on its line, nothing is lit across.
+        // Without a drawn road past the turn no lane is claimed there: the curve ends on its line, nothing is lit across. The
+        // maneuver's arrow still follows the path, out of the lit lane, not the road's line.
         val alone = draw(LaneScenes.streetTurn(), oneWay = false)
         assertNull(alone.path.junctions.single().receiving)
         assertEquals(0.0, alone.path.junctions.single().offsetTo, MM)
         assertEquals(gore - 10.0, alone.drawing.litStretches().single().endInclusive, MM)
-        assertTrue(alone.drawing.turns().isEmpty())
+        assertEquals(listOf(gore), alone.drawing.turns())
+        val arrow = GoreArrow.alongTurn(alone.path.points, alone.path.stations, gore)
+        assertEquals(alone.path.offsetAt(gore - 14.0), offset(arrow.first()), 0.05)
+        assertTrue(abs(offset(arrow.first())) > lane, "the arrow begins in the lit lane, off the road's line")
     }
 
     @Test
@@ -457,7 +461,7 @@ class StreetDrawingTest {
             assertEquals(0.0, junction.offsetTo, MM)
             assertTrue(d.of(Kind.LIT).none { it.to > junction.from + MM })
             assertEquals(gore - 10.0, d.drawing.litStretches().single().endInclusive, MM)
-            // The navigation SDK's own U-turn arrow: none of ours.
+            // The app's own U-turn arrow from the route's shape: none along the path.
             assertTrue(d.drawing.turns().isEmpty())
         }
     }

@@ -11,10 +11,10 @@ import kotlin.math.min
  * The maneuver arrow at a gore of the app's own lanes (the own lanes' design 5.3, D11). The navigation SDK's arrow of a
  * maneuver follows the route's own line, which at a gore cuts across the lanes to the ramp; where the app draws the lanes,
  * the arrow follows its path instead, in the lit lane up to the gore and on into the ramp past it, from [BEFORE_METERS]
- * before the gore to [AFTER_METERS] after it. At a street turn where the lit lane crosses the junction into the receiving
- * road's lane ([LaneDrawing.turns]) it follows the path the same way, from [STOP_LINE_BEFORE_METERS] before the stop line's
- * place, so the lane's own painted arrow stays in sight ([alongTurn]). Pure; built once with the path, off the main thread,
- * and kept in memory with it, never stored.
+ * before the gore to [AFTER_METERS] after it. At a street turn the path crosses on its own curve ([LaneDrawing.turns]),
+ * into the receiving road's lane or onto its line, it follows the path the same way, from [STOP_LINE_BEFORE_METERS] before
+ * the stop line's place, so the lane's own painted arrow stays in sight ([alongTurn]). Pure; built once with the path, off
+ * the main thread, and kept in memory with it, never stored.
  */
 object GoreArrow {
 

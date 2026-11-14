@@ -641,6 +641,11 @@ class LaneTrustTest {
                 saw("litTurn")
             }
         }
+        // The maneuver's arrow follows the path at every curve of its own but a U-turn's, lit or not.
+        for (j in b.path.junctions) {
+            val uTurn = nodes[j.node].maneuver?.modifier == TurnModifier.U_TURN
+            assertEquals(!uTurn, nodes[j.node].station in b.drawing.turns(), "${b.name}: the arrow at the curve at ${j.from}")
+        }
         // A roundabout: nothing of ours from its approach's near side to the end of the way round it.
         for ((i, node) in nodes.withIndex()) {
             if (node.maneuver?.type !in ROUNDABOUTS || node.maneuver?.type in ROUNDABOUT_EXITS || i == 0) continue
