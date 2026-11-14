@@ -86,6 +86,24 @@ class DriveCameraWiringTest {
     }
 
     @Test
+    fun `a map button during a drive switches the drive view only from the other one, else it recenters`() {
+        // The car's strip: every map button during guidance goes through the drive views.
+        val mode = body("override fun setCameraMode(mode: CameraMode)")
+        assertEquals(listOf("if (guidanceState == GuidanceState.ACTIVE) {", "chooseDriveView(mode)", "return"), mode.subList(0, 3))
+        val choose = body("private fun chooseDriveView(mode: CameraMode)")
+        assertTrue("val view = driveCamera.driveViewControl().driveView" in choose)
+        // The overview switch from Normal only: in the Overview already, as while it is down for a turn, it changes nothing,
+        // and the view goes out by itself after the turn.
+        assertTrue("CameraMode.OVERVIEW -> if (view == DriveView.NORMAL) toggle(now)" in choose, "$choose")
+        // Following leaves the Overview drive view; in Normal it is Recenter, which ends a hold with the car at once.
+        assertTrue(
+            "CameraMode.FOLLOWING -> if (view == DriveView.OVERVIEW) toggle(now) else carryOut(driveCamera.onRecenter(now), BY_DRIVER, WHY_RECENTER_TAP)" in choose,
+            "$choose",
+        )
+        assertEquals(2, choose.count { "toggle(now)" in it }, "$choose")
+    }
+
+    @Test
     fun `a camera made anew during a drive is asked for what the drive views want`() {
         val style = body("override fun setCameraStyle(style: CameraStyle)")
         val ask = style.indexOf("carryOut(driveCamera.wish, BY_STYLE, WHY_STYLE, always = true)")
