@@ -258,6 +258,51 @@ class CardPlanRowTest {
         assertTrue(rows.drop(worded).all { it.target == LaneTarget(LaneEdge.LEFT, 1, 0) })
     }
 
+    // ------------------------------------------------------------------ an earlier exit on the exit's side
+
+    @Test
+    fun `before an earlier exit that takes the lane at the exit's side, the card never names that lane, and names the exit's once it is passed`() {
+        val route = LaneScenes.earlierExitOnSide()
+        val plan = plan(route)
+        val exit = exitOf(route)
+        val earlier = plan.topology.points.single { it.station == GORE - 1_500.0 }
+        // At the earlier exit its right lane leaves; the plan names the lane beside it, the exit's right lane past it.
+        val leaving = earlier.lanes.lastIndex
+        val named = requireNotNull(CardPlanRow.named(earlier, plan.segmentAt(earlier.station)))
+        assertEquals(leaving - 1, named)
+        val rows = CardDrive(route, plan = plan).drive(everyUpdate = true).filter { it.row.source == CardLanes.Source.RUN_UP }
+        val before = rows.filter { it.station <= earlier.station }
+        val past = rows.filter { it.station > earlier.station && it.station < GORE }
+        assertTrue(before.isNotEmpty() && past.isNotEmpty())
+        for (row in before) {
+            val at = "${GORE - row.station} m before the gore"
+            // The earlier exit's row, lit on the plan's lane there, never on the lane that leaves first.
+            assertEquals(earlier.node, row.node, at)
+            assertEquals(listOf(named), row.row.lanes.indices.filter { row.row.lanes[it].isRecommended }, at)
+            // No words while the plan names no lane, else the plan's lane in words: never "Right lane".
+            val waits = row.target == null && row.odd == RunUpRule.ODD_NOT_NAMED
+            assertTrue(waits || row.target == LaneTarget(LaneEdge.RIGHT, 1, 1), "$at: ${row.target}, ${row.odd}")
+        }
+        // Once the earlier exit is passed, the exit's own lane in words to the gore.
+        for (row in past) {
+            val at = "${GORE - row.station} m before the gore"
+            assertEquals(exit, row.node, at)
+            assertEquals(listOf(route.nodes[exit].lanes.lastIndex), row.row.lanes.indices.filter { row.row.lanes[it].isRecommended }, at)
+            assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 0), row.target, at)
+            assertNull(row.odd, at)
+        }
+        // A run-up begun before the plan names a lane, as at a speed above the route's planning speed: the plan's lane at
+        // the earlier exit lit, and no words until the plan names a lane at the car.
+        val window = plan.windows.first { it.kind == CardWindow.Kind.RUN_UP }
+        for (car in listOf(window.from - 600.0, window.from - 1.0)) {
+            val row = rowAt(route, plan, exit, car)
+            assertEquals("${earlier.node}", row.key, "at ${GORE - car} m")
+            assertEquals(listOf(named), row.lanes.lanes.indices.filter { row.lanes.lanes[it].isRecommended }, "at ${GORE - car} m")
+            assertNull(row.target, "at ${GORE - car} m")
+            assertEquals(RunUpRule.ODD_NOT_NAMED, row.odd, "at ${GORE - car} m")
+        }
+    }
+
     // ------------------------------------------------------------------ where the plan names no lane
 
     @Test

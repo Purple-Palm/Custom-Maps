@@ -434,6 +434,17 @@ internal object LaneScenes {
         id = "short-lane-before-exit-lane",
     )
 
+    /**
+     * An earlier exit on the exit's side: four lanes, the right one leaving by a road on the right 1,500 m before a right
+     * exit, which takes the right one of the three that go on. Before the earlier exit the lane at the exit's edge is not
+     * the exit's lane: it leaves first. Planned at 27 m/s. For the card's tests, not among [all].
+     */
+    fun earlierExitOnSide() = approach(
+        listOf(at(1_500.0, s(), s(), s(), sr(false), roads = EXIT_RIGHT)),
+        exit = listOf(s(false), s(false), sr()),
+        id = "earlier-exit-on-side",
+    )
+
     /** Two lanes added on the right at a point 900 m before a right exit, which takes the inner one only. */
     fun twoAdded() = approach(
         listOf(at(2_000.0, s(), s(), s(), s()), at(900.0, s(), s(), s(), s(), sr(), sr())),
