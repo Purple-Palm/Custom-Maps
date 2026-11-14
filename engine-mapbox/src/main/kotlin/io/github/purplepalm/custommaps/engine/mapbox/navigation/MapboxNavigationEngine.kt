@@ -47,6 +47,7 @@ import io.github.purplepalm.custommaps.nav.GuidanceAudio
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
+import io.github.purplepalm.custommaps.nav.camera.ViewInput
 import io.github.purplepalm.custommaps.nav.car.CarSurfaces
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.LaneRowLog
@@ -267,6 +268,14 @@ internal class MapboxNavigationEngine(
      * that step, never the drive.
      */
     private val maneuverFactsReader = ManeuverFactsReader(onError = { error -> debugLog.error("maneuverFacts", error) })
+
+    /**
+     * The points ahead that the drive views' planner comes down for, with the car's place on the route
+     * ([ViewPoints]): walked from the route once per step, the same answer for the phone's map and the
+     * car's. A route whose steps cannot be read costs one error line and the points past that step,
+     * never the drive.
+     */
+    private val viewPoints = ViewPoints(onError = { error -> debugLog.error("viewPoints", error) })
 
     /**
      * Where the debug lines that describe whole routes are put together: off the main thread, since
@@ -1163,6 +1172,7 @@ internal class MapboxNavigationEngine(
                 audioCall { audio.onGuidanceEnded() }
                 upcoming.reset()
                 laneChoices.clear()
+                viewPoints.clear()
                 laneRowLog.reset()
                 divergeWatch.reset()
                 val commit = ++commitCount
@@ -1285,6 +1295,7 @@ internal class MapboxNavigationEngine(
                 audioCall { audio.onGuidanceEnded() }
                 upcoming.reset()
                 laneChoices.clear()
+                viewPoints.clear()
                 laneRowLog.reset()
                 divergeWatch.reset()
             }
@@ -1640,6 +1651,15 @@ internal class MapboxNavigationEngine(
      * cameras then frame by the banner as the navigation SDK does.
      */
     internal fun maneuverFacts(progress: RouteProgress): ManeuverFacts? = maneuverFactsReader.facts(progress)
+
+    /**
+     * What the drive views' planner reads of [progress], for the map's drive camera: the points ahead the
+     * view comes down for, as the route names them ([ViewPoints]), with how far the car is along the route,
+     * whether it is off it, the matched speed the camera gets and the run-up on now ([runUpKey]). The same
+     * object for every map that asks with the same update. Nothing is requested.
+     */
+    internal fun viewAhead(progress: RouteProgress): ViewInput =
+        viewPoints.ahead(progress, laneChoices.ahead(progress), lastMatch?.enhancedLocation?.speed, runUpKey(progress), nowSeconds())
 
     /**
      * Whether the progress update that comes with the latest matched position is one the screen
