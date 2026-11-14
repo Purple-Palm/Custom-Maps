@@ -404,14 +404,15 @@ class CrossSectionTest {
     }
 
     @Test
-    fun `where the sources of one road disagree none of it is drawn`() {
+    fun `where the sources of one stretch disagree none of it is drawn, and a road sits as its first told stretch`() {
         val route = LaneScenes.streetTurn()
         // One-way up to the intersection 200 m before the turn and two-way past it, as the horizon reads each street's middle.
         val mixed = CrossSection.of(SceneLines.planOf(route), streets = StreetWays.of(route) { it < gore - 200.0 })
         assertFalse(mixed.drawsAt(gore - 500.0))
         assertFalse(mixed.drawsAt(gore - 100.0))
         assertEquals(listOf(CrossSection.UndrawnStreet(gore - 650.0, gore, mixed = true)), mixed.undrawnStreets)
-        // Two stretches of one road apart, the second street two-way: neither is drawn.
+        // Two stretches of one road apart, the first street one-way, the second two-way: the road sits as the first, the
+        // second is not drawn.
         val apart = LaneScenes.route(
             LaneScenes.street(0.0, maneuver = LaneScenes.DEPART),
             LaneScenes.street(3_000.0, s(), s()),
@@ -422,10 +423,12 @@ class CrossSectionTest {
         val plan = SceneLines.planOf(apart)
         val known = plan.evidence().stretches.filter { it.kind == LaneEvidence.Kind.KNOWN }
         val both = CrossSection.of(plan, streets = StreetWays.of(apart) { it < 2_000.0 })
-        assertEquals(2, both.undrawnStreets.size, "${both.undrawnStreets}")
-        assertTrue(both.undrawnStreets.all { it.mixed })
-        assertEquals(known.minOf { it.from }, both.undrawnStreets.first().from, 1e-9)
-        for (stretch in known) assertFalse(both.drawsAt((stretch.from + stretch.to) / 2.0))
+        assertEquals(2, known.size)
+        val (first, second) = known.sortedBy { it.from }
+        assertEquals(listOf(CrossSection.UndrawnStreet(second.from, second.to, mixed = true)), both.undrawnStreets)
+        assertTrue(both.drawsAt((first.from + first.to) / 2.0))
+        assertEquals(CrossSection.Carriageway.ONE_WAY, both.carriagewayAt((first.from + first.to) / 2.0))
+        assertFalse(both.drawsAt((second.from + second.to) / 2.0))
         // All alike, both are drawn.
         val alike = CrossSection.of(plan, streets = StreetWays.of(apart) { false })
         assertTrue(alike.undrawnStreets.isEmpty())

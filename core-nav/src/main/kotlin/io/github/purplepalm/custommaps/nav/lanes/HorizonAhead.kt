@@ -119,6 +119,37 @@ class HorizonAhead private constructor(
         return null
     }
 
+    /**
+     * Whether the route's road from [from] to [to] along these stretches is one-way, by every edge the horizon lays over it
+     * ([HorizonEdge.oneWay]): read from [ROAD_END_MARGIN_M] past [from] to as far before [to], since an edge end may lie that
+     * far off the intersection the route places it at, and at the road's middle alone where it is no longer than twice
+     * that. Null where the stretches do not hold all of it, and where its edges say otherwise of it: the street's way is not
+     * known there. The engine's reading for the app's own streets (the design's 3.3): a lookup over a few stretches, on the
+     * route lines' worker with a drawing window's send.
+     */
+    fun oneWayAlong(from: Double, to: Double): Boolean? {
+        if (!(to > from) || stretches.isEmpty()) return null
+        val inside = to - from > 2.0 * ROAD_END_MARGIN_M
+        val a = if (inside) from + ROAD_END_MARGIN_M else (from + to) / 2.0
+        val b = if (inside) to - ROAD_END_MARGIN_M else a
+        // The first stretch that ends past where the reading begins.
+        var low = 0
+        var high = stretches.size
+        while (low < high) {
+            val mid = (low + high) ushr 1
+            if (stretches[mid].end <= a) low = mid + 1 else high = mid
+        }
+        if (low >= stretches.size || stretches[low].start > a) return null
+        // The stretches meet end to end: each one from where the one before it ends.
+        val first = stretches[low].edge.oneWay
+        for (k in low until stretches.size) {
+            val s = stretches[k]
+            if (s.edge.oneWay != first) return null
+            if (s.end > b) return first
+        }
+        return null
+    }
+
     /** The stretch whose end lies nearest [station], before or after it; null without stretches. A tie goes to the earlier. */
     fun endNearest(station: Double): HorizonStretch? {
         if (stretches.isEmpty() || station.isNaN()) return null
@@ -166,6 +197,13 @@ class HorizonAhead private constructor(
          * lane point ([HorizonLanesLine.MATCH_TOLERANCE_M]).
          */
         const val JOIN_M = 12.0
+
+        /**
+         * A street's way is read this far in from each of its ends ([oneWayAlong]), in metres: an edge end may lie as far off
+         * the intersection the route places it at as one may off a lane point ([HorizonLanesLine.MATCH_TOLERANCE_M]), so the
+         * edge of the street before or after it is not read for it.
+         */
+        const val ROAD_END_MARGIN_M = HorizonLanesLine.MATCH_TOLERANCE_M
 
         /**
          * The horizon is updated at most once in this many seconds, as its options ask: the navigation SDK maps the whole

@@ -13,8 +13,9 @@ import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
  *    is given (while its switch is on) and it holds an edge there;
  * 3. none: nothing of the app's own is drawn on that street, and the route line is the one without the drawing.
  *
- * Freeways and ramps are one-way by their kind and are not looked up. Pure; made off the main thread with the route's
- * drawing, from the route and, for the horizon, the lookup the engine hands it; never stored.
+ * Freeways and ramps are one-way by their kind and are not looked up. The horizon's answers come with a drawing window's
+ * send, for the streets past the window on screen ([HorizonEvidence], [taken]). Pure; made off the main thread with the
+ * route's drawing, from the route and, for the horizon, what the engine hands it; never stored.
  */
 class StreetWays private constructor(
     /** The navigator's id of the route. */
@@ -46,12 +47,42 @@ class StreetWays private constructor(
     /** How many intersections of the route have a street leave them that a source tells, by the source. */
     val known: Map<Source, Int> by lazy { Source.entries.associateWith { s -> ways.count { it?.source == s } } }
 
+    /** Whether [other] tells the same of the same route's streets: a drawing built with either draws its streets alike. */
+    fun sameAs(other: StreetWays): Boolean = routeId == other.routeId && ways == other.ways
+
     companion object {
 
         /** No source for any street of [route]: none of its streets is drawn. */
         fun none(route: LaneRoute): StreetWays {
             val streets = route.nodes.indices.count { isStreet(route, it) }
             return StreetWays(route.routeId, List(route.nodes.size) { null }, streets)
+        }
+
+        /**
+         * How the streets of [route] sit by the route's own access field where it tells ([Source.ACCESS]), and elsewhere as
+         * [told] tells, by intersection: what a drawing has taken from the electronic horizon ([HorizonEvidence]). An answer
+         * [told] gives for an intersection no street leaves is not taken.
+         */
+        fun taken(route: LaneRoute, told: Map<Int, Way>): StreetWays {
+            val nodes = route.nodes
+            var unknown = 0
+            val ways = nodes.indices.map { i ->
+                if (!isStreet(route, i)) return@map null
+                val way = nodes[i].oneWay?.let { Way(carriageway(it), Source.ACCESS) } ?: told[i]
+                if (way == null) unknown++
+                way
+            }
+            return StreetWays(route.routeId, ways, unknown)
+        }
+
+        /**
+         * The street that leaves the intersection [node] of [route], from its station to the next intersection's, or to the
+         * route's end after the last: the road a source tells of; null where no street leaves it.
+         */
+        fun span(route: LaneRoute, node: Int): ClosedFloatingPointRange<Double>? {
+            if (node !in route.nodes.indices || !isStreet(route, node)) return null
+            val nodes = route.nodes
+            return nodes[node].station..(if (node + 1 < nodes.size) nodes[node + 1].station else route.lengthMeters)
         }
 
         /**
@@ -77,7 +108,8 @@ class StreetWays private constructor(
             return StreetWays(route.routeId, ways, unknown)
         }
 
-        private fun carriageway(oneWay: Boolean): CrossSection.Carriageway =
+        /** How a carriageway sits on a road that is [oneWay], or two-way. */
+        fun carriageway(oneWay: Boolean): CrossSection.Carriageway =
             if (oneWay) CrossSection.Carriageway.ONE_WAY else CrossSection.Carriageway.TWO_WAY
 
         /** Whether a street leaves the intersection [i] of [route]: it is no freeway, no ramp, and not the route's end. */

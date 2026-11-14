@@ -177,6 +177,37 @@ class HorizonAheadTest {
         assertEquals(1.0, HorizonAhead.HORIZON_UPDATE_SECONDS)
     }
 
+    /** A street's edge of [length] metres, one-way or two-way. */
+    private fun street(length: Double, oneWay: Boolean) =
+        HorizonEdge(length, 2, motorway = false, ramp = false, oneWay = oneWay, roadClass = HorizonRoadClass.SECONDARY)
+
+    @Test
+    fun `a street's way is every edge's along it, read the margin in from each of its ends`() {
+        val margin = HorizonAhead.ROAD_END_MARGIN_M
+        assertEquals(HorizonLanesLine.MATCH_TOLERANCE_M, margin)
+        // From a car at 1,000 m: a two-way street of 230 m, a one-way one of 170 m, two-way again for 400 m.
+        val ahead = HorizonAhead.of("r", 1_000.0, 0.0, listOf(street(230.0, false), street(170.0, true), street(400.0, false)))
+        assertEquals(false, ahead.oneWayAlong(1_000.0, 1_230.0))
+        assertEquals(true, ahead.oneWayAlong(1_230.0, 1_400.0))
+        assertEquals(false, ahead.oneWayAlong(1_400.0, 1_800.0))
+        // An edge end the margin off the street's ends reads none of the edges beyond it...
+        assertEquals(true, ahead.oneWayAlong(1_230.0 - margin + 0.1, 1_400.0 + margin - 0.1))
+        // ...one farther off reads two ways, and tells none.
+        assertNull(ahead.oneWayAlong(1_230.0 - margin - 0.1, 1_400.0))
+        assertNull(ahead.oneWayAlong(1_230.0, 1_400.0 + margin + 0.1))
+        // A street no longer than twice the margin is read at its middle alone.
+        assertEquals(true, ahead.oneWayAlong(1_215.0, 1_255.0))
+        assertEquals(false, ahead.oneWayAlong(1_205.0, 1_245.0))
+        // Where the stretches do not hold all of the street, nothing is told: before the car, past the horizon's end, and
+        // for a street of no length.
+        assertNull(ahead.oneWayAlong(1_000.0 - 2.0 * margin, 1_100.0))
+        assertEquals(false, ahead.oneWayAlong(1_000.0 - margin, 1_100.0))
+        assertNull(ahead.oneWayAlong(1_500.0, 1_800.0 + margin + 0.1))
+        assertEquals(false, ahead.oneWayAlong(1_500.0, 1_800.0 + margin - 0.1))
+        assertNull(ahead.oneWayAlong(1_300.0, 1_300.0))
+        assertNull(HorizonAhead.of("r", 1_000.0, 0.0, emptyList()).oneWayAlong(1_000.0, 1_200.0))
+    }
+
     @Test
     fun `road classes are read by the horizon's own words, any other as other`() {
         for (c in HorizonRoadClass.entries.filter { it != HorizonRoadClass.OTHER }) assertEquals(c, HorizonRoadClass.of(c.name))
