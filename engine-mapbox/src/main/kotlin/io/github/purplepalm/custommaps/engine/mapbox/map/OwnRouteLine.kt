@@ -321,6 +321,9 @@ internal class OwnRouteLine(
     /** How many of the held window's tint pieces, in the order they end, are hidden behind the car. */
     private var hiddenTints = 0
 
+    /** How many of the held window's pieces of the lit lane inside street junctions are hidden ([LaneWindow.insides]). */
+    private var hiddenInsides = 0
+
     /** The windows of the drive's route that loaded, and the windows sent, for their data ids. */
     private var windowsLoaded = 0
     private var windowIds = 0
@@ -448,6 +451,7 @@ internal class OwnRouteLine(
         pendingWindow = null
         window = null
         hiddenTints = 0
+        hiddenInsides = 0
         pathLoadedAt = null
         if (routeId != null && !failed()) {
             logLine(DRAWER_SDK, REASON_STYLE_LOAD)
@@ -932,6 +936,7 @@ internal class OwnRouteLine(
         if (built.features == 0 && (window?.features ?: 0) == 0 && built.streets.noOneWay == 0 && built.streets.mixed == 0) {
             window = built
             hiddenTints = 0
+            hiddenInsides = 0
             return
         }
         attempt { sendWindow(built, REASON_AHEAD) }
@@ -1058,6 +1063,7 @@ internal class OwnRouteLine(
         pendingWindow = null
         window = loaded
         hiddenTints = 0
+        hiddenInsides = 0
         windowsLoaded++
         val loadMs = Math.round((loadedAt - windowSentAt) / NANOS_PER_MILLI)
         debugLog.log(
@@ -1092,14 +1098,34 @@ internal class OwnRouteLine(
         if (drawn) applyStates(loaded)
     }
 
-    /** The feature states of [window]: its tint pieces the car has passed hidden, its lit pieces' traffic. */
+    /**
+     * The feature states of [window]: its tint pieces the car has passed hidden, and its lit lane's pieces inside street
+     * junctions; its lit pieces' traffic.
+     */
     private fun applyStates(window: LaneWindow) {
         val port = lanePort ?: return
         var k = 0
         while (k < window.tints.size && window.tints[k].to <= trimStation) k++
         hiddenTints = k
-        val behind = window.tints.subList(0, k).map { it.id }
+        var j = 0
+        while (j < window.insides.size && window.insides[j].to <= trimStation) j++
+        hiddenInsides = j
+        val behind = window.tints.subList(0, k).map { it.id } + window.insides.subList(0, j).map { it.id }
         if (behind.isNotEmpty() || window.levels.isNotEmpty()) attempt { port.setStates(behind, window.levels) }
+    }
+
+    /**
+     * Hides the held window's pieces of the lit lane inside street junctions that end at or behind [car], where no eraser lies
+     * over the map's own road ([LaneWindow.insides]): at each trim, a call only where the car has passed one, a few a second.
+     */
+    private fun hideInsidesBehind(car: Double) {
+        val held = window ?: return
+        if (hiddenInsides >= held.insides.size || held.insides[hiddenInsides].to > car) return
+        var k = hiddenInsides
+        while (k < held.insides.size && held.insides[k].to <= car) k++
+        val passed = held.insides.subList(hiddenInsides, k).map { it.id }
+        hiddenInsides = k
+        attempt { lanePort?.setStates(passed, emptyList()) }
     }
 
     /** Hides the held window's tint pieces that end at or behind [car] and are not hidden yet: a few calls a second at most. */
@@ -1129,6 +1155,7 @@ internal class OwnRouteLine(
         pendingWindow = null
         window = null
         hiddenTints = 0
+        hiddenInsides = 0
         pathLoadedAt = null
         if (waited && !released) quietly { lanePort?.watchLoads(false) }
     }
@@ -1141,7 +1168,8 @@ internal class OwnRouteLine(
         if (lanes) {
             val lit = drawing.lanes?.lit.orEmpty()
             layers.setGradients(laneGradients(drawing.runs, lit, look))
-            lanePort?.setEraser(eraserGradient(lit, MapPalette.lanes(look).asphalt))
+            // The eraser over the drawing's own asphalt only: inside a street junction the lit lane's pieces are hidden instead.
+            lanePort?.setEraser(eraserGradient(drawing.lanes?.erased.orEmpty(), MapPalette.lanes(look).asphalt))
         } else {
             layers.setColours(colourStops(drawing.runs, look), casingColour(look))
         }
@@ -1200,6 +1228,7 @@ internal class OwnRouteLine(
     private fun setTrim(drawing: OwnLineDrawing, station: Double) {
         val fraction = drawing.table.pathFraction(station)
         trimStation = station
+        if (lanes) hideInsidesBehind(station)
         if (fraction == trim) return
         trim = fraction
         trims++

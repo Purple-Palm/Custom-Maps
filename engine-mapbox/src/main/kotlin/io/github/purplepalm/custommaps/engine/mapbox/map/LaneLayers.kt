@@ -100,7 +100,10 @@ internal object LaneLayers {
         /** A stop line's ([LaneDrawing.Kind.STOP_LINE]), which the [STOP] layer draws. */
         const val WIDTH_STOP = "stop"
 
-        /** The feature state of a tint's piece the car has passed: true, and the piece is not drawn. */
+        /**
+         * The feature state of a tint's piece the car has passed, or of a piece of the lit lane or its edges inside a street
+         * junction: true, and the piece is not drawn.
+         */
         const val STATE_BEHIND = "behind"
 
         /** The feature state of a lit piece where the route has traffic: one of the levels below, else the route's amber. */
@@ -401,8 +404,9 @@ internal object LaneLayers {
                 fillEmissiveStrength(spec.emissiveStrength)
                 // A kept lane lies on the asphalt it is part of.
                 if (spec.id == ASPHALT) fillSortKey(keptOnTop())
-                // A tint's piece the car has passed is not drawn: all of it or nothing, never half.
-                if (spec.id == TINT) fillOpacity(notBehind())
+                // A tint's piece the car has passed is not drawn: all of it or nothing, never half; so too a piece of the lit lane
+                // inside a street junction, where no eraser covers it ([LaneDrawing.junctionInsides]).
+                if (spec.id == TINT || spec.id == LIT) fillOpacity(notBehind())
             }
         } else {
             lineLayer(spec.id, spec.source) {
@@ -417,6 +421,8 @@ internal object LaneLayers {
                 lineEmissiveStrength(spec.emissiveStrength)
                 // Never faded behind 3D objects: drawn whole or not at all, as the fills under them are.
                 lineDepthOcclusionFactor(0.0)
+                // The lit lane's edges inside a street junction, in pieces the car has passed, are not drawn.
+                if (spec.id == LIT_EDGES) lineOpacity(notBehind())
                 // The eraser covers nothing until the route's lit stretches are known.
                 if (spec.id == ERASER) lineGradient(OwnRouteLine.stepGradient(listOf(OwnRouteLine.ColourStop(0.0, OwnRouteLine.TRANSPARENT))))
             }

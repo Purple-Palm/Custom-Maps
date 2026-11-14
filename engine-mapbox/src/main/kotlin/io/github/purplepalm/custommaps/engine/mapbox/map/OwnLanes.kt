@@ -42,6 +42,12 @@ internal class OwnLanes(
     /** The same stretches as fractions of the path's projected length, as the route line's gradients take them. */
     val lit: List<ClosedFloatingPointRange<Double>>,
     /**
+     * The lit stretches over the drawing's own asphalt ([LaneDrawing.erasedStretches]), as fractions of the path's projected
+     * length: where the eraser in the asphalt's colour covers the lit lane behind the car. Inside a street junction, where the
+     * map's own road shows, the lit lane's own pieces are hidden instead ([LaneWindow.insides]).
+     */
+    val erased: List<ClosedFloatingPointRange<Double>> = lit,
+    /**
      * The arrow of each maneuver that lies at a gore of the drawing, by its leg and the step it begins ([StepAt]): the
      * path's points around the gore ([GoreArrow]), for the navigation SDK's arrow API in place of its own arrow; and so of
      * each maneuver at a street junction the path crosses on its own curve ([LaneDrawing.turns]).
@@ -66,6 +72,7 @@ internal class OwnLanes(
         val features = mergeTints(drawing.features(window.from, window.to))
         val out = ArrayList<Feature>(features.size)
         val tints = ArrayList<LaneWindow.Piece>()
+        val insides = HashMap<String, Double>()
         val levels = ArrayList<Pair<String, String>>()
         var coordinates = 0
         var latitude = Double.NaN
@@ -80,6 +87,7 @@ internal class OwnLanes(
             val id = f.id?.toString()
             out.add(Feature.fromGeometry(geometry, properties, id))
             if (id == null) continue
+            if (LaneDrawing.isInsideId(requireNotNull(f.id))) insides[id] = maxOf(insides[id] ?: f.to, f.to)
             when (f.kind) {
                 LaneDrawing.Kind.TINT -> tints.add(LaneWindow.Piece(id, f.to))
                 LaneDrawing.Kind.LIT -> levelName(levelAt(runs, table.pathFraction((f.from + f.to) / 2.0)))?.let { levels.add(id to it) }
@@ -94,6 +102,7 @@ internal class OwnLanes(
             coordinates = coordinates,
             bytes = collection.toJson().length,
             tints = tints.sortedBy { it.to },
+            insides = insides.map { (id, to) -> LaneWindow.Piece(id, to) }.sortedBy { it.to },
             levels = levels,
             latitude = latitude,
             carBar = CarBar.of(drawing, window.from, window.to),
@@ -154,6 +163,7 @@ internal class OwnLanes(
                 windows = DrawingWindows(plan.windows.map { it.from..it.to }, path.routeStations.last()),
                 litStations = litStations,
                 lit = litStations.map { table.pathFraction(it.start)..table.pathFraction(it.endInclusive) },
+                erased = drawing.erasedStretches().map { table.pathFraction(it.start)..table.pathFraction(it.endInclusive) },
                 arrows = arrowsOf(drawing.gores(), steps, path, drawing.turns()),
                 drawnStreets = section.drawnStreets,
                 undrawnStreets = section.undrawnStreets,
@@ -271,8 +281,13 @@ internal class LaneWindow(
     val horizonMeters: Double = 0.0,
     val horizonZones: Int = 0,
     val streets: Streets = Streets(),
+    /**
+     * The pieces of the lit lane and of its edges inside the street junctions it crosses ([LaneDrawing.junctionInsides]),
+     * hidden as the car passes them where no eraser may lie over the map's own road; in the order they end.
+     */
+    val insides: List<Piece> = emptyList(),
 ) {
-    /** A piece of a tint: its feature's [id], and the route station where it ends. */
+    /** A piece of a tint, or of the lit lane inside a junction: its feature's [id], and the route station where it ends. */
     data class Piece(val id: String, val to: Double)
 
     /**

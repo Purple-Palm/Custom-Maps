@@ -7,6 +7,7 @@ import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.HorizonRoadClass
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.GoreArrow
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.abs
 
 /**
  * The own line with the app's lanes on streets (OL6), on a fake style ([OwnLineScene]) along a made-up street
@@ -160,6 +162,48 @@ class OwnRouteLineStreetsTest {
         val arrow = requireNotNull(line.goreArrow(id, 0, 1))
         assertEquals(turn - LaneTopology.STOP_LINE_METERS - GoreArrow.STOP_LINE_BEFORE_METERS, north(arrow.first()), 0.05)
         assertEquals(1.5 * LaneTopology.STREET_LANE_METERS, east(arrow.first()), 0.05)
+    }
+
+    @Test
+    fun `inside a junction the lit lane crosses no eraser lies over the map's road, and the lit pieces there hide as the car passes`() {
+        drawn()
+        drive(0.0, turn - 400.0) { horizonCut(it, oneWay = false) }
+        val drawing = shown()
+        val own = requireNotNull(drawing.lanes)
+        // A junction the lit lane crosses in the turn's card window, where the map's own road shows.
+        val junction = own.drawing.junctionInsides.first { j -> own.litStations.any { it.start < j.start && it.endInclusive > j.endInclusive } }
+        val near = junction.start
+        val far = junction.endInclusive
+        // The eraser's asphalt on both sides of it, transparent inside it.
+        assertTrue(own.erased.none { it.endInclusive > drawing.table.pathFraction(near) + 1e-9 && it.start < drawing.table.pathFraction(far) - 1e-9 }, "${own.erased}")
+        assertTrue(own.erased.any { abs(it.endInclusive - drawing.table.pathFraction(near)) < 1e-9 })
+        assertTrue(own.erased.any { abs(it.start - drawing.table.pathFraction(far)) < 1e-9 })
+        assertEquals(OwnRouteLine.eraserGradient(own.erased, MapPalette.lanes(Look.NIGHT).asphalt), lanes.eraserStops)
+        val stops = requireNotNull(lanes.eraserStops)
+        val middle = drawing.table.pathFraction((near + far) / 2.0)
+        assertEquals(OwnRouteLine.TRANSPARENT, stops.last { it.from <= middle }.colour)
+        // Up to it, the window on screen holds the junction's own pieces of the lit lane and of its edges, each a few metres
+        // long, ending where the drawing says.
+        drive(turn - 380.0, near - 20.0) { horizonCut(it, oneWay = false) }
+        val ends = HashMap<String, Double>()
+        for (f in own.drawing.features()) {
+            val id = f.id ?: continue
+            if (!LaneDrawing.isInsideId(id) || f.from < near - 1e-6 || f.to > far + 1e-6) continue
+            assertTrue(f.to - f.from <= LaneDrawing.JUNCTION_PIECE_METERS + 1e-6, "a piece over ${f.from}..${f.to}")
+            ends[id.toString()] = f.to
+        }
+        assertTrue(ends.size >= 2 * ((far - near) / LaneDrawing.JUNCTION_PIECE_METERS).toInt(), "$ends")
+        val shownIds = requireNotNull(lanes.held).features().orEmpty().mapNotNull { it.id() }.toSet()
+        assertEquals(ends.keys, ends.keys.intersect(shownIds), "the junction's pieces in the window on screen")
+        // Through it a metre at a time: what the car has passed is hidden at once, and nothing ahead of it.
+        val behind = { lanes.states.filter { it.second == LaneLayers.Key.STATE_BEHIND }.map { it.first }.toSet() }
+        var car = near - 2.0
+        while (car <= far + 2.0) {
+            puck(car)
+            assertEquals(ends.filter { it.value <= car }.keys, behind().intersect(ends.keys), "at $car")
+            car += 1.0
+        }
+        assertEquals(ends.keys, behind().intersect(ends.keys))
     }
 
     @Test

@@ -250,6 +250,13 @@ class StreetDrawingTest {
         assertEquals(2, edges.size, "the lit lane across the junction")
         assertEquals(lane, edges[1] - edges[0], 0.05)
         assertEquals(across.path.offsetAt(x), (edges[0] + edges[1]) / 2.0, 0.05)
+        // There, in a piece of its own the map hides once the car is past it; the eraser in the asphalt's colour covers the lit
+        // lane on both sides of the junction, not inside it.
+        assertEquals(LaneDrawing.insideId(gore - 106.0 + MM), lit.single().id)
+        assertEquals(gore - 106.0, lit.single().from, MM)
+        assertEquals(gore - 104.0, lit.single().to, MM)
+        val litStretch = across.drawing.litStretches().single()
+        assertEquals(listOf(litStretch.start..gore - 110.0, gore - 90.0..gore - 10.0), across.drawing.erasedStretches())
     }
 
     @Test
@@ -393,14 +400,18 @@ class StreetDrawingTest {
             assertEquals(gore + RoutePath.JUNCTION_FAR_SIDE_METERS, stretch.endInclusive, MM)
             val lit = d.of(Kind.LIT).filter { it.to > junction.from + MM }
             assertEquals(gore + RoutePath.JUNCTION_FAR_SIDE_METERS, lit.maxOf { it.to }, MM)
+            // Across the junction, where the eraser covers nothing, the lit lane and its two edges in pieces of their own,
+            // which the map hides once the car is past them.
             val edges = d.of(Kind.LIT_EDGE).filter { it.from >= junction.from - MM }
-            assertEquals(2, edges.size)
+            assertEquals(((junction.to - junction.from) / LaneDrawing.JUNCTION_PIECE_METERS).toInt(), edges.size)
+            assertTrue(edges.all { it.parts.size == 2 && it.id == LaneDrawing.insideEdgeId(it.from + MM) })
+            assertTrue(lit.all { it.id == LaneDrawing.insideId(it.from + MM) })
+            assertEquals(listOf(gore - 400.0 - 10.0..gore - 400.0 + 10.0, junction.from..junction.to), d.drawing.junctionInsides)
+            assertEquals(listOf(stretch.start..junction.from), d.drawing.erasedStretches())
             val k = junction.points.size / 2
             val middle = SceneLines.local(junction.points[k])
-            for (edge in edges) {
-                val nearest = edge.parts.single().minOf { SceneLines.local(it).distanceTo(middle) }
-                assertEquals(lane / 2.0, nearest, 0.1, "the lit edge ${edge.side} off the curve's middle")
-            }
+            val nearest = edges.flatMap { it.parts }.map { part -> part.minOf { SceneLines.local(it).distanceTo(middle) } }.sorted()
+            for (i in 0..1) assertEquals(lane / 2.0, nearest[i], 0.1, "a lit edge off the curve's middle")
             // The maneuver's arrow along the lit turn, from 4 m before the stop line's place to 30 m past the node.
             assertEquals(listOf(gore), d.drawing.turns())
             val arrow = GoreArrow.alongTurn(d.path.points, d.path.stations, gore)

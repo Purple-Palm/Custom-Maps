@@ -271,6 +271,21 @@ class LaneDrawing private constructor(
     fun litStretches(): List<ClosedFloatingPointRange<Double>> = builder.litStretches()
 
     /**
+     * The insides of the street junctions the lit lane may cross, in route order, merged where they meet: each one the drawing
+     * goes on through ([junctionInteriors]) and each one the path crosses on its own curve ([RoutePath.junctions]). The map's
+     * own road shows there, not the drawing's asphalt: the lit lane and its edges are cut there into pieces of
+     * [JUNCTION_PIECE_METERS] with ids of their own ([insideId], [insideEdgeId]), which the map hides by feature state once the
+     * car is past them.
+     */
+    val junctionInsides: List<ClosedFloatingPointRange<Double>> get() = builder.insides
+
+    /**
+     * The lit stretches ([litStretches]) where the drawing's own asphalt lies under the lit lane: without the junctions' insides
+     * ([junctionInsides]). The map's eraser, in the asphalt's colour, covers the lit lane behind the car there only.
+     */
+    fun erasedStretches(): List<ClosedFloatingPointRange<Double>> = without(litStretches(), builder.insides)
+
+    /**
      * The route stations of the drawing's gores, in route order: where the route leaves its road and lanes of that road go
      * on beside it, drawn with a gore, and the path reaches it in a lane. The map lays the arrow of a maneuver there along the
      * path ([GoreArrow]). Not a gore the path reaches on the road's line, where no lane is named before it: the navigation
@@ -469,8 +484,54 @@ class LaneDrawing private constructor(
         /** ...of this many pieces. */
         private const val LANE_IDS = 10_000_000L
 
+        /**
+         * Inside a street junction ([junctionInsides]) the lit lane and its edges are cut into pieces this long, at its multiples
+         * from the route's start and at the junction's two sides, so the map hides the lit lane behind the car there piece by
+         * piece ([insideId]), where no eraser in the asphalt's colour may lie over the map's own road.
+         */
+        const val JUNCTION_PIECE_METERS = 2.0
+
+        /** A sample of the lit lane this close to a cut inside a street junction ([JUNCTION_PIECE_METERS]) is the cut. */
+        private const val CUT_SNAP_METERS = 1e-4
+
+        /** The lit lane's pieces inside a street junction have ids from here... */
+        private const val INSIDE_IDS = 3_000_000_000_000L
+
+        /** ...and the pieces of its edges there from here. */
+        private const val INSIDE_EDGE_IDS = 4_000_000_000_000L
+
         /** The piece ([PIECE_METERS]) that begins at or holds route station [station]. */
         fun pieceOf(station: Double): Long = floor(station / PIECE_METERS + PIECE_EPSILON).toLong()
+
+        /** The step of [JUNCTION_PIECE_METERS] from the route's start that begins at or holds route station [station]. */
+        private fun stepOf(station: Double): Long = floor(station / JUNCTION_PIECE_METERS + PIECE_EPSILON).toLong()
+
+        /** The id of the lit lane's piece inside a street junction that begins at or holds route station [station]. */
+        fun insideId(station: Double): Long = INSIDE_IDS + stepOf(station)
+
+        /** The id of the piece of the lit lane's two edges inside a street junction that begins at or holds route station [station]. */
+        fun insideEdgeId(station: Double): Long = INSIDE_EDGE_IDS + stepOf(station)
+
+        /** Whether [id] is one of a lit piece or of its edges' piece inside a street junction ([insideId], [insideEdgeId]). */
+        fun isInsideId(id: Long): Boolean = id >= INSIDE_IDS
+
+        /** [stretches] without the parts that lie in [cuts], both ascending. */
+        internal fun without(
+            stretches: List<ClosedFloatingPointRange<Double>>,
+            cuts: List<ClosedFloatingPointRange<Double>>,
+        ): List<ClosedFloatingPointRange<Double>> {
+            val out = ArrayList<ClosedFloatingPointRange<Double>>()
+            for (stretch in stretches) {
+                var from = stretch.start
+                for (cut in cuts) {
+                    if (cut.endInclusive <= from || cut.start >= stretch.endInclusive) continue
+                    if (cut.start - from > SAME_STATION) out.add(from..cut.start)
+                    from = max(from, cut.endInclusive)
+                }
+                if (stretch.endInclusive - from > SAME_STATION) out.add(from..stretch.endInclusive)
+            }
+            return out
+        }
 
         /** The id of the lit lane's piece [piece]. */
         fun litId(piece: Long): Long = LIT_IDS + piece
@@ -652,6 +713,55 @@ class LaneDrawing private constructor(
 
         /** The insides of the street junctions the drawings go on through ([LaneDrawing.junctionInteriors]), in route order. */
         val interiors: List<Pair<Double, Double>> = interiorsOf()
+
+        /** The insides of the street junctions the lit lane may cross ([LaneDrawing.junctionInsides]), in route order. */
+        val insides: List<ClosedFloatingPointRange<Double>> = run {
+            val all = (interiors.map { it.first..it.second } + path.junctions.map { it.from..it.to }).sortedBy { it.start }
+            val out = ArrayList<ClosedFloatingPointRange<Double>>()
+            for (r in all) {
+                val last = out.lastOrNull()
+                if (last != null && r.start <= last.endInclusive + SAME_STATION) out[out.size - 1] = last.start..max(last.endInclusive, r.endInclusive) else out.add(r)
+            }
+            out
+        }
+
+        /** The inside of the street junction the lit lane may cross that holds [s]: from its near side on, short of its far side. */
+        private fun insideAt(s: Double): ClosedFloatingPointRange<Double>? = insides.firstOrNull { s >= it.start - SAME_STATION && s < it.endInclusive - SAME_STATION }
+
+        /** Whether [s] lies inside a street junction the lit lane may cross ([insideAt]). */
+        private fun inside(s: Double): Boolean = insideAt(s) != null
+
+        /** Where the piece of the lit lane inside a street junction that holds [s] is keyed from: [s], no earlier than the near side. */
+        private fun insideKey(s: Double): Double = max(s, requireNotNull(insideAt(s)).start) + SAME_STATION
+
+        /**
+         * Whether a piece of the lit lane or a tint begins at [s]: at a multiple of [PIECE_METERS], at a street junction's side,
+         * or inside one at a multiple of [JUNCTION_PIECE_METERS].
+         */
+        private fun onBoundary(s: Double): Boolean {
+            if (abs(s - Math.round(s / PIECE_METERS) * PIECE_METERS) <= SAME_STATION) return true
+            for (r in insides) {
+                if (abs(s - r.start) <= SAME_STATION || abs(s - r.endInclusive) <= SAME_STATION) return true
+                if (s > r.start && s < r.endInclusive && abs(s - Math.round(s / JUNCTION_PIECE_METERS) * JUNCTION_PIECE_METERS) <= SAME_STATION) return true
+            }
+            return false
+        }
+
+        /** The stations where the lit lane is cut inside the street junctions between [from] and [to]: their sides and the steps between. */
+        private fun insideCuts(from: Double, to: Double): List<Double> {
+            val out = ArrayList<Double>()
+            for (r in insides) {
+                if (r.endInclusive < from || r.start > to) continue
+                out.add(r.start)
+                var k = floor(r.start / JUNCTION_PIECE_METERS + PIECE_EPSILON).toLong() + 1
+                while (k * JUNCTION_PIECE_METERS < r.endInclusive - SAME_STATION) {
+                    out.add(k * JUNCTION_PIECE_METERS)
+                    k++
+                }
+                out.add(r.endInclusive)
+            }
+            return out.filter { it > from + SAME_STATION && it < to - SAME_STATION }
+        }
 
         /** The drawing's gores: each ramp start inside a drawing, and each drawing's end at a turn. */
         private val gores = ArrayList<Gore>()
@@ -1545,12 +1655,25 @@ class LaneDrawing private constructor(
                 all.add(k * PIECE_METERS)
                 k++
             }
+            val cuts = insideCuts(s0, s1)
+            all.addAll(cuts)
             for (m in path.moves) {
                 for (x in listOf(m.from, m.to)) if (x > s0 + SAME_STATION && x < s1 - SAME_STATION) all.add(x)
             }
             all.sort()
-            val out = ArrayList<Double>(all.size)
-            for (x in all) if (out.isEmpty() || x - out.last() > SAME_STATION / 2.0) out.add(x)
+            return withCuts(all, cuts)
+        }
+
+        /**
+         * The ascending [samples] once each, where a sample lies within [CUT_SNAP_METERS] of one of [cuts], that cut alone: a
+         * piece of the lit lane inside a street junction begins exactly at its cut.
+         */
+        private fun withCuts(samples: List<Double>, cuts: List<Double>): List<Double> {
+            val out = ArrayList<Double>(samples.size)
+            for (x in samples) {
+                if (cuts.isNotEmpty() && x !in cuts && cuts.any { abs(it - x) < CUT_SNAP_METERS }) continue
+                if (out.isEmpty() || x - out.last() > SAME_STATION / 2.0) out.add(x)
+            }
             return out
         }
 
@@ -1730,21 +1853,52 @@ class LaneDrawing private constructor(
                 if (k * PIECE_METERS > from + SAME_STATION) at.add(k * PIECE_METERS)
                 k++
             }
+            val cuts = insideCuts(from, to)
+            at.addAll(cuts)
             at.add(to)
             at.sort()
-            return at.distinct().map { x -> x to max(0, RoutePath.indexAtOrBefore(stations, x)) }
+            return withCuts(at.distinct(), cuts).map { x -> x to max(0, RoutePath.indexAtOrBefore(stations, x)) }
         }
 
         /** The lit lane's edges along [edges] as two lines without their small loops ([untangle]), and [edges] emptied. */
         private fun litEdges(edges: Strip, lane: Int?, out: MutableList<Feature>) {
-            if (edges.stations.size >= 2 && edges.stations.last() - edges.stations.first() > SAME_STATION) {
+            val stations = edges.stations
+            if (stations.size >= 2 && stations.last() - stations.first() > SAME_STATION) {
+                // Whole where no street junction lies on it; across one, cut at its sides and inside it into the lit lane's own
+                // pieces there, with their ids ([insideId]).
+                val cuts = insideCuts(stations.first(), stations.last())
                 for ((side, points) in listOf(LaneEdge.LEFT to edges.left, LaneEdge.RIGHT to edges.right)) {
-                    out.add(
-                        Feature(
-                            Kind.LIT_EDGE, edges.stations.first(), edges.stations.last(), listOf(simplify(untangle(points, edges.stations).first)),
-                            width = Width.EDGE, pattern = Pattern.SOLID, lane = lane, side = side,
-                        ),
-                    )
+                    if (cuts.isEmpty()) {
+                        out.add(
+                            Feature(
+                                Kind.LIT_EDGE, stations.first(), stations.last(), listOf(simplify(untangle(points, stations).first)),
+                                width = Width.EDGE, pattern = Pattern.SOLID, lane = lane, side = side,
+                            ),
+                        )
+                        continue
+                    }
+                    val (line, at) = untangle(points, stations)
+                    val bounds = listOf(stations.first()) + cuts + stations.last()
+                    var from = bounds.first()
+                    for (k in 1 until bounds.size) {
+                        val to = bounds[k]
+                        // Outside the junctions the edge goes on whole to the next junction's side.
+                        if (k < bounds.size - 1 && !inside(from) && !inside(to - SAME_STATION) && !insides.any { abs(it.start - to) <= SAME_STATION }) continue
+                        if (to - from > SAME_STATION) {
+                            val part = ArrayList<GeoPoint>()
+                            part.add(pointOn(line, at, from))
+                            for (i in at.indices) if (at[i] > from + SAME_STATION && at[i] < to - SAME_STATION) part.add(line[i])
+                            part.add(pointOn(line, at, to))
+                            out.add(
+                                Feature(
+                                    Kind.LIT_EDGE, from, to, listOf(simplify(part)),
+                                    width = Width.EDGE, pattern = Pattern.SOLID, lane = lane, side = side,
+                                    id = if (inside(from)) insideEdgeId(insideKey(from)) else null,
+                                ),
+                            )
+                        }
+                        from = to
+                    }
                 }
             }
             edges.stations.clear()
@@ -1926,13 +2080,15 @@ class LaneDrawing private constructor(
                     val (left, leftAt) = untangle(strip.left, stations)
                     val (right, rightAt) = untangle(strip.right, stations)
                     val whole = left === strip.left && right === strip.right
+                    // The lit lane inside a street junction in pieces of its own ([insideId]).
+                    fun idAt(s: Double): Long = if (kind == Kind.LIT && inside(s)) insideId(insideKey(s)) else idOf(pieceOf(s))
                     var i = 0
                     while (i < stations.size) {
-                        val k = pieceOf(stations[i])
+                        val id = idAt(stations[i])
                         var j = i
-                        while (j + 1 < stations.size && pieceOf(stations[j + 1]) == k) j++
+                        while (j + 1 < stations.size && idAt(stations[j + 1]) == id) j++
                         // The next piece's first sample ends this one too where it lies on the pieces' boundary.
-                        val end = if (j + 1 < stations.size && abs(stations[j + 1] - (k + 1) * PIECE_METERS) <= SAME_STATION) j + 1 else j
+                        val end = if (j + 1 < stations.size && onBoundary(stations[j + 1])) j + 1 else j
                         val from = stations[i]
                         val to = stations[end]
                         if (to - from > SAME_STATION) {
@@ -1941,7 +2097,7 @@ class LaneDrawing private constructor(
                             } else {
                                 ring(between(left, leftAt, from, to), between(right, rightAt, from, to), kind, Part.ROUTE, lanes[i], from, to)
                             }
-                            feature?.let { out.add(it.copy(id = idOf(k))) }
+                            feature?.let { out.add(it.copy(id = id)) }
                         }
                         i = j + 1
                     }

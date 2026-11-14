@@ -170,6 +170,7 @@ class LaneTrustTest {
         }
         assertSeen("line", "named", "lit", "arrow", "kept", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
         assertSeen("pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout", "roundaboutLanes", "roadLineTwoWay")
+        assertSeen("insidePiece", "erased")
     }
 
     @Test
@@ -613,7 +614,11 @@ class LaneTrustTest {
                     if (f.from > interior.endInclusive || f.to < interior.start) continue
                     val across = DrawingProbe.across(axis, s, f.parts).filter { abs(it) < INTERIOR_REACH_METERS }
                     if (f.kind == Kind.LIT || f.kind == Kind.LIT_EDGE) {
-                        if (across.isNotEmpty()) saw("litAcross")
+                        if (across.isNotEmpty()) {
+                            // In the junction's own pieces, which the map hides once the car is past them: no eraser lies there.
+                            assertTrue(f.id?.let { LaneDrawing.isInsideId(it) } == true, "${b.name}: a ${f.kind} ${f.from}..${f.to} with the id ${f.id} inside the junction at $s")
+                            saw("litAcross")
+                        }
                         continue
                     }
                     assertTrue(across.isEmpty(), "${b.name}: a ${f.kind} inside the junction from ${interior.start} to ${interior.endInclusive}, at $s")
@@ -1089,6 +1094,19 @@ class LaneTrustTest {
     // ------------------------------------------------------------------ 3, 4, 10: the lit lane and the tints
 
     private fun litAndTints(b: Built) {
+        // The eraser covers the lit lane behind the car on our asphalt only: never inside a street junction, where the map's own
+        // road shows; on a street, where our carriageway's asphalt lies.
+        val erased = b.drawing.erasedStretches()
+        for (e in erased) {
+            assertTrue(b.drawing.litStretches().any { e.start >= it.start - 1e-6 && e.endInclusive <= it.endInclusive + 1e-6 }, "${b.name}: erased off the lit lane at $e")
+            assertTrue(b.drawing.junctionInsides.none { e.endInclusive > it.start + 1e-6 && e.start < it.endInclusive - 1e-6 }, "${b.name}: erased inside a junction at $e")
+            var x = e.start + 0.25
+            while (x < e.endInclusive) {
+                if (b.section.roadAt(x) == RoadKind.STREET) assertTrue(b.drawing.asphaltAt(x) != null, "${b.name}: the eraser over no asphalt of ours at $x")
+                x += 0.5
+            }
+        }
+        if (erased.isNotEmpty() && b.drawing.junctionInsides.any { j -> b.drawing.litStretches().any { it.start < j.endInclusive && it.endInclusive > j.start } }) saw("erased")
         val lanes = b.plan.topology.lanes
         val ids = HashSet<Long>()
         val turning = turns(b) + folds(b)
@@ -1106,17 +1124,31 @@ class LaneTrustTest {
             val lane = lanes[requireNotNull(f.lane)]
             // 3: never a designated lane.
             assertFalse(lane.designated, "${b.name}: a ${f.kind} on the designated lane ${lane.id}")
-            if (f.kind == Kind.LIT_EDGE) {
+            // Inside a street junction, where the map's own road shows and no eraser lies, the lit lane and its two edges in short
+            // pieces of their own, which the map hides once the car is past them; none reaches across a junction's side.
+            // (A piece outside holds no part inside: [junctionInteriorsPlain] and [litTurnIntoTheReceivingLane] check.)
+            val inside = b.drawing.junctionInsides.any { f.from >= it.start - 1e-6 && f.to <= it.endInclusive + 1e-6 }
+            if (inside && f.kind != Kind.TINT) {
+                val id = requireNotNull(f.id) { "${b.name}: a ${f.kind} piece inside a junction without an id" }
+                assertTrue(ids.add(id), "${b.name}: two pieces with the id $id")
+                assertTrue(LaneDrawing.isInsideId(id), "${b.name}: a ${f.kind} piece inside a junction at ${f.from} with the id $id")
+                assertEquals(if (f.kind == Kind.LIT) LaneDrawing.insideId(f.from + 1e-6) else LaneDrawing.insideEdgeId(f.from + 1e-6), id)
+                assertTrue(f.to - f.from <= LaneDrawing.JUNCTION_PIECE_METERS + 1e-6, "${b.name}: a ${f.kind} piece over ${f.from}..${f.to}")
+                if (f.kind == Kind.LIT_EDGE) assertEquals(2, f.parts.size, "${b.name}: a lit edges' piece at ${f.from} without both edges")
+                saw("insidePiece")
+                if (f.kind == Kind.LIT_EDGE) continue
+            } else if (f.kind == Kind.LIT_EDGE) {
                 assertEquals(null, f.id)
                 continue
+            } else {
+                // In pieces whose ids are the same in every window.
+                val id = requireNotNull(f.id) { "${b.name}: a ${f.kind} piece without an id" }
+                assertTrue(ids.add(id), "${b.name}: two pieces with the id $id")
+                val piece = LaneDrawing.pieceOf(f.from)
+                // 50 m pieces from the route's start.
+                assertTrue(f.to <= (piece + 1) * 50.0 + 1e-6 && f.from >= piece * 50.0 - 1e-6, "${b.name}: a ${f.kind} piece over ${f.from}..${f.to}")
+                assertEquals(if (f.kind == Kind.LIT) LaneDrawing.litId(piece) else LaneDrawing.tintId(lane.id, piece), id)
             }
-            // In pieces whose ids are the same in every window.
-            val id = requireNotNull(f.id) { "${b.name}: a ${f.kind} piece without an id" }
-            assertTrue(ids.add(id), "${b.name}: two pieces with the id $id")
-            val piece = LaneDrawing.pieceOf(f.from)
-            // 50 m pieces from the route's start.
-            assertTrue(f.to <= (piece + 1) * 50.0 + 1e-6 && f.from >= piece * 50.0 - 1e-6, "${b.name}: a ${f.kind} piece over ${f.from}..${f.to}")
-            assertEquals(if (f.kind == Kind.LIT) LaneDrawing.litId(piece) else LaneDrawing.tintId(lane.id, piece), id)
             // Each part of a piece (a piece may hold two, where its lane is lit or tinted on both sides of a gap) at its middle.
             val middles = f.parts.map { ring ->
                 val stations = ring.map { DrawingProbe.project(b.path.axes, (f.from + f.to) / 2.0, it).first }
