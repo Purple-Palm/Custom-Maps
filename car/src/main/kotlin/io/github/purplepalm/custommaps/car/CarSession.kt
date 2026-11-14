@@ -345,6 +345,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             follow(settings.laneZoom, "setLaneZoom", created::setLaneZoom)
             follow(settings.lanesOnMap, "setLanesOnMap", created::setLanesOnMap)
             follow(settings.ownRouteLine, "setOwnRouteLine", created::setOwnRouteLine)
+            // The phone's drive view and Zoom in before turns, framed by the car's own tuning.
+            follow(settings.driveCamera, "setDriveCamera", created::setDriveCamera)
             // The car's map alone: 30 or 60 frames a second, from the Debug switch.
             follow(settings.frameTarget, "setFrameTarget", created::setFrameTarget)
             // And lighter while the phone is hot, unless its Debug switch is off: the switch with the

@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
 import io.github.purplepalm.custommaps.nav.sound.ToneLevel
@@ -459,6 +461,7 @@ class DataStoreAppSettingsTest {
         settings.setCarLightWhenHot(false)
         settings.setSideRoadFields(true)
         settings.updateSound { SoundSettings(tones = false, beforeTurn = false, atTurn = false, duck = DuckMode.OFF, level = ToneLevel.LOUD, leadInMillis = 0) }
+        settings.updateDriveCamera { DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 0, turnZoom = false) }
         assertEquals(DataStoreAppSettings.KEYS, raw().keys)
     }
 
@@ -547,6 +550,78 @@ class DataStoreAppSettingsTest {
         settings.updateSound { it.copy(leadInMillis = 1_000) }
         assertEquals(300, settings.sound.first().leadInMillis)
         assertFalse("tone_lead_in_ms" in raw())
+        assertEquals(emptyList<Pair<String, Any>>(), changes)
+    }
+
+    private val storedDriveView = stringPreferencesKey("drive_view")
+    private val storedTurnZoom = stringPreferencesKey("overview_turn_zoom")
+    private val storedRecenter = intPreferencesKey("recenter_seconds")
+
+    @Test
+    fun `the drive camera starts in Normal, with Recenter by itself after 10 s and Zoom in before turns on, and nothing is written`() = runBlocking {
+        assertEquals(DriveCameraSettings(driveView = DriveView.NORMAL, recenterSeconds = 10, turnZoom = true), settings.driveCamera.first())
+        // The defaults again: nothing to write, nothing reported.
+        settings.updateDriveCamera { it.copy() }
+        assertEquals(emptyMap<String, Any>(), raw())
+        assertEquals(emptyList<Pair<String, Any>>(), changes)
+    }
+
+    @Test
+    fun `each drive camera setting is stored under its own key and word, each change reported once`() = runBlocking {
+        settings.updateDriveCamera { it.copy(driveView = DriveView.OVERVIEW) }
+        assertEquals(DriveView.OVERVIEW, settings.driveCamera.first().driveView)
+        assertEquals(mapOf<String, Any>("drive_view" to "overview"), raw())
+        settings.updateDriveCamera { it.copy(turnZoom = false) }
+        assertEquals("off", raw()["overview_turn_zoom"])
+        assertFalse(settings.driveCamera.first().turnZoom)
+        for (seconds in listOf(0, 5, 20, 10)) {
+            settings.updateDriveCamera { it.copy(recenterSeconds = seconds) }
+            assertEquals(seconds, settings.driveCamera.first().recenterSeconds)
+            assertEquals(seconds, raw()["recenter_seconds"])
+        }
+        settings.updateDriveCamera { it.copy(driveView = DriveView.NORMAL, turnZoom = true) }
+        assertEquals(DriveCameraSettings(), settings.driveCamera.first())
+        assertEquals(
+            listOf<Pair<String, Any>>(
+                "drive_view" to "overview", "overview_turn_zoom" to "off",
+                "recenter_seconds" to 0, "recenter_seconds" to 5, "recenter_seconds" to 20, "recenter_seconds" to 10,
+                "drive_view" to "normal", "overview_turn_zoom" to "on",
+            ),
+            changes,
+        )
+    }
+
+    @Test
+    fun `a change of the drive view and Recenter by itself is one write of the keys it changes`() = runBlocking {
+        val probe = Probe(dataStore)
+        val once = DataStoreAppSettings(probe) { key, value -> changes += key to value }
+        once.updateDriveCamera { it.copy(driveView = DriveView.OVERVIEW, recenterSeconds = 20, turnZoom = true) }
+        assertEquals(listOf(setOf("drive_view", "recenter_seconds")), probe.written)
+        assertEquals(listOf<Pair<String, Any>>("drive_view" to "overview", "recenter_seconds" to 20), changes)
+        assertEquals(DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 20), settings.driveCamera.first())
+    }
+
+    @Test
+    fun `a drive camera word or number it does not know reads as its default, and a wait the row does not offer is not stored`() = runBlocking {
+        // As a file from a build with other choices would hold it, and one that named them otherwise.
+        for (word in listOf("smart", "OVERVIEW", "")) {
+            dataStore.edit { it[storedDriveView] = word }
+            assertEquals(DriveView.NORMAL, settings.driveCamera.first().driveView, word)
+        }
+        // Zoom in before turns reads as on unless the file says off.
+        for (word in listOf("OFF", "no", "false", "")) {
+            dataStore.edit { it[storedTurnZoom] = word }
+            assertTrue(settings.driveCamera.first().turnZoom, word)
+        }
+        for (seconds in listOf(-1, 1, 7, 15, 30, 600)) {
+            dataStore.edit { it[storedRecenter] = seconds }
+            assertEquals(10, settings.driveCamera.first().recenterSeconds, "$seconds")
+        }
+        dataStore.edit { it.remove(storedRecenter) }
+        changes.clear()
+        settings.updateDriveCamera { it.copy(recenterSeconds = 7) }
+        assertEquals(10, settings.driveCamera.first().recenterSeconds)
+        assertFalse("recenter_seconds" in raw())
         assertEquals(emptyList<Pair<String, Any>>(), changes)
     }
 

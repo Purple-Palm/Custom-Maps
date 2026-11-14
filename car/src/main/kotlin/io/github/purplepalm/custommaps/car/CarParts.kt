@@ -11,6 +11,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.look.SharedLook
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,4 +61,9 @@ class CarMapSettings(
     val phoneThermal: Flow<ThermalStatus?>,
     /** Debug: whether the car's map gets lighter while the phone is hot; on unless turned off. */
     val lightWhenHot: Flow<Boolean>,
+    /**
+     * The drive view and Zoom in before turns, as the phone's map has them; the car's map has no Recenter by itself
+     * (CarNavigationMap leaves it out).
+     */
+    val driveCamera: Flow<DriveCameraSettings>,
 )

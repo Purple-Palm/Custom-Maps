@@ -150,6 +150,19 @@
     <string name="day_night_next_day">Light from about %1$s</string>
 
     <string name="guidance_title">Guidance</string>
+    <string name="drive_view_title">Drive view</string>
+    <string name="drive_view_normal">Normal</string>
+    <string name="drive_view_overview">Overview</string>
+    <string name="drive_view_note">Overview shows the rest of the route from above. The Overview button on the map switches it too.</string>
+    <!-- Under Drive view while one of the two Mapbox camera styles is chosen. -->
+    <string name="drive_view_mapbox_styles_note">Smoothest with the Smooth follow camera style.</string>
+    <string name="overview_turn_zoom_title">Zoom in before turns</string>
+    <string name="overview_turn_zoom_note">In the Overview, the map comes down to each turn, exit and lane choice and goes back up when the next one is far enough away (about 1.25 miles). Off: the Overview stays up all the way. The tones sound either way.</string>
+    <string name="recenter_seconds_title">Recenter by itself</string>
+    <string name="recenter_seconds_off">Off</string>
+    <!-- A wait in seconds, as "10 s". -->
+    <string name="recenter_seconds_value">%1$d s</string>
+    <string name="recenter_seconds_note">After you move the map during a drive, it goes back by itself this long after your last touch, sooner when a turn is near. Off: only Recenter brings it back.</string>
     <string name="camera_style_title">Camera style</string>
     <string name="camera_style_mapbox_standard">Mapbox standard</string>
     <string name="camera_style_mapbox_standard_note">The Mapbox camera as it comes, for comparison</string>

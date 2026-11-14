@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.settings
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,7 @@ class FakeAppSettings(
     carLightWhenHot: Boolean = CAR_LIGHT_WHEN_HOT_DEFAULT,
     sideRoadFields: Boolean = false,
     sound: SoundSettings = SoundSettings(),
+    driveCamera: DriveCameraSettings = DriveCameraSettings(),
 ) : AppSettings {
 
     /** While true every change fails as it does on a full disk, and the stored value stays. */
@@ -76,6 +78,16 @@ class FakeAppSettings(
     override val sound = MutableStateFlow(sound)
 
     override suspend fun updateSound(change: (SoundSettings) -> SoundSettings) = store { sound.value = change(sound.value) }
+
+    override val driveCamera = MutableStateFlow(driveCamera)
+
+    /** Every change that was stored, in order, as the map would have it from the flow. */
+    val storedDriveCameras = mutableListOf<DriveCameraSettings>()
+
+    override suspend fun updateDriveCamera(change: (DriveCameraSettings) -> DriveCameraSettings) = store {
+        driveCamera.value = change(driveCamera.value)
+        storedDriveCameras += driveCamera.value
+    }
 
     private fun store(change: () -> Unit) {
         if (storageFull) throw IOException("No space left on device")

@@ -10,6 +10,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.MonthCount
@@ -46,6 +47,8 @@ data class GuidanceSettings(
     val lanesOnMap: LanesOnMap = LanesOnMap.DEFAULT,
     /** Whether guidance reads the lane counts between lane points from Mapbox's electronic horizon, a beta. */
     val laneCountsHorizon: Boolean = LANE_COUNTS_HORIZON_DEFAULT,
+    /** The drive view, Zoom in before turns and Recenter by itself. */
+    val driveCamera: DriveCameraSettings = DriveCameraSettings(),
 )
 
 /** The look section: Auto, Day or Night, and under Auto when the look changes next. */
@@ -109,8 +112,14 @@ class SettingsViewModel(
     private val logBytes = MutableStateFlow<Long?>(null)
 
     val guidance: StateFlow<GuidanceSettings> =
-        combine(settings.cameraStyle, settings.laneZoom, settings.lanesOnMap, settings.laneCountsHorizon) { style, laneZoom, lanesOnMap, horizon ->
-            GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, lanesOnMap = lanesOnMap, laneCountsHorizon = horizon)
+        combine(
+            settings.cameraStyle,
+            settings.laneZoom,
+            settings.lanesOnMap,
+            settings.laneCountsHorizon,
+            settings.driveCamera,
+        ) { style, laneZoom, lanesOnMap, horizon, driveCamera ->
+            GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, lanesOnMap = lanesOnMap, laneCountsHorizon = horizon, driveCamera = driveCamera)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
 
     /**
@@ -176,6 +185,9 @@ class SettingsViewModel(
      */
     fun onEvent(event: SettingsEvent) {
         when (event.id) {
+            SettingId.DRIVE_VIEW -> event.chosen(SettingsCatalogue.driveViews) { view -> updateDriveCamera { it.copy(driveView = view) } }
+            SettingId.OVERVIEW_TURN_ZOOM -> event.switched { on -> updateDriveCamera { it.copy(turnZoom = on) } }
+            SettingId.RECENTER_SECONDS -> event.chosen(SettingsCatalogue.recenterSeconds) { seconds -> updateDriveCamera { it.copy(recenterSeconds = seconds) } }
             SettingId.CAMERA_STYLE -> event.chosen(SettingsCatalogue.cameraStyles, ::setCameraStyle)
             SettingId.LANE_ZOOM -> event.chosen(SettingsCatalogue.laneZooms, ::setLaneZoom)
             SettingId.LANES_ON_MAP -> event.chosen(SettingsCatalogue.lanesOnMap, ::setLanesOnMap)
@@ -229,6 +241,21 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the row keeps showing the stored value, which the tones keep too.
                 debugLog.error("settings.updateSound", e)
+            }
+        }
+    }
+
+    /**
+     * Applies at once, also during a drive, on the phone's map and the car's: another drive view ends a hold of the map and
+     * shows the view it wants; Recenter by itself counts from the next touch. One write of the keys [change] changes.
+     */
+    private fun updateDriveCamera(change: (DriveCameraSettings) -> DriveCameraSettings) {
+        viewModelScope.launch {
+            try {
+                settings.updateDriveCamera(change)
+            } catch (e: IOException) {
+                // Not stored, so the row keeps showing the stored value, which the maps keep too.
+                debugLog.error("settings.updateDriveCamera", e)
             }
         }
     }

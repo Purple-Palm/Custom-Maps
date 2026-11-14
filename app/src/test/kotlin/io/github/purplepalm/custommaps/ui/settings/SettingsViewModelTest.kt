@@ -7,6 +7,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
 import io.github.purplepalm.custommaps.nav.sound.ToneLevel
@@ -607,6 +609,7 @@ class SettingsViewModelTest {
             SettingId.SIDE_ROAD_FIELDS to { settings.sideRoadFields.value },
             SettingId.CAR_LIGHT_WHEN_HOT to { settings.carLightWhenHot.value },
             SettingId.LANE_COUNTS_HORIZON to { settings.laneCountsHorizon.value },
+            SettingId.OVERVIEW_TURN_ZOOM to { settings.driveCamera.value.turnZoom },
             SettingId.TONE_BEFORE_TURN to { settings.sound.value.beforeTurn },
             SettingId.TONE_AT_TURN to { settings.sound.value.atTurn },
             // Last: off, it hides the two above.
@@ -631,6 +634,20 @@ class SettingsViewModelTest {
     fun `a choice of the catalogue stores the option at its place in the row`() = runTest(dispatcher) {
         val viewModel = viewModelWithValues()
         fun selected(id: SettingId) = (SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.single { it.id == id } as ChoiceRow).selected
+        for ((index, view) in SettingsCatalogue.driveViews.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.DRIVE_VIEW, index))
+            runCurrent()
+            assertEquals(view, settings.driveCamera.value.driveView)
+            assertEquals(index, selected(SettingId.DRIVE_VIEW))
+        }
+        for ((index, seconds) in SettingsCatalogue.recenterSeconds.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.RECENTER_SECONDS, index))
+            runCurrent()
+            assertEquals(seconds, settings.driveCamera.value.recenterSeconds)
+            assertEquals(index, selected(SettingId.RECENTER_SECONDS))
+        }
+        // Each wrote its own part of the drive camera's settings only: Overview, the last wait, Zoom in before turns on.
+        assertEquals(DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 20, turnZoom = true), settings.driveCamera.value)
         for ((index, style) in SettingsCatalogue.cameraStyles.withIndex()) {
             viewModel.onEvent(SettingsEvent.Chosen(SettingId.CAMERA_STYLE, index))
             runCurrent()
@@ -728,6 +745,21 @@ class SettingsViewModelTest {
         runCurrent()
         assertEquals(CameraStyle.SMOOTH_FOLLOW, settings.cameraStyle.value)
         assertFalse(settings.simulateDrive.value)
+    }
+
+    @Test
+    fun `the drive camera rows show the stored settings, and one that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.driveCamera.value = DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 5, turnZoom = false)
+        val viewModel = viewModelWithValues()
+        assertEquals(settings.driveCamera.value, viewModel.values.value.guidance.driveCamera)
+        settings.storageFull = true
+        viewModel.onEvent(SettingsEvent.Chosen(SettingId.DRIVE_VIEW, SettingsCatalogue.driveViews.indexOf(DriveView.NORMAL)))
+        viewModel.onEvent(SettingsEvent.Switched(SettingId.OVERVIEW_TURN_ZOOM, true))
+        viewModel.onEvent(SettingsEvent.Chosen(SettingId.RECENTER_SECONDS, SettingsCatalogue.recenterSeconds.indexOf(0)))
+        runCurrent()
+        assertEquals(DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 5, turnZoom = false), viewModel.values.value.guidance.driveCamera)
+        assertEquals(listOf("error", "error", "error"), archive.logged)
+        assertEquals(emptyList<DriveCameraSettings>(), settings.storedDriveCameras)
     }
 
     @Test

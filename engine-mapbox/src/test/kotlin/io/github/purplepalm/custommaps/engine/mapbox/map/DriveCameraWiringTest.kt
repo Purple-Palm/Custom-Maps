@@ -69,6 +69,16 @@ class DriveCameraWiringTest {
     }
 
     @Test
+    fun `settings change the drive views at once, and a map put away asks its camera for nothing`() {
+        val settings = body("override fun setDriveCamera(settings: DriveCameraSettings)")
+        assertEquals("val wish = driveCamera.setSettings(settings, driveNow())", settings.first())
+        assertTrue(
+            "if (guidanceState == GuidanceState.ACTIVE && !away) carryOut(wish, BY_DRIVER, WHY_SETTINGS) else publishDriveControls()" in settings,
+            "$settings",
+        )
+    }
+
+    @Test
     fun `a camera made anew during a drive is asked for what the drive views want`() {
         val style = body("override fun setCameraStyle(style: CameraStyle)")
         val ask = style.indexOf("carryOut(driveCamera.wish, BY_STYLE, WHY_STYLE, always = true)")

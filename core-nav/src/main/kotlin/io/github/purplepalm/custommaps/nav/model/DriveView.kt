@@ -17,10 +17,18 @@ enum class DriveView {
 data class DriveCameraSettings(
     val driveView: DriveView = DriveView.NORMAL,
     /** Recenter by itself: how many seconds after the driver's last touch the map goes back; 0 is off. */
-    val recenterSeconds: Int = 10,
+    val recenterSeconds: Int = RECENTER_DEFAULT,
     /** Zoom in before turns: read only in the Overview drive view; off gives the plain Overview. */
     val turnZoom: Boolean = true,
-)
+) {
+    companion object {
+        /** The waits Settings offers for Recenter by itself, in seconds, in the order it lists them; 0 is off. */
+        val RECENTER_CHOICES: List<Int> = listOf(0, 5, 10, 20)
+
+        /** Recenter by itself's wait when never chosen, and for a stored number Settings does not offer. */
+        const val RECENTER_DEFAULT = 10
+    }
+}
 
 /** What the Overview toggle shows: it changes only when the drive view or Zoom in before turns changes. */
 data class DriveViewControl(val driveView: DriveView, val turnZoom: Boolean)

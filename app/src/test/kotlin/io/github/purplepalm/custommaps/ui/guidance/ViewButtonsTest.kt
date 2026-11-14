@@ -82,8 +82,11 @@ class ViewButtonsTest {
         assertTrue("val driveView = phoneMap.driveViewControl.collectAsStateWithLifecycle()" in screen)
         assertTrue("val recenter = phoneMap.recenterControl.collectAsStateWithLifecycle()" in screen)
         assertFalse(Regex("""\b(driveView|recenter)\.value\b""").containsMatchIn(screen))
-        assertTrue("onToggleView = { phoneMap.toggleDriveView() }" in screen)
+        // The map has the other drive view at once, and the choice is stored for the next drives and the car's map.
+        assertTrue("onToggleView = { viewModel.onDriveViewToggled(phoneMap.toggleDriveView()) }" in screen)
         assertTrue("onRecenter = phoneMap::recenter" in screen)
+        // The stored settings reach the map, the button's choice among them.
+        assertTrue("LaunchedEffect(phoneMap) { settings.driveCamera.collect(phoneMap::setDriveCamera) }" in screen)
     }
 
     @Test

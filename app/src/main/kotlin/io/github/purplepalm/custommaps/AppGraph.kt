@@ -188,6 +188,7 @@ class AppGraph(private val application: Application) {
             // The heat the "thermal" lines say, from their one listener: the car's map gets lighter while the phone is hot.
             phoneThermal = deviceLog.thermal,
             lightWhenHot = settings.carLightWhenHot,
+            driveCamera = settings.driveCamera,
         ),
         look = lookController,
         debugLog = debugLog,

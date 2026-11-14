@@ -8,6 +8,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
 import io.github.purplepalm.custommaps.nav.sound.DuckPlan
@@ -43,6 +45,9 @@ enum class SettingsPage(val tab: SettingsTab) {
  * at home on, and the [page] of that tab it goes on once the tabs are built (null: on the tab itself).
  */
 enum class SettingId(val key: String?, val tab: SettingsTab, val page: SettingsPage? = null) {
+    DRIVE_VIEW("drive_view", SettingsTab.MAP),
+    OVERVIEW_TURN_ZOOM("overview_turn_zoom", SettingsTab.MAP),
+    RECENTER_SECONDS("recenter_seconds", SettingsTab.MAP),
     CAMERA_STYLE("camera_style", SettingsTab.MAP),
     LANE_ZOOM("lane_zoom", SettingsTab.MAP),
     LANES_ON_MAP("lanes_on_map", SettingsTab.MAP),
@@ -180,6 +185,8 @@ sealed interface SettingsEvent {
 object SettingsCatalogue {
 
     /** The options of each choice, in the order its row lists them; the view model stores by the same lists. */
+    val driveViews: List<DriveView> = DriveView.entries
+    val recenterSeconds: List<Int> = DriveCameraSettings.RECENTER_CHOICES
     val cameraStyles: List<CameraStyle> = CameraStyle.entries
     val laneZooms: List<LaneZoom> = LaneZoom.entries
     val lanesOnMap: List<LanesOnMap> = LanesOnMap.entries
@@ -216,7 +223,39 @@ object SettingsCatalogue {
     /** The stored keys whose rows go on [page] once the tabs are built. */
     fun keysOn(page: SettingsPage): Set<String> = SettingId.entries.filter { it.page == page }.mapNotNullTo(LinkedHashSet()) { it.key }
 
+    /**
+     * The guidance group: first the drive views (the drive view, which the guidance bar's Overview button switches and
+     * stores too, Zoom in before turns right under it, and Recenter by itself), then the camera style, the lane zoom and
+     * the lanes on the map.
+     */
     private fun guidanceRows(guidance: GuidanceSettings): List<SettingRow> = listOf(
+        ChoiceRow(
+            id = SettingId.DRIVE_VIEW,
+            title = text(R.string.drive_view_title),
+            options = driveViews.map { ChoiceOption(text(it.titleRes())) },
+            selected = driveViews.indexOf(guidance.driveCamera.driveView),
+            lines = buildList {
+                add(RowNote(text(R.string.drive_view_note)))
+                // The Mapbox styles carry the drive view's moves with flights of their own, less smooth than the glides.
+                if (guidance.cameraStyle != CameraStyle.SMOOTH_FOLLOW) add(RowNote(text(R.string.drive_view_mapbox_styles_note), LineTone.NOTE_NOW))
+            },
+        ),
+        // Read in the Overview only: off, the Overview stays up all the way.
+        SwitchRow(
+            id = SettingId.OVERVIEW_TURN_ZOOM,
+            title = text(R.string.overview_turn_zoom_title),
+            on = guidance.driveCamera.turnZoom,
+            lines = listOf(RowNote(text(R.string.overview_turn_zoom_note))),
+        ),
+        ChoiceRow(
+            id = SettingId.RECENTER_SECONDS,
+            title = text(R.string.recenter_seconds_title),
+            options = recenterSeconds.map { seconds ->
+                ChoiceOption(if (seconds == 0) text(R.string.recenter_seconds_off) else text(R.string.recenter_seconds_value, seconds))
+            },
+            selected = recenterSeconds.indexOf(guidance.driveCamera.recenterSeconds),
+            lines = listOf(RowNote(text(R.string.recenter_seconds_note))),
+        ),
         ChoiceRow(
             id = SettingId.CAMERA_STYLE,
             title = text(R.string.camera_style_title),
@@ -469,6 +508,12 @@ object SettingsCatalogue {
 internal fun tripsSinceRes(began: LogBegan?): Int = when (began) {
     LogBegan.OLDEST_KEPT -> R.string.debug_trips_since_oldest_kept
     LogBegan.INSTALLATION, null -> R.string.debug_trips_since_installation
+}
+
+@StringRes
+private fun DriveView.titleRes(): Int = when (this) {
+    DriveView.NORMAL -> R.string.drive_view_normal
+    DriveView.OVERVIEW -> R.string.drive_view_overview
 }
 
 @StringRes

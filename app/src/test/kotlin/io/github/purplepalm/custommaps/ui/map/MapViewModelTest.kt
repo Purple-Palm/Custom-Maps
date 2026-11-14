@@ -7,6 +7,8 @@ import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Maneuver
@@ -24,6 +26,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -316,6 +319,51 @@ class MapViewModelTest {
         assertSame(screen, viewModel.state.value)
         viewModel.onReplaySeek(0.75)
         assertEquals(listOf(0.75), navigation.seeks)
+    }
+
+    @Test
+    fun `the Overview button's choice is stored, each tap in its order, and leaves the other drive camera settings alone`() = runTest(dispatcher) {
+        settings.driveCamera.value = DriveCameraSettings(recenterSeconds = 5, turnZoom = false)
+        val viewModel = viewModel()
+        viewModel.onDriveViewToggled(DriveView.OVERVIEW)
+        runCurrent()
+        assertEquals(DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 5, turnZoom = false), settings.driveCamera.value)
+        // Taps quicker than a write: each is stored after the one before, so the last one stays.
+        viewModel.onDriveViewToggled(DriveView.NORMAL)
+        viewModel.onDriveViewToggled(DriveView.OVERVIEW)
+        viewModel.onDriveViewToggled(DriveView.NORMAL)
+        runCurrent()
+        assertEquals(
+            listOf(DriveView.OVERVIEW, DriveView.NORMAL, DriveView.OVERVIEW, DriveView.NORMAL),
+            settings.storedDriveCameras.map { it.driveView },
+        )
+        assertEquals(DriveCameraSettings(driveView = DriveView.NORMAL, recenterSeconds = 5, turnZoom = false), settings.driveCamera.value)
+    }
+
+    @Test
+    fun `a choice that cannot be stored stays the map's for the drive, for nothing stored changes`() = runTest(dispatcher) {
+        val logged = mutableListOf<String>()
+        val log = object : DebugLog {
+            override fun log(type: String, fields: Map<String, Any?>) {
+                logged += type
+            }
+        }
+        val viewModel = MapViewModel(navigation, search, settings, log).also { runCurrent() }
+        // What the map collects: the stored settings.
+        val toMap = mutableListOf<DriveCameraSettings>()
+        backgroundScope.launch { settings.driveCamera.collect { toMap += it } }
+        runCurrent()
+        settings.storageFull = true
+        viewModel.onDriveViewToggled(DriveView.OVERVIEW)
+        runCurrent()
+        // Nothing reaches the map, which keeps the view the button gave it until the drive ends.
+        assertEquals(listOf(DriveCameraSettings()), toMap)
+        assertEquals(listOf("error"), logged)
+        // The next choice is stored once the store works again, and the map hears of it.
+        settings.storageFull = false
+        viewModel.onDriveViewToggled(DriveView.OVERVIEW)
+        runCurrent()
+        assertEquals(listOf(DriveCameraSettings(), DriveCameraSettings(driveView = DriveView.OVERVIEW)), toMap)
     }
 
     @Test

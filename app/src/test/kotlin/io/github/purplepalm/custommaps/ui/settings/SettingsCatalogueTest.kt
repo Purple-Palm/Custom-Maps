@@ -6,6 +6,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
 import io.github.purplepalm.custommaps.nav.sound.ToneLevel
@@ -92,7 +94,10 @@ class SettingsCatalogueTest {
         )
         assertEquals(setOf("tones", "tone_before_turn", "tone_at_turn", "tone_duck", "tone_level"), SettingsCatalogue.keysOn(SettingsTab.SOUND))
         assertEquals(emptySet<String>(), SettingsCatalogue.keysOn(SettingsPage.TOKEN))
-        assertEquals(setOf("camera_style", "lane_zoom", "lanes_on_map", "lane_counts_horizon"), SettingsCatalogue.keysOn(SettingsTab.MAP))
+        assertEquals(
+            setOf("drive_view", "overview_turn_zoom", "recenter_seconds", "camera_style", "lane_zoom", "lanes_on_map", "lane_counts_horizon"),
+            SettingsCatalogue.keysOn(SettingsTab.MAP),
+        )
         assertTrue("day_night" in SettingsCatalogue.keysOn(SettingsTab.APP))
     }
 
@@ -115,6 +120,61 @@ class SettingsCatalogueTest {
         }
         for (fps in listOf(30, 60)) {
             assertEquals(fps, SettingsCatalogue.carMapFps[row<ChoiceRow>(SettingId.CAR_MAP_FPS, everything.copy(debug = DebugState(carMapFps = fps))).selected])
+        }
+    }
+
+    @Test
+    fun `the guidance group begins with the drive view, Zoom in before turns right under it, and Recenter by itself`() {
+        val guidance = SettingsCatalogue.groups(SettingsTab.MAP, everything).single()
+        assertEquals(R.string.guidance_title, guidance.title)
+        assertEquals(
+            listOf(
+                SettingId.DRIVE_VIEW, SettingId.OVERVIEW_TURN_ZOOM, SettingId.RECENTER_SECONDS,
+                SettingId.CAMERA_STYLE, SettingId.LANE_ZOOM, SettingId.LANES_ON_MAP, SettingId.LANE_COUNTS_HORIZON,
+            ),
+            guidance.rows.map { it.id },
+        )
+        val view = row<ChoiceRow>(SettingId.DRIVE_VIEW)
+        assertEquals(listOf(RowText.Res(R.string.drive_view_normal), RowText.Res(R.string.drive_view_overview)), view.options.map { it.title })
+        assertFalse(view.folds, "two segments")
+        val recenter = row<ChoiceRow>(SettingId.RECENTER_SECONDS)
+        assertEquals(
+            listOf(
+                RowText.Res(R.string.recenter_seconds_off),
+                RowText.Res(R.string.recenter_seconds_value, listOf(5)),
+                RowText.Res(R.string.recenter_seconds_value, listOf(10)),
+                RowText.Res(R.string.recenter_seconds_value, listOf(20)),
+            ),
+            recenter.options.map { it.title },
+        )
+        assertEquals(listOf(RowNote(RowText.Res(R.string.overview_turn_zoom_note))), row<SwitchRow>(SettingId.OVERVIEW_TURN_ZOOM).lines)
+        assertEquals(listOf(RowNote(RowText.Res(R.string.recenter_seconds_note))), recenter.lines)
+    }
+
+    @Test
+    fun `the drive camera rows show the stored settings, Normal, 10 s and Zoom in before turns on when never chosen`() {
+        assertEquals(DriveView.NORMAL, SettingsCatalogue.driveViews[row<ChoiceRow>(SettingId.DRIVE_VIEW).selected])
+        assertEquals(10, SettingsCatalogue.recenterSeconds[row<ChoiceRow>(SettingId.RECENTER_SECONDS).selected])
+        assertTrue(row<SwitchRow>(SettingId.OVERVIEW_TURN_ZOOM).on)
+        for (view in DriveView.entries) {
+            for (seconds in DriveCameraSettings.RECENTER_CHOICES) {
+                for (turnZoom in listOf(true, false)) {
+                    val values = everything.copy(guidance = GuidanceSettings(driveCamera = DriveCameraSettings(view, seconds, turnZoom)))
+                    assertEquals(view, SettingsCatalogue.driveViews[row<ChoiceRow>(SettingId.DRIVE_VIEW, values).selected])
+                    assertEquals(seconds, SettingsCatalogue.recenterSeconds[row<ChoiceRow>(SettingId.RECENTER_SECONDS, values).selected])
+                    assertEquals(turnZoom, row<SwitchRow>(SettingId.OVERVIEW_TURN_ZOOM, values).on)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `with a Mapbox camera style the drive view row says the drive views are smoothest with Smooth follow`() {
+        val smoothest = RowNote(RowText.Res(R.string.drive_view_mapbox_styles_note), LineTone.NOTE_NOW)
+        for (style in CameraStyle.entries) {
+            val lines = row<ChoiceRow>(SettingId.DRIVE_VIEW, everything.copy(guidance = GuidanceSettings(cameraStyle = style))).lines
+            assertEquals(RowNote(RowText.Res(R.string.drive_view_note)), lines.first())
+            assertEquals(style != CameraStyle.SMOOTH_FOLLOW, smoothest in lines, "$style")
         }
     }
 

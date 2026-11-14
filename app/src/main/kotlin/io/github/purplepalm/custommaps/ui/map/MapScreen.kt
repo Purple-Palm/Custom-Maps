@@ -202,6 +202,8 @@ fun MapScreen(
         LaunchedEffect(phoneMap) { settings.ownRouteLine.collect(phoneMap::setOwnRouteLine) }
         // And for the one that measures what the lanes drawn by the app cost the map's frames.
         LaunchedEffect(phoneMap) { settings.measureOwnLanes.collect(phoneMap::setMeasureOwnLanes) }
+        // And for the drive view, Zoom in before turns and Recenter by itself; the Overview button stores its choice here.
+        LaunchedEffect(phoneMap) { settings.driveCamera.collect(phoneMap::setDriveCamera) }
         LaunchedEffect(phoneMap, pinnedPlace) { phoneMap.showPlace(pinnedPlace) }
     }
 
@@ -447,8 +449,8 @@ fun MapScreen(
                         progress = progress,
                         driveView = driveView,
                         recenter = recenter,
-                        // The map has the other drive view at once, for this drive.
-                        onToggleView = { phoneMap.toggleDriveView() },
+                        // The map has the other drive view at once; stored, it is the next drives' too.
+                        onToggleView = { viewModel.onDriveViewToggled(phoneMap.toggleDriveView()) },
                         onRecenter = phoneMap::recenter,
                         onEnd = viewModel::onEnd,
                         onList = onListButton.takeIf { phoneScreen.listButton },

@@ -869,7 +869,8 @@ internal class MapScene(
 
     override fun setDriveCamera(settings: DriveCameraSettings) {
         val wish = driveCamera.setSettings(settings, driveNow())
-        if (guidanceState == GuidanceState.ACTIVE) carryOut(wish, BY_DRIVER, WHY_SETTINGS) else publishDriveControls()
+        // A map put away asks the camera for nothing: back, it asks for what the drive views want then.
+        if (guidanceState == GuidanceState.ACTIVE && !away) carryOut(wish, BY_DRIVER, WHY_SETTINGS) else publishDriveControls()
     }
 
     override fun toggleDriveView(): DriveView = toggle(driveNow())

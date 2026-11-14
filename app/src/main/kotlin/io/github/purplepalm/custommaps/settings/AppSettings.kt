@@ -12,6 +12,8 @@ import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
 import io.github.purplepalm.custommaps.nav.sound.DuckPlan
@@ -126,6 +128,15 @@ interface AppSettings {
 
     /** Stores [change] of the tones' settings in one write: only what it changes, each changed key reported once. */
     suspend fun updateSound(change: (SoundSettings) -> SoundSettings)
+
+    /**
+     * The drive camera's settings ([DriveCameraSettings]): the drive view, which the guidance bar's Overview button
+     * stores too, Recenter by itself and Zoom in before turns. Normal, 10 s and on when never chosen.
+     */
+    val driveCamera: Flow<DriveCameraSettings>
+
+    /** Stores [change] of the drive camera's settings in one write: only what it changes, each changed key reported once. */
+    suspend fun updateDriveCamera(change: (DriveCameraSettings) -> DriveCameraSettings)
 }
 
 /**
@@ -290,6 +301,12 @@ class DataStoreAppSettings(
 
     override suspend fun updateSound(change: (SoundSettings) -> SoundSettings) = SOUND.update(dataStore, change, onChanged)
 
+    /** A missing value reads as its default and is never written unless it changes; an unknown word or number too. */
+    override val driveCamera: Flow<DriveCameraSettings> = preferences.map(DRIVE_CAMERA::of).distinctUntilChanged()
+
+    override suspend fun updateDriveCamera(change: (DriveCameraSettings) -> DriveCameraSettings) =
+        DRIVE_CAMERA.update(dataStore, change, onChanged)
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -304,7 +321,10 @@ class DataStoreAppSettings(
             linkedSetOf(
                 SIMULATE_DRIVE.name, CAMERA_STYLE.name, LANE_ZOOM.name, LANES_ON_MAP.name, LANE_COUNTS_HORIZON.name, DAY_NIGHT.name,
                 OWN_ROUTE_LINE.name, MEASURE_OWN_LANES.name, CAR_MAP_FPS.name, CAR_LIGHT_WHEN_HOT.name, SIDE_ROAD_FIELDS.name,
-            ).apply { addAll(SOUND.keyNames) }
+            ).apply {
+                addAll(SOUND.keyNames)
+                addAll(DRIVE_CAMERA.keyNames)
+            }
         }
         private val SIMULATE_DRIVE = booleanPreferencesKey("simulate_drive")
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
@@ -345,6 +365,31 @@ class DataStoreAppSettings(
                 PreferenceGroup.Field(TONE_LEVEL) { it.level.stored() },
                 // A number the Debug row does not offer is stored as the default it reads as.
                 PreferenceGroup.Field(TONE_LEAD_IN) { leadInOf(it.leadInMillis) },
+            ),
+        )
+
+        private val DRIVE_VIEW = stringPreferencesKey("drive_view")
+        private val OVERVIEW_TURN_ZOOM = stringPreferencesKey("overview_turn_zoom")
+        private val RECENTER_SECONDS = intPreferencesKey("recenter_seconds")
+
+        /** Zoom in before turns is stored as a word: on, or off. */
+        private const val TURN_ZOOM_ON = "on"
+        private const val TURN_ZOOM_OFF = "off"
+
+        /** The drive camera's keys as one group, as the tones' are. */
+        internal val DRIVE_CAMERA = PreferenceGroup(
+            read = { stored ->
+                DriveCameraSettings(
+                    driveView = driveViewOf(stored[DRIVE_VIEW]),
+                    recenterSeconds = recenterSecondsOf(stored[RECENTER_SECONDS]),
+                    turnZoom = turnZoomOf(stored[OVERVIEW_TURN_ZOOM]),
+                )
+            },
+            fields = listOf(
+                PreferenceGroup.Field(DRIVE_VIEW) { it.driveView.stored() },
+                PreferenceGroup.Field(OVERVIEW_TURN_ZOOM) { if (it.turnZoom) TURN_ZOOM_ON else TURN_ZOOM_OFF },
+                // A number the row does not offer is stored as the default it reads as.
+                PreferenceGroup.Field(RECENTER_SECONDS) { recenterSecondsOf(it.recenterSeconds) },
             ),
         )
 
@@ -408,5 +453,18 @@ class DataStoreAppSettings(
         private fun toneLevelOf(stored: String?): ToneLevel = ToneLevel.entries.firstOrNull { it.stored() == stored } ?: ToneLevel.NORMAL
 
         private fun leadInOf(stored: Int?): Int = stored?.takeIf { it in DuckPlan.WAKE_LEAD_INS } ?: DuckPlan.WAKE_LEAD_IN_MILLIS
+
+        private fun DriveView.stored(): String = when (this) {
+            DriveView.NORMAL -> "normal"
+            DriveView.OVERVIEW -> "overview"
+        }
+
+        private fun driveViewOf(stored: String?): DriveView = DriveView.entries.firstOrNull { it.stored() == stored } ?: DriveView.NORMAL
+
+        /** Any word but off reads as on, the default: only a choice of off turns the zoom before turns off. */
+        private fun turnZoomOf(stored: String?): Boolean = stored != TURN_ZOOM_OFF
+
+        private fun recenterSecondsOf(stored: Int?): Int =
+            stored?.takeIf { it in DriveCameraSettings.RECENTER_CHOICES } ?: DriveCameraSettings.RECENTER_DEFAULT
     }
 }

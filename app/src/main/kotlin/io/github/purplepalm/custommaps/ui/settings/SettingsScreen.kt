@@ -36,6 +36,9 @@ import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
+import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
 import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
@@ -327,6 +330,30 @@ private fun GuidanceGroupPreview(@PreviewParameter(LookParameter::class) look: L
         GuidanceSettings(lanesOnMap = LanesOnMap.MAPBOX, laneCountsHorizon = false),
     )
     GroupPreview(look, guidance.flatMap { SettingsCatalogue.groups(SettingsTab.MAP, SettingsValues(guidance = it)) })
+}
+
+/**
+ * The drive camera's three rows at the head of the Guidance group on a narrow phone with every font size, by day and at
+ * night: the Overview with Zoom in before turns on and Recenter by itself after 10 s, under Smooth follow; and Normal with
+ * Zoom in before turns off and Recenter by itself Off, under Mapbox tuned, with the line that Smooth follow is smoothest.
+ */
+@Preview(name = "drive views", widthDp = 360)
+@Preview(name = "drive views, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "drive views, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun DriveViewRowsPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    val guidance = listOf(
+        GuidanceSettings(driveCamera = DriveCameraSettings(driveView = DriveView.OVERVIEW)),
+        GuidanceSettings(cameraStyle = CameraStyle.MAPBOX_TUNED, driveCamera = DriveCameraSettings(recenterSeconds = 0, turnZoom = false)),
+    )
+    val driveRows = setOf(SettingId.DRIVE_VIEW, SettingId.OVERVIEW_TURN_ZOOM, SettingId.RECENTER_SECONDS)
+    GroupPreview(
+        look,
+        guidance.map { values ->
+            val group = SettingsCatalogue.groups(SettingsTab.MAP, SettingsValues(guidance = values)).single()
+            group.copy(rows = group.rows.filter { it.id in driveRows })
+        },
+    )
 }
 
 /**

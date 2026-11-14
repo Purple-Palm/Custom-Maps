@@ -7,7 +7,9 @@ import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.model.DriveView
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.PlaceSuggestion
@@ -15,6 +17,7 @@ import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
 import io.github.purplepalm.custommaps.settings.AppSettings
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -64,7 +67,7 @@ data class MapUiState(
 class MapViewModel(
     private val navigation: NavigationEngine,
     private val search: SearchProvider,
-    settings: AppSettings,
+    private val settings: AppSettings,
     private val debugLog: DebugLog,
 ) : ViewModel() {
 
@@ -221,6 +224,22 @@ class MapViewModel(
     fun onStart() {
         debugLog.log("ui_start", mapOf("simulated" to state.value.simulateDrive))
         navigation.startGuidance(simulated = state.value.simulateDrive)
+    }
+
+    /**
+     * The Overview button switched the map's drive view to [view]. The map has it at once, for this drive; stored, it is
+     * the drive view of the next drives and of the car's map too. Taps are stored in their order, each its own write, so
+     * the last one stays. A choice that cannot be stored stays the map's for the drive: nothing that is stored changes,
+     * so nothing reaches the map.
+     */
+    fun onDriveViewToggled(view: DriveView) {
+        viewModelScope.launch {
+            try {
+                settings.updateDriveCamera { it.copy(driveView = view) }
+            } catch (e: IOException) {
+                debugLog.error("settings.updateDriveCamera", e)
+            }
+        }
     }
 
     /** The replay slider of a simulated drive was let go at [fraction] of its length; its "replay_seek" line says what came of it. */
