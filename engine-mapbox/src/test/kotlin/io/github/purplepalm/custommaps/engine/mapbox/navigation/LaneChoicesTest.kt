@@ -742,6 +742,52 @@ class LaneChoicesTest {
     }
 
     @Test
+    fun `the tones get the key of the row the card shows ahead of the maneuver`() {
+        // A straight-on lane choice: its key while the card shows its row, none once it is passed.
+        val straight = split()
+        assertNull(straight.shownKey)
+        requireNotNull(straight.lanesAhead(listOf(beforeSplit(straight, 700.0)), 29.0))
+        assertEquals("r/0/2/2", straight.shownKey)
+        assertEquals(straight.choiceKey, straight.shownKey)
+        assertFalse(straight.runUpFromExitWindow)
+        assertNull(straight.lanesAhead(emptyList(), 29.0))
+        assertNull(straight.shownKey)
+        // A run-up begun by an edge point: that point's row, then the exit's own, and never from the exit's own window.
+        val edge = LaneChoices()
+        requireNotNull(edge.at(onStep = 0.0, toExit = 2_100.0, t = 1.0))
+        assertEquals("r/0/2/2", edge.shownKey)
+        assertFalse(edge.runUpFromExitWindow)
+        requireNotNull(edge.at(onStep = 450.0, toExit = 1_650.0, t = 18.0))
+        assertEquals("r/0/2/end", edge.shownKey)
+        assertFalse(edge.runUpFromExitWindow)
+        // The run-up's row stands for a lane choice's: the card shows nothing else.
+        assertNull(edge.lanesAhead(listOf(beforeSplit(split(), 300.0)), 25.0))
+        assertEquals("r/0/2/end", edge.shownKey)
+        // Past the gore, outside a run-up: nothing.
+        assertNull(edge.at(onStep = 0.0, toExit = 800.0, t = 54.0, type = "turn", key = "r/0/3"))
+        assertNull(edge.shownKey)
+    }
+
+    @Test
+    fun `a run-up begun at the exit's own window says so while it holds the exit ahead`() {
+        val lanes = LaneChoices()
+        fun at(onStep: Double, toExit: Double, t: Double): RunUpLanes? {
+            val choices = lanes.update(false, "r/0/2", onStep, toExit, "off ramp") { runUpStep(lanes, it, step = listOf(intersection(0), intersection(2))) }
+            return lanes.moveRunUp(choices, onRoute = true, metersOnStep = onStep, speedMps = 25.0, nowSeconds = t)
+        }
+        // At 25 m/s the exit's own window starts 625 m before it; no point on the way has the exit's lane leave.
+        assertNull(at(onStep = 0.0, toExit = 700.0, t = 0.0))
+        assertFalse(lanes.runUpFromExitWindow)
+        requireNotNull(at(onStep = 80.0, toExit = 620.0, t = 3.0))
+        assertEquals("r/0/2/end", lanes.runUpStartKey)
+        assertEquals("r/0/2/end", lanes.shownKey)
+        assertTrue(lanes.runUpFromExitWindow)
+        lanes.clear()
+        assertFalse(lanes.runUpFromExitWindow)
+        assertNull(lanes.shownKey)
+    }
+
+    @Test
     fun `the run-up holds whatever the speed does and ends off the route, and a short time off begins it again`() {
         val lanes = LaneChoices()
         requireNotNull(lanes.at(onStep = 0.0, toExit = 1_500.0, t = 0.0))

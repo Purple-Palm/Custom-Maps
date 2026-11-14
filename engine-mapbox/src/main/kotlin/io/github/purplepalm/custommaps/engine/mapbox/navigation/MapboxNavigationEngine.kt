@@ -43,6 +43,7 @@ import com.mapbox.navigation.tripdata.maneuver.model.Maneuver as MapboxManeuver
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxEngine
 import io.github.purplepalm.custommaps.engine.mapbox.map.camera.GuidancePuck
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
+import io.github.purplepalm.custommaps.nav.GuidanceAudio
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
 import io.github.purplepalm.custommaps.nav.car.CarSurfaces
@@ -92,6 +93,7 @@ import io.github.purplepalm.custommaps.nav.network.offlineReason
 import io.github.purplepalm.custommaps.nav.replay.ReplayPosition
 import io.github.purplepalm.custommaps.nav.replay.ReplaySeek
 import io.github.purplepalm.custommaps.nav.replay.SeekHold
+import io.github.purplepalm.custommaps.nav.sound.ToneMoment
 import io.github.purplepalm.custommaps.nav.trip.TripEnding
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
@@ -135,6 +137,11 @@ internal class MapboxNavigationEngine(
     private val offlineData: OfflineData,
     /** This app's network as Android reports it, for the time a trip spends offline. */
     private val network: StateFlow<NetworkStatus>,
+    /**
+     * The audible side of guidance, told where the drive is ([GuidanceAudio]): the app's tones. Told only what the
+     * engine's own observers already receive; no call into the SDK is made for it.
+     */
+    private val audio: GuidanceAudio = GuidanceAudio.Silent,
 ) : NavigationEngine, MapboxNavigationObserver {
 
     private val appContext = context.applicationContext
@@ -310,6 +317,9 @@ internal class MapboxNavigationEngine(
 
     /** Whether the card's comparison with the plan failed in this drive: one error line, then no more "lane_agree" lines. */
     private var laneAgreeFailed = false
+
+    /** Whether a call to the audio port failed in this drive: one error line, and the calls go on. Main thread. */
+    private var audioFailed = false
 
     /**
      * Settings' switch Lane counts between lane points ([setLaneCountsHorizon]): whether a drive listens to Mapbox's electronic
@@ -855,6 +865,7 @@ internal class MapboxNavigationEngine(
             // The session started the replay over and plays it: the car jumps to where it starts.
             // A run-up ends there, and may begin again soon if the car lands on the same approach.
             thenTracker.reset()
+            audioCall { audio.onGuidanceEnded() }
             laneChoices.onSeek(nowSeconds())
             divergeWatch.reset()
             seekHold.resume()
@@ -876,9 +887,10 @@ internal class MapboxNavigationEngine(
                 false
             }
         if (moved) {
-            // What the Then chip and the lane choices remember is of the place the car left. A
+            // What the Then chip, the tones and the lane choices remember is of the place the car left. A
             // run-up ends at the seek, and may begin again soon if the car lands on the same approach.
             thenTracker.reset()
+            audioCall { audio.onGuidanceEnded() }
             laneChoices.onSeek(nowSeconds())
             divergeWatch.reset()
             seekHold.resume()
@@ -1136,8 +1148,10 @@ internal class MapboxNavigationEngine(
                 // Keeps the navigator alive for the drive, even without a screen. The preview's
                 // download is not ended here: it goes on into the drive ([OfflineData.onTripStarted]).
                 MapboxNavigationApp.attach(guidanceLifecycle)
-                // A new drive: the Then chip and the lane choices know nothing of the last one.
+                // A new drive: the Then chip, the tones and the lane choices know nothing of the last one.
                 thenTracker.reset()
+                audioFailed = false
+                audioCall { audio.onGuidanceEnded() }
                 upcoming.reset()
                 laneChoices.clear()
                 laneRowLog.reset()
@@ -1259,6 +1273,7 @@ internal class MapboxNavigationEngine(
                 _routeProgress.value = null
                 cardContinuity.reset()
                 thenTracker.reset()
+                audioCall { audio.onGuidanceEnded() }
                 upcoming.reset()
                 laneChoices.clear()
                 laneRowLog.reset()
@@ -1533,6 +1548,8 @@ internal class MapboxNavigationEngine(
         if (snapshot != null) {
             logLaneRow(progress, snapshot)
             _routeProgress.value = snapshot
+            // Behind the guards above: no tone for a place the car has left, nor for a maneuver a seek jumped over.
+            if (active) tellAudio(progress, snapshot)
         }
         // The card's row against the lane plan of the update's route, for the debug log only.
         if (active) logLaneAgree(progress, snapshot)
@@ -1551,6 +1568,32 @@ internal class MapboxNavigationEngine(
      * before the first.
      */
     private fun livePosition(): DeviceFix? = lastMatch?.enhancedLocation?.let(DeviceFix::of)?.takeIf { it.live }
+
+    /**
+     * Tells the audio port of [snapshot], the update just published, with the lane row the card shows ahead of the
+     * maneuver ([LaneChoices.shownKey]), how far ahead its point is, and whether the run-up on now began at its exit's
+     * own window. The car's speed is the snapshot's, the latest matched one. Reads only what the navigator already
+     * handed over: one small object per update.
+     */
+    private fun tellAudio(progress: RouteProgress, snapshot: RouteProgressSnapshot) {
+        audioCall {
+            val key = laneChoices.shownKey
+            val meters = if (key == null) null else laneChoices.ahead(progress).firstOrNull { it.key == key }?.metersAhead
+            audio.onProgress(ToneMoment.of(snapshot, progress.navigationRoute.id, key, meters, laneChoices.runUpFromExitWindow))
+        }
+    }
+
+    /** A call to the audio port: what it throws costs one error line in a drive, never the drive or the call after it. */
+    private inline fun audioCall(call: () -> Unit) {
+        try {
+            call()
+        } catch (e: RuntimeException) {
+            if (!audioFailed) {
+                audioFailed = true
+                debugLog.error(AUDIO_ERROR, e)
+            }
+        }
+    }
 
     /**
      * Whether [result], a matched position of this trip, is still the one the navigator held from
@@ -1916,6 +1959,8 @@ internal class MapboxNavigationEngine(
 
         override fun onFinalDestinationArrival(routeProgress: RouteProgress) {
             debugLog.log("arrival", mapOf("match" to lastMatch?.debugFields()))
+            // Before guidance ends: the pair, if the last step has not had it.
+            audioCall { audio.onArrived() }
             dispatch(GuidanceEvent.Arrived)
         }
     }
@@ -2028,6 +2073,9 @@ internal class MapboxNavigationEngine(
 
         /** Where an error line says a street maneuver's row could not be read from the lane plan. */
         const val CARD_STREET_ERROR = "cardStreetRow"
+
+        /** Where an error line says a call to the audio port failed. */
+        const val AUDIO_ERROR = "audio"
     }
 }
 

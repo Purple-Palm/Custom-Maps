@@ -20,6 +20,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.navigation.NavigatorHosts
 import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.engine.mapbox.search.MapboxSearchProvider
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
+import io.github.purplepalm.custommaps.nav.GuidanceAudio
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
@@ -40,12 +41,13 @@ class MapboxEngine private constructor(
     private val debugLog: DebugLog,
     tileStore: TileStore,
     network: StateFlow<NetworkStatus>,
+    audio: GuidanceAudio,
 ) {
 
     /** What is kept on the phone for stretches without a connection, in the one tile store. */
     private val offlineData = OfflineData(tileStore, application.resources.displayMetrics.density, debugLog)
 
-    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog, offlineData, network)
+    private val navigationEngine = MapboxNavigationEngine(application, tripLog, debugLog, offlineData, network, audio)
 
     val navigation: NavigationEngine get() = navigationEngine
 
@@ -155,6 +157,8 @@ class MapboxEngine private constructor(
             debugLog: DebugLog,
             /** This app's network as Android reports it; the summary of each trip counts its time offline. */
             network: StateFlow<NetworkStatus>,
+            /** The audible side of guidance, which the engine tells where the drive is; none by default. */
+            audio: GuidanceAudio = GuidanceAudio.Silent,
         ): MapboxEngine {
             // One tile store for the map and the navigator. This is the store at the default
             // location, the one each of them used by itself before, so nothing saved so far is
@@ -173,7 +177,7 @@ class MapboxEngine private constructor(
                         .build(),
                 )
             }
-            return MapboxEngine(application, tripLog, debugLog, tileStore, network)
+            return MapboxEngine(application, tripLog, debugLog, tileStore, network, audio)
         }
 
         /**

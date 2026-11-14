@@ -436,6 +436,21 @@ internal class LaneChoices(
     val runUpStartKey: String? get() = latch.startKey
 
     /**
+     * The key of the point whose lanes the card shows ahead of the maneuver, for the tones: on a run-up the point whose
+     * row the run-up shows ([RunUpLanes.key]: a point on the way where the lane at the exit's side leaves, or the exit's
+     * own, ending in /end), on its ramp the split's own; outside one the straight-on lane choice whose row the card shows
+     * ([choiceKey]); null while the card shows the maneuver's own row. As of the last update that moved the latch and
+     * asked [lanesAhead].
+     */
+    val shownKey: String? get() = if (latch.exitKey != null) runUpRow?.key else cardKey
+
+    /**
+     * Whether the run-up on now began at its exit's own window, the close view's start for the exit itself, and still
+     * holds that exit ahead: then its first row is the exit's own, which the exit's own tone covers. False on its ramp.
+     */
+    val runUpFromExitWindow: Boolean get() = latch.exitKey != null && latch.rampAhead.isNaN() && latch.startKey == latch.exitKey
+
+    /**
      * The roads without lane data still ahead of a car [metersOnStep] into the loaded step that
      * leave on the side of its exit, nearest first, keyed by their intersection as the points are,
      * for the debug log's watch of diverges ([DivergeWatch]). Empty on most steps.

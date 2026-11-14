@@ -6,6 +6,7 @@ import com.mapbox.api.directions.v5.models.LegStep
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.api.directions.v5.models.StepIntersection
 import com.mapbox.api.directions.v5.models.StepManeuver
+import com.mapbox.api.directions.v5.models.VoiceInstructions
 import com.mapbox.common.location.Location
 import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.route.NavigationRoute
@@ -130,6 +131,8 @@ private fun LegStep.debugFields(shape: List<Point>): Map<String, Any?> {
         "seconds" to duration(),
         "drivingSide" to drivingSide(),
         "speedLimitSign" to speedLimitSign(),
+        // Where Mapbox would speak on this step, to set each tone beside it: numbers only.
+        "voiceAt" to voiceAtFields(voiceInstructions()),
         "lanes" to stepLaneFields(bannerInstructions()),
         "laneIntersections" to laneIntersectionFields(intersections().orEmpty(), shape),
         // The class of the step's road, as it leaves the maneuver, and what the step has on the way.
@@ -157,6 +160,14 @@ internal fun stepLaneFields(banners: List<BannerInstructions>?): List<Map<String
 }
 
 private const val LANE_COMPONENT = "lane"
+
+/**
+ * Where a step's own voice instructions fall, in whole metres before the step's maneuver, in the route's order:
+ * the moments Mapbox would speak at, which the app's tones are set beside in the log. The numbers come with
+ * every route the app gets; reading them asks nothing. Null for a step without any.
+ */
+internal fun voiceAtFields(instructions: List<VoiceInstructions>?): List<Long>? =
+    instructions?.mapNotNull { it.distanceAlongGeometry()?.takeIf(Double::isFinite)?.let(Math::round) }?.takeIf { it.isNotEmpty() }
 
 /**
  * How many of a step's intersections have traffic signals, a stop sign, a yield sign or a railway
