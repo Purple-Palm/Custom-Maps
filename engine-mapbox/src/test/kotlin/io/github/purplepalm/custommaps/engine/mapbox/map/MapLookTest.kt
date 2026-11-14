@@ -46,7 +46,7 @@ class MapLookTest {
     @Test
     fun `a look is written in the table's order, one key a call`() {
         val basemap = restoring()
-        val written = MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own)
+        val written = MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own, light = false)
 
         assertEquals(MapPalette.column(Look.NIGHT).map { (key, value) -> key to value.toValue() }, basemap.writes)
         assertEquals(MapLook.Written(keys = 16, errors = 0, failedKeys = emptyList(), reset = null), written)
@@ -58,7 +58,7 @@ class MapLookTest {
             val light = restoring()
             val written = MapLook.write(light, look, look, own, light = true)
             val full = restoring()
-            MapLook.write(full, look, look, own)
+            MapLook.write(full, look, look, own, light = false)
             assertEquals(Value.valueOf(false), light.writes.toMap()[MapPalette.SHOW_3D_OBJECTS], "$look")
             assertEquals(Value.valueOf(true), full.writes.toMap()[MapPalette.SHOW_3D_OBJECTS], "$look")
             assertEquals(
@@ -82,10 +82,10 @@ class MapLookTest {
         MapLook.write(basemap, Look.NIGHT, null, own, light = true)
         assertEquals(off, basemap.held[MapPalette.SHOW_3D_OBJECTS])
         // The theme alone leaves them as they are.
-        MapLook.write(basemap, null, Look.NIGHT, own)
+        MapLook.write(basemap, null, Look.NIGHT, own, light = false)
         assertEquals(off, basemap.held[MapPalette.SHOW_3D_OBJECTS])
         // The full map again: the look's own.
-        MapLook.write(basemap, Look.DAY, Look.DAY, own)
+        MapLook.write(basemap, Look.DAY, Look.DAY, own, light = false)
         assertEquals(Read(Value.valueOf(true), Kind.CONSTANT), basemap.held[MapPalette.SHOW_3D_OBJECTS])
     }
 
@@ -111,7 +111,7 @@ class MapLookTest {
     @Test
     fun `nothing is read at night`() {
         val basemap = restoring()
-        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own)
+        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own, light = false)
         assertTrue(basemap.reads.isEmpty())
     }
 
@@ -119,7 +119,7 @@ class MapLookTest {
     fun `a write the map refuses is counted with its key, and the other keys are still written`() {
         val basemap = restoring()
         basemap.refused = setOf("colorWater")
-        val written = MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own)
+        val written = MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own, light = false)
 
         assertEquals(16, basemap.writes.size)
         assertEquals(1, written.errors)
@@ -129,17 +129,17 @@ class MapLookTest {
     @Test
     fun `the theme is written from the theme's own column, or left as it is`() {
         val basemap = restoring()
-        MapLook.write(basemap, Look.NIGHT, Look.DAY, own)
+        MapLook.write(basemap, Look.NIGHT, Look.DAY, own, light = false)
         assertEquals(Value.valueOf("default"), basemap.writes.toMap()[MapLook.THEME])
         assertEquals(Value.valueOf("night"), basemap.writes.toMap()["lightPreset"])
 
         val withoutTheme = restoring()
-        val written = MapLook.write(withoutTheme, Look.DAY, null, own)
+        val written = MapLook.write(withoutTheme, Look.DAY, null, own, light = false)
         assertEquals(15, written.keys)
         assertTrue(withoutTheme.writes.none { it.first == MapLook.THEME })
 
         val themeAlone = restoring()
-        assertEquals(1, MapLook.write(themeAlone, null, Look.NIGHT, own).keys)
+        assertEquals(1, MapLook.write(themeAlone, null, Look.NIGHT, own, light = false).keys)
         assertEquals(listOf(MapLook.THEME to Value.valueOf("monochrome")), themeAlone.writes)
         assertTrue(themeAlone.reads.isEmpty())
     }
@@ -147,9 +147,9 @@ class MapLookTest {
     @Test
     fun `by day a key that reads back as the style had it says null and is written once`() {
         val basemap = restoring()
-        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own)
+        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own, light = false)
         basemap.writes.clear()
-        val written = MapLook.write(basemap, Look.DAY, Look.DAY, own)
+        val written = MapLook.write(basemap, Look.DAY, Look.DAY, own, light = false)
 
         assertEquals(MapLook.RESET_NULL, written.reset)
         assertEquals(restoredKeys, basemap.reads)
@@ -159,9 +159,9 @@ class MapLookTest {
 
     /** Night first, then day with [basemap]: every key given back reads otherwise, and gets the snapshot. */
     private fun assertSnapshotWrittenBack(basemap: Basemap) {
-        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own)
+        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own, light = false)
         basemap.writes.clear()
-        val written = MapLook.write(basemap, Look.DAY, Look.DAY, own)
+        val written = MapLook.write(basemap, Look.DAY, Look.DAY, own, light = false)
 
         assertEquals(MapLook.RESET_SNAPSHOT, written.reset)
         assertEquals(0, written.errors)
@@ -190,9 +190,9 @@ class MapLookTest {
     fun `a key the style said nothing for when it loaded has nothing to give back`() {
         val silent = own + ("colorWater" to Read(null, Kind.FAILED))
         val basemap = Basemap(silent) { _, before -> before }
-        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, silent)
+        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, silent, light = false)
         basemap.writes.clear()
-        val written = MapLook.write(basemap, Look.DAY, Look.DAY, silent)
+        val written = MapLook.write(basemap, Look.DAY, Look.DAY, silent, light = false)
 
         assertEquals(MapLook.RESET_SNAPSHOT, written.reset)
         assertTrue(basemap.writes.drop(16).none { it.first == "colorWater" })
@@ -212,7 +212,7 @@ class MapLookTest {
     @Test
     fun `nothing to write writes nothing`() {
         val basemap = restoring()
-        val written = MapLook.write(basemap, null, null, own)
+        val written = MapLook.write(basemap, null, null, own, light = false)
         assertEquals(0, written.keys)
         assertNull(written.reset)
         assertTrue(basemap.writes.isEmpty() && basemap.reads.isEmpty())

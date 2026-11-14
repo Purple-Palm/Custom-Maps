@@ -63,10 +63,11 @@ internal object MapLook {
     /**
      * Writes every key of [look]'s column but the theme, and the theme of [theme]'s column, in the
      * table's order; a null look or theme leaves its keys as they are. With [light], the car's lighter
-     * map, the 3D objects are written off whatever the look says ([MapPalette.Key.value]). By day each
+     * map, the 3D objects are written off whatever the look says ([MapPalette.Key.value]); every caller
+     * says it, the phone's map false ([LookApplier.light]), so no write can leave it out. By day each
      * key given back to the style is read back and compared with [snapshot].
      */
-    fun write(basemap: Basemap, look: Look?, theme: Look?, snapshot: Map<String, Read>, light: Boolean = false): Written {
+    fun write(basemap: Basemap, look: Look?, theme: Look?, snapshot: Map<String, Read>, light: Boolean): Written {
         var keys = 0
         var errors = 0
         val failed = LinkedHashSet<String>()
