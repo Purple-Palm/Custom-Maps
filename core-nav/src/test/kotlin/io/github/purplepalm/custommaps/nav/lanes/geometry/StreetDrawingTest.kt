@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.lanes.CardWindows
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
@@ -45,12 +46,12 @@ class StreetDrawingTest {
         fun of(kind: Kind) = features.filter { it.kind == kind }
     }
 
-    /** [route] drawn with every street one-way or two-way as [oneWay] says; with no source where it is null. */
-    private fun draw(route: LaneRoute, oneWay: Boolean?): Drawn {
+    /** [route] along [line] drawn with every street one-way or two-way as [oneWay] says; with no source where it is null. */
+    private fun draw(route: LaneRoute, oneWay: Boolean?, line: List<GeoPoint> = SceneLines.of(route)): Drawn {
         val plan = SceneLines.planOf(route)
         val evidence = plan.evidence()
         val section = CrossSection.of(plan, evidence, oneWay?.let { LaneScenes.ways(route, it) })
-        val path = RoutePath.of(plan, SceneLines.of(route), version = 1, evidence = evidence, section = section)
+        val path = RoutePath.of(plan, line, version = 1, evidence = evidence, section = section)
         val drawing = LaneDrawing.of(plan, path, evidence, section)
         return Drawn(plan, evidence, section, path, drawing, drawing.features())
     }
@@ -464,6 +465,52 @@ class StreetDrawingTest {
             // The app's own U-turn arrow from the route's shape: none along the path.
             assertTrue(d.drawing.turns().isEmpty())
         }
+    }
+
+    @Test
+    fun `at a U-turn the path reaches the junction on the route's line and turns back where the route does`() {
+        val route = LaneScenes.streetUTurn()
+        val node = LocalPoint(0.0, gore)
+        val lines = listOf(
+            "at one point" to (SceneLines.of(route) to listOf(node)),
+            "across a median opening" to (SceneLines.uTurnAcross(route) to listOf(node, LocalPoint(-SceneLines.MEDIAN_OPENING_METERS, gore))),
+        )
+        for ((what, pair) in lines) {
+            val (line, corners) = pair
+            for (oneWay in listOf(false, true)) {
+                val name = "$what ${if (oneWay) "one-way" else "two-way"}"
+                val d = draw(route, oneWay, line)
+                val junction = d.path.junctions.single()
+                assertEquals(gore - 10.0, junction.from, MM, name)
+                assertEquals(gore + RoutePath.JUNCTION_FAR_SIDE_METERS, junction.to, MM, name)
+                val local = d.path.points.map { SceneLines.local(it) }
+                // Up to the node the path only goes on, never back, from its lane onto the route's line at the node.
+                val upTo = d.path.points.indices.filter { d.path.stations[it] <= gore + MM }
+                for (k in 1 until upTo.size) assertTrue(local[upTo[k]].y >= local[upTo[k - 1]].y - MM, "$name: back at ${d.path.stations[upTo[k]]}")
+                for (corner in corners) assertTrue(local.minOf { it.distanceTo(corner) } < 1.0, "$name: ${local.minOf { it.distanceTo(corner) }} m from $corner")
+                // From the node to the far side it is the route's own line, turning where the route does.
+                val k = junction.stations.indexOfFirst { abs(it - gore) < MM }
+                assertTrue(k > 0, name)
+                assertEquals(0.0, SceneLines.local(junction.points[k]).distanceTo(node), MM, name)
+                for (i in k until junction.points.size) {
+                    assertEquals(0.0, SceneLines.local(junction.points[i]).distanceTo(SceneLines.local(routeAt(d.path, junction.stations[i]))), MM, "$name at ${junction.stations[i]}")
+                }
+                // No lane claimed past it, nothing lit across, the navigation SDK's arrow.
+                assertNull(junction.receiving, name)
+                assertTrue(d.of(Kind.LIT).none { it.to > junction.from + MM }, name)
+                assertTrue(d.drawing.turns().isEmpty(), name)
+            }
+        }
+    }
+
+    /** The route's own line of [path] at [station], between its points. */
+    private fun routeAt(path: RoutePath, station: Double): GeoPoint {
+        val st = path.routeStations
+        val k = RoutePath.indexAtOrBefore(st, station).coerceIn(0, st.size - 2)
+        val f = ((station - st[k]) / (st[k + 1] - st[k])).coerceIn(0.0, 1.0)
+        val a = path.route[k]
+        val b = path.route[k + 1]
+        return GeoPoint(a.latitude + (b.latitude - a.latitude) * f, a.longitude + (b.longitude - a.longitude) * f)
     }
 
     @Test

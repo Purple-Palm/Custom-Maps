@@ -18,7 +18,7 @@ import kotlin.math.sin
 
 /**
  * Made-up lines for the made-up routes of [LaneScenes]: from 0, 0 due north at sea, a vertex every [STEP] metres,
- * the road turning at each maneuver's station by an angle of its kind. No place.
+ * the road turning at each maneuver's station by an angle of its kind, back on itself at a U-turn. No place.
  */
 internal object SceneLines {
 
@@ -71,12 +71,30 @@ internal object SceneLines {
         return out
     }
 
+    /**
+     * The line of [route] with each U-turn across a median opening instead: two left corners [MEDIAN_OPENING_METERS] apart, up
+     * the near carriageway, across the opening and back down the far one.
+     */
+    fun uTurnAcross(route: LaneRoute): List<GeoPoint> = line(
+        route.lengthMeters,
+        bendsOf(route).flatMap { (station, degrees) ->
+            if (degrees == 180.0) listOf(station to 90.0, station + MEDIAN_OPENING_METERS to 90.0) else listOf(station to degrees)
+        },
+    )
+
     fun geo(p: LocalPoint) = GeoPoint(frame.latitudeOf(p), frame.longitudeOf(p))
 
     fun local(p: GeoPoint): LocalPoint = frame.toLocal(p.latitude, p.longitude)
 
-    /** The turn of a maneuver of [type] to [modifier] in degrees, left positive: a ramp leaves at [rampDegrees], a fork at 8. */
+    /** How far apart a median opening's two corners lie, where [uTurnAcross] turns back through one. */
+    const val MEDIAN_OPENING_METERS = 12.0
+
+    /**
+     * The turn of a maneuver of [type] to [modifier] in degrees, left positive: a ramp leaves at [rampDegrees], a fork at 8, a
+     * U-turn turns back on itself at one point, as on an undivided road.
+     */
     fun bendOf(type: ManeuverType, modifier: TurnModifier?, rampDegrees: Double): Double {
+        if (modifier == TurnModifier.U_TURN && type != ManeuverType.DEPART && type != ManeuverType.ARRIVE) return 180.0
         val side = when (modifier) {
             TurnModifier.SLIGHT_LEFT, TurnModifier.LEFT, TurnModifier.SHARP_LEFT, TurnModifier.U_TURN -> 1.0
             TurnModifier.SLIGHT_RIGHT, TurnModifier.RIGHT, TurnModifier.SHARP_RIGHT -> -1.0

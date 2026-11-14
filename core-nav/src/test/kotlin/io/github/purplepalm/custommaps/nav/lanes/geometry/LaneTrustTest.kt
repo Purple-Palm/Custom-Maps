@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
+import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.lanes.DesignatedKind
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
@@ -639,6 +640,13 @@ class LaneTrustTest {
             if (maneuver.modifier == TurnModifier.U_TURN) {
                 assertNull(lane, "${b.name}: a receiving lane past the U-turn at ${j.from}")
                 assertEquals(0.0, j.offsetTo, 1e-9, "${b.name}: the U-turn's curve off the route's line")
+                // The path reaches the junction on the route's own line at the node, and is that line to the far side.
+                val at = nodes[j.node].station
+                for (k in j.points.indices) {
+                    if (j.stations[k] < at - 1e-6) continue
+                    assertTrue(Geo.meters(j.points[k], routeAt(b.path, j.stations[k])) < 0.01, "${b.name}: the U-turn's path off the route's line at ${j.stations[k]}")
+                }
+                assertTrue(j.stations.any { abs(it - at) < 1e-6 }, "${b.name}: the U-turn's path short of its node at $at")
                 saw("uTurn")
             }
             val lit = b.features.filter { it.kind == Kind.LIT && it.to > j.from + 1e-6 && it.from < j.to - 1e-6 }
@@ -1421,6 +1429,16 @@ class LaneTrustTest {
             RoadKind.RAMP -> LaneDrawing.STANDARD_RAMP_BAND_METERS
             RoadKind.STREET -> LaneDrawing.STANDARD_STREET_BAND_METERS
         }
+    }
+
+    /** The route's own line of [path] at [station], between its points. */
+    private fun routeAt(path: RoutePath, station: Double): GeoPoint {
+        val st = path.routeStations
+        val k = RoutePath.indexAtOrBefore(st, station).coerceIn(0, st.size - 2)
+        val f = ((station - st[k]) / (st[k + 1] - st[k])).coerceIn(0.0, 1.0)
+        val a = path.route[k]
+        val b = path.route[k + 1]
+        return GeoPoint(a.latitude + (b.latitude - a.latitude) * f, a.longitude + (b.longitude - a.longitude) * f)
     }
 
     /** The stretches where the route turns onto another road with lanes, and the path's turns: the path's rules do not hold across them. */

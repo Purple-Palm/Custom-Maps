@@ -168,10 +168,11 @@ class RoutePath private constructor(
      *
      * It ends in the middle of [receiving], the receiving road's lane, where the route turns at the junction from a lane the
      * plan names into a road drawn from the far side on: the nearest of its lanes open to every car, counted from the turn's
-     * inside as the named lane is among the lanes the turn can be made from (k-th to k-th). Elsewhere, and always at a
-     * U-turn, it ends on the new road's line, [receiving] null: where no lane is drawn past the junction no lane is claimed
-     * there, and after a U-turn the route's line runs in the receiving carriageway's middle. At a roundabout there is no
-     * curve: nothing of the app's own lies inside one, and the path is the route's line there.
+     * inside as the named lane is among the lanes the turn can be made from (k-th to k-th). Elsewhere it ends on the new
+     * road's line, [receiving] null: where no lane is drawn past the junction no lane is claimed there. At a U-turn the curve
+     * ends on the route's own line at the node, and from there the path is that line to the far side, turning back where the
+     * route does: the route's line runs in the receiving carriageway's middle, and no lane is claimed past the junction. At a
+     * roundabout there is no curve: nothing of the app's own lies inside one, and the path is the route's line there.
      */
     class Junction(
         val node: Int,
@@ -726,6 +727,7 @@ class RoutePath private constructor(
             val node = nodes.indexOfFirst { abs(it.station - d.to) < 1e-6 && LaneEvidence.planTurns(it) }
             // Nothing of the app's own inside a roundabout: the path is the route's line there.
             if (node >= 0 && nodes[node].maneuver?.type in ROUNDABOUT_TYPES) return null
+            if (node >= 0 && nodes[node].maneuver?.modifier == TurnModifier.U_TURN) return uTurnOf(d, axes, samples, offsets, far, node)
             val a = axes.lastOrNull { near >= it.from - 1e-9 && near <= it.to + 1e-9 } ?: return null
             val b = axes.lastOrNull { far >= it.from - 1e-9 && far <= it.to + 1e-9 } ?: return null
             val t0 = offsetIn(axes, samples, offsets, near)
@@ -768,6 +770,66 @@ class RoutePath private constructor(
             stations[local.size - 1] = far
             val receiving = receivingOf(region, d, b).second
             return Junction(node, near, far, t0, t1, local.map { a.toGeo(it) }, stations, receiving)
+        }
+
+        /**
+         * The path across the street junction of a U-turn at the intersection [node], which ends the drawing [d]: from where the
+         * path lies at the near side, along the road's way there, onto the route's own line at the node, along the road's way
+         * where the turn's arc begins; a cubic whose handles reach a third of the way, its points every metre or so at stations
+         * by their share of its length; then the route's own line from the node to [far], where it turns back as the route
+         * does, on an undivided road at the node itself, across a median opening by its corners. So the line reaches the
+         * junction and turns where the navigation SDK's U-turn arrow does, and claims no lane past it ([Junction.receiving]
+         * null). Null where the junction lies off the region's windows or its near side at the node.
+         */
+        private fun uTurnOf(d: Drawing, axes: List<RoadAxis>, samples: List<DoubleArray>, offsets: List<DoubleArray>, far: Double, node: Int): Junction? {
+            val near = d.carriagewayTo
+            val at = nodes[node].station
+            if (at <= near + SAME_STATION) return null
+            val a = axes.lastOrNull { near >= it.from - 1e-9 && near <= it.to + 1e-9 } ?: return null
+            val b = axes.lastOrNull { at >= it.from - 1e-9 && at <= it.to + 1e-9 } ?: return null
+            val t0 = offsetIn(axes, samples, offsets, near)
+            val p0 = a.offset(near, t0)
+            val at0 = a.at(near)
+            val p3 = a.toLocal(pointAt(at))
+            // The road's way into the node: where the arc at the turn begins.
+            val way = b.at(CrossSection.beginOf(b, at))
+            val wx = way.tx
+            val wy = way.ty
+            val chord = p0.distanceTo(p3)
+            if (chord < SAME_OFFSET_METERS) return null
+            val u = chord / 3.0
+            val p1 = LocalPoint(p0.x + at0.tx * u, p0.y + at0.ty * u)
+            // The way in the frame of [a]: the axes' frames differ only by their origins.
+            val p2 = LocalPoint(p3.x - wx * u, p3.y - wy * u)
+            val n = max(JUNCTION_MIN_POINTS, ceil(chord / JUNCTION_STEP_METERS).toInt())
+            val local = (0..n).map { k ->
+                val t = k.toDouble() / n
+                val w = 1.0 - t
+                LocalPoint(
+                    w * w * w * p0.x + 3.0 * w * w * t * p1.x + 3.0 * w * t * t * p2.x + t * t * t * p3.x,
+                    w * w * w * p0.y + 3.0 * w * w * t * p1.y + 3.0 * w * t * t * p2.y + t * t * t * p3.y,
+                )
+            }
+            val lengths = DoubleArray(local.size)
+            for (k in 1 until local.size) lengths[k] = lengths[k - 1] + local[k].distanceTo(local[k - 1])
+            val total = lengths.last()
+            val points = ArrayList<GeoPoint>(local.size + 8)
+            val stations = ArrayList<Double>(local.size + 8)
+            for (k in local.indices) {
+                points.add(a.toGeo(local[k]))
+                stations.add(if (k == local.size - 1 || total <= 0.0) at else near + (at - near) * lengths[k] / total)
+            }
+            // From the node on, the route's own line, point for point, to the far side.
+            for (i in line.indices) {
+                if (lineStations[i] <= at + SAME_STATION || lineStations[i] >= far - SAME_STATION) continue
+                points.add(line[i])
+                stations.add(lineStations[i])
+            }
+            if (far > at + SAME_STATION) {
+                points.add(pointAt(far))
+                stations.add(far)
+            }
+            return Junction(node, near, far, t0, 0.0, points, stations.toDoubleArray(), null)
         }
 
         /** For each street junction a drawing ends at, by its node's station: where its curve ends, and in which lane. */
