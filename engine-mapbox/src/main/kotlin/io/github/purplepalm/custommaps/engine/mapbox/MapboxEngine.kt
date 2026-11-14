@@ -8,6 +8,8 @@ import com.mapbox.common.TileStore
 import com.mapbox.maps.MapboxMapsOptions
 import com.mapbox.navigation.base.formatter.DistanceFormatterOptions
 import com.mapbox.navigation.base.formatter.UnitType
+import com.mapbox.navigation.base.options.AlertServiceOptions
+import com.mapbox.navigation.base.options.EHorizonOptions
 import com.mapbox.navigation.base.options.NavigationOptions
 import com.mapbox.navigation.base.options.RoutingTilesOptions
 import com.mapbox.navigation.core.lifecycle.MapboxNavigationApp
@@ -21,6 +23,7 @@ import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.SearchProvider
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.network.NetworkStatus
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
@@ -113,6 +116,20 @@ class MapboxEngine private constructor(
         navigationEngine.onRunUpWordsShown(key, shown)
     }
 
+    /**
+     * Settings' switch Lane counts between lane points is [on]: whether a drive listens to Mapbox's electronic horizon, a
+     * beta, from the trip session's start to its end. The app sends no request for it and starts no trip session: the
+     * navigator works it out from the road data it loads for the trip. Main thread.
+     */
+    fun setLaneCountsHorizon(on: Boolean) {
+        navigationEngine.setLaneCountsHorizon(on)
+    }
+
+    /** Debug's switch Measure the drawn lanes is [on]: the engine then also times the horizon's observer on the main thread. Main thread. */
+    fun setMeasureOwnLanes(on: Boolean) {
+        navigationEngine.setMeasureOwnLanes(on)
+    }
+
     companion object {
 
         /**
@@ -142,11 +159,41 @@ class MapboxEngine private constructor(
                         // Miles and feet in every text the SDK formats, whatever the phone's locale.
                         .distanceFormatterOptions(distanceFormatterOptions(application))
                         .routingTilesOptions(RoutingTilesOptions.Builder().tileStore(tileStore).build())
+                        // Once, here, and never changed: the horizon runs only while the engine listens to it.
+                        .eHorizonOptions(horizonOptions())
                         .build(),
                 )
             }
             return MapboxEngine(application, tripLog, debugLog, tileStore, network)
         }
+
+        /**
+         * The electronic horizon's options (the own lanes' OL9), given to the navigator with its other options when it is
+         * made and never changed: no navigator is made anew for them. They change nothing while no observer listens: the
+         * horizon runs only while one is registered, during guidance with the switch Lane counts between lane points on.
+         * [HorizonAhead.HORIZON_AHEAD_M] ahead, the most probable path only ([HORIZON_EXPANSION]), at most one update in
+         * [HorizonAhead.HORIZON_UPDATE_SECONDS]; road objects as the SDK collects them by default ([HORIZON_ALERTS]) and no
+         * enhanced data ([HORIZON_ENHANCED_DATA]).
+         */
+        internal fun horizonOptions(): EHorizonOptions = EHorizonOptions.Builder()
+            .length(HorizonAhead.HORIZON_AHEAD_M)
+            .expansion(HORIZON_EXPANSION)
+            .minTimeDeltaBetweenUpdates(HorizonAhead.HORIZON_UPDATE_SECONDS)
+            .alertServiceOptions(HORIZON_ALERTS)
+            .enableEnhancedDataAlongEH(HORIZON_ENHANCED_DATA)
+            .build()
+
+        /** No branches off the most probable path: in active guidance the route is the path, and only the route's edges are read. */
+        internal const val HORIZON_EXPANSION = 0
+
+        /**
+         * No enhanced (ADAS) data along the horizon, the SDK's default: it needs more bandwidth, disk space and RAM, and tiles
+         * of its own, and the app reads none of it.
+         */
+        internal const val HORIZON_ENHANCED_DATA = false
+
+        /** The road objects the horizon collects, as the SDK collects them by default: the app reads none of them and changes nothing there. */
+        internal val HORIZON_ALERTS: AlertServiceOptions = AlertServiceOptions.Builder().build()
 
         internal fun distanceFormatterOptions(context: Context): DistanceFormatterOptions =
             DistanceFormatterOptions.Builder(context)

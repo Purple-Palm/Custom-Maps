@@ -180,6 +180,28 @@ class TripSummaryTest {
     }
 
     @Test
+    fun `every trip says what it read from the electronic horizon, and the next one starts over`() {
+        val tally = TripTally()
+        tally.horizon.onSwitch(true)
+        tally.begin(0L, simulated = false, offline = false)
+        tally.horizon.onListening(true, 0L)
+        tally.horizon.onPosition(true)
+        tally.horizon.onRead(9)
+        val horizon = tally.fields(30_000L, staleUpdates = 0)["horizon"] as Map<*, *>
+        assertEquals(true, horizon["on"])
+        assertEquals(30.0, horizon["listenedS"])
+        assertEquals(1, horizon["updates"])
+        assertEquals(9, horizon["edges"])
+        tally.end()
+        tally.horizon.onSwitch(false)
+        tally.begin(40_000L, simulated = false, offline = false)
+        val next = tally.fields(41_000L, staleUpdates = 0)["horizon"] as Map<*, *>
+        assertEquals(false, next["on"])
+        assertEquals(0, next["edges"])
+        assertEquals(0.0, next["listenedS"])
+    }
+
+    @Test
     fun `the marker keeps what the trip added up`() {
         val marker = TripMarker(File(temp, "trip-running"))
         val tally = TripTally()
@@ -207,6 +229,22 @@ class TripSummaryTest {
                 "longestGapS" to 0.0,
                 "staleStart" to true,
                 "staleUpdates" to 1L,
+                "horizon" to mapOf(
+                    "on" to false,
+                    "switched" to 0L,
+                    "listenedS" to 0.0,
+                    "updates" to 0L,
+                    "notAvailable" to 0L,
+                    "edges" to 0L,
+                    "points" to 0L,
+                    "agreeAll" to 0L,
+                    "agreeGeneral" to 0L,
+                    "disagree" to 0L,
+                    "noCount" to 0L,
+                    "stretchesUsed" to 0L,
+                    "windows" to 0L,
+                    "failed" to false,
+                ),
             ),
             read,
         )

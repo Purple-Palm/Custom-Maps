@@ -251,6 +251,9 @@ class AppGraph(private val application: Application) {
                     withContext(Dispatchers.IO) { processHistory.setStateSummary(summary) }
                 }
         }
+        // Mapbox's electronic horizon during a drive while its switch is on; the measuring switch also times its observer.
+        applicationScope.launch { settings.laneCountsHorizon.collect(engine::setLaneCountsHorizon) }
+        applicationScope.launch { settings.measureOwnLanes.collect(engine::setMeasureOwnLanes) }
         // Battery, heat and memory once a minute while a drive runs; animations as it starts.
         applicationScope.launch {
             engine.navigation.guidanceState

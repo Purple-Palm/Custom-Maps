@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.nav.trip
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.guidance.StopReason
+import io.github.purplepalm.custommaps.nav.lanes.HorizonCounts
 import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 
 /**
@@ -64,6 +65,12 @@ class TripTally {
     /** The close views the measuring switch measured on the trip, for its frame gate. */
     private val laneViews = mutableListOf<LaneMeasureGate.View>()
 
+    /**
+     * What the trip read from Mapbox's electronic horizon, for the summary's "horizon" ([HorizonCounts]): begun and ended
+     * with the trip; the engine tells it the switch, the listening and what each update gave.
+     */
+    val horizon = HorizonCounts()
+
     /** A trip session starts at [nowMillis]; [offline] says whether the app has no internet now. */
     fun begin(nowMillis: Long, simulated: Boolean, offline: Boolean) {
         running = true
@@ -84,6 +91,7 @@ class TripTally {
         offlineSince = nowMillis
         offlineMillis = 0L
         laneViews.clear()
+        horizon.begin(nowMillis)
     }
 
     /** The navigator's id of the trip session, which its "session_state" line also has. */
@@ -151,7 +159,8 @@ class TripTally {
      * "mapErrors" (a count for each kind), "offlineSeconds" and "staleStart" with
      * "staleUpdates", the updates that still carried where the trip before left the car; and on a
      * trip the measuring switch measured close views of, "laneGate", the frame gate of the app's
-     * lanes ([LaneMeasureGate.summary]).
+     * lanes ([LaneMeasureGate.summary]); and "horizon", what the trip read from the electronic
+     * horizon ([HorizonCounts.fields]).
      */
     fun fields(nowMillis: Long, staleUpdates: Int): Map<String, Any?> {
         val offlineNow = offlineMillis + if (offline) nowMillis - offlineSince else 0L
@@ -168,12 +177,14 @@ class TripTally {
             "offlineSeconds" to seconds(offlineNow),
             "staleStart" to (staleUpdates > 0),
             "staleUpdates" to staleUpdates,
-        ) + if (laneViews.isEmpty()) emptyMap() else mapOf("laneGate" to LaneMeasureGate.summary(laneViews))
+        ) + (if (laneViews.isEmpty()) emptyMap() else mapOf("laneGate" to LaneMeasureGate.summary(laneViews))) +
+            mapOf("horizon" to horizon.fields(nowMillis))
     }
 
     /** The trip session stopped: nothing more is counted. */
     fun end() {
         running = false
+        horizon.end()
     }
 
     companion object {

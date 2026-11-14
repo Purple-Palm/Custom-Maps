@@ -67,12 +67,15 @@ import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanAgreement
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
+import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
+import io.github.purplepalm.custommaps.nav.lanes.HorizonListening
 import io.github.purplepalm.custommaps.nav.lanes.LaneAgreeLine
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
 import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.lanes.RouteHorizon
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -275,6 +278,9 @@ internal class MapboxNavigationEngine(
     /** The car's station on [lanePlanHeld]'s route at the latest progress update; not a number without it. Main thread. */
     private var lanePlanStation = Double.NaN
 
+    /** When [lanePlanStation] was taken, in nanoseconds since boot: a horizon update moves it on to its own moment. Main thread. */
+    private var lanePlanStationNanos = 0L
+
     /**
      * The card's run-up row read from the lane plan, with every choice of who draws the lanes on the map: the same
      * object while it does not change; every drive starts it over. Main thread.
@@ -292,6 +298,51 @@ internal class MapboxNavigationEngine(
 
     /** Whether the card's comparison with the plan failed in this drive: one error line, then no more "lane_agree" lines. */
     private var laneAgreeFailed = false
+
+    /**
+     * Settings' switch Lane counts between lane points ([setLaneCountsHorizon]): whether a drive listens to Mapbox's electronic
+     * horizon. Null until the app has read the setting, which counts as off. Main thread.
+     */
+    private var laneCountsHorizon: Boolean? = null
+
+    /**
+     * The electronic horizon along the route the drive is on, as its newest update laid it out ([RouteHorizon]): for the
+     * drawing of the app's own lanes between lane points, and for whether a street of the route is one-way. Main thread.
+     */
+    internal val routeHorizon = RouteHorizon()
+
+    /**
+     * Mapbox's electronic horizon, listened to during guidance once the trip session runs, while the switch is on
+     * ([updateHorizon], [HorizonListening]), whoever draws the lanes on the map. Its edges are read and laid along the route
+     * on the route lines' worker, each new one once, never on the main thread, where its observer only walks the route's
+     * edges of each update. No request, no trip session, no setting of the navigator's changed: its options are set once
+     * at setup ([MapboxEngine]).
+     */
+    private val horizon = HorizonReader<MapboxNavigation>(
+        scope = scope,
+        worker = routeLines,
+        debugLog = debugLog,
+        register = { navigator, observer -> navigator.registerEHorizonObserver(observer) },
+        unregister = { navigator, observer -> navigator.unregisterEHorizonObserver(observer) },
+        metadata = { navigator, id -> navigator.graphAccessor.getEdgeMetadata(id)?.toHorizonEdge() },
+        car = ::horizonCar,
+        listener = object : HorizonReader.Listener {
+            override fun onPosition(available: Boolean) = tripTally.horizon.onPosition(available)
+
+            override fun onResult(result: HorizonResult) {
+                if (_guidanceState.value != GuidanceState.ACTIVE) return
+                routeHorizon.take(result.ahead)
+                tripTally.horizon.onRead(result.reads)
+                tripTally.horizon.onCompared(result.compared)
+            }
+
+            override fun onFailure() {
+                routeHorizon.clear()
+                tripTally.horizon.onFailure()
+                tripTally.horizon.onListening(false, SystemClock.elapsedRealtime())
+            }
+        },
+    )
 
     /** The navigator's latest map-matched position, recorded with each progress update. */
     private var lastMatch: LocationMatcherResult? = null
@@ -521,6 +572,8 @@ internal class MapboxNavigationEngine(
         mapboxNavigation.getRerouteController()?.registerRerouteStateObserver(rerouteStateObserver)
         setRerouteOptionsAdapter(mapboxNavigation, rerouteOptionsLogger)
         debugLog.log("navigator_attached")
+        // A navigator that comes during a drive gets the horizon's observer, as the drive's first one did.
+        updateHorizon()
     }
 
     override fun onDetached(mapboxNavigation: MapboxNavigation) {
@@ -541,6 +594,10 @@ internal class MapboxNavigationEngine(
         rerouting = false
         // No progress comes without a navigator, so none would stop the motion sensors.
         endMotion()
+        // Nor is the horizon listened to on a navigator that goes.
+        horizon.listen(null)
+        routeHorizon.clear()
+        tripTally.horizon.onListening(false, SystemClock.elapsedRealtime())
         navigation = null
         lastMatch = null
         lastRawFix = null
@@ -1109,12 +1166,16 @@ internal class MapboxNavigationEngine(
                     }
                 }
                 tripSessionRunning = true
+                // Once the trip session runs: the horizon's callbacks fire only inside one.
+                updateHorizon()
             }
             GuidanceCommand.StopTripSession -> {
                 commitCount++
                 // Before the session stops: a refresh or a request still under way is given up,
                 // and its answer finds no trip to change.
                 startRefresher.end()
+                // The horizon stops with the drive, before its summary is added up.
+                endHorizon()
                 endTripTally()
                 endLanePlans()
                 endMotion()
@@ -1287,7 +1348,8 @@ internal class MapboxNavigationEngine(
             PhoneMotion.Listening.Step.NONE -> Unit
         }
         val window = if (motionListening.listening) motionSensors.take() else null
-        if (window == null) emptyMap() else mapOf("motion" to window)
+        // With the horizon listened to, the lanes it counts on the car's edge: research beside the motion, nothing more.
+        if (window == null) emptyMap() else mapOf("motion" to window + horizon.ehLanesField())
     } catch (e: RuntimeException) {
         debugLog.error("motionSensors", e)
         motionListening.fail()
@@ -1300,6 +1362,61 @@ internal class MapboxNavigationEngine(
         motionListening.end()
         motionSensors.stop()
     }
+
+    /**
+     * Settings' switch Lane counts between lane points is [on]: a drive under way listens to Mapbox's electronic horizon from
+     * now on, or stops at once; nothing else of the drive changes. Main thread.
+     */
+    internal fun setLaneCountsHorizon(on: Boolean) {
+        if (laneCountsHorizon == on) return
+        laneCountsHorizon = on
+        tripTally.horizon.onSwitch(on)
+        updateHorizon()
+    }
+
+    /** Debug's switch Measure the drawn lanes is [on]: the horizon's observer is then timed on the main thread, for the progress lines. */
+    internal fun setMeasureOwnLanes(on: Boolean) {
+        horizon.measuring = on
+    }
+
+    /**
+     * Listens to the electronic horizon while [HorizonListening.wanted] holds, and stops at once where it no longer does: the
+     * stretches it laid out are forgotten then. Called where any of its conditions changes: the trip session's start and the
+     * switch, the navigator's coming, and the session's stop outside the app; the drive's end and the navigator's going stop
+     * it themselves ([endHorizon], [onDetached]).
+     */
+    private fun updateHorizon() {
+        val wanted = HorizonListening.wanted(laneCountsHorizon, _guidanceState.value == GuidanceState.ACTIVE, tripSessionRunning)
+        horizon.listen(navigation.takeIf { wanted })
+        if (!horizon.listening) routeHorizon.clear()
+        tripTally.horizon.onListening(horizon.listening, SystemClock.elapsedRealtime())
+    }
+
+    /** The drive ends: the horizon is no longer listened to, nothing of it still on its way is taken, and its stretches go. */
+    private fun endHorizon() {
+        horizon.endDrive()
+        routeHorizon.clear()
+        tripTally.horizon.onListening(false, SystemClock.elapsedRealtime())
+    }
+
+    /**
+     * Where the car is along the route of the lane plan held, for a horizon update now: its station at the latest progress
+     * update moved on by its speed to this moment ([HorizonAhead.carStation]). Null outside guidance, where no plan of the
+     * update's route is held, and where the latest update is one the screen leaves alone. Main thread.
+     */
+    private fun horizonCar(): HorizonCar? {
+        if (_guidanceState.value != GuidanceState.ACTIVE || latestHeld()) return null
+        val held = lanePlanHeld ?: return null
+        val age = (SystemClock.elapsedRealtimeNanos() - lanePlanStationNanos) / NANOS_PER_SECOND
+        val station = HorizonAhead.carStation(lanePlanStation, lastMatch?.enhancedLocation?.speed, age) ?: return null
+        return HorizonCar(held, station)
+    }
+
+    /**
+     * "horizon" for a "progress" line while the switch Measure the drawn lanes is on and the horizon is listened to: how much
+     * of the main thread its observer took since the line before ([HorizonReader.takeObserverTime]).
+     */
+    private fun horizonTime(): Map<String, Any?> = horizon.takeObserverTime()?.let { mapOf("horizon" to it) } ?: emptyMap()
 
     private val routeProgressObserver = RouteProgressObserver { progress ->
         val active = _guidanceState.value == GuidanceState.ACTIVE
@@ -1341,7 +1458,7 @@ internal class MapboxNavigationEngine(
                 "match" to matchFields(),
                 "thenShown" to snapshot?.showThen,
                 "card" to card?.logName,
-            ) + speedLimitChange(active) + motion,
+            ) + speedLimitChange(active) + motion + horizonTime(),
         )
         if (active) logLaneChoices(progress)
         if (snapshot != null) {
@@ -1509,6 +1626,7 @@ internal class MapboxNavigationEngine(
         } ?: return
         lanePlanHeld = held
         lanePlanStation = car
+        lanePlanStationNanos = SystemClock.elapsedRealtimeNanos()
         lanePlanAtCar = held.at(car)
         lanePlanCar = CarOnPlan(held.routeId, car)
     }
@@ -1683,7 +1801,11 @@ internal class MapboxNavigationEngine(
         // A new primary route of the drive, never a refresh of the same one: where its lane data holds, and its lane plan.
         val primary = routes.firstOrNull()
         if (primary != null) {
-            lanePlans.onRoutesChanged(primary.id, refresh = reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)?.let { planLanes(primary, it) }
+            lanePlans.onRoutesChanged(primary.id, refresh = reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)?.let {
+                // The horizon laid along the route before is forgotten; the new route's is read from its plan on.
+                routeHorizon.clear()
+                planLanes(primary, it)
+            }
         }
     }
 
@@ -1748,6 +1870,8 @@ internal class MapboxNavigationEngine(
      */
     private fun onTripSessionStoppedOutsideApp() {
         tripSessionRunning = false
+        // No horizon without a trip session.
+        updateHorizon()
         scope.launch {
             if (_guidanceState.value != GuidanceState.ACTIVE) return@launch
             Log.i(TAG, "Trip session stopped outside the app")
@@ -1792,6 +1916,7 @@ internal class MapboxNavigationEngine(
     private companion object {
         const val TAG = "TripSession"
         const val MILLIS_PER_SECOND = 1_000L
+        const val NANOS_PER_SECOND = 1_000_000_000.0
 
         /** Under the app's no-backup files. */
         const val TRIP_MARKER_FILE = "trip-running"
