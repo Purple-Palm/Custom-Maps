@@ -694,6 +694,21 @@ internal object LaneScenes {
     }
 
     /**
+     * A left turn at [GORE] from the left of two lanes, beside a lane only for bicycles at the right edge, at a traffic signal
+     * where a road crosses: a lane point 275 m before it, and the road after it with two lanes to a lane point 135 m on; the
+     * arrival 300 m past the turn. One-way, the lit turn's curve has one of its points a few centimetres past the end of a
+     * piece of the drawing.
+     */
+    fun leftBesideBicycles(): LaneRoute = route(
+        street(0.0, maneuver = DEPART),
+        street(GORE - 275.0, s(), bike(), roads = CROSSING),
+        street(GORE, left(), bike(), roads = CROSSING, maneuver = TURN_LEFT, signal = true),
+        street(GORE + 135.0, s(), s()),
+        street(GORE + 300.0, maneuver = ARRIVE),
+        id = "left-beside-bicycles",
+    )
+
+    /**
      * A U-turn at [GORE] from the left of two lanes, at a junction where a road crosses, and the road back with two lanes to a
      * lane point 150 m on: the route's line turns back there.
      */

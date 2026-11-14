@@ -1663,7 +1663,8 @@ class LaneDrawing private constructor(
         /**
          * The lit lane across each street junction between [a] and [b] where it crosses into the receiving road's lane
          * ([litTurn]): its full width about the path's curve, square to the curve, in the same pieces as the lit lane before it,
-         * with its edges.
+         * with its edges. The curve's way turns evenly from each of its points to the next ([curveWays]), so a piece's end just
+         * before one of its points puts no step back into the edge inside the turn.
          */
         private fun litTurns(a: Double, b: Double, out: MutableList<Feature>) {
             for (j in path.junctions) {
@@ -1674,6 +1675,7 @@ class LaneDrawing private constructor(
                 val half = CrossSection.laneMeters(RoadKind.STREET, topology.lanes[named].kinds) / 2.0
                 val axis = axisAt(j.from)
                 val local = j.points.map { axis.toLocal(it) }
+                val ways = curveWays(local)
                 val pieces = Pieces(Kind.LIT, out)
                 val edges = Strip()
                 for ((s, k) in curveSamples(j.stations, from, to)) {
@@ -1683,8 +1685,10 @@ class LaneDrawing private constructor(
                     val f = if (span > 0.0) ((s - j.stations[i]) / span).coerceIn(0.0, 1.0) else 0.0
                     val px = local[i].x + (local[i + 1].x - local[i].x) * f
                     val py = local[i].y + (local[i + 1].y - local[i].y) * f
-                    val dx = local[i + 1].x - local[i].x
-                    val dy = local[i + 1].y - local[i].y
+                    val wa = ways[i] ?: continue
+                    val wb = ways[i + 1] ?: continue
+                    val dx = wa.x + (wb.x - wa.x) * f
+                    val dy = wa.y + (wb.y - wa.y) * f
                     val norm = hypot(dx, dy)
                     if (norm == 0.0) continue
                     val nx = -dy / norm
@@ -1699,6 +1703,18 @@ class LaneDrawing private constructor(
                 pieces.close()
                 litEdges(edges, named, out)
             }
+        }
+
+        /**
+         * The way of the curve through [points] at each of them, as a unit vector: along the chord from the point before it to the
+         * point after it, from the first to the second at the first and from the last but one to the last at the last; null where
+         * those two points are one.
+         */
+        private fun curveWays(points: List<LocalPoint>): List<LocalPoint?> = points.indices.map { i ->
+            val p = points[max(0, i - 1)]
+            val q = points[min(points.size - 1, i + 1)]
+            val norm = hypot(q.x - p.x, q.y - p.y)
+            if (norm == 0.0) null else LocalPoint((q.x - p.x) / norm, (q.y - p.y) / norm)
         }
 
         /**

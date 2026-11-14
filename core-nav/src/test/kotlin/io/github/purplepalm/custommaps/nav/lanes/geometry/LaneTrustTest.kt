@@ -1431,6 +1431,7 @@ class LaneTrustTest {
         "street-turn-receiving" to LaneScenes.streetTurn(receiving = true),
         "street-pocket" to LaneScenes.streetPocket(),
         "junction-pocket" to LaneScenes.junctionPocket(),
+        "left-beside-bicycles" to LaneScenes.leftBesideBicycles(),
         "street-u-turn" to LaneScenes.streetUTurn(),
         "street-roundabout" to LaneScenes.roundabout(),
     )
