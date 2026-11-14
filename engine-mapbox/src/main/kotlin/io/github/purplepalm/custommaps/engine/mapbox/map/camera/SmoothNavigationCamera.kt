@@ -490,6 +490,10 @@ internal class SmoothNavigationCamera(
             "camWrites" to writes,
             "focus" to Motion.round(maneuverFocus.focusAt(now), 2),
             "focusGoal" to maneuverFocus.goal,
+            // How the step latched the tilt: its window, or the bridge from a turn right before.
+            "latchedBy" to maneuverFocus.latchedBy?.logName,
+            // With Large, how much of the last junction's close zoom is kept.
+            "keep" to Motion.round(maneuverFocus.keepAt(now), 2).takeIf { laneZoom == LaneZoom.LARGE },
             "zoomTarget" to Motion.round(toZoom, 2),
             "bearingError" to Motion.round(Angles.wrap180(toBearing - bearing.value), 1),
             "onPuck" to Motion.round(onPuck.value, 2),
@@ -694,6 +698,8 @@ internal class SmoothNavigationCamera(
                 laneFocus = laneShare,
                 roadFrame = roadFrame,
                 lanesCap = lanesCap,
+                // Between close turns the view stays down; the first junction's zoom is let go meanwhile.
+                junctionKeep = maneuverFocus.keepAt(now),
             )
         } else {
             frameZoom

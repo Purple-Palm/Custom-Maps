@@ -7,11 +7,17 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+/** One mile an hour in meters a second. */
+private const val MPH = 0.44704
+
 /** Runs the camera math the way the camera does: once-a-second input, read at 60 frames a second. */
 class CameraMotionTest {
     private val tuning = CameraTuning.PHONE
     private val excluded = listOf("continue", "merge", "on ramp", "off ramp", "fork")
     private val frame = 1.0 / 60
+
+    /** Sixteen phases of the once-a-second updates against the turns, each a whole sixteenth. */
+    private val phases = (0 until 16).map { it / 16.0 }
 
     @Test
     fun `spring never overshoots and is exact for any frame time`() {
@@ -345,6 +351,89 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `between two close turns the view stays down as far as the bridge reaches`() {
+        // At 30 mph the bridge reaches 340 m from the first turn, at 45 mph 420 m (window, plus 6.5 s of
+        // driving from the hold's end 2 s past the turn); farther apart the view goes up once and down once.
+        for ((mph, gaps) in listOf(30.0 to listOf(250.0, 260.0, 300.0, 340.0), 45.0 to listOf(250.0, 260.0, 300.0, 340.0, 360.0, 420.0))) {
+            for (gap in gaps) {
+                for (phase in phases) assertEquals(0, closeTurns(gap, mph * MPH, phase).moves, "$gap m at $mph mph, phase $phase")
+            }
+        }
+        for ((mph, gap) in listOf(30.0 to 360.0, 45.0 to 460.0)) {
+            for (phase in phases) assertEquals(2, closeTurns(gap, mph * MPH, phase).moves, "$gap m at $mph mph, phase $phase")
+        }
+    }
+
+    @Test
+    fun `the bridge latches the next turn as the hold ends, and without it the view rises and falls`() {
+        for (phase in phases) {
+            val bridged = closeTurns(300.0, 30.0 * MPH, phase)
+            assertEquals(ManeuverFocus.Latch.BRIDGE, bridged.secondBy, "phase $phase")
+            // Close enough to be inside its own window as the hold ends: the window latches it.
+            assertEquals(ManeuverFocus.Latch.WINDOW, closeTurns(250.0, 30.0 * MPH, phase).secondBy, "phase $phase")
+            // With no bridge, 300 m apart rise and fall as they always did.
+            assertEquals(2, closeTurns(300.0, 30.0 * MPH, phase, tuning.copy(bridgeSeconds = 0.0)).moves, "phase $phase")
+        }
+    }
+
+    @Test
+    fun `the junction keep follows the focus as the tilt rises and is 1 through the hold`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onProgress(10.0, "r/0/1", 900.0, 0.0, "turn", excluded, 10.0)
+        for (t in listOf(10.0, 11.0, 11.5)) {
+            focus.onProgress(t, "r/0/1", 900.0 - 10.0 * (t - 10.0), 10.0 * (t - 10.0), "turn", excluded, 10.0)
+            assertEquals(1.0, focus.keepAt(t), 1e-9, "at $t s, in the hold")
+        }
+        // Far from the next turn the view goes up, and the keep with it.
+        focus.onProgress(13.0, "r/0/1", 870.0, 30.0, "turn", excluded, 10.0)
+        assertEquals(0.0, focus.goal)
+        var t = 13.0
+        while (t < 17.0) {
+            assertEquals(focus.focusAt(t), focus.keepAt(t), 1e-12, "at $t s")
+            t += frame
+        }
+    }
+
+    @Test
+    fun `while the view stays down for a turn not framed yet the kept zoom is let go over 3 s`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onProgress(10.0, "r/0/1", 300.0, 0.0, "turn", excluded, 10.0)
+        focus.onProgress(11.0, "r/0/1", 290.0, 10.0, "turn", excluded, 10.0)
+        focus.onProgress(12.0, "r/0/1", 280.0, 20.0, "turn", excluded, 10.0)
+        assertEquals(1.0, focus.keepAt(12.0), 1e-9)
+        // The hold ends 30 m past the turn: the next one is 270 m on, in the bridge's reach (215 + 65 m) and not framed.
+        focus.onProgress(13.0, "r/0/1", 270.0, 30.0, "turn", excluded, 10.0)
+        assertEquals(1.0, focus.goal)
+        assertEquals(ManeuverFocus.Latch.BRIDGE, focus.latchedBy)
+        assertEquals(1.0, focus.keepAt(13.0), 1e-9)
+        assertEquals(0.5, focus.keepAt(13.0 + tuning.keptZoomReleaseSeconds / 2), 1e-9)
+        assertEquals(0.0, focus.keepAt(13.0 + tuning.keptZoomReleaseSeconds), 1e-9)
+        assertEquals(0.0, focus.keepAt(20.0), 1e-9)
+        // The tilt stays down meanwhile, also once the next turn is framed.
+        focus.onProgress(14.0, "r/0/1", 260.0, 40.0, "turn", excluded, 10.0)
+        focus.onProgress(22.0, "r/0/1", 179.0, 121.0, "turn", excluded, 10.0)
+        for (at in listOf(13.0, 15.0, 22.0)) assertEquals(1.0, focus.focusAt(at), 1e-9, "at $at s")
+        assertEquals(0.0, focus.keepAt(22.0), 1e-9)
+        // The end of guidance takes the release back: the keep is the focus again.
+        focus.reset(23.0)
+        assertEquals(focus.focusAt(24.0), focus.keepAt(24.0), 1e-12)
+        assertEquals(null, focus.latchedBy)
+    }
+
+    @Test
+    fun `a next turn framed already as the hold ends keeps the junction zoom with the focus`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onProgress(10.0, "r/0/1", 150.0, 0.0, "turn", excluded, 10.0)
+        focus.onProgress(13.0, "r/0/1", 120.0, 30.0, "turn", excluded, 10.0)
+        assertEquals(1.0, focus.goal)
+        assertEquals(ManeuverFocus.Latch.WINDOW, focus.latchedBy)
+        for (at in listOf(13.0, 14.5, 16.0, 20.0)) assertEquals(focus.focusAt(at), focus.keepAt(at), 1e-12, "at $at s")
+    }
+
+    @Test
     fun `a reroute with the same indices is a new step`() {
         val focus = ManeuverFocus(tuning)
         focus.onProgress(0.0, "a/0/0", 150.0, 0.0, "turn", excluded, 10.0)
@@ -409,6 +498,40 @@ class CameraMotionTest {
     fun `the car screen follows the puck a little more calmly`() {
         assertTrue(CameraTuning.CAR.centerTau > CameraTuning.PHONE.centerTau)
         assertEquals(CameraTuning.PHONE.copy(centerTau = CameraTuning.CAR.centerTau), CameraTuning.CAR)
+    }
+
+    /** How the view went between two close turns: its moves after the first latch, and how the second step latched. */
+    private class CloseTurns(val moves: Int, val secondBy: ManeuverFocus.Latch?)
+
+    /**
+     * Two turns [gap] meters apart at a steady [speed], one update a second at [phase]: how often the
+     * goal changed from the first time it went down until the car reached the second turn, and how
+     * the step to the second turn latched.
+     */
+    private fun closeTurns(gap: Double, speed: Double, phase: Double, tuning: CameraTuning = this.tuning): CloseTurns {
+        val focus = ManeuverFocus(tuning)
+        val first = 600.0
+        val second = first + gap
+        var down = false
+        var moves = 0
+        var last = 0.0
+        var secondBy: ManeuverFocus.Latch? = null
+        var k = 0
+        while (true) {
+            // A phase of whole sixteenths keeps every time exact, so the hold's 2 s end on the update they should.
+            val t = phase + k
+            val s = speed * t
+            if (s >= second) break
+            val step = if (s < first) 0 else 1
+            val end = if (step == 0) first else second
+            focus.onProgress(t, "r/0/$step", end - s, if (step == 0) s else s - first, "turn", excluded, speed)
+            if (down && focus.goal != last) moves += 1
+            if (focus.goal == 1.0) down = true
+            last = focus.goal
+            if (step == 1) secondBy = focus.latchedBy
+            k += 1
+        }
+        return CloseTurns(moves, secondBy)
     }
 
     /** A view that went down for the turn at the end of step r/0/0, as the car reaches the turn at 100 s. */

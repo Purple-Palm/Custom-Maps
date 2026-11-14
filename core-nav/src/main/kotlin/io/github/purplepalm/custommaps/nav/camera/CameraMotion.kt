@@ -27,6 +27,18 @@ data class CameraTuning(
     val holdAfterManeuverMeters: Double = 25.0,
     val holdAfterManeuverSeconds: Double = 2.0,
     /**
+     * The bridge between close maneuvers: as the hold after one ends, a next maneuver no farther than
+     * its own window plus this much driving keeps the view down. The time the view would take to go
+     * up and come back down ([ascentSeconds] + [descentSeconds]).
+     */
+    val bridgeSeconds: Double = 6.5,
+    /**
+     * While the view stays down past the hold for a next maneuver that is not framed yet, the Large
+     * lane zoom lets the last junction's close zoom go over this long, on the curve the tilt would
+     * have risen on ([ascentSeconds]), so the next junction closes in from its own frame.
+     */
+    val keptZoomReleaseSeconds: Double = 3.0,
+    /**
      * A once-a-second sample is reached over this long. It is longer than the time between two
      * samples and equal to the puck's glide, so no input stops between samples.
      */
@@ -302,7 +314,10 @@ fun guidancePitch(tuning: CameraTuning, laneShare: Double, junctionFocus: Double
  * - Held through the turn, for at least holdAfterManeuverMeters and holdAfterManeuverSeconds into
  *   the next step.
  * - Up over [CameraTuning.ascentSeconds], unless the next counted maneuver is already inside its own
- *   window: turns close together keep the view down, with no bounce.
+ *   window, or no farther than its window plus [CameraTuning.bridgeSeconds] of driving as the hold
+ *   ends (the bridge): turns close together keep the view down, with no rise and fall in between.
+ *   Where the view stays down so for a maneuver that is not framed yet, [keepAt] lets the last
+ *   junction's close zoom go over [CameraTuning.keptZoomReleaseSeconds].
  * - A reversal starts from where the focus is and takes the share of the time that is left to go.
  */
 class ManeuverFocus(private val tuning: CameraTuning) {
@@ -315,11 +330,31 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     private var holdStep: String? = null
     private var holdUntil = 0.0
 
+    /** Whether the hold after the last maneuver has ended on this step, so the bridge was decided. */
+    private var holdOver = false
+
+    /** When the view stayed down past the hold for a next maneuver not framed yet; not a number otherwise. */
+    private var keptDownSince = Double.NaN
+
     /** The focus being moved to: 0 or 1. */
     var goal = 0.0
         private set
 
+    /** How the step the car is on latched the view down, for the log; null while it has not. */
+    var latchedBy: Latch? = null
+        private set
+
     fun focusAt(now: Double) = lerp(from, to, easeInOut((now - start) / duration))
+
+    /**
+     * How much of the last junction's close zoom the Large lane zoom keeps ([ZoomPlanner.target]'s
+     * junction keep): the focus, so the zoom is let go as the tilt comes back up; but where the view
+     * stays down past the hold for a next maneuver that is not framed yet, from 1 at the hold's end
+     * down to 0 over [CameraTuning.keptZoomReleaseSeconds], on the same eased curve. The view then
+     * drives on at the road's zoom, and the next junction's frame closes in from where it begins.
+     */
+    fun keepAt(now: Double): Double =
+        if (keptDownSince.isNaN()) focusAt(now) else 1.0 - easeInOut((now - keptDownSince) / tuning.keptZoomReleaseSeconds)
 
     fun pitchAt(now: Double) = lerp(tuning.cruisePitch, tuning.maneuverPitch, focusAt(now))
 
@@ -359,12 +394,27 @@ class ManeuverFocus(private val tuning: CameraTuning) {
                 holdUntil = now + tuning.holdAfterManeuverSeconds
             }
             this.stepKey = stepKey
-        }
-        val counts = maneuverType != null && maneuverType !in excludedTypes
-        if (counts && metersToManeuver <= windowMeters(tuning, speedMps)) {
-            latchedStep = stepKey
+            holdOver = false
+            keptDownSince = Double.NaN
+            latchedBy = null
         }
         val inTurn = holdStep == stepKey && (metersOnStep < tuning.holdAfterManeuverMeters || now < holdUntil)
+        // The first update past the hold after the last maneuver, with the view still down.
+        val holdEnds = holdStep == stepKey && !inTurn && !holdOver
+        if (holdEnds) holdOver = true
+        val counts = maneuverType != null && maneuverType !in excludedTypes
+        if (counts && latchedStep != stepKey) {
+            val window = windowMeters(tuning, speedMps)
+            if (metersToManeuver <= window) {
+                latch(stepKey, Latch.WINDOW)
+            } else if (holdEnds && goal == 1.0 && metersToManeuver <= window + bridgeMeters(tuning, speedMps)) {
+                // The bridge: going up now, the view would have to come straight back down.
+                latch(stepKey, Latch.BRIDGE)
+            }
+        }
+        // The view stays down past the hold for a next maneuver the navigation SDK does not frame yet:
+        // the last junction's close zoom is let go from here.
+        if (holdEnds && goal == 1.0 && latchedStep == stepKey && metersToManeuver > tuning.maneuverFramingMeters) keptDownSince = now
         val newGoal = if (latchedStep == stepKey || inTurn) 1.0 else 0.0
         if (newGoal != goal) animateTo(newGoal, now)
     }
@@ -374,7 +424,15 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         stepKey = null
         latchedStep = null
         holdStep = null
+        holdOver = false
+        keptDownSince = Double.NaN
+        latchedBy = null
         if (goal != 0.0) animateTo(0.0, now)
+    }
+
+    private fun latch(stepKey: String, by: Latch) {
+        latchedStep = stepKey
+        latchedBy = by
     }
 
     private fun animateTo(newGoal: Double, now: Double) {
@@ -403,5 +461,18 @@ class ManeuverFocus(private val tuning: CameraTuning) {
          */
         fun windowMeters(tuning: CameraTuning, speedMps: Double?): Double =
             tuning.maneuverFramingMeters + (speedMps ?: 0.0).coerceAtLeast(MIN_SPEED_MPS) * tuning.descentSeconds
+
+        /** How far past its window a next maneuver still keeps the view down as the hold ends: [CameraTuning.bridgeSeconds] of driving. */
+        fun bridgeMeters(tuning: CameraTuning, speedMps: Double?): Double =
+            (speedMps ?: 0.0).coerceAtLeast(MIN_SPEED_MPS) * tuning.bridgeSeconds
+    }
+
+    /** How a step latched the view down, by its name in the log. */
+    enum class Latch(val logName: String) {
+        /** The maneuver came within its window. */
+        WINDOW("window"),
+
+        /** As the hold after the last maneuver ended, the maneuver lay within its window plus the bridge. */
+        BRIDGE("bridge"),
     }
 }

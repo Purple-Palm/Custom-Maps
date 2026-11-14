@@ -309,9 +309,11 @@ class LaneFocus(private val tuning: CameraTuning) {
  *   keeps both in view, and no closer than [CameraTuning.junctionLaneDp], along the same eased
  *   curve as the tilt;
  * - after the maneuver, the zoom the junction had, let go along that curve as the tilt comes back.
- *   Where the view stays down for a next maneuver, it is kept until that one is framed. What was
- *   let go is not taken up again: when the tilt turns back down for a next maneuver that is not
- *   framed yet, the zoom waits where it is;
+ *   Where the view stays down for a next maneuver that is not framed yet, it is let go along the
+ *   junction keep instead ([ManeuverFocus.keepAt]), over a few seconds, so the view drives on at the
+ *   road's zoom and the next junction closes in from its own frame. What was let go is not taken
+ *   up again: when the tilt turns back down for a next maneuver that is not framed yet, the zoom
+ *   waits where it is;
  * - near a lane choice, the zoom of [CameraTuning.freewayLaneDp], along [LaneFocus]'s curve, and
  *   no closer than the zoom that still shows enough road ahead ([LookAhead]). In the frame of a
  *   maneuver that is no closer than the frame was fitted: its center is the frame's own point,
@@ -347,6 +349,8 @@ class ZoomPlanner(private val tuning: CameraTuning) {
      * @param lanesCap the closest zoom the lanes may go to and still show enough road ahead
      *   ([LookAhead.zoomFor]); infinity, or not a number, for none. It never takes the zoom below
      *   the road's, and the junction's zoom is not its business
+     * @param junctionKeep how much of the last junction's zoom is kept past it ([ManeuverFocus.keepAt]):
+     *   the focus, unless the view stays down for a next maneuver that is not framed yet
      */
     fun target(
         mode: LaneZoom,
@@ -357,6 +361,7 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         laneFocus: Double,
         roadFrame: Boolean,
         lanesCap: Double = Double.POSITIVE_INFINITY,
+        junctionKeep: Double = junctionFocus,
     ): Double {
         if (mode == LaneZoom.DEFAULT) {
             reset()
@@ -369,8 +374,9 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         val keeps = !junctionZoom.isNaN() && (afterManeuver || roadFrame)
         val junction = if (keeps) {
             // The focus can turn back toward 1 here, for a next maneuver that is latched and not
-            // framed yet. Going back in to the junction behind the car would be a bounce.
-            keptShare = min(keptShare, junctionFocus)
+            // framed yet. Going back in to the junction behind the car would be a bounce. Where the
+            // view stays down for such a maneuver, the keep falls on its own.
+            keptShare = min(keptShare, junctionKeep)
             lerp(road, max(road, junctionZoom), keptShare)
         } else {
             val full = if (roadFrame) road else max(road, min(frameZoom, closest(tuning.junctionLaneDp, latitude)))

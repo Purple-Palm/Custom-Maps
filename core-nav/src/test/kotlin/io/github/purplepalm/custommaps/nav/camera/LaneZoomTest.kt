@@ -929,6 +929,44 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `a falling junction keep lets the kept zoom go while the tilt stays down`() {
+        val plan = ZoomPlanner(tuning)
+        val cap = MapScale.zoomForLaneDp(28.0, 35.0)
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false), 1e-9)
+        // Past the first turn the view stays down for a next one not framed yet, and its keep falls.
+        assertEquals(cap, plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true, junctionKeep = 1.0), 1e-9)
+        assertEquals(ZoomPlanner.Kind.AFTER_JUNCTION, plan.kind)
+        assertEquals(lerp(16.2, cap, 0.5), plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true, junctionKeep = 0.5), 1e-9)
+        assertEquals(16.2, plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true, junctionKeep = 0.0), 1e-9)
+        assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
+        // What was let go is not taken up again before the next junction is framed.
+        assertEquals(16.2, plan.target(LaneZoom.LARGE, 16.2, 35.0, 1.0, false, 0.0, roadFrame = true, junctionKeep = 1.0), 1e-9)
+        // That one's frame decides, and past it all of its zoom is kept again.
+        assertEquals(17.4, plan.target(LaneZoom.LARGE, 17.4, 35.0, 1.0, false, 0.0, roadFrame = false, junctionKeep = 1.0), 1e-9)
+        assertEquals(17.4, plan.target(LaneZoom.LARGE, 16.0, 35.0, 1.0, true, 0.0, roadFrame = true), 1e-9)
+    }
+
+    @Test
+    fun `without a keep of its own the junction keep is the focus`() {
+        val plain = ZoomPlanner(tuning)
+        val kept = ZoomPlanner(tuning)
+        // A junction, the way past it with the tilt going up, a next junction not framed yet, its frame, and past it.
+        val steps = listOf(
+            Triple(19.6, 1.0, false) to false, Triple(16.2, 0.8, true) to true, Triple(16.2, 0.4, true) to true,
+            Triple(16.2, 0.7, false) to true, Triple(17.4, 1.0, false) to false, Triple(16.0, 0.6, true) to true,
+        )
+        for ((input, road) in steps) {
+            val (frameZoom, focus, after) = input
+            assertEquals(
+                plain.target(LaneZoom.LARGE, frameZoom, 35.0, focus, after, 0.0, roadFrame = road),
+                kept.target(LaneZoom.LARGE, frameZoom, 35.0, focus, after, 0.0, roadFrame = road, junctionKeep = focus),
+                1e-12,
+            )
+            assertEquals(plain.kind, kept.kind)
+        }
+    }
+
+    @Test
     fun `a frame of a wide junction is taken at its word, also when it is farther out than the last junction`() {
         val plan = ZoomPlanner(tuning)
         plan.target(LaneZoom.LARGE, 19.6, 35.0, 1.0, false, 0.0, roadFrame = false)

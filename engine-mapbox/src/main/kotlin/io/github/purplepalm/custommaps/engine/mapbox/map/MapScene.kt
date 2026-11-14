@@ -1729,7 +1729,9 @@ internal class MapScene(
      * source fits its frames within. Smooth follow: "camFps", "camMaxGapMs" and "camWrites" (its
      * frames, the longest time between two of them and how many set the map's camera), "focus" and
      * "focusGoal" (how far the view is tilted onto the next maneuver, from 0 to 1, and where that
-     * is going), "zoomTarget", "bearingError" (the bearing still to turn) and "onPuck" (1 while the
+     * is going), "latchedBy" (how the step latched the tilt: "window", or "bridge" as the hold after a
+     * turn right before ended), with Large "keep" (how much of the last junction's close zoom is still
+     * kept), "zoomTarget", "bearingError" (the bearing still to turn) and "onPuck" (1 while the
      * camera centers on the drawn car, 0 while it frames a maneuver or the route); "laneZoom",
      * "zoomPlan" (what sets the zoom: ROAD, JUNCTION, AFTER_JUNCTION or LANES), "laneFocus" and
      * "laneGoal" (the lane choices' schedule: how far it is in for one, and where that is going;
