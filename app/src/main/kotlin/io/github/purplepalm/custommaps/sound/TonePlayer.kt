@@ -25,7 +25,7 @@ import java.util.EnumMap
  * tone is never played twice. Every sound is played on a thread of its own, never on the main thread:
  *
  * 1. During a call, or while the phone rings (the audio mode is not normal), nothing: `in_call`. With the
- *    media volume at zero, nothing: `volume_zero`.
+ *    media volume at zero, nothing: `volume_zero` ([PlayGate]). Asked before anything is asked of Android.
  * 2. What the output is: whether something plays, whether a Bluetooth output is connected, whether a car
  *    session is ([OutputState]); and the plan of the dip ([DuckPlan]).
  * 3. Where the plan asks, the sound for a moment (audio focus, transient, others may duck), with the
@@ -33,7 +33,7 @@ import java.util.EnumMap
  * 4. The samples, made once for each sound on this thread ([Chime]) and kept; with silence in front, a copy.
  * 5. A static track of exactly the sound: navigation guidance, sonification, 48 kHz, mono, float; written,
  *    turned to the tone's level, played.
- * 6. The sound given back after the plan's hold, with the same request.
+ * 6. The sound given back after the plan's hold, with the same request ([PlaySchedule]).
  * 7. The track stopped and let go of after its length and 250 ms more: a track that still sounds is never cut.
  * 8. Anything that throws lets go of what exists and gives the sound back: `failed`.
  *
@@ -113,10 +113,11 @@ class TonePlayer(
         refused: () -> Unit,
     ): Pair<ToneResult, AudioTrack?> {
         // 1. A call, or a ringing phone: a tone would sound in it. The media volume at zero: nothing would be heard.
-        if (audio.mode != AudioManager.MODE_NORMAL) return ToneResult.IN_CALL to null
+        // Before anything is asked of Android, also with Off, which asks for no sound that a call could refuse.
+        val modeNormal = audio.mode == AudioManager.MODE_NORMAL
         val volume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         fields["volume"] = "$volume/${audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}"
-        if (volume == 0) return ToneResult.VOLUME_ZERO to null
+        PlayGate.check(modeNormal, volume)?.let { return it to null }
         // 2. What plays, where it goes, and the dip's plan.
         val outputs = outputTypes()
         val output = OutputState(musicActive = audio.isMusicActive, wireless = outputs.any { it in BLUETOOTH }, car = car)
@@ -162,11 +163,11 @@ class TonePlayer(
             throw e
         }
         fields["startMs"] = elapsedMillis() - decided
+        val schedule = PlaySchedule.of(plan, pcm.size)
         // 6. The sound given back after the hold; the ring goes on over the music coming back.
-        request?.let { handler.postDelayed({ giveBack(it) }, plan.holdMillis.toLong()) }
+        request?.let { handler.postDelayed({ giveBack(it) }, schedule.giveBackAfterMillis) }
         // 7. Stopped and let go of once it has rung out.
-        val soundMillis = pcm.size * MILLIS_PER_SECOND / Chime.SAMPLE_RATE
-        handler.postDelayed({ letGo(track) }, soundMillis + RELEASE_AFTER_MILLIS)
+        handler.postDelayed({ letGo(track) }, schedule.releaseAfterMillis)
         return ToneResult.PLAYED to track
     }
 
@@ -221,9 +222,6 @@ class TonePlayer(
         const val FOCUS_FAILED = "failed"
         const val BYTES_PER_SAMPLE = 4
         const val MILLIS_PER_SECOND = 1_000L
-
-        /** After a sound's last sample: never cut a track that still sounds. */
-        const val RELEASE_AFTER_MILLIS = 250L
 
         /** Bluetooth outputs: a car's speakers, headphones, hearing aids. */
         val BLUETOOTH: Set<Int> = buildSet {
