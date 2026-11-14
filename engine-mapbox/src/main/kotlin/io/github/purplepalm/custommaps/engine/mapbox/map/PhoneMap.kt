@@ -253,8 +253,10 @@ class PhoneMap internal constructor(
 
     /**
      * Stops listening to the navigator. The map view itself follows the hosting activity's lifecycle,
-     * once it has been in the window.
+     * once it has been in the window. The finger listener goes too ([watchFingers]): taking it away
+     * clicks nothing, so the lint check for a touch listener without a click has nothing to find.
      */
+    @SuppressLint("ClickableViewAccessibility")
     fun release() {
         scene.release()
         mapView.gestures.removeOnMapClickListener(mapClickListener)
