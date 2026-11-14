@@ -14,9 +14,10 @@ import io.github.purplepalm.custommaps.nav.model.TurnModifier
  * The "lane_row" line of the debug log: the lane row the maneuver card draws ([CardLanes]), lane by
  * lane, with what the run-up to an exit adds to it and why such a row has no words. A line is
  * written when what the card draws changes: where its row comes from, its lanes, which of them are
- * lit, or the words beside them; never for a distance alone. Keys, indices, numbers and short
- * tokens only: no place, no road name and no instruction text. Not thread-safe: use it from one
- * thread, the one the engine publishes its updates on.
+ * lit, or the words beside them, and when it shows none because the next maneuver's own lanes are
+ * held back while it is far ([CardLanes.far]); never for a distance alone. Keys, indices, numbers
+ * and short tokens only: no place, no road name and no instruction text. Not thread-safe: use it
+ * from one thread, the one the engine publishes its updates on.
  *
  * The card measures the words itself and leaves out those that do not fit (the app's lane row).
  * It says so through [onWordsShown]; the line that follows has no words and the reason [ODD_NO_FIT].
@@ -59,7 +60,8 @@ class LaneRowLog {
             CardLanes.Source.RUN_UP -> runUpMeters
             CardLanes.Source.CHOICE -> card.distance?.meters
             CardLanes.Source.MANEUVER -> snapshot.distanceToNextManeuver.meters
-            CardLanes.Source.NONE -> null
+            // How far the maneuver is whose lanes are held back.
+            CardLanes.Source.NONE -> if (card.far) snapshot.distanceToNextManeuver.meters else null
         }
         // The words show until the card says they did not fit; a new row's words show again.
         val last = row
@@ -106,7 +108,7 @@ class LaneRowLog {
 
     private fun lineIfChanged(): Map<String, Any?>? {
         val current = row ?: return null
-        val drawn = Drawn(current.card.source, current.card.lanes, current.shownWords)
+        val drawn = Drawn(current.card.source, current.card.lanes, current.shownWords, current.card.far)
         if (drawn == written) return null
         written = drawn
         return fields(current)
@@ -124,6 +126,8 @@ class LaneRowLog {
         val label = row.card.distance?.takeIf { row.card.source == CardLanes.Source.CHOICE }?.let { ImperialFormat.distance(it).toString() }
         return mapOf(
             "source" to row.card.source.name.lowercase(),
+            // No row while the next maneuver's own lanes are held back: it is still far.
+            "far" to row.card.far.takeIf { it },
             "key" to row.key,
             "row" to lanes?.map(::token),
             "lit" to lanes?.indices?.filter { lanes[it].isRecommended && !lanes[it].outline },
@@ -157,8 +161,8 @@ class LaneRowLog {
         val shownWords: LaneTarget? get() = card.target?.takeIf { wordsShown }
     }
 
-    /** What the card draws: a line is written when this changes. */
-    private data class Drawn(val source: CardLanes.Source, val lanes: LaneInfo?, val words: LaneTarget?)
+    /** What the card draws, and whether it holds a far maneuver's lanes back: a line is written when this changes. */
+    private data class Drawn(val source: CardLanes.Source, val lanes: LaneInfo?, val words: LaneTarget?, val far: Boolean)
 
     companion object {
         /** Why a run-up's row shows no words although it has some: they did not fit beside the lanes, and the card left them out. */

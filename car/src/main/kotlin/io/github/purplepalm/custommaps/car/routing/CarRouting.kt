@@ -88,7 +88,8 @@ data class CarRouting(
          * - The current step is the phone card's: its maneuver, its words as the card has them (the
          *   road, then the roundabout's exit and the second line, "Exit 2 · Office"; the road alone
          *   where the host has less room), its distance and its time, and the card's lane row
-         *   ([CardLanes]: the run-up's row first, then a lane choice ahead, then the maneuver's own).
+         *   ([CardLanes]: the run-up's row first, then a lane choice ahead, then the maneuver's own
+         *   within two miles of it).
          * - The Then step is there exactly while the phone's Then chip shows it
          *   ([RouteProgressSnapshot.thenManeuver]), with the chip's words: the road, or the side of
          *   the destination at the arrival. Its distance and time count from the car.

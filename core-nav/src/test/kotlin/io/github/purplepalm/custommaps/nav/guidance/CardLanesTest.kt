@@ -14,8 +14,10 @@ import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import kotlin.time.Duration.Companion.minutes
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class CardLanesTest {
@@ -35,9 +37,10 @@ class CardLanesTest {
         laneChoiceAhead: LanesAhead? = null,
         runUpLanes: RunUpLanes? = null,
         pending: Boolean = false,
+        toManeuver: Double = 900.0,
     ) = RouteProgressSnapshot(
         nextManeuver = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.SLIGHT_RIGHT, "Oak Street"),
-        distanceToNextManeuver = Distance.meters(900.0),
+        distanceToNextManeuver = Distance.meters(toManeuver),
         lanes = lanes,
         distanceRemaining = Distance.miles(12.0),
         durationRemaining = 14.minutes,
@@ -88,6 +91,45 @@ class CardLanesTest {
     }
 
     @Test
+    fun `the maneuver's own lanes show only within two miles of it, and farther the row is none and says why`() {
+        assertEquals(3_219.0, CardLanes.MANEUVER_LANES_METERS)
+        assertTrue(Distance.miles(2.0).meters <= CardLanes.MANEUVER_LANES_METERS, "two miles")
+        val far = CardLanes.of(snapshot(maneuverLanes, toManeuver = 15_000.0))
+        assertEquals(Source.NONE, far.source)
+        assertNull(far.lanes)
+        assertNull(far.distance)
+        assertNull(far.target)
+        assertTrue(far.far)
+        // Half a metre over the border: still none.
+        assertEquals(CardLanes(Source.NONE, far = true), CardLanes.of(snapshot(maneuverLanes, toManeuver = 3_219.5)))
+        for (meters in listOf(3_219.0, Distance.miles(2.0).meters, 3_000.0, 0.0)) {
+            val near = CardLanes.of(snapshot(maneuverLanes, toManeuver = meters))
+            assertEquals(Source.MANEUVER, near.source, "$meters m")
+            assertSame(maneuverLanes, near.lanes, "$meters m")
+            assertFalse(near.far, "$meters m")
+        }
+        // A maneuver without lanes holds nothing back, far or near.
+        assertEquals(CardLanes(Source.NONE), CardLanes.of(snapshot(toManeuver = 15_000.0)))
+        assertEquals(CardLanes(Source.NONE), CardLanes.of(snapshot(toManeuver = 3_000.0)))
+    }
+
+    @Test
+    fun `a run-up's row and a lane choice's row show also farther than two miles from the maneuver`() {
+        val runUpFar = CardLanes.of(snapshot(maneuverLanes, choice, runUp, toManeuver = 15_000.0))
+        assertEquals(Source.RUN_UP, runUpFar.source)
+        assertSame(runUpLanes, runUpFar.lanes)
+        assertEquals(LaneTarget(LaneEdge.RIGHT, 1, 1), runUpFar.target)
+        assertFalse(runUpFar.far)
+        val choiceFar = CardLanes.of(snapshot(maneuverLanes, choice, toManeuver = 15_000.0))
+        assertEquals(Source.CHOICE, choiceFar.source)
+        assertSame(choiceLanes, choiceFar.lanes)
+        assertEquals(Distance.miles(0.4), choiceFar.distance)
+        assertFalse(choiceFar.far)
+        // A run-up's row without lanes of the maneuver, far: still the run-up's.
+        assertEquals(Source.RUN_UP, CardLanes.of(snapshot(runUpLanes = runUp, toManeuver = 15_000.0)).source)
+    }
+
+    @Test
     fun `no lanes at all is no row`() {
         val none = CardLanes.of(snapshot())
         assertEquals(Source.NONE, none.source)
@@ -98,10 +140,18 @@ class CardLanesTest {
 
     @Test
     fun `a pending card shows no row, whatever it carries`() {
-        for (pending in listOf(snapshot(maneuverLanes, choice, runUp, pending = true), snapshot(maneuverLanes, pending = true))) {
+        val pendings = listOf(
+            snapshot(maneuverLanes, choice, runUp, pending = true),
+            snapshot(maneuverLanes, pending = true),
+            snapshot(maneuverLanes, pending = true, toManeuver = 15_000.0),
+            snapshot(maneuverLanes, choice, runUp, pending = true, toManeuver = 15_000.0),
+        )
+        for (pending in pendings) {
             val row = CardLanes.of(pending)
             assertEquals(Source.NONE, row.source)
             assertNull(row.lanes)
+            // Nothing held back for being far: a pending card shows no lanes anyway.
+            assertFalse(row.far)
         }
     }
 }

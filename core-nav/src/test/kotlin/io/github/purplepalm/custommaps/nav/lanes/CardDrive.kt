@@ -17,10 +17,12 @@ import io.github.purplepalm.custommaps.nav.model.TurnModifier
  * engine's lane choices make it (engine `LaneChoices`: the points of each step, the one run-up latch, the
  * run-up's row from [RunUpRule], a lane choice's row within its close view's window) and as [CardLanes]
  * picks one; the next maneuver's own row lights the lanes the route marks, as the navigation SDK's banner
- * does. With a [plan], as the engine has it once the route's plan is held: the latch begins no later than the
- * plan's seam ([LanePlan.seams]) and holds through the ramps the plan holds through ([LanePlan.rampAfter]), with the
- * split's row on the ramp, and the run-up's row is read from the plan ([CardPlanRow]). Keys are the route's node
- * indices. Test code only.
+ * does. That row is given from the step's start: the card shows it only within
+ * [CardLanes.MANEUVER_LANES_METERS] of the maneuver, which changes where it shows, never its lanes, so the
+ * rows here are compared with the plan wherever the step has them. With a [plan], as the engine has it once
+ * the route's plan is held: the latch begins no later than the plan's seam ([LanePlan.seams]) and holds
+ * through the ramps the plan holds through ([LanePlan.rampAfter]), with the split's row on the ramp, and the
+ * run-up's row is read from the plan ([CardPlanRow]). Keys are the route's node indices. Test code only.
  */
 internal class CardDrive(private val route: LaneRoute, private val tuning: CameraTuning = CameraTuning.PHONE, private val plan: LanePlan? = null) {
 

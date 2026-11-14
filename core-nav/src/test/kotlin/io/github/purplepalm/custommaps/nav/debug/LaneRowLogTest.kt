@@ -134,6 +134,32 @@ class LaneRowLogTest {
     }
 
     @Test
+    fun `a maneuver farther than two miles writes one line of no row, held back for being far, and its row at two miles`() {
+        val log = LaneRowLog()
+        val far = requireNotNull(log.at(snapshot(toManeuver = 15_000.4)))
+        assertEquals(mapOf("source" to "none", "far" to true, "metersAhead" to 15_000L, "pending" to false, "offRoute" to false), far)
+        assertNull(log.at(snapshot(toManeuver = 9_000.0)), "nearer only")
+        assertEquals("none", log.cardSource)
+        // A lane choice on the way shows its row; past it, the maneuver's lanes are held back again.
+        val choice = LaneInfo(listOf(carPool, on, on, leaving, leaving))
+        assertEquals("choice", log.at(snapshot(toManeuver = 6_000.0, laneChoiceAhead = LanesAhead(Distance.miles(0.4), choice)), choiceKey = "r/0/2/3")?.get("source"))
+        assertEquals(mapOf("source" to "none", "far" to true, "metersAhead" to 5_000L, "pending" to false, "offRoute" to false), log.at(snapshot(toManeuver = 5_000.0)))
+        // Two miles before it, to the metre above: the maneuver's own row, and no word of far.
+        val near = requireNotNull(log.at(snapshot(toManeuver = 3_219.0)))
+        assertEquals("maneuver", near["source"])
+        assertEquals("r/0/2/end", near["key"])
+        assertEquals(listOf("s", "s", "s", "s", "sr*"), near["row"])
+        assertEquals(3_219L, near["metersAhead"])
+        assertFalse("far" in near)
+        // A maneuver without lanes is a row of none that holds nothing back, and a far one after it says so.
+        val bare = LaneRowLog()
+        assertEquals(mapOf("source" to "none", "pending" to false, "offRoute" to false), bare.at(snapshot(lanes = null, toManeuver = 15_000.0)))
+        assertEquals(true, bare.at(snapshot(toManeuver = 14_000.0))?.get("far"))
+        assertNull(bare.at(snapshot(toManeuver = 13_000.0)), "the same row of none")
+        assertEquals(mapOf("source" to "none", "pending" to false, "offRoute" to false), bare.at(snapshot(lanes = null, toManeuver = 12_000.0)))
+    }
+
+    @Test
     fun `a lane choice's row has its key and its distance, and a distance alone writes nothing`() {
         val log = LaneRowLog()
         log.at(snapshot())

@@ -78,6 +78,20 @@ class CarRoutingTest {
     }
 
     @Test
+    fun `an exit farther than two miles shows no lanes in the car, as on the phone, and its own lanes from two miles`() {
+        val far = checkNotNull(of(towardsExit(10.0)).current)
+        assertNull(far.lanes)
+        assertEquals(emptyList<CarLane>(), far.hostLanes)
+        assertEquals(CardLanes.of(towardsExit(10.0)).lanes, far.lanes)
+        assertEquals(EXIT_LANES, of(towardsExit(2.0)).current?.lanes)
+        // A run-up's row and a lane choice's show however far the exit is.
+        assertEquals(RUN_UP.lanes, of(towardsExit(10.0).copy(runUpLanes = RUN_UP)).current?.lanes)
+        assertEquals(CHOICE_LANES, of(towardsExit(10.0).copy(laneChoiceAhead = LanesAhead(Distance.miles(0.4), CHOICE_LANES))).current?.lanes)
+        // The lanes coming change what the card shows, so the host is told at once.
+        assertNotEquals(of(towardsExit(2.01)).key, of(towardsExit(2.0)).key)
+    }
+
+    @Test
     fun `the Then step shows exactly while the phone's Then chip does, with its words`() {
         assertNull(of(towardsExit(0.2)).then)
         val shown = of(towardsExit(0.2).copy(showThen = true))
