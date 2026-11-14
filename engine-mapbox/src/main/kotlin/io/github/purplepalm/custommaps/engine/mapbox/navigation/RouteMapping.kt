@@ -211,8 +211,14 @@ internal fun followingManeuver(steps: List<LegStep>, stepIndex: Int): FollowingM
  * the time of that maneuver and of every one after it unknown (zero), and the list goes on. Built
  * once for each step of a drive ([UpcomingManeuvers]).
  */
-internal fun upcomingManeuvers(steps: List<LegStep>, stepIndex: Int): List<FollowingManeuver> {
-    val upcoming = ArrayList<FollowingManeuver>()
+internal fun upcomingManeuvers(steps: List<LegStep>, stepIndex: Int): List<FollowingManeuver> = upcomingSteps(steps, stepIndex).map { it.value }
+
+/**
+ * [upcomingManeuvers], each with the index of the step that ends with it: the step the car is on while
+ * that maneuver is the next one, as the progress snapshot numbers steps.
+ */
+internal fun upcomingSteps(steps: List<LegStep>, stepIndex: Int): List<IndexedValue<FollowingManeuver>> {
+    val upcoming = ArrayList<IndexedValue<FollowingManeuver>>()
     // Summed in the order followingManeuver sums a roundabout's way out and the road after it, so
     // the first item is equal to its answer, to the last bit.
     var distance: Distance? = null
@@ -228,7 +234,7 @@ internal fun upcomingManeuvers(steps: List<LegStep>, stepIndex: Int): List<Follo
             timeKnown = false
         }
         if (!ManeuverMapping.isRoundaboutExit(step.maneuver.type)) {
-            upcoming += FollowingManeuver(step.maneuver, distance, duration?.takeIf { timeKnown } ?: Duration.ZERO)
+            upcoming += IndexedValue(index, FollowingManeuver(step.maneuver, distance, duration?.takeIf { timeKnown } ?: Duration.ZERO))
         }
         index += 1
     }

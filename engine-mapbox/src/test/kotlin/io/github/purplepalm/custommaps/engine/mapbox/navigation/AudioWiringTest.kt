@@ -34,10 +34,15 @@ class AudioWiringTest {
         assertTrue(observer.subList(stale, seek).contains("return@RouteProgressObserver"))
         assertTrue(observer.subList(seek, published).contains("return@RouteProgressObserver"))
         assertEquals(1, Regex("tellAudio\\(").findAll(code).count() - 1, "one call, besides its declaration")
-        // The moment takes the snapshot, the route's id, the card's row and the run-up's start.
+        // The moment takes the snapshot, the route's id, the card's row, the run-up's start and the leg's maneuvers after
+        // the next one with their steps' keys, the same holder the snapshot's list comes from.
         val tell = body("private fun tellAudio(progress: RouteProgress, snapshot: RouteProgressSnapshot)")
         assertTrue("val key = laneChoices.shownKey" in tell)
-        assertTrue("audio.onProgress(ToneMoment.of(snapshot, progress.navigationRoute.id, key, meters, laneChoices.runUpFromExitWindow))" in tell)
+        assertTrue(
+            "audio.onProgress(ToneMoment.of(snapshot, progress.navigationRoute.id, key, meters, laneChoices.runUpFromExitWindow, upcoming.aheadOf(progress)))" in tell,
+        )
+        assertTrue("private val upcoming = UpcomingManeuvers()" in code)
+        assertTrue("progress.toSnapshot(next, speed, upcoming.of(progress))" in code)
     }
 
     @Test

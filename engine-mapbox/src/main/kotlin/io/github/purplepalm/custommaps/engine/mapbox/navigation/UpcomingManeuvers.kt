@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.engine.mapbox.navigation
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
+import io.github.purplepalm.custommaps.nav.sound.ManeuverAhead
 
 /**
  * The maneuvers of the current leg after the next one ([upcomingManeuvers]), built once for each step
@@ -12,29 +13,49 @@ import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
  * the route and so the list, whose times are then those from before it until the next step; its
  * maneuvers and distances do not change with one. Not thread-safe: the updates of a drive arrive on
  * one thread.
+ *
+ * The same maneuvers each with the key of the step that ends with it go to the tones ([aheadOf]), built
+ * with the list and kept with it.
  */
 internal class UpcomingManeuvers {
 
     private var key: String? = null
     private var list: List<FollowingManeuver> = emptyList()
+    private var ahead: List<ManeuverAhead> = emptyList()
 
     /**
      * The maneuvers after the next one while the car is on step [stepIndex] of leg [legIndex] of the
      * route [routeId], whose legs are [legs]: only that leg's, through its arrival.
      */
     fun of(routeId: String, legs: List<RouteLeg>, legIndex: Int, stepIndex: Int): List<FollowingManeuver> {
-        val stepKey = "$routeId/$legIndex/$stepIndex"
-        if (stepKey != key) {
-            list = upcomingManeuvers(legs.getOrNull(legIndex)?.steps().orEmpty(), stepIndex)
-            key = stepKey
-        }
+        load(routeId, legs, legIndex, stepIndex)
         return list
+    }
+
+    /**
+     * The same maneuvers as [of], the same objects, each with the key of the step that ends with it, as
+     * the progress snapshot keys steps: for the tones' look past a maneuver that makes no sound
+     * ([io.github.purplepalm.custommaps.nav.sound.ToneMoment.of]). The same list for every update of a step.
+     */
+    fun aheadOf(routeId: String, legs: List<RouteLeg>, legIndex: Int, stepIndex: Int): List<ManeuverAhead> {
+        load(routeId, legs, legIndex, stepIndex)
+        return ahead
     }
 
     /** A new drive knows nothing of the last one. */
     fun reset() {
         key = null
         list = emptyList()
+        ahead = emptyList()
+    }
+
+    private fun load(routeId: String, legs: List<RouteLeg>, legIndex: Int, stepIndex: Int) {
+        val stepKey = "$routeId/$legIndex/$stepIndex"
+        if (stepKey == key) return
+        val steps = upcomingSteps(legs.getOrNull(legIndex)?.steps().orEmpty(), stepIndex)
+        list = steps.map { it.value }
+        ahead = steps.map { ManeuverAhead("$routeId/$legIndex/${it.index}", it.value) }
+        key = stepKey
     }
 }
 
@@ -46,4 +67,11 @@ internal fun UpcomingManeuvers.of(progress: RouteProgress): List<FollowingManeuv
     val leg = progress.currentLegProgress ?: return emptyList()
     val step = leg.currentStepProgress ?: return emptyList()
     return of(progress.navigationRoute.id, progress.navigationRoute.directionsRoute.legs().orEmpty(), leg.legIndex, step.stepIndex)
+}
+
+/** [UpcomingManeuvers.aheadOf] at this moment of the drive, as [of] reads it; empty before the progress has a leg and a step. */
+internal fun UpcomingManeuvers.aheadOf(progress: RouteProgress): List<ManeuverAhead> {
+    val leg = progress.currentLegProgress ?: return emptyList()
+    val step = leg.currentStepProgress ?: return emptyList()
+    return aheadOf(progress.navigationRoute.id, progress.navigationRoute.directionsRoute.legs().orEmpty(), leg.legIndex, step.stepIndex)
 }

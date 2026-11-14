@@ -1572,14 +1572,16 @@ internal class MapboxNavigationEngine(
     /**
      * Tells the audio port of [snapshot], the update just published, with the lane row the card shows ahead of the
      * maneuver ([LaneChoices.shownKey]), how far ahead its point is, and whether the run-up on now began at its exit's
-     * own window. The car's speed is the snapshot's, the latest matched one. Reads only what the navigator already
-     * handed over: one small object per update.
+     * own window; and with the leg's maneuvers after the next one, each with its step's key, the same list for the
+     * whole step ([UpcomingManeuvers.aheadOf]), so that the tones can look past a next maneuver that makes no sound,
+     * also on a pending card. The car's speed is the snapshot's, the latest matched one. Reads only what the navigator
+     * already handed over: one small object per update.
      */
     private fun tellAudio(progress: RouteProgress, snapshot: RouteProgressSnapshot) {
         audioCall {
             val key = laneChoices.shownKey
             val meters = if (key == null) null else laneChoices.ahead(progress).firstOrNull { it.key == key }?.metersAhead
-            audio.onProgress(ToneMoment.of(snapshot, progress.navigationRoute.id, key, meters, laneChoices.runUpFromExitWindow))
+            audio.onProgress(ToneMoment.of(snapshot, progress.navigationRoute.id, key, meters, laneChoices.runUpFromExitWindow, upcoming.aheadOf(progress)))
         }
     }
 

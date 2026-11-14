@@ -227,6 +227,46 @@ class UpcomingManeuversTest {
     }
 
     @Test
+    fun `for the tones each maneuver comes with the key of the step it ends, the snapshot's key once the car is on that step`() {
+        val legs = listOf(leg(plain))
+        val maneuvers = UpcomingManeuvers()
+        val ahead = maneuvers.aheadOf("route-a", legs, legIndex = 0, stepIndex = 0)
+        assertEquals(listOf("route-a/0/1", "route-a/0/2", "route-a/0/3"), ahead.map { it.stepKey })
+        // On that step it is the next maneuver, as the snapshot's card has it.
+        for (item in ahead) assertEquals(nextManeuverOf(plain, item.stepKey.substringAfterLast('/').toInt()), item.following.maneuver)
+        // The list's own objects, with their distances from the next maneuver, and the same list for every update of the step.
+        val list = maneuvers.of("route-a", legs, legIndex = 0, stepIndex = 0)
+        assertEquals(list.size, ahead.size)
+        for (i in list.indices) assertSame(list[i], ahead[i].following)
+        assertSame(ahead, maneuvers.aheadOf("route-a", legs, legIndex = 0, stepIndex = 0))
+        assertSame(list, maneuvers.of("route-a", legs, legIndex = 0, stepIndex = 0))
+        // A step on, from the step after; a new route and a new drive build them again.
+        assertEquals(listOf("route-a/0/2", "route-a/0/3"), maneuvers.aheadOf("route-a", legs, legIndex = 0, stepIndex = 1).map { it.stepKey })
+        assertEquals(listOf("route-b/0/2", "route-b/0/3"), maneuvers.aheadOf("route-b", legs, legIndex = 0, stepIndex = 1).map { it.stepKey })
+        val before = maneuvers.aheadOf("route-b", legs, legIndex = 0, stepIndex = 1)
+        maneuvers.reset()
+        assertNotSame(before, maneuvers.aheadOf("route-b", legs, legIndex = 0, stepIndex = 1))
+    }
+
+    @Test
+    fun `a roundabout's way out has no key of its own, and the turn after it keeps its step's, also from inside the roundabout`() {
+        val steps = withRoundabout()
+        val legs = listOf(leg(steps))
+        val ahead = UpcomingManeuvers().aheadOf("route-a", legs, legIndex = 0, stepIndex = 0)
+        assertEquals(listOf("route-a/0/1", "route-a/0/3", "route-a/0/4"), ahead.map { it.stepKey })
+        for (item in ahead) assertEquals(nextManeuverOf(steps, item.stepKey.substringAfterLast('/').toInt()), item.following.maneuver)
+        // Inside it the way out is the next maneuver: the turn after it, 90 m on, on its own step.
+        val inside = UpcomingManeuvers().aheadOf("route-a", legs, legIndex = 0, stepIndex = 2)
+        assertEquals(listOf("route-a/0/3" to 90.0, "route-a/0/4" to 390.0), inside.map { it.stepKey to it.following.distanceAfterNext.meters })
+        // The second leg's keys carry its own number.
+        val toStop = listOf(step("depart", null, 500.0, 40.0, banner("Oak Street", "turn", "left")), step("turn", "left", 150.0, 12.0, banner("Pine Street", "arrive", "right")), arrive("right"))
+        val onward = listOf(step("depart", null, 100.0, 9.0, banner("Elm Street", "turn", "right")), step("turn", "right", 250.0, 20.0, banner("Elm Street", "arrive", "left")), arrive("left"))
+        assertEquals(listOf("route-a/1/1"), UpcomingManeuvers().aheadOf("route-a", listOf(leg(toStop), leg(onward)), legIndex = 1, stepIndex = 0).map { it.stepKey })
+        // And nothing where the leg has nothing after the next maneuver.
+        assertTrue(UpcomingManeuvers().aheadOf("route-a", legs, legIndex = 0, stepIndex = 4).isEmpty())
+    }
+
+    @Test
     fun `a leg that ends right after the next maneuver has nothing after it`() {
         val upcoming = UpcomingManeuvers().of("route-a", listOf(leg(plain)), legIndex = 0, stepIndex = 3)
         assertTrue(upcoming.isEmpty())
