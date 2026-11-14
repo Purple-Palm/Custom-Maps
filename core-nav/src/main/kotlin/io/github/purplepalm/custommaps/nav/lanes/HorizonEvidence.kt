@@ -8,10 +8,12 @@ import kotlin.math.min
  * The electronic horizon's lane counts as one route's drawing has taken them, drawing window by drawing window (the own
  * lanes' OL9): the evidence the drawing of the app's own lanes is built from, which the map's own line holds with the
  * route's path. The horizon may change the drawing only beyond the drawing window on screen: each window's send takes
- * the newest update's pairs of lane points ([HorizonLanes]) whose first point lies at or past [startFor], and keeps the
- * pairs earlier sends took before that, so what the map already draws is never changed for the horizon's sake and a
- * window already sent is never sent again for it. With the switch off, a send takes nothing new from there on
- * ([next] with no update): what was sent stays until the next route.
+ * the newest update's pairs of lane points ([HorizonLanes]) whose second point lies past [startFor], from there on where
+ * the first lies before it, and keeps the pairs earlier sends took from before that, so what the map already draws is
+ * never changed for the horizon's sake and a window already sent is never sent again for it. A pair longer than what the
+ * window on screen leaves of the horizon ahead is taken all the same, with the edges behind the car that the updates
+ * before gave ([HorizonAhead.after]). With the switch off, a send takes nothing new from there on ([next] with no
+ * update): what was sent stays until the next route.
  *
  * Pure and never changed once made; built on a worker with the drawing, never stored. The plan is the one the route
  * already has: neither it nor the card change ([LanePlan.evidence]).
@@ -19,7 +21,7 @@ import kotlin.math.min
 class HorizonEvidence private constructor(
     /** The route's lane plan. */
     val plan: LanePlan,
-    /** The pairs of lane points the drawing takes from the horizon, each from the send that first covered it. */
+    /** The pairs of lane points the drawing takes from the horizon: the last send's from its start on, earlier sends' before it. */
     val lanes: HorizonLanes,
     /** Where the pairs of the last send's update begin ([startFor]); before every station for none. */
     val start: Double = Double.NEGATIVE_INFINITY,
@@ -51,17 +53,26 @@ class HorizonEvidence private constructor(
 
     /**
      * The holder for the next window's send, with the window on screen ending at [windowEnd] and the route's merged card
-     * windows [cards]: the pairs taken before [startFor] stay, and from there on the pairs of [ahead], the newest update of
-     * the horizon along this route, replace those taken before; none where [ahead] is null (the switch is off, or the
-     * horizon has nothing) or of another route.
+     * windows [cards]: the pairs taken from before [startFor] stay as they were taken, the map drawing them in part; from
+     * there on the pairs of [ahead], the newest update of the horizon along this route with the stretches kept behind the
+     * car, replace those taken before: each pair whose second point lies past the start, from the start on where its
+     * first lies before it ([HorizonLanes.of]). A pair kept from before that reads under neither convention draws nothing
+     * and may be taken anew. None new where [ahead] is null (the switch is off, or the horizon has nothing) or of another
+     * route.
      */
     fun next(ahead: HorizonAhead?, windowEnd: Double, cards: List<ClosedFloatingPointRange<Double>>): HorizonEvidence {
         val start = startFor(windowEnd, cards)
         val routeId = plan.topology.evidence.route.routeId
-        val newest = if (ahead != null && ahead.routeId == routeId) HorizonLanes.of(plan, ahead).from(start) else HorizonLanes.none(routeId)
-        val agreed = lanes.between.filter { it.convention != HorizonConvention.NONE }.map { it.before }.toSet()
+        val kept = lanes.before(start).filter { it.pieces.isNotEmpty() }
+        val keptPairs = kept.between.mapTo(HashSet()) { it.before }
+        val newest = if (ahead != null && ahead.routeId == routeId) {
+            HorizonLanes.of(plan, ahead, from = start).filter { it.before !in keptPairs }
+        } else {
+            HorizonLanes.none(routeId)
+        }
+        val agreed = lanes.between.filter { it.convention != HorizonConvention.NONE }.mapTo(HashSet()) { it.before }
         val fresh = newest.between.filter { it.convention != HorizonConvention.NONE && it.before !in agreed }.sumOf { it.stretches }
-        return HorizonEvidence(plan, lanes.before(start) + newest, start, fresh)
+        return HorizonEvidence(plan, kept + newest, start, fresh)
     }
 
     /**

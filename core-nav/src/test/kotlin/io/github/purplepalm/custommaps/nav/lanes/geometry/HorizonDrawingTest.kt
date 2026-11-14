@@ -5,6 +5,7 @@ import io.github.purplepalm.custommaps.nav.lanes.HorizonConvention
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEdge
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.HorizonLanes
+import io.github.purplepalm.custommaps.nav.lanes.HorizonLanesLine
 import io.github.purplepalm.custommaps.nav.lanes.HorizonRoadClass
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
@@ -16,12 +17,15 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.bare
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
+import io.github.purplepalm.custommaps.nav.lanes.RouteHorizon
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * The drawing of the app's own lanes with the electronic horizon's counts (OL9: [HorizonEvidence], [HorizonLanes]) on the
@@ -54,6 +58,11 @@ class HorizonDrawingTest {
     )
 
     private class Built(val plan: LanePlan, val evidence: LaneEvidence, val section: CrossSection, val path: RoutePath, val drawing: LaneDrawing)
+
+    /** [evidence]'s stretches and zones up to [x], cut there: what a drawing shows before it. */
+    private fun upTo(evidence: LaneEvidence, x: Double) =
+        evidence.stretches.filter { it.from < x }.map { it.copy(to = minOf(it.to, x)) } to
+            evidence.zones.filter { it.from < x }.map { it.copy(to = minOf(it.to, x)) }
 
     private fun build(plan: LanePlan, evidence: LaneEvidence, line: List<GeoPoint>, version: Int): Built {
         val section = CrossSection.of(plan, evidence)
@@ -109,6 +118,140 @@ class HorizonDrawingTest {
         assertEquals(0, off.taken)
         // Another route's update gives nothing.
         assertTrue(empty.next(HorizonAhead.of("another", p - 550.0, 0.5, listOf(edge(1_100.0, 5))), p - 130.0, cards).isEmpty)
+    }
+
+    @Test
+    fun `a send takes a pair the window on screen has partly passed from its start on, the drawing before it as it was`() {
+        val route = gapScene(5, "gap")
+        val plan = SceneLines.planOf(route)
+        val cards = DrawingWindows(plan.windows.map { it.from..it.to }, route.lengthMeters).cards
+        val empty = HorizonEvidence.of(plan)
+        // The window on screen ends 430 m past the first point; the horizon, from the car 550 m before it, covers the pair.
+        val windowEnd = p + 430.0
+        val held = empty.next(horizon(route, 5), windowEnd, cards)
+        val start = windowEnd + HorizonEvidence.START_PAST_WINDOW_M
+        val pair = held.lanes.between.first()
+        assertEquals(0, pair.before)
+        assertEquals(start, pair.from)
+        assertEquals(HorizonConvention.ALL, pair.convention)
+        assertEquals(held.lanes.stretchesUsed, held.taken)
+        // Bridged from the start on; up to it the evidence is the plan's own, and so what the window on screen draws.
+        assertTrue(held.evidence.stretches.any { it.horizon && it.kind == LaneEvidence.Kind.BRIDGED && it.from == start })
+        assertTrue(held.evidence.stretches.filter { it.horizon }.all { it.from >= start })
+        assertEquals(upTo(empty.evidence, windowEnd), upTo(held.evidence, windowEnd))
+        // At the next send it is kept as taken, the window on screen drawing it.
+        val later = held.next(horizon(route, 5), q - 700.0, cards)
+        assertEquals(start, later.lanes.between.first { it.before == 0 }.from)
+        assertEquals(0, later.taken)
+    }
+
+    @Test
+    fun `a pair kept from before under neither reading draws nothing and is taken anew from the start on`() {
+        val route = gapScene(5, "gap")
+        val plan = SceneLines.planOf(route)
+        val cards = DrawingWindows(plan.windows.map { it.from..it.to }, route.lengthMeters).cards
+        val none = HorizonEvidence.of(plan).next(horizon(route, 4), p - 130.0, cards)
+        assertEquals(HorizonConvention.NONE, none.lanes.between.first().convention)
+        // The next send's window ends past the first point: the pair is the newest update's from the start on, and counted.
+        val windowEnd = p + 430.0
+        val agreed = none.next(horizon(route, 5), windowEnd, cards)
+        val pair = agreed.lanes.between.single { it.before == 0 }
+        assertEquals(HorizonConvention.ALL, pair.convention)
+        assertEquals(windowEnd + HorizonEvidence.START_PAST_WINDOW_M, pair.from)
+        assertEquals(pair.stretches, agreed.taken)
+        assertEquals(upTo(none.evidence, windowEnd), upTo(agreed.evidence, windowEnd))
+    }
+
+    /**
+     * A drive along a freeway with two lane points of five lanes [length] metres apart, the first [first] metres along, a
+     * road without lane data leaving on the far side half way between them and IA's exit 1,050 m past the second: the
+     * horizon's edges end at every intersection and every 410 m between, five lanes each, six on the one to the gore; an
+     * update every 23 m, cut as the navigator cuts it (whole edges until one reaches [HorizonAhead.HORIZON_AHEAD_M] past the
+     * car), held as the engine holds it ([RouteHorizon]); each window sent when [DrawingWindows.due] says, with the
+     * holder's next send as the map's own line makes it. What it gives: the gap's metres the drive bridged, those that lay
+     * past the window on screen at the first send whose update reached past the second point, and whether any send changed
+     * what lay before the end of the window on screen.
+     */
+    private fun drive(first: Double, length: Double): Triple<Double, Double, Boolean> {
+        val second = first + length
+        val gore = second + 1_050.0
+        val five = List(5) { s() }.toTypedArray()
+        val route = LaneScenes.route(
+            LaneScenes.node(0.0, maneuver = LaneScenes.DEPART, planMps = 27.0),
+            LaneScenes.node(first, *five, planMps = 27.0),
+            LaneScenes.node(first + length / 2.0, roads = EXIT_LEFT, planMps = 27.0),
+            LaneScenes.node(second, *five, planMps = 27.0),
+            LaneScenes.node(gore, *LaneScenes.iaExit().toTypedArray(), road = RoadKind.RAMP, maneuver = LaneScenes.OFF_RIGHT, planMps = 20.0),
+            LaneScenes.node(gore + 400.0, road = RoadKind.STREET, maneuver = LaneScenes.TURN_LEFT, planMps = 15.0),
+            LaneScenes.node(gore + 500.0, road = RoadKind.STREET, maneuver = LaneScenes.ARRIVE, planMps = 15.0),
+            id = "sweep-$first-$length",
+        )
+        val plan = SceneLines.planOf(route)
+        val nodes = route.nodes.map { it.station }
+        val ends = (nodes + (1..40).map { it * 410.0 }.filter { x -> nodes.none { abs(it - x) < 50.0 } && x < route.lengthMeters })
+            .filter { it > 0.0 }.distinct().sorted()
+        val starts = listOf(0.0) + ends.dropLast(1)
+        fun meta(i: Int): HorizonEdge {
+            val ramp = ends[i] > gore
+            return HorizonEdge(ends[i] - starts[i], if (ramp) 2 else if (ends[i] == gore) 6 else 5, motorway = !ramp, ramp = ramp, oneWay = true, roadClass = HorizonRoadClass.MOTORWAY)
+        }
+        fun update(car: Double): HorizonAhead {
+            val i = ends.indexOfFirst { it > car }
+            val edges = ArrayList<HorizonEdge>()
+            var k = i
+            while (k < ends.size) {
+                edges.add(meta(k))
+                if (ends[k] - car >= HorizonAhead.HORIZON_AHEAD_M) break
+                k++
+            }
+            return HorizonAhead.of(route.routeId, car, (car - starts[i]) / (ends[i] - starts[i]), edges)
+        }
+        val gap = plan.evidence().stretches.filter { it.kind == LaneEvidence.Kind.NONE && it.to > first && it.from < second }
+        val windows = DrawingWindows(plan.windows.map { it.from..it.to }, route.lengthMeters)
+        val held = RouteHorizon()
+        var holder = HorizonEvidence.of(plan)
+        var shown = windows.windowAt(0.0)
+        var taken: HorizonAhead? = null
+        var reachable = Double.NaN
+        var moved = false
+        var car = 0.0
+        while (car < gore - 300.0) {
+            held.take(update(car))
+            if (windows.due(car, shown, changing = false)) {
+                val ahead = held.aheadOf(route.routeId)
+                if (shown.holds(car) && ahead != null && ahead !== taken) {
+                    val start = HorizonEvidence.startFor(shown.to, windows.cards)
+                    if (reachable.isNaN() && ahead.to >= second + HorizonLanesLine.MATCH_TOLERANCE_M) {
+                        reachable = gap.sumOf { max(0.0, it.to - max(it.from, start)) }
+                    }
+                    val next = holder.next(ahead, shown.to, windows.cards)
+                    if (upTo(holder.evidence, shown.to) != upTo(next.evidence, shown.to)) moved = true
+                    if (!next.drawsAs(holder)) holder = next
+                    taken = ahead
+                }
+                shown = windows.windowAt(car)
+            }
+            car += 23.0
+        }
+        val bridged = holder.evidence.stretches.filter { it.horizon && it.kind == LaneEvidence.Kind.BRIDGED }
+            .sumOf { b -> gap.sumOf { g -> max(0.0, min(b.to, g.to) - max(b.from, g.from)) } }
+        return Triple(bridged, if (reachable.isNaN()) 0.0 else reachable, moved)
+    }
+
+    @Test
+    fun `on a drive the counts bridge every metre of a gap past the window on screen once the horizon reaches past it`() {
+        for (length in listOf(1_490.0, 2_010.0, 2_530.0, 2_970.0)) {
+            var some = 0
+            for (j in 0 until 33) {
+                val first = 3_010.0 + j * 59.0
+                val (bridged, reachable, moved) = drive(first, length)
+                assertFalse(moved, "a send changed the drawing before the window's end: $length m apart from $first")
+                assertEquals(reachable, bridged, 1e-6, "$length m apart from $first")
+                if (bridged > 0.0) some++
+            }
+            // Most placements leave part of the gap past the window on screen when the horizon first reaches the second point.
+            assertTrue(some >= 22, "$length m apart: bridged at $some of 33")
+        }
     }
 
     @Test

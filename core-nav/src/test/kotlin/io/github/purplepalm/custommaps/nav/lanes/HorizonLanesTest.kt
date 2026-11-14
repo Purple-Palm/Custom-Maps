@@ -60,6 +60,10 @@ class HorizonLanesTest {
 
     private fun LaneEvidence.zoneList(): List<String> = zones.map { "${it.from.dm()}..${it.to.dm()} ${it.cause}" }
 
+    /** The evidence's stretches and zones up to [x], cut there: what a drawing shows before it. */
+    private fun LaneEvidence.upTo(x: Double) =
+        stretches.filter { it.from < x }.map { it.copy(to = minOf(it.to, x)) } to zones.filter { it.from < x }.map { it.copy(to = minOf(it.to, x)) }
+
     @Test
     fun `a gap the route's rules cannot bridge is bridged where the horizon agrees with every listed lane`() {
         val route = gapScene(five, five)
@@ -412,6 +416,65 @@ class HorizonLanesTest {
         val lanes = HorizonLanes.of(plan, ahead)
         val pair = lanes.between.first { it.from == road }
         assertTrue(pair.pieces.none { it.kind == HorizonLanes.Piece.Kind.CHANGE || it.kind == HorizonLanes.Piece.Kind.DIFFERS }, pair.pieces.toString())
+    }
+
+    @Test
+    fun `from a station past the first point a pair is taken from there on, and nothing of it before`() {
+        val route = gapScene(five, five)
+        val plan = SceneLines.planOf(route)
+        val ahead = horizon(route.routeId, *gapEdges(5, 5, 5))
+        val from = p + 410.0
+        val lanes = HorizonLanes.of(plan, ahead, from = from)
+        val pair = lanes.between.single { it.before == 0 }
+        assertEquals(listOf(from, q), listOf(pair.from, pair.to))
+        assertEquals(HorizonConvention.ALL, pair.convention)
+        // The horizon's count from the first point, as it gives it; what the drawing takes from the station on.
+        assertEquals(listOf(HorizonLanes.Count(p, q, 5)), pair.counts)
+        assertEquals(listOf(HorizonLanes.Piece(from, q, HorizonLanes.Piece.Kind.BRIDGED, 5)), pair.pieces)
+        assertEquals(2, pair.stretches)
+        // The road before the station as the plan draws it, the gap bridged past it.
+        assertEquals(
+            listOf("$p..${from.dm()} NONE", "${from.dm()}..${(q - 1_000.0).dm()} BRIDGED 5 horizon", "${(q - 1_000.0).dm()}..$q KNOWN 5"),
+            plan.evidence(lanes).between(p, q),
+        )
+        // Past the far-side road the first stretch between the points ends before the station: not counted.
+        assertEquals(1, HorizonLanes.of(plan, ahead, from = road + 13.0).between.single { it.before == 0 }.stretches)
+        // A pair that ends at the station is none of what is taken from there.
+        assertTrue(HorizonLanes.of(plan, ahead, from = q).between.none { it.before == 0 })
+        assertEquals(1, HorizonLanes.of(plan, ahead, from = q - 0.1).between.count { it.before == 0 })
+    }
+
+    @Test
+    fun `a pair is covered from the tolerance before its first point, every edge end that may lead to it known`() {
+        val route = gapScene(five, five)
+        val plan = SceneLines.planOf(route)
+        val tolerance = HorizonLanesLine.MATCH_TOLERANCE_M
+        // The stretches begin [before] metres before the first point, at the car, its edge ending at the point.
+        fun covered(before: Double): Boolean {
+            val ahead = HorizonAhead.of(route.routeId, p - before, 0.0, listOf(edge(before, 5), edge(1_200.0, 5), edge(1_200.0, 5), edge(1_050.0, 6), edge(400.0, 2, ramp = true)))
+            return HorizonLanes.of(plan, ahead).between.any { it.before == 0 }
+        }
+        assertTrue(covered(tolerance))
+        assertTrue(!covered(tolerance - 0.1))
+    }
+
+    @Test
+    fun `a gain is placed from a station past the first point only where its zone and the zone it replaces lie past it`() {
+        val route = gapScene(List(4) { s() }, five, id = "far-gain")
+        val plan = SceneLines.planOf(route)
+        val ahead = horizon(route.routeId, *gapEdges(4, 4, 5))
+        val zone = 2.0 * LaneTopology.addedTaperMeters(27.0, RoadKind.FREEWAY) + LaneEvidence.ZONE_MIDDLE_METERS
+        assertEquals(road, HorizonLanes.of(plan, ahead, from = road - zone - 0.1).between.first().placed)
+        // From inside its zone: the plan's late opening stays, its zone with it, and nothing of the pair before the station.
+        val from = road - zone + 0.1
+        val inside = HorizonLanes.of(plan, ahead, from = from)
+        val pair = inside.between.first()
+        assertNull(pair.placed)
+        assertTrue(inside.placedGains.isEmpty())
+        assertTrue(pair.pieces.all { it.from >= from }, pair.pieces.toString())
+        val change = LaneEvidence.Zone.Cause.CHANGE
+        assertEquals(plan.evidence().zones.filter { it.cause == change }, plan.evidence(inside).zones.filter { it.cause == change })
+        assertEquals(plan.evidence().upTo(from), plan.evidence(inside).upTo(from))
     }
 
     @Test

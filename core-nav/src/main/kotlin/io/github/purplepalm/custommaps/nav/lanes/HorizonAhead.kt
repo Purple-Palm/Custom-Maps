@@ -145,7 +145,9 @@ class HorizonAhead private constructor(
          * How far ahead the horizon reaches, in metres, as its options ask for once at the navigator's setup: a drawing
          * window reaches at most [io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows.MAX_METERS] less its
          * part behind the car ahead when it is sent, so the counts must already cover that much road; the horizon's own
-         * default of 500 m never would.
+         * default of 500 m never would. A pair of lane points is taken once its second point lies within it, the edge that
+         * leads to its first kept from the updates before where the car has passed it ([after], [TRAIL_M]), and drawn from
+         * the end of the window on screen on: the pair need not fit in one horizon past that window.
          */
         const val HORIZON_AHEAD_M = 3_500.0
 

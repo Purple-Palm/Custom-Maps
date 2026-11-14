@@ -64,12 +64,15 @@ class HorizonLanes private constructor(
     }
 
     /**
-     * Two lane points in a row on one freeway carriageway: [before] and [after], indices into the plan's topology points, at
-     * [from] and [to] metres along the route; [afterNode] is the intersection of the second. [convention]: the reading under
-     * which the horizon's count of the edge that leads to each equals that point's list, [HorizonConvention.NONE] where none
-     * does, and nothing of the horizon is taken. [counts]: the horizon's count between them, as it gives it; [stretches]: how
-     * many of the horizon's stretches lie between them. [placed]: where the plan's gain on the far side opens instead of
-     * late, the edge end where the count rises; null where none is placed. [pieces]: what the drawing takes, in route order.
+     * Two lane points in a row on one freeway carriageway: [before] and [after], indices into the plan's topology points;
+     * what the drawing takes of them lies from [from] to [to] metres along the route, from the first point to the second, or
+     * from where a window's send may first change the drawing where the first lies before that ([of]'s from); [afterNode]
+     * is the intersection of the second. [convention]: the reading under which the horizon's count of the edge that leads
+     * to each equals that point's list, [HorizonConvention.NONE] where none does, and nothing of the horizon is taken.
+     * [counts]: the horizon's count from the first point to the second, as it gives it; [stretches]: how many of the
+     * horizon's stretches lie between [from] and [to]. [placed]: where the plan's gain on the far side opens instead of
+     * late, the edge end where the count rises; null where none is placed. [pieces]: what the drawing takes, in route order,
+     * none before [from].
      */
     data class Between(
         val before: Int,
@@ -95,11 +98,14 @@ class HorizonLanes private constructor(
     /** How many of the horizon's stretches lie between the points it agrees with: those the drawing takes from it. */
     val stretchesUsed: Int get() = between.filter { it.convention != HorizonConvention.NONE }.sumOf { it.stretches }
 
-    /** The pairs of lane points whose first lies at or past [station]: what a drawing window sent from there takes. */
+    /** The pairs of lane points taken from [station] on: what a drawing window sent from there takes. */
     fun from(station: Double): HorizonLanes = HorizonLanes(routeId, between.filter { it.from >= station })
 
-    /** The pairs whose first lies before [station]: what the windows sent before took, which stays. */
+    /** The pairs taken from before [station]: what the windows sent before took, which stays. */
     fun before(station: Double): HorizonLanes = HorizonLanes(routeId, between.filter { it.from < station })
+
+    /** The pairs that [keep] holds for. */
+    fun filter(keep: (Between) -> Boolean): HorizonLanes = HorizonLanes(routeId, between.filter(keep))
 
     /** These pairs and [other]'s, of the same route, in route order. */
     operator fun plus(other: HorizonLanes): HorizonLanes {
@@ -114,33 +120,43 @@ class HorizonLanes private constructor(
         fun none(routeId: String): HorizonLanes = HorizonLanes(routeId, emptyList())
 
         /**
-         * What [plan]'s drawing takes from [ahead], one update of the horizon along the plan's route: every pair of lane
-         * points in a row on one freeway carriageway that the stretches cover entirely, from the car on, an edge ending at
-         * each point within [tolerance] ([HorizonLanesLine.MATCH_TOLERANCE_M]: an intersection's lanes describe its
-         * approach) and the stretches reaching past the second by as much. A pair with an edge of no count, a ramp, a road
-         * that is no motorway or a node where the route turns is left alone, as is one the stretches do not reach.
+         * What [plan]'s drawing takes from [ahead], the horizon along the plan's route as its newest update laid it out with
+         * the stretches kept behind the car ([HorizonAhead.after]), from [from] on: every pair of lane points in a row on one
+         * freeway carriageway whose second point lies past [from], that the stretches cover entirely, from [tolerance]
+         * ([HorizonLanesLine.MATCH_TOLERANCE_M]: an intersection's lanes describe its approach) before the first to as far
+         * past the second, an edge ending at each point within it. Where the first lies before [from], what the drawing takes
+         * of the pair begins at [from]: nothing of it changes the road before, and a gain it would place reaching there stays
+         * late. A pair with an edge of no count, a ramp, a road that is no motorway or a node where the route turns is left
+         * alone, as is one the stretches do not cover.
          */
-        fun of(plan: LanePlan, ahead: HorizonAhead, tolerance: Double = HorizonLanesLine.MATCH_TOLERANCE_M): HorizonLanes {
+        fun of(
+            plan: LanePlan,
+            ahead: HorizonAhead,
+            tolerance: Double = HorizonLanesLine.MATCH_TOLERANCE_M,
+            from: Double = Double.NEGATIVE_INFINITY,
+        ): HorizonLanes {
             val topology = plan.topology
             val routeId = topology.evidence.route.routeId
             if (ahead.routeId != routeId || ahead.stretches.isEmpty()) return none(routeId)
             val out = ArrayList<Between>()
             for (k in 0 until topology.points.size - 1) {
-                between(plan, k, ahead, tolerance)?.let { out.add(it) }
+                between(plan, k, ahead, tolerance, from)?.let { out.add(it) }
             }
             return HorizonLanes(routeId, out)
         }
 
-        /** The pair of the topology's points [k] and k + 1, as [ahead] covers it; null where it is left alone. */
-        private fun between(plan: LanePlan, k: Int, ahead: HorizonAhead, tolerance: Double): Between? {
+        /** The pair of the topology's points [k] and k + 1, as [ahead] covers it from [from] on; null where it is left alone. */
+        private fun between(plan: LanePlan, k: Int, ahead: HorizonAhead, tolerance: Double, from: Double): Between? {
             val topology = plan.topology
             val route = topology.evidence.route
             val nodes = route.nodes
             val a = topology.points[k]
             val b = topology.points[k + 1]
             if (a.run != b.run || a.turns) return null
-            // Covered entirely, from the car on.
-            if (a.station < ahead.from || ahead.to < b.station + tolerance) return null
+            // Something of it past where the drawing may change.
+            if (b.station <= from) return null
+            // Covered entirely: every edge end within the tolerance of either point is known.
+            if (a.station - tolerance < ahead.start || ahead.to < b.station + tolerance) return null
             // Two points of one junction leave nothing between them.
             if (b.station - a.station <= 2.0 * tolerance) return null
             // One freeway carriageway: a freeway leads to the first, and on from it to the second, with no turn between.
@@ -164,15 +180,17 @@ class HorizonLanes private constructor(
                 else -> HorizonConvention.NONE
             }
             val counts = profile(ahead, ia, ib, a.station, b.station, tolerance)
-            val stretches = ib - ia
+            // What the drawing takes begins at the first point, or where it may first change the drawing past it.
+            val clip = max(a.station, from)
+            val stretches = (ia + 1..ib).count { ahead.stretches[it].end > clip }
             if (convention == HorizonConvention.NONE) {
-                return Between(k, k + 1, a.station, b.station, b.node, convention, counts, stretches, null, emptyList())
+                return Between(k, k + 1, clip, b.station, b.node, convention, counts, stretches, null, emptyList())
             }
             val general = convention == HorizonConvention.GENERAL
             val lanes = topology.lanesOf(a.run)
             // The horizon's changes between the points, apart from those at a point itself.
             val changes = counts.dropLast(1).map { it.to }.filter { it > a.station + tolerance && it < b.station - tolerance }
-            val placed = placedGain(plan, k, counts, changes, general, tolerance)
+            val placed = placedGain(plan, k, counts, changes, general, tolerance, clip)
             val moved = placed?.let { x -> addedLanes(topology, k).associate { it.id to x } }.orEmpty()
             val drawn = snapped(drawnProfile(plan, lanes, a.station, b.station, general, moved), counts.map { it.from } + b.station, tolerance)
             val all = if (general) drawnProfile(plan, lanes, a.station, b.station, false, moved) else null
@@ -197,7 +215,16 @@ class HorizonLanes private constructor(
                 pieces.add(Piece(from, x, Piece.Kind.CHANGE, max(1, max(lanesAt(all ?: drawn, from + SAME), lanesAt(all ?: drawn, x - SAME)))))
             }
             pieces.sortWith(compareBy<Piece>({ it.from }, { it.kind.ordinal }))
-            return Between(k, k + 1, a.station, b.station, b.node, convention, counts, stretches, placed, pieces)
+            return Between(k, k + 1, clip, b.station, b.node, convention, counts, stretches, placed, clipped(pieces, clip))
+        }
+
+        /** [pieces] from [clip] on: those that end by then go, one that begins before begins there. */
+        private fun clipped(pieces: List<Piece>, clip: Double): List<Piece> = pieces.mapNotNull { piece ->
+            when {
+                piece.to <= clip + SAME -> null
+                piece.from >= clip -> piece
+                else -> piece.copy(from = clip)
+            }
         }
 
         /** The index of the stretch of [ahead] whose end lies nearest [station], within [tolerance]; null where none does. */
@@ -311,9 +338,10 @@ class HorizonLanes private constructor(
          * before the second, and that edge end lies no later than where the plan opens them, with room for their taper after
          * the first point. Under the reading of the lanes open to every car ([general]) the count says nothing of a lane
          * kept for car pools, so a gain with one among its lanes is never placed: every lane of it would open where the count
-         * rose. Null otherwise: the plan's late opening stays.
+         * rose. Where the drawing may change only from [clip] on, past the first point, the gain's zone, the zone placed late
+         * it replaces and the lanes' tapers must all lie past it. Null otherwise: the plan's late opening stays.
          */
-        private fun placedGain(plan: LanePlan, k: Int, counts: List<Count>, changes: List<Double>, general: Boolean, tolerance: Double): Double? {
+        private fun placedGain(plan: LanePlan, k: Int, counts: List<Count>, changes: List<Double>, general: Boolean, tolerance: Double, clip: Double): Double? {
             val topology = plan.topology
             val alignment = topology.alignments.firstOrNull { it.before == k && it.after == k + 1 } ?: return null
             val b = topology.points[k + 1]
@@ -334,6 +362,9 @@ class HorizonLanes private constructor(
             val route = topology.evidence.route
             val taper = LaneTopology.addedTaperMeters(PlanningSpeed.of(route.nodes[if (b.node > 0) b.node - 1 else b.node]), RoadKind.FREEWAY)
             if (x > added.minOf { it.opens } + SAME || x - taper < a.station + LaneTopology.LEAVE_PAST_POINT_METERS) return null
+            // Nothing before the clip moves: the placed zone, and the zone placed late before the second point that it replaces.
+            val lateFrom = max(a.station, b.station - (2.0 * taper + LaneEvidence.ZONE_MIDDLE_METERS))
+            if (clip > a.station && min(x - zoneMeters(route, x, true), lateFrom) < clip) return null
             return x
         }
 
