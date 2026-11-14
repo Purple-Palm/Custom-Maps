@@ -45,7 +45,7 @@ class RouteHorizonTest {
         assertEquals(listOf(500.0 to 600.0, 600.0 to 700.0, 700.0 to 800.0), joined.stretches.map { it.start to it.end })
         assertEquals(650.0, joined.from)
         assertEquals(true, held.oneWayAt("route-1", 550.0))
-        assertEquals(HorizonRoadClass.PRIMARY, held.roadClassAt("route-1", 750.0))
+        assertEquals(HorizonRoadClass.PRIMARY, held.roadClassAt("route-1", 760.0))
         // A seek far ahead: no edge end of what was held meets the car's edge, the newest alone.
         val seek = HorizonAhead.of("route-1", 3_000.0, 0.5, listOf(edge(oneWay = true, roadClass = HorizonRoadClass.PRIMARY)))
         held.take(seek)

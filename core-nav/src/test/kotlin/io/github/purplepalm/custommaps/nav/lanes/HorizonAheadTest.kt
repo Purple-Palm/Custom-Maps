@@ -130,7 +130,7 @@ class HorizonAheadTest {
             return newer.after(earlier)
         }
         val join = HorizonAhead.JOIN_M
-        assertEquals(10.0, join)
+        assertEquals(12.0, join)
         assertEquals(0.0, joined(join - 0.1).start)
         assertEquals(0.0, joined(-(join - 0.1)).start)
         // The car's edge begins where the earlier one's end lies, whatever the newer update makes of it.
@@ -159,12 +159,12 @@ class HorizonAheadTest {
         val nothing = HorizonAhead.of("route-1", 600.0, 0.2, emptyList())
         assertSame(nothing, nothing.after(earlier))
         // A seek back, behind every edge the earlier update had, and one far past its end: no edge end meets.
-        val back = HorizonAhead.of("route-1", 300.0, 0.4, listOf(edge(500.0)))
+        val back = HorizonAhead.of("route-1", 300.0, 0.35, listOf(edge(500.0)))
         assertSame(back, back.after(HorizonAhead.of("route-1", 1_000.0, 0.0, listOf(edge(500.0)))))
-        val far = HorizonAhead.of("route-1", 5_200.0, 0.4, listOf(edge(500.0)))
+        val far = HorizonAhead.of("route-1", 5_200.0, 0.35, listOf(edge(500.0)))
         assertSame(far, far.after(earlier))
         // An earlier edge end within the join of where the car's short edge begins, yet past where it ends: not that node.
-        val short = HorizonAhead.of("route-1", 502.0, 0.75, listOf(edge(8.0), edge(400.0)))
+        val short = HorizonAhead.of("route-1", 502.0, 0.7, listOf(edge(9.0), edge(400.0)))
         assertSame(short, short.after(HorizonAhead.of("route-1", 0.0, 0.0, listOf(edge(505.0), edge(500.0)))))
     }
 

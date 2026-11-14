@@ -160,10 +160,10 @@ class HorizonAhead private constructor(
          * An edge end of an earlier update at most this far, in metres, from where the edge the car is on begins, as the
          * newer update reckons it, is that same node ([after]): two updates about a second apart lay the road from the car's
          * stations, each moved on to its own moment ([carStation]), so they place the node the car just passed a few metres
-         * apart at most, far less than the road ahead drifts. Half the tolerance within which an edge end leads to a lane
-         * point ([HorizonLanesLine.MATCH_TOLERANCE_M]).
+         * apart at most, far less than the road ahead drifts. Well within the tolerance within which an edge end leads to a
+         * lane point ([HorizonLanesLine.MATCH_TOLERANCE_M]).
          */
-        const val JOIN_M = 10.0
+        const val JOIN_M = 12.0
 
         /**
          * The horizon is updated at most once in this many seconds, as its options ask: the navigation SDK maps the whole
