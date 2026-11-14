@@ -276,6 +276,10 @@ class ToneDirectorTest {
         assertEquals(ToneResult.PLAYED, director.heard.value)
         assertEquals(Played(ToneKind.AHEAD, ToneLevel.SOFT, DuckMode.LITTLE, 300, false, sink.played.last().atMillis), sink.played.last())
         assertEquals("sample", log.of(ToneDirector.TONE_LINE).last()["why"])
+        // Settings opened again: that sound was of another moment.
+        director.forgetHeard()
+        assertNull(director.heard.value)
+        assertEquals(1, sink.played.count { it.level == ToneLevel.SOFT })
     }
 
     @Test

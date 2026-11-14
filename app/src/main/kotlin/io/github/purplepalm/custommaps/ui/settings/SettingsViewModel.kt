@@ -11,6 +11,7 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
@@ -18,6 +19,8 @@ import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.CAR_LIGHT_WHEN_HOT_DEFAULT
 import io.github.purplepalm.custommaps.settings.LANE_COUNTS_HORIZON_DEFAULT
+import io.github.purplepalm.custommaps.settings.SoundSettings
+import io.github.purplepalm.custommaps.sound.ToneResult
 import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenTripCounts
 import io.github.purplepalm.custommaps.token.TokenTrips
@@ -95,6 +98,12 @@ class SettingsViewModel(
     shownLook: Flow<Look> = flowOf(Look.NIGHT),
     /** When Auto would change the shown look next ([NextLook.of]); worked out here, never in composition. */
     private val nextLook: (choice: LookChoice, shown: Look) -> NextLook? = { _, _ -> null },
+    /** What became of the last sound Play the tones or a level chosen asked for (the app's tones). */
+    tonesHeard: Flow<ToneResult?> = flowOf(null),
+    /** Play the tones: the one tone, then the two, as the tones would sound them. */
+    private val playTones: () -> Unit = {},
+    /** The one tone at a level just chosen, so the driver hears it at once. */
+    private val playToneAt: (ToneLevel) -> Unit = {},
 ) : ViewModel() {
 
     private val logBytes = MutableStateFlow<Long?>(null)
@@ -153,11 +162,12 @@ class SettingsViewModel(
 
     /**
      * Everything Settings shows, in one value, for the catalogue ([SettingsCatalogue]): the guidance, the look
-     * and the debug section as above.
+     * and the debug section as above, the tones' settings and what became of the last sound Settings played.
      */
     val values: StateFlow<SettingsValues> =
-        combine(guidance, look, debug) { guidance, look, debug -> SettingsValues(guidance = guidance, look = look, debug = debug) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsValues())
+        combine(guidance, look, debug, settings.sound, tonesHeard) { guidance, look, debug, sound, heard ->
+            SettingsValues(guidance = guidance, look = look, debug = debug, sound = sound, heard = heard)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsValues())
 
     /**
      * What the driver did with a row: stored through the row's own setter, by the options the catalogue lists
@@ -170,6 +180,17 @@ class SettingsViewModel(
             SettingId.LANE_ZOOM -> event.chosen(SettingsCatalogue.laneZooms, ::setLaneZoom)
             SettingId.LANES_ON_MAP -> event.chosen(SettingsCatalogue.lanesOnMap, ::setLanesOnMap)
             SettingId.LANE_COUNTS_HORIZON -> event.switched(::setLaneCountsHorizon)
+            SettingId.TONES -> event.switched { on -> updateSound { it.copy(tones = on) } }
+            SettingId.TONE_BEFORE_TURN -> event.switched { on -> updateSound { it.copy(beforeTurn = on) } }
+            SettingId.TONE_AT_TURN -> event.switched { on -> updateSound { it.copy(atTurn = on) } }
+            SettingId.TONE_DUCK -> event.chosen(SettingsCatalogue.duckModes) { duck -> updateSound { it.copy(duck = duck) } }
+            SettingId.TONE_LEVEL -> event.chosen(SettingsCatalogue.toneLevels) { level ->
+                updateSound { it.copy(level = level) }
+                // Heard at once, at the level chosen, whether or not it could be stored.
+                playToneAt(level)
+            }
+            SettingId.TONE_LEAD_IN -> event.chosen(SettingsCatalogue.toneLeadIns) { millis -> updateSound { it.copy(leadInMillis = millis) } }
+            SettingId.PLAY_TONES -> if (event is SettingsEvent.Acted) playTones()
             SettingId.DAY_NIGHT -> event.chosen(SettingsCatalogue.lookChoices, ::setDayNight)
             SettingId.SIMULATE_DRIVE -> event.switched(::setSimulateDrive)
             SettingId.OWN_ROUTE_LINE -> event.switched(::setOwnRouteLine)
@@ -195,6 +216,21 @@ class SettingsViewModel(
     /** The state this event switched to; nothing for another kind of event. */
     private inline fun SettingsEvent.switched(store: (Boolean) -> Unit) {
         (this as? SettingsEvent.Switched)?.let { store(it.on) }
+    }
+
+    /**
+     * Applies from the next tone on, also during a drive; a tone that sounds now plays to its end. One write of the keys
+     * [change] changes.
+     */
+    private fun updateSound(change: (SoundSettings) -> SoundSettings) {
+        viewModelScope.launch {
+            try {
+                settings.updateSound(change)
+            } catch (e: IOException) {
+                // Not stored, so the row keeps showing the stored value, which the tones keep too.
+                debugLog.error("settings.updateSound", e)
+            }
+        }
     }
 
     /** Applies at once, also during a drive: the screen and the map take the look in the same moment. */

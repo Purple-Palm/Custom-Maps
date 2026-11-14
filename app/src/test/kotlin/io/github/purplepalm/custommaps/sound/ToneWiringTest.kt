@@ -43,4 +43,16 @@ class ToneWiringTest {
         val players = Sources.filesUnder("").filter { (_, file) -> "AudioTrack" in file.readText() }.keys
         assertEquals(setOf("sound/TonePlayer.kt"), players)
     }
+
+    @Test
+    fun `Settings plays the tones and reads what became of them through the same director, and forgets it at each opening`() {
+        val app = Sources.code("ui/CustomMapsApp.kt").lines().map { it.trim() }
+        for (line in listOf("tonesHeard = graph.tones.heard,", "playTones = graph.tones::playDemo,", "playToneAt = graph.tones::playSample,")) {
+            assertTrue(line in app, line)
+        }
+        val opened = app.indexOf("settingsViewModel.refreshLogSize()")
+        assertTrue(opened > 0)
+        assertEquals("LaunchedEffect(Unit) {", app[opened - 1])
+        assertTrue("graph.tones.forgetHeard()" in app.subList(opened, opened + 4))
+    }
 }

@@ -9,8 +9,13 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.DuckPlan
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
 import io.github.purplepalm.custommaps.nav.trip.TripKind
+import io.github.purplepalm.custommaps.settings.SoundSettings
+import io.github.purplepalm.custommaps.sound.ToneResult
 import io.github.purplepalm.custommaps.token.TripsOf
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -42,6 +47,12 @@ enum class SettingId(val key: String?, val tab: SettingsTab, val page: SettingsP
     LANE_ZOOM("lane_zoom", SettingsTab.MAP),
     LANES_ON_MAP("lanes_on_map", SettingsTab.MAP),
     LANE_COUNTS_HORIZON("lane_counts_horizon", SettingsTab.MAP),
+    TONES("tones", SettingsTab.SOUND),
+    TONE_BEFORE_TURN("tone_before_turn", SettingsTab.SOUND),
+    TONE_AT_TURN("tone_at_turn", SettingsTab.SOUND),
+    TONE_DUCK("tone_duck", SettingsTab.SOUND),
+    TONE_LEVEL("tone_level", SettingsTab.SOUND),
+    PLAY_TONES(null, SettingsTab.SOUND),
     DAY_NIGHT("day_night", SettingsTab.APP),
     TOKENS(null, SettingsTab.APP, SettingsPage.TOKEN),
     TRIP_SESSIONS(null, SettingsTab.APP),
@@ -53,6 +64,7 @@ enum class SettingId(val key: String?, val tab: SettingsTab, val page: SettingsP
     SIDE_ROAD_FIELDS("side_road_fields", SettingsTab.APP, SettingsPage.DEBUG),
     CAR_MAP_FPS("car_map_fps", SettingsTab.APP, SettingsPage.DEBUG),
     CAR_LIGHT_WHEN_HOT("car_light_when_hot", SettingsTab.APP, SettingsPage.DEBUG),
+    TONE_LEAD_IN("tone_lead_in_ms", SettingsTab.APP, SettingsPage.DEBUG),
     TEMPORARY_KEY(null, SettingsTab.APP, SettingsPage.DEBUG),
     DEBUG_LOG(null, SettingsTab.APP, SettingsPage.DEBUG),
     SHARE_LOG(null, SettingsTab.APP, SettingsPage.DEBUG),
@@ -142,6 +154,10 @@ data class SettingsValues(
     val guidance: GuidanceSettings = GuidanceSettings(),
     val look: LookSettings = LookSettings(),
     val debug: DebugState = DebugState(),
+    /** The guidance tones' settings. */
+    val sound: SoundSettings = SoundSettings(),
+    /** What became of the last sound Play the tones or a level chosen asked for; null before any, and while one is on its way. */
+    val heard: ToneResult? = null,
     /** Debug builds only: Crash now is offered. */
     val crashNow: Boolean = false,
     /** A debug build signed with the default Android debug key, which the next CI build cannot be installed over. */
@@ -169,6 +185,9 @@ object SettingsCatalogue {
     val lanesOnMap: List<LanesOnMap> = LanesOnMap.entries
     val lookChoices: List<LookChoice> = LookChoice.entries
     val carMapFps: List<Int> = CarFrameRate.TARGETS
+    val duckModes: List<DuckMode> = DuckMode.entries
+    val toneLevels: List<ToneLevel> = ToneLevel.entries
+    val toneLeadIns: List<Int> = DuckPlan.WAKE_LEAD_INS
 
     /** Usage of billable products per month, in the Mapbox console. */
     const val MAPBOX_STATISTICS_URL = "https://console.mapbox.com/account/statistics/"
@@ -176,7 +195,8 @@ object SettingsCatalogue {
     /** The groups of [tab] for [values], in their order; the times of recent trips in [zone]. */
     fun groups(tab: SettingsTab, values: SettingsValues, zone: ZoneId = ZoneId.systemDefault()): List<SettingsGroup> = when (tab) {
         SettingsTab.MAP -> listOf(SettingsGroup(tab, R.string.guidance_title, guidanceRows(values.guidance)))
-        SettingsTab.ROUTE, SettingsTab.SOUND, SettingsTab.TRIPS -> emptyList()
+        SettingsTab.SOUND -> listOf(SettingsGroup(tab, R.string.sound_title, soundRows(values)))
+        SettingsTab.ROUTE, SettingsTab.TRIPS -> emptyList()
         SettingsTab.APP -> listOf(
             SettingsGroup(tab, R.string.day_night_title, listOf(dayNightRow(values.look))),
             SettingsGroup(tab, R.string.token_title, listOf(BlockRow(SettingId.TOKENS))),
@@ -239,6 +259,45 @@ object SettingsCatalogue {
             badge = text(R.string.mapbox_beta_label),
         ),
     )
+
+    /**
+     * The guidance tones: the master switch, and under it each part with its own switch, the dip of the music, the
+     * level and Play the tones. With Tones off the switch is the only row, as nothing under it would sound. Under
+     * Play the tones, why the last sound it played was not heard, where the app knows.
+     */
+    private fun soundRows(values: SettingsValues): List<SettingRow> {
+        val sound = values.sound
+        val tones = switch(SettingId.TONES, R.string.tones_title, sound.tones, R.string.tones_note)
+        if (!sound.tones) return listOf(tones)
+        return listOf(
+            tones,
+            switch(SettingId.TONE_BEFORE_TURN, R.string.tone_before_turn_title, sound.beforeTurn, R.string.tone_before_turn_note),
+            switch(SettingId.TONE_AT_TURN, R.string.tone_at_turn_title, sound.atTurn, R.string.tone_at_turn_note),
+            ChoiceRow(
+                id = SettingId.TONE_DUCK,
+                title = text(R.string.tone_duck_title),
+                options = duckModes.map { ChoiceOption(text(it.titleRes())) },
+                selected = duckModes.indexOf(sound.duck),
+                lines = listOf(RowNote(text(R.string.tone_duck_note))),
+            ),
+            // Choosing a level plays the one tone at it (the view model's).
+            ChoiceRow(
+                id = SettingId.TONE_LEVEL,
+                title = text(R.string.tone_level_title),
+                options = toneLevels.map { ChoiceOption(text(it.titleRes())) },
+                selected = toneLevels.indexOf(sound.level),
+                lines = listOf(RowNote(text(R.string.tone_level_note))),
+            ),
+            ActionRow(
+                id = SettingId.PLAY_TONES,
+                title = text(R.string.play_tones),
+                lines = listOfNotNull(
+                    RowNote(text(R.string.play_tones_note)),
+                    values.heard?.reasonRes()?.let { RowNote(text(it)) },
+                ),
+            ),
+        )
+    }
 
     /**
      * Auto, Day or Night. Under Auto the note says what it does, and when the look changes next: on the
@@ -317,6 +376,16 @@ object SettingsCatalogue {
             )
             // The car's map without its 3D objects while the phone is hot.
             add(switch(SettingId.CAR_LIGHT_WHEN_HOT, R.string.debug_car_light_when_hot, debug.carLightWhenHot, R.string.debug_car_light_when_hot_note))
+            // The silence in front of a tone on a Bluetooth output that may be asleep, to find the shortest that wakes it.
+            add(
+                ChoiceRow(
+                    id = SettingId.TONE_LEAD_IN,
+                    title = text(R.string.debug_tone_lead_in),
+                    options = toneLeadIns.map { ChoiceOption(RowText.Plain(it.toString())) },
+                    selected = toneLeadIns.indexOf(values.sound.leadInMillis),
+                    lines = listOf(RowNote(text(R.string.debug_tone_lead_in_note))),
+                ),
+            )
             if (values.temporaryDebugKey) add(InfoRow(SettingId.TEMPORARY_KEY, null, listOf(RowNote(text(R.string.debug_temporary_key), LineTone.WARNING))))
             add(
                 InfoRow(
@@ -428,6 +497,29 @@ private fun LanesOnMap.noteRes(): Int = when (this) {
     LanesOnMap.OFF -> R.string.lanes_on_map_off_note
     LanesOnMap.MAPBOX -> R.string.lanes_on_map_mapbox_note
     LanesOnMap.APP -> R.string.lanes_on_map_app_note
+}
+
+@StringRes
+private fun DuckMode.titleRes(): Int = when (this) {
+    DuckMode.OFF -> R.string.tone_duck_off
+    DuckMode.LITTLE -> R.string.tone_duck_little
+    DuckMode.MORE -> R.string.tone_duck_more
+}
+
+@StringRes
+private fun ToneLevel.titleRes(): Int = when (this) {
+    ToneLevel.SOFT -> R.string.tone_level_soft
+    ToneLevel.NORMAL -> R.string.tone_level_normal
+    ToneLevel.LOUD -> R.string.tone_level_loud
+}
+
+/** Why a sound was not heard, where the app knows it; none for one played, nor for a failure it cannot name. */
+@StringRes
+private fun ToneResult.reasonRes(): Int? = when (this) {
+    ToneResult.VOLUME_ZERO -> R.string.play_tones_volume_zero
+    ToneResult.IN_CALL -> R.string.play_tones_in_call
+    ToneResult.NO_FOCUS -> R.string.play_tones_no_focus
+    ToneResult.PLAYED, ToneResult.FAILED -> null
 }
 
 @StringRes

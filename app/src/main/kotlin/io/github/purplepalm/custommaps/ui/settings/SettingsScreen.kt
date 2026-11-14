@@ -36,10 +36,14 @@ import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
+import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
 import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
+import io.github.purplepalm.custommaps.settings.SoundSettings
+import io.github.purplepalm.custommaps.sound.ToneResult
 import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
@@ -264,8 +268,8 @@ private fun GroupPreview(look: Look, groups: List<SettingsGroup>) {
 }
 
 /** The whole page, its switches one on and one off, on a narrow phone and with a large font. */
-@Preview(name = "settings", widthDp = 360, heightDp = 2600)
-@Preview(name = "settings, large font", widthDp = 360, heightDp = 3200, fontScale = 1.3f)
+@Preview(name = "settings", widthDp = 360, heightDp = 3600)
+@Preview(name = "settings, large font", widthDp = 360, heightDp = 4600, fontScale = 1.3f)
 @Composable
 private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: Look) {
     CustomMapsTheme(look) {
@@ -323,4 +327,21 @@ private fun GuidanceGroupPreview(@PreviewParameter(LookParameter::class) look: L
         GuidanceSettings(lanesOnMap = LanesOnMap.MAPBOX, laneCountsHorizon = false),
     )
     GroupPreview(look, guidance.flatMap { SettingsCatalogue.groups(SettingsTab.MAP, SettingsValues(guidance = it)) })
+}
+
+/**
+ * The Sound group on a narrow phone with every font size, by day and at night: every tone on, with the line under Play the
+ * tones when the media volume was at zero; More and Loud, the widest words of their rows; and Tones off, its one row.
+ */
+@Preview(name = "sound", widthDp = 360)
+@Preview(name = "sound, large font", widthDp = 360, fontScale = 1.3f)
+@Preview(name = "sound, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun SoundGroupPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    val sounds = listOf(
+        SettingsValues(heard = ToneResult.VOLUME_ZERO),
+        SettingsValues(sound = SoundSettings(duck = DuckMode.MORE, level = ToneLevel.LOUD)),
+        SettingsValues(sound = SoundSettings(tones = false)),
+    )
+    GroupPreview(look, sounds.flatMap { SettingsCatalogue.groups(SettingsTab.SOUND, it) })
 }

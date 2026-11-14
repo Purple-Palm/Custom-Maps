@@ -458,6 +458,7 @@ class DataStoreAppSettingsTest {
         settings.setCarMapFps(60)
         settings.setCarLightWhenHot(false)
         settings.setSideRoadFields(true)
+        settings.updateSound { SoundSettings(tones = false, beforeTurn = false, atTurn = false, duck = DuckMode.OFF, level = ToneLevel.LOUD, leadInMillis = 0) }
         assertEquals(DataStoreAppSettings.KEYS, raw().keys)
     }
 

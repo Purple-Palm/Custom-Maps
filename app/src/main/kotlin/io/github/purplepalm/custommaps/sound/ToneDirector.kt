@@ -175,6 +175,11 @@ class ToneDirector(
         offer(ToneKind.AHEAD, demoLevel = level) { heardState.value = it }
     }
 
+    /** Settings opens again: what became of a sound asked for before is not shown any more, being of another moment. */
+    fun forgetHeard() {
+        heardState.value = null
+    }
+
     /** Whether no tone of the drive may sound: Tones off, or another app guides on the car's screen. */
     private fun silent(): Boolean = !sound.tones || carYielded
 

@@ -95,9 +95,16 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                     tokens = graph.tokenStore.list,
                     shownLook = graph.lookController.look,
                     nextLook = graph::nextLook,
+                    tonesHeard = graph.tones.heard,
+                    playTones = graph.tones::playDemo,
+                    playToneAt = graph.tones::playSample,
                 )
             }
-            LaunchedEffect(Unit) { settingsViewModel.refreshLogSize() }
+            LaunchedEffect(Unit) {
+                settingsViewModel.refreshLogSize()
+                // What Play the tones heard the last time Settings was open belongs to that time.
+                graph.tones.forgetHeard()
+            }
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()
             val values by settingsViewModel.values.collectAsStateWithLifecycle()
             // Debug builds only: read once from the app's own signing certificate.

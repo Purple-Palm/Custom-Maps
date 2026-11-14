@@ -168,6 +168,30 @@
     <string name="lane_counts_horizon_note">Mapbox\'s electronic horizon, a beta. Mapbox may end its free use.</string>
     <string name="mapbox_beta_label">Mapbox beta</string>
 
+    <string name="sound_title">Sound</string>
+    <string name="tones_title">Tones</string>
+    <string name="tones_note">Soft chimes of the app\'s own. They follow the media volume.</string>
+    <string name="tone_before_turn_title">Before a turn</string>
+    <string name="tone_before_turn_note">One tone about 25 seconds before a turn, an exit, a lane choice or the destination.</string>
+    <string name="tone_at_turn_title">Two tones at the turn</string>
+    <string name="tone_at_turn_note">Two tones about 7 seconds before it.</string>
+    <string name="tone_duck_title">Lower the music</string>
+    <string name="tone_duck_off">Off</string>
+    <string name="tone_duck_little">A little</string>
+    <string name="tone_duck_more">More</string>
+    <string name="tone_duck_note">A little: a short dip. A podcast pauses for that moment; Off leaves it alone.</string>
+    <string name="tone_level_title">Tone level</string>
+    <string name="tone_level_soft">Soft</string>
+    <string name="tone_level_normal">Normal</string>
+    <string name="tone_level_loud">Loud</string>
+    <string name="tone_level_note">Against the music. The media volume sets the rest. A level chosen plays the one tone at it.</string>
+    <string name="play_tones">Play the tones</string>
+    <string name="play_tones_note">The one tone, then the two.</string>
+    <!-- Why the tones of Play the tones were not heard, in one line under it. -->
+    <string name="play_tones_volume_zero">The media volume is at zero</string>
+    <string name="play_tones_in_call">A call is active</string>
+    <string name="play_tones_no_focus">Another app holds the sound</string>
+
     <string name="debug_title">Debug</string>
     <string name="trip_sessions_title">Trip sessions</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
@@ -208,6 +232,8 @@
     <string name="debug_car_map_fps_note">How many frames a second the map on the car\'s screen draws, to compare 30 with 60 in the car. The car may show fewer than the map draws, since it shows the app\'s screen at a rate of its own, and 60 costs the phone more power and heat.</string>
     <string name="debug_car_light_when_hot">Lighter car map when hot</string>
     <string name="debug_car_light_when_hot_note">While the phone is hot, the map on the car\'s screen leaves out its 3D buildings, landmarks and trees, to draw less, and shows them again once the phone has been cooler for two minutes. The phone\'s own map keeps them. Off: the car\'s map always shows them.</string>
+    <string name="debug_tone_lead_in">Tone lead-in on Bluetooth</string>
+    <string name="debug_tone_lead_in_note">Milliseconds of silence before a tone when nothing plays and a Bluetooth output is connected, so that an output asleep wakes before the tone starts.</string>
     <string name="debug_crash_now">Crash now</string>
     <string name="debug_crash_now_note">Debug builds only. Ends the app at once with an error, as a crash would, to check that the crash and how the app ended are in the debug log.</string>
     <string name="debug_crash_now_title">Crash the app now?</string>

@@ -8,11 +8,15 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.LogBegan
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.FakeAppSettings
+import io.github.purplepalm.custommaps.settings.SoundSettings
+import io.github.purplepalm.custommaps.sound.ToneResult
 import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
@@ -596,22 +600,26 @@ class SettingsViewModelTest {
     @Test
     fun `a switch of the catalogue stores through its own setter`() = runTest(dispatcher) {
         val viewModel = viewModelWithValues()
-        val stored = mapOf(
-            SettingId.SIMULATE_DRIVE to settings.simulateDrive,
-            SettingId.OWN_ROUTE_LINE to settings.ownRouteLine,
-            SettingId.MEASURE_OWN_LANES to settings.measureOwnLanes,
-            SettingId.SIDE_ROAD_FIELDS to settings.sideRoadFields,
-            SettingId.CAR_LIGHT_WHEN_HOT to settings.carLightWhenHot,
-            SettingId.LANE_COUNTS_HORIZON to settings.laneCountsHorizon,
+        val stored: Map<SettingId, () -> Boolean> = mapOf(
+            SettingId.SIMULATE_DRIVE to { settings.simulateDrive.value },
+            SettingId.OWN_ROUTE_LINE to { settings.ownRouteLine.value },
+            SettingId.MEASURE_OWN_LANES to { settings.measureOwnLanes.value },
+            SettingId.SIDE_ROAD_FIELDS to { settings.sideRoadFields.value },
+            SettingId.CAR_LIGHT_WHEN_HOT to { settings.carLightWhenHot.value },
+            SettingId.LANE_COUNTS_HORIZON to { settings.laneCountsHorizon.value },
+            SettingId.TONE_BEFORE_TURN to { settings.sound.value.beforeTurn },
+            SettingId.TONE_AT_TURN to { settings.sound.value.atTurn },
+            // Last: off, it hides the two above.
+            SettingId.TONES to { settings.sound.value.tones },
         )
         // Every switch row of the page is one of these.
         val switches = SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.filterIsInstance<SwitchRow>().map { it.id }.toSet()
         assertEquals(stored.keys, switches)
-        for ((id, flow) in stored) {
-            val now = !flow.value
+        for ((id, value) in stored) {
+            val now = !value()
             viewModel.onEvent(SettingsEvent.Switched(id, now))
             runCurrent()
-            assertEquals(now, flow.value, "$id")
+            assertEquals(now, value(), "$id")
             // And the row shows what was stored.
             val row = SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.single { it.id == id } as SwitchRow
             assertEquals(now, row.on, "$id")
@@ -653,8 +661,63 @@ class SettingsViewModelTest {
             assertEquals(fps, settings.carMapFps.value)
             assertEquals(index, selected(SettingId.CAR_MAP_FPS))
         }
+        for ((index, duck) in SettingsCatalogue.duckModes.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.TONE_DUCK, index))
+            runCurrent()
+            assertEquals(duck, settings.sound.value.duck)
+            assertEquals(index, selected(SettingId.TONE_DUCK))
+        }
+        for ((index, level) in SettingsCatalogue.toneLevels.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.TONE_LEVEL, index))
+            runCurrent()
+            assertEquals(level, settings.sound.value.level)
+            assertEquals(index, selected(SettingId.TONE_LEVEL))
+        }
+        for ((index, millis) in SettingsCatalogue.toneLeadIns.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.TONE_LEAD_IN, index))
+            runCurrent()
+            assertEquals(millis, settings.sound.value.leadInMillis)
+            assertEquals(index, selected(SettingId.TONE_LEAD_IN))
+        }
+        // Each choice wrote its own part of the tones' settings only.
+        assertEquals(SoundSettings(duck = DuckMode.MORE, level = ToneLevel.LOUD, leadInMillis = 600), settings.sound.value)
         assertEquals(emptyList<String>(), archive.logged)
     }
+
+    @Test
+    fun `Play the tones plays them, a level chosen plays the one tone at it, and why the tones were not heard shows under the button`() =
+        runTest(dispatcher) {
+            val heard = MutableStateFlow<ToneResult?>(null)
+            val played = mutableListOf<String>()
+            val viewModel = SettingsViewModel(
+                tripLog, settings, archive, now = { now }, installedAt = { installedAt },
+                tonesHeard = heard, playTones = { played += "demo" }, playToneAt = { played += "sample ${it.name}" },
+            ).also {
+                it.values.launchIn(backgroundScope)
+                runCurrent()
+            }
+            fun playRow() = SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.single { it.id == SettingId.PLAY_TONES } as ActionRow
+            viewModel.onEvent(SettingsEvent.Acted(SettingId.PLAY_TONES))
+            // Only the button plays them.
+            viewModel.onEvent(SettingsEvent.Switched(SettingId.PLAY_TONES, true))
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.PLAY_TONES, 0))
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.TONE_LEVEL, SettingsCatalogue.toneLevels.indexOf(ToneLevel.SOFT)))
+            runCurrent()
+            assertEquals(listOf("demo", "sample SOFT"), played)
+            assertEquals(ToneLevel.SOFT, settings.sound.value.level)
+            assertEquals(listOf(RowNote(RowText.Res(R.string.play_tones_note))), playRow().lines)
+            heard.value = ToneResult.VOLUME_ZERO
+            runCurrent()
+            assertEquals(ToneResult.VOLUME_ZERO, viewModel.values.value.heard)
+            assertEquals(RowNote(RowText.Res(R.string.play_tones_volume_zero)), playRow().lines.last())
+            // A level that cannot be stored is still heard at once; the row keeps the stored one.
+            settings.storageFull = true
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.TONE_LEVEL, SettingsCatalogue.toneLevels.indexOf(ToneLevel.LOUD)))
+            runCurrent()
+            assertEquals("sample LOUD", played.last())
+            assertEquals(ToneLevel.SOFT, viewModel.values.value.sound.level)
+            assertEquals(listOf("error"), archive.logged)
+        }
 
     @Test
     fun `an option the row does not have, or an event of another kind, stores nothing`() = runTest(dispatcher) {
@@ -676,6 +739,10 @@ class SettingsViewModelTest {
         assertFalse(settings.sideRoadFields.value)
         assertFalse(viewModel.values.value.debug.sideRoadFields)
         assertEquals(listOf("error"), archive.logged)
+        viewModel.onEvent(SettingsEvent.Switched(SettingId.TONES, false))
+        runCurrent()
+        assertTrue(viewModel.values.value.sound.tones)
+        assertEquals(listOf("error", "error"), archive.logged)
     }
 
     @Test

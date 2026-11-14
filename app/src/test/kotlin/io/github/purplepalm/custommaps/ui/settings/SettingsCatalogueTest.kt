@@ -7,10 +7,14 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.trip.MonthCount
 import io.github.purplepalm.custommaps.nav.trip.TripKind
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
+import io.github.purplepalm.custommaps.settings.SoundSettings
+import io.github.purplepalm.custommaps.sound.ToneResult
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
 import java.time.Instant
@@ -64,7 +68,15 @@ class SettingsCatalogueTest {
         val groups = SettingsCatalogue.page(everything, ZoneOffset.UTC)
         assertEquals(groups.map { it.tab }.sortedBy { it.ordinal }, groups.map { it.tab })
         assertEquals(
-            listOf(R.string.guidance_title, R.string.day_night_title, R.string.token_title, R.string.trip_sessions_title, R.string.debug_title, R.string.about_title),
+            listOf(
+                R.string.guidance_title,
+                R.string.sound_title,
+                R.string.day_night_title,
+                R.string.token_title,
+                R.string.trip_sessions_title,
+                R.string.debug_title,
+                R.string.about_title,
+            ),
             groups.map { it.title },
         )
         // Each row sits in a group of its own tab.
@@ -73,11 +85,12 @@ class SettingsCatalogueTest {
     }
 
     @Test
-    fun `the debug page holds the Debug switches and the car's frames`() {
+    fun `the debug page holds the Debug switches, the car's frames and the tones' lead-in`() {
         assertEquals(
-            setOf("simulate_drive", "own_route_line", "measure_own_lanes", "side_road_fields", "car_map_fps", "car_light_when_hot"),
+            setOf("simulate_drive", "own_route_line", "measure_own_lanes", "side_road_fields", "car_map_fps", "car_light_when_hot", "tone_lead_in_ms"),
             SettingsCatalogue.keysOn(SettingsPage.DEBUG),
         )
+        assertEquals(setOf("tones", "tone_before_turn", "tone_at_turn", "tone_duck", "tone_level"), SettingsCatalogue.keysOn(SettingsTab.SOUND))
         assertEquals(emptySet<String>(), SettingsCatalogue.keysOn(SettingsPage.TOKEN))
         assertEquals(setOf("camera_style", "lane_zoom", "lanes_on_map", "lane_counts_horizon"), SettingsCatalogue.keysOn(SettingsTab.MAP))
         assertTrue("day_night" in SettingsCatalogue.keysOn(SettingsTab.APP))
@@ -195,5 +208,67 @@ class SettingsCatalogueTest {
         }
         assertTrue(row<SwitchRow>(SettingId.LANE_COUNTS_HORIZON, everything.copy(guidance = GuidanceSettings(laneCountsHorizon = true))).on)
         assertFalse(row<SwitchRow>(SettingId.LANE_COUNTS_HORIZON, everything.copy(guidance = GuidanceSettings(laneCountsHorizon = false))).on)
+    }
+
+    @Test
+    fun `the Sound group has the tones' rows in their order, and Tones off hides every row below it`() {
+        val sound = SettingsCatalogue.groups(SettingsTab.SOUND, everything).single()
+        assertEquals(R.string.sound_title, sound.title)
+        assertEquals(
+            listOf(SettingId.TONES, SettingId.TONE_BEFORE_TURN, SettingId.TONE_AT_TURN, SettingId.TONE_DUCK, SettingId.TONE_LEVEL, SettingId.PLAY_TONES),
+            sound.rows.map { it.id },
+        )
+        val off = everything.copy(sound = SoundSettings(tones = false))
+        val alone = SettingsCatalogue.groups(SettingsTab.SOUND, off).single().rows
+        assertEquals(listOf(SettingId.TONES), alone.map { it.id })
+        assertFalse((alone.single() as SwitchRow).on)
+        // The Debug page's lead-in stays: it is no row under Tones.
+        assertTrue(rows(off).any { it.id == SettingId.TONE_LEAD_IN })
+        assertEquals(listOf(RowNote(RowText.Res(R.string.tones_note))), alone.single().lines)
+    }
+
+    @Test
+    fun `the tones' switches and choices show the stored values`() {
+        val parts = everything.copy(sound = SoundSettings(beforeTurn = false, atTurn = true))
+        assertFalse(row<SwitchRow>(SettingId.TONE_BEFORE_TURN, parts).on)
+        assertTrue(row<SwitchRow>(SettingId.TONE_AT_TURN, parts).on)
+        assertTrue(row<SwitchRow>(SettingId.TONE_BEFORE_TURN).on)
+        assertFalse(row<SwitchRow>(SettingId.TONE_AT_TURN, everything.copy(sound = SoundSettings(atTurn = false))).on)
+        for (duck in DuckMode.entries) {
+            val chosen = row<ChoiceRow>(SettingId.TONE_DUCK, everything.copy(sound = SoundSettings(duck = duck)))
+            assertEquals(duck, SettingsCatalogue.duckModes[chosen.selected])
+            assertFalse(chosen.folds, "three segments")
+        }
+        for (level in ToneLevel.entries) {
+            assertEquals(level, SettingsCatalogue.toneLevels[row<ChoiceRow>(SettingId.TONE_LEVEL, everything.copy(sound = SoundSettings(level = level))).selected])
+        }
+        for (millis in listOf(0, 150, 300, 600)) {
+            val chosen = row<ChoiceRow>(SettingId.TONE_LEAD_IN, everything.copy(sound = SoundSettings(leadInMillis = millis)))
+            assertEquals(millis, SettingsCatalogue.toneLeadIns[chosen.selected])
+            assertEquals(listOf("0", "150", "300", "600").map { ChoiceOption(RowText.Plain(it)) }, chosen.options)
+        }
+        // A little and Normal when never chosen, 300 ms in front.
+        assertEquals(DuckMode.LITTLE, SettingsCatalogue.duckModes[row<ChoiceRow>(SettingId.TONE_DUCK).selected])
+        assertEquals(ToneLevel.NORMAL, SettingsCatalogue.toneLevels[row<ChoiceRow>(SettingId.TONE_LEVEL).selected])
+        assertEquals(300, SettingsCatalogue.toneLeadIns[row<ChoiceRow>(SettingId.TONE_LEAD_IN).selected])
+    }
+
+    @Test
+    fun `under Play the tones one line says why they were not heard, where the app knows`() {
+        val reasons = mapOf(
+            ToneResult.VOLUME_ZERO to R.string.play_tones_volume_zero,
+            ToneResult.IN_CALL to R.string.play_tones_in_call,
+            ToneResult.NO_FOCUS to R.string.play_tones_no_focus,
+        )
+        val note = RowNote(RowText.Res(R.string.play_tones_note))
+        for ((heard, reason) in reasons) {
+            // In the notes' own tone: a line to read when parked, not a warning.
+            assertEquals(listOf(note, RowNote(RowText.Res(reason), LineTone.NOTE)), row<ActionRow>(SettingId.PLAY_TONES, everything.copy(heard = heard)).lines)
+        }
+        for (heard in listOf(null, ToneResult.PLAYED, ToneResult.FAILED)) {
+            assertEquals(listOf(note), row<ActionRow>(SettingId.PLAY_TONES, everything.copy(heard = heard)).lines, "$heard")
+        }
+        assertTrue(row<ActionRow>(SettingId.PLAY_TONES).enabled)
+        assertEquals(null, row<ActionRow>(SettingId.PLAY_TONES).confirm)
     }
 }

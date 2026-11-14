@@ -304,7 +304,7 @@ class DataStoreAppSettings(
             linkedSetOf(
                 SIMULATE_DRIVE.name, CAMERA_STYLE.name, LANE_ZOOM.name, LANES_ON_MAP.name, LANE_COUNTS_HORIZON.name, DAY_NIGHT.name,
                 OWN_ROUTE_LINE.name, MEASURE_OWN_LANES.name, CAR_MAP_FPS.name, CAR_LIGHT_WHEN_HOT.name, SIDE_ROAD_FIELDS.name,
-            )
+            ).apply { addAll(SOUND.keyNames) }
         }
         private val SIMULATE_DRIVE = booleanPreferencesKey("simulate_drive")
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
