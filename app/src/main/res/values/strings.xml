@@ -203,6 +203,8 @@
     <string name="debug_car_map_fps">Car map frames</string>
     <string name="debug_car_map_fps_value">%1$d a second</string>
     <string name="debug_car_map_fps_note">How many frames a second the map on the car\'s screen draws, to compare 30 with 60 in the car. The car may show fewer than the map draws, since it shows the app\'s screen at a rate of its own, and 60 costs the phone more power and heat.</string>
+    <string name="debug_car_light_when_hot">Lighter car map when hot</string>
+    <string name="debug_car_light_when_hot_note">While the phone is hot, the map on the car\'s screen leaves out its 3D buildings, landmarks and trees, to draw less, and shows them again once the phone has been cooler for two minutes. The phone\'s own map keeps them. Off: the car\'s map always shows them.</string>
     <string name="debug_crash_now">Crash now</string>
     <string name="debug_crash_now_note">Debug builds only. Ends the app at once with an error, as a crash would, to check that the crash and how the app ended are in the debug log.</string>
     <string name="debug_crash_now_title">Crash the app now?</string>

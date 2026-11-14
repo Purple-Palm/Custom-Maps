@@ -124,6 +124,23 @@ class MapPaletteTest {
     }
 
     @Test
+    fun `the car's lighter map changes the 3D objects alone, off in both looks`() {
+        for (look in listOf(Look.NIGHT, Look.DAY)) {
+            for (key in MapPalette.keys) {
+                assertEquals(key.value(look), key.value(look, light = false), "${key.name} $look")
+                val light = key.value(look, light = true)
+                if (key.name == MapPalette.SHOW_3D_OBJECTS) {
+                    assertEquals(LookValue.Flag(true), key.value(look), "$look shows them")
+                    assertEquals(LookValue.Flag(false), light, "$look")
+                } else {
+                    assertEquals(key.value(look), light, "${key.name} $look")
+                }
+            }
+        }
+        assertEquals(1, MapPalette.keys.count { it.name == MapPalette.SHOW_3D_OBJECTS })
+    }
+
+    @Test
     fun `every colour is written as #RRGGBB`() {
         val colours = MapPalette.keys.flatMap { listOf(it.night, it.day) }.filterIsInstance<LookValue.Colour>()
         assertTrue(colours.isNotEmpty())

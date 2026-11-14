@@ -41,6 +41,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -58,7 +59,8 @@ import kotlinx.coroutines.launch
  *   the drive belongs to the engine and outlives the session.
  * - **The map** is made once the gate is ready and the app's first look is decided, again for a new
  *   token, and let go of when the session ends ([CarMapStep]). It takes the phone's camera style, lane
- *   zoom, Lanes on the map and Debug switches, pins the destination of the preview or the drive, and
+ *   zoom, Lanes on the map and Debug switches, and the phone's thermal status, by which it gets lighter
+ *   while the phone is hot; it pins the destination of the preview or the drive, and
  *   shows the app's one look, the phone's ([CarParts.look]): the session starts the look if no screen
  *   has yet (the host may have started the process with no activity), keeps it deciding while the
  *   session is started, as the phone's activity does, and hands the look to the map as the phone's
@@ -341,6 +343,12 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             follow(settings.ownRouteLine, "setOwnRouteLine", created::setOwnRouteLine)
             // The car's map alone: 30 or 60 frames a second, from the Debug switch.
             follow(settings.frameTarget, "setFrameTarget", created::setFrameTarget)
+            // And lighter while the phone is hot, unless its Debug switch is off: the switch with the
+            // status, so that a map made while the phone is hot waits for the stored switch.
+            follow(combine(settings.lightWhenHot, settings.phoneThermal, ::Pair), "carLight") { (enabled, status) ->
+                created.setLightWhenHot(enabled)
+                created.setPhoneThermal(status)
+            }
             // The place of the preview, the drive and the arrival, as the phone pins it.
             follow(parts.navigation.destination, "showPlace", created::showPlace)
             follow(created.cameraMode, "cameraMode") { cameraMode.value = it }

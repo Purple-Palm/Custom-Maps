@@ -122,6 +122,7 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                 onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
                 onMeasureOwnLanesChange = settingsViewModel::setMeasureOwnLanes,
                 onCarMapFpsChange = settingsViewModel::setCarMapFps,
+                onCarLightWhenHotChange = settingsViewModel::setCarLightWhenHot,
                 onShareLog = {
                     scope.launch {
                         val files = settingsViewModel.exportLog(graph.debugLogHeader())

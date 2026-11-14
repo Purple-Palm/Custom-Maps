@@ -74,6 +74,7 @@ class DataStoreAppSettingsTest {
         assertEquals(LanesOnMap.OFF, settings.lanesOnMap.first())
         assertFalse(settings.ownRouteLine.first(), "the SDK draws the route line unless the Debug switch says otherwise")
         assertTrue(settings.laneCountsHorizon.first(), "lane counts from the electronic horizon until switched off")
+        assertTrue(settings.carLightWhenHot.first(), "a lighter car map while the phone is hot until switched off")
         // Read, never written: a later default reaches a phone that never chose.
         assertEquals(emptyMap<String, Any>(), raw())
         assertEquals(emptyList<Pair<String, Any>>(), changes)
@@ -263,6 +264,21 @@ class DataStoreAppSettingsTest {
         settings.setCarMapFps(30)
         assertEquals(30, settings.carMapFps.first())
         assertEquals(listOf<Pair<String, Any>>("car_map_fps" to 60, "car_map_fps" to 30), changes)
+    }
+
+    @Test
+    fun `the lighter car map when hot is on until switched off, stored under its own key, each change reported`() = runBlocking {
+        assertTrue(settings.carLightWhenHot.first())
+        assertEquals(emptyMap<String, Any>(), raw(), "on is read, never written")
+        settings.setCarLightWhenHot(false)
+        assertFalse(settings.carLightWhenHot.first())
+        assertEquals(mapOf<String, Any>("car_light_when_hot" to false), raw())
+        assertEquals(30, settings.carMapFps.first(), "the other Debug switches are their own")
+        assertFalse(settings.measureOwnLanes.first())
+        settings.setCarLightWhenHot(true)
+        assertTrue(settings.carLightWhenHot.first())
+        assertEquals(mapOf<String, Any>("car_light_when_hot" to true), raw())
+        assertEquals(listOf<Pair<String, Any>>("car_light_when_hot" to false, "car_light_when_hot" to true), changes)
     }
 
     @Test

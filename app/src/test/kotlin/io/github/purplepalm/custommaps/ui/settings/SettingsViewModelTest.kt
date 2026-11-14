@@ -444,6 +444,33 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `the car's map gets lighter when hot until the switch is turned off, and the choice is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        runCurrent()
+        assertTrue(viewModel.debug.value.carLightWhenHot)
+        viewModel.setCarLightWhenHot(false)
+        runCurrent()
+        assertFalse(settings.carLightWhenHot.value)
+        assertFalse(viewModel.debug.value.carLightWhenHot)
+        assertEquals(30, viewModel.debug.value.carMapFps, "the other Debug switches are their own")
+        assertFalse(viewModel.debug.value.measureOwnLanes)
+        viewModel.setCarLightWhenHot(true)
+        runCurrent()
+        assertTrue(viewModel.debug.value.carLightWhenHot)
+    }
+
+    @Test
+    fun `a lighter car map switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setCarLightWhenHot(false)
+        runCurrent()
+        assertTrue(viewModel.debug.value.carLightWhenHot)
+        assertTrue(settings.carLightWhenHot.value)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
     fun `an own route line switch that cannot be stored stays as it was`() = runTest(dispatcher) {
         settings.storageFull = true
         val viewModel = viewModel()

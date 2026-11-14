@@ -1022,6 +1022,21 @@ internal class MapScene(
     }
 
     /**
+     * The car's lighter map while the phone is hot ([io.github.purplepalm.custommaps.nav.car.CarLightRule]):
+     * the basemap's 3D objects off, whatever the look says, from now on in every look and every style
+     * load, until it is false again and the look has its own. Written at once on a style whose data is
+     * there; a style still loading takes it with its look. Only the car's map calls it: the phone's
+     * keeps its look's own.
+     */
+    fun setLight(light: Boolean) {
+        if (!mapboxMap.isValid()) return
+        val look = lookApplier.setLight(light) ?: return
+        MapLook.writeObjects(basemap, look, light)?.let { error ->
+            debugLog.log("error", mapOf("where" to "carLight", "error" to error))
+        }
+    }
+
+    /**
      * Shows the puck right after the driver grants location access. Without this the platform
      * provider notices the new permission only at its next check, which can take a few seconds.
      */
@@ -1146,10 +1161,16 @@ internal class MapScene(
         ).filterValues { it != null }
     }
 
-    /** Writes what [writes] says is due now: the basemap's config with its theme, and the route line's colours. */
+    /**
+     * Writes what [writes] says is due now: the basemap's config with its theme, the car's lighter map
+     * composed in ([setLight]), and the route line's colours.
+     */
     private fun applyLook(writes: LookApplier.Writes): MapLook.Written {
-        val written =
-            if (writes.basemap == null && writes.theme == null) MapLook.Written.NONE else MapLook.write(basemap, writes.basemap, writes.theme, styleSnapshot)
+        val written = if (writes.basemap == null && writes.theme == null) {
+            MapLook.Written.NONE
+        } else {
+            MapLook.write(basemap, writes.basemap, writes.theme, styleSnapshot, lookApplier.light)
+        }
         writes.routeLine?.let { look -> style?.let { applyRouteLineLook(it, look) } }
         return written
     }
@@ -1697,8 +1718,9 @@ internal class MapScene(
      * left with. The screen adds its own at the end
      * ([Host.cameraFields]): the car its frame clock's ticks of the second ("clock" with "vsyncTicks"
      * and "timerTicks"), the cap on its surface's frames ("maxFps"), where it comes from ("capFrom":
-     * display or timer for the display's own cap, drawn when the frames drawn moved it) and the
-     * display rate measured now ("measuredHz").
+     * display or timer for the display's own cap, drawn when the frames drawn moved it), the
+     * display rate measured now ("measuredHz") and whether its map leaves out the 3D objects while
+     * the phone is hot ("light", [setLight]).
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"

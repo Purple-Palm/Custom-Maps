@@ -5,6 +5,7 @@ import androidx.lifecycle.LifecycleOwner
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.NavigationEngine
+import io.github.purplepalm.custommaps.nav.car.ThermalStatus
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
@@ -50,4 +51,11 @@ class CarMapSettings(
     val ownRouteLine: Flow<Boolean>,
     /** Debug: the frames a second the car's map draws, 30 or 60, for the car's map alone. */
     val frameTarget: Flow<Int>,
+    /**
+     * The phone's thermal status as the app reads it for its "thermal" lines, null before the first
+     * reading: the car's map alone gets lighter while the phone is hot.
+     */
+    val phoneThermal: Flow<ThermalStatus?>,
+    /** Debug: whether the car's map gets lighter while the phone is hot; on unless turned off. */
+    val lightWhenHot: Flow<Boolean>,
 )

@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import android.os.SystemClock
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.core.graphics.createBitmap
@@ -39,9 +40,11 @@ import io.github.purplepalm.custommaps.nav.car.CarAreas
 import io.github.purplepalm.custommaps.nav.car.CarFailure
 import io.github.purplepalm.custommaps.nav.car.CarFrameCap
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
+import io.github.purplepalm.custommaps.nav.car.CarLightRule
 import io.github.purplepalm.custommaps.nav.car.CarLook
 import io.github.purplepalm.custommaps.nav.car.CarOverview
 import io.github.purplepalm.custommaps.nav.car.CarZoom
+import io.github.purplepalm.custommaps.nav.car.ThermalStatus
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.withFields
@@ -98,6 +101,10 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   basemap's theme that waits for a quiet moment of the drive waits here too. The host's own mode
  *   ([CarContext.isDarkMode]) colours only the images of its routing card; a "car_look" line says it
  *   beside the look the map shows ([CarLook]), as the map is made and with each look it takes.
+ * - **Lighter while the phone is hot.** From the phone's thermal status MODERATE on the map leaves
+ *   out its 3D objects, and takes them back after two minutes of a cooler phone ([CarLightRule]),
+ *   unless the Debug switch "Lighter car map when hot" is off ([setLightWhenHot]); kept from one
+ *   surface to the next. A "car_light" line says each change, and the car's camera line `light`.
  * - **Frames.** Each surface has its frame clock ([CarFrames]), started as the surface comes and
  *   stopped as it goes: the display's frames while the main thread gets them, a timer's while it
  *   gets none, a "frame_clock" line at each switch and the ticks of each second in the camera line.
@@ -181,6 +188,12 @@ internal class CarNavigationMap(
     /** The cap on the surface's frames, and the rate it is worked out for, kept for the next surface. */
     private val frameCap = CarFrameCap()
 
+    /** Whether the map is the lighter one while the phone is hot, kept for the next surface. */
+    private val lightRule = CarLightRule()
+
+    /** The wait for the end of the two minutes a lighter map needs a cool phone; null while none is due. */
+    private var coolCheck: Job? = null
+
     /** New positions of the platform's location on this surface since the last "car_location" check. */
     private var platformFixes = 0
 
@@ -221,6 +234,8 @@ internal class CarNavigationMap(
                 "targetFps" to frameCap.targetFps,
                 "capFrom" to frameCap.basis?.let(::basisName),
                 "measuredHz" to frames.displayHz()?.let { Motion.round(it, 1) },
+                // Whether the map leaves out its 3D objects while the phone is hot.
+                "light" to lightRule.light,
             )
             frameCap.onWindowStart()
             return fields
@@ -361,6 +376,19 @@ internal class CarNavigationMap(
         }
     }
 
+    /**
+     * The phone's thermal status: from MODERATE on the map is the lighter one, at once on the surface
+     * there is and on every later one, and full again after two minutes of a cooler phone ([CarLightRule]).
+     */
+    override fun setPhoneThermal(status: ThermalStatus?) {
+        guard("setPhoneThermal") { onLightRule(lightRule.onStatus(status, SystemClock.elapsedRealtime())) }
+    }
+
+    /** The Debug switch "Lighter car map when hot": off, the full map always, at once. */
+    override fun setLightWhenHot(enabled: Boolean) {
+        guard("setLightWhenHot") { onLightRule(lightRule.setEnabled(enabled, SystemClock.elapsedRealtime())) }
+    }
+
     override fun zoomBy(delta: Double) {
         guard("zoomBy") {
             // The scene lets the camera go before it zooms, as for a gesture.
@@ -438,6 +466,8 @@ internal class CarNavigationMap(
         created.setLanesOnMap(lanesOnMap)
         created.setOwnRouteLine(ownRouteLine)
         created.showPlace(place)
+        // Lighter while the phone is hot: the style's data takes it with the look.
+        created.setLight(lightRule.light)
         created.setVisible(true)
         // The library keeps the areas the host reported, also one that came before any surface, but
         // tells its observers of the stable one only while a surface is there, and never again for a
@@ -603,6 +633,28 @@ internal class CarNavigationMap(
     private fun driverMoved(kind: String) {
         overview.onDriverMoved()
         scene?.onDriverMoved(kind)
+    }
+
+    /**
+     * After the lighter map's rule heard something: when the map changed, the map of the surface there
+     * is lighter or full and a "car_light" line says it; then the wait for the end of a cool phone's
+     * two minutes, when one is due.
+     */
+    private fun onLightRule(changed: Boolean) {
+        if (released) return
+        if (changed) {
+            scene?.setLight(lightRule.light)
+            log.log(CarLightRule.LINE, lightRule.fields())
+        }
+        coolCheck?.cancel()
+        coolCheck = null
+        val due = lightRule.dueAtMillis
+        if (due == CarLightRule.NONE) return
+        coolCheck = scope.launch {
+            delay((due - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+            coolCheck = null
+            guard("carLight") { onLightRule(lightRule.onTime(SystemClock.elapsedRealtime())) }
+        }
     }
 
     /**

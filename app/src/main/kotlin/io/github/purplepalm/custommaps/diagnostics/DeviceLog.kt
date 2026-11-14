@@ -26,6 +26,7 @@ import android.view.Display
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import io.github.purplepalm.custommaps.nav.car.CarFailure
+import io.github.purplepalm.custommaps.nav.car.ThermalStatus
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
@@ -86,6 +87,15 @@ internal class DeviceLog(
 
     /** True while one of the app's activities is started, that is, on screen. */
     val visible: StateFlow<Boolean> = _visible.asStateFlow()
+
+    private val _thermal = MutableStateFlow<ThermalStatus?>(null)
+
+    /**
+     * The phone's thermal status as Android last reported it, from the one listener that writes the
+     * "thermal" lines (it reports the status of the moment as it registers); null before that, and
+     * before Android 10, which has none. The car's map gets lighter while the phone is hot.
+     */
+    val thermal: StateFlow<ThermalStatus?> = _thermal.asStateFlow()
 
     /**
      * Called on the main thread whenever an activity resumes, for instance back from system
@@ -297,6 +307,12 @@ internal class DeviceLog(
     private fun listenToHeat() {
         powerManager?.addThermalStatusListener(ContextCompat.getMainExecutor(application)) { status ->
             debugLog.log("thermal", mapOf("status" to thermalName(status)))
+            // The car's map follows it on the main thread: what it throws is written, never thrown here.
+            try {
+                _thermal.value = ThermalStatus.of(status)
+            } catch (e: RuntimeException) {
+                debugLog.log(ERROR_LINE, CarFailure.fields("thermalStatus", e))
+            }
         }
     }
 

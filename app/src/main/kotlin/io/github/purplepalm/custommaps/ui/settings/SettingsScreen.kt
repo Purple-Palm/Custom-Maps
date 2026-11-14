@@ -119,6 +119,7 @@ fun SettingsScreen(
     onOwnRouteLineChange: (Boolean) -> Unit,
     onMeasureOwnLanesChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
+    onCarLightWhenHotChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onBack: () -> Unit,
@@ -169,6 +170,7 @@ fun SettingsScreen(
                 onOwnRouteLineChange,
                 onMeasureOwnLanesChange,
                 onCarMapFpsChange,
+                onCarLightWhenHotChange,
                 onShareLog,
                 onClearLog,
                 onCrashNow,
@@ -486,6 +488,7 @@ private fun DebugSection(
     onOwnRouteLineChange: (Boolean) -> Unit,
     onMeasureOwnLanesChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
+    onCarLightWhenHotChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
     onCrashNow: (() -> Unit)?,
@@ -605,6 +608,25 @@ private fun DebugSection(
     // The car's map at 30 or 60 frames a second, to compare what the car shows of each.
     Spacer(Modifier.height(16.dp))
     CarMapFramesBlock(debug.carMapFps, onCarMapFpsChange)
+
+    // The car's map without its 3D objects while the phone is hot.
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.debug_car_light_when_hot),
+                style = MaterialTheme.typography.titleSmall,
+                color = LookTheme.tokens.onCard,
+            )
+            Text(
+                text = stringResource(R.string.debug_car_light_when_hot_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = LookTheme.tokens.onCardMuted,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        AppSwitch(checked = debug.carLightWhenHot, onCheckedChange = onCarLightWhenHotChange)
+    }
 
     Spacer(Modifier.height(16.dp))
     if (temporaryDebugKey) {
@@ -867,6 +889,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onOwnRouteLineChange = {},
             onMeasureOwnLanesChange = {},
             onCarMapFpsChange = {},
+            onCarLightWhenHotChange = {},
             onShareLog = {},
             onClearLog = {},
             onBack = {},

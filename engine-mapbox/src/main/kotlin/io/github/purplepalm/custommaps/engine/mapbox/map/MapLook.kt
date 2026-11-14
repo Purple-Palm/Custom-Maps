@@ -62,17 +62,18 @@ internal object MapLook {
 
     /**
      * Writes every key of [look]'s column but the theme, and the theme of [theme]'s column, in the
-     * table's order; a null look or theme leaves its keys as they are. By day each key given back to
-     * the style is read back and compared with [snapshot].
+     * table's order; a null look or theme leaves its keys as they are. With [light], the car's lighter
+     * map, the 3D objects are written off whatever the look says ([MapPalette.Key.value]). By day each
+     * key given back to the style is read back and compared with [snapshot].
      */
-    fun write(basemap: Basemap, look: Look?, theme: Look?, snapshot: Map<String, Read>): Written {
+    fun write(basemap: Basemap, look: Look?, theme: Look?, snapshot: Map<String, Read>, light: Boolean = false): Written {
         var keys = 0
         var errors = 0
         val failed = LinkedHashSet<String>()
         val restored = ArrayList<String>()
         for (key in MapPalette.keys) {
             val from = (if (key.name == THEME) theme else look) ?: continue
-            val value = key.value(from)
+            val value = key.value(from, light)
             keys += 1
             if (basemap.write(key.name, value.toValue()) != null) {
                 errors += 1
@@ -94,6 +95,15 @@ internal object MapLook {
             }
         }
         return Written(keys, errors, failed.toList(), reset)
+    }
+
+    /**
+     * The 3D objects alone, as [look] has them with the car's lighter map composed in: off while
+     * [light], else the look's own. Returns what went wrong, or null.
+     */
+    fun writeObjects(basemap: Basemap, look: Look, light: Boolean): String? {
+        val key = MapPalette.keys.first { it.name == MapPalette.SHOW_3D_OBJECTS }
+        return basemap.write(key.name, key.value(look, light).toValue())
     }
 
     /** The value a column's entry is written as. */

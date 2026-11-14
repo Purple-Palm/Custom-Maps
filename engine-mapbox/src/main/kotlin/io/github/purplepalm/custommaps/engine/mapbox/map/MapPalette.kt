@@ -44,7 +44,22 @@ internal object MapPalette {
     /** One key of the basemap's config, with its value in each look. */
     class Key(val name: String, val night: LookValue, val day: LookValue) {
         fun value(look: Look): LookValue = if (look == Look.NIGHT) night else day
+
+        /**
+         * [look]'s value with the car's lighter map composed in: no 3D objects while [light], whatever
+         * the look says; every other key, and every key without [light], as the look has it.
+         */
+        fun value(look: Look, light: Boolean): LookValue = if (light && name == SHOW_3D_OBJECTS) NO_3D_OBJECTS else value(look)
     }
+
+    /**
+     * The basemap's switch for its 3D objects: buildings, landmarks and trees. On in both looks; off on
+     * the car's lighter map while the phone is hot, which only the car's map asks for.
+     */
+    const val SHOW_3D_OBJECTS = "show3dObjects"
+
+    /** The 3D objects off: the car's lighter map. */
+    val NO_3D_OBJECTS: LookValue = LookValue.Flag(false)
 
     /**
      * Every key a look writes, in the order they are written; by day every colour the night sets
@@ -55,7 +70,7 @@ internal object MapPalette {
         Key("lightPreset", LookValue.Text("night"), LookValue.Text("day")),
         // The only bright and colourful theme by day; monochrome would be pale grey.
         Key(MapLook.THEME, LookValue.Text("monochrome"), LookValue.Text("default")),
-        Key("show3dObjects", LookValue.Flag(true), LookValue.Flag(true)),
+        Key(SHOW_3D_OBJECTS, LookValue.Flag(true), LookValue.Flag(true)),
         Key("colorLand", LookValue.Colour(LAND), LookValue.Restore),
         Key("colorBuildings", LookValue.Colour(BUILDINGS), LookValue.Restore),
         Key("colorMotorways", LookValue.Colour(MOTORWAYS), LookValue.Restore),

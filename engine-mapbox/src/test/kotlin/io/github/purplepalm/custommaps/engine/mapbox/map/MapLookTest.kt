@@ -53,6 +53,57 @@ class MapLookTest {
     }
 
     @Test
+    fun `the car's lighter map writes no 3D objects in either look, and every other key as the look has it`() {
+        for (look in listOf(Look.NIGHT, Look.DAY)) {
+            val light = restoring()
+            val written = MapLook.write(light, look, look, own, light = true)
+            val full = restoring()
+            MapLook.write(full, look, look, own)
+            assertEquals(Value.valueOf(false), light.writes.toMap()[MapPalette.SHOW_3D_OBJECTS], "$look")
+            assertEquals(Value.valueOf(true), full.writes.toMap()[MapPalette.SHOW_3D_OBJECTS], "$look")
+            assertEquals(
+                full.writes.filter { it.first != MapPalette.SHOW_3D_OBJECTS },
+                light.writes.filter { it.first != MapPalette.SHOW_3D_OBJECTS },
+                "$look",
+            )
+            assertEquals(16, written.keys)
+        }
+    }
+
+    @Test
+    fun `no look switch turns the 3D objects on while the car's map is light`() {
+        val basemap = restoring()
+        val off = Read(Value.valueOf(false), Kind.CONSTANT)
+        MapLook.write(basemap, Look.NIGHT, Look.NIGHT, own, light = true)
+        assertEquals(off, basemap.held[MapPalette.SHOW_3D_OBJECTS])
+        MapLook.write(basemap, Look.DAY, Look.DAY, own, light = true)
+        assertEquals(off, basemap.held[MapPalette.SHOW_3D_OBJECTS])
+        // A theme that waits: the look without its theme, still without them.
+        MapLook.write(basemap, Look.NIGHT, null, own, light = true)
+        assertEquals(off, basemap.held[MapPalette.SHOW_3D_OBJECTS])
+        // The theme alone leaves them as they are.
+        MapLook.write(basemap, null, Look.NIGHT, own)
+        assertEquals(off, basemap.held[MapPalette.SHOW_3D_OBJECTS])
+        // The full map again: the look's own.
+        MapLook.write(basemap, Look.DAY, Look.DAY, own)
+        assertEquals(Read(Value.valueOf(true), Kind.CONSTANT), basemap.held[MapPalette.SHOW_3D_OBJECTS])
+    }
+
+    @Test
+    fun `the 3D objects alone are one key, off while light and the look's own after`() {
+        for (look in listOf(Look.NIGHT, Look.DAY)) {
+            val basemap = restoring()
+            assertNull(MapLook.writeObjects(basemap, look, light = true))
+            assertNull(MapLook.writeObjects(basemap, look, light = false))
+            assertEquals(listOf(MapPalette.SHOW_3D_OBJECTS to Value.valueOf(false), MapPalette.SHOW_3D_OBJECTS to Value.valueOf(true)), basemap.writes)
+            assertTrue(basemap.reads.isEmpty())
+        }
+        val refusing = restoring()
+        refusing.refused = setOf(MapPalette.SHOW_3D_OBJECTS)
+        assertEquals("refused", MapLook.writeObjects(refusing, Look.DAY, light = true))
+    }
+
+    @Test
     fun `the port to the map has no call that writes many keys at once`() {
         assertEquals(setOf("read", "write"), MapLook.Basemap::class.java.declaredMethods.map { it.name }.toSet())
     }

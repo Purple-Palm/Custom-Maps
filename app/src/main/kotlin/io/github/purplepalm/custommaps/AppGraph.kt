@@ -170,6 +170,9 @@ class AppGraph(private val application: Application) {
             lanesOnMap = settings.lanesOnMap,
             ownRouteLine = settings.ownRouteLine,
             frameTarget = settings.carMapFps,
+            // The heat the "thermal" lines say, from their one listener: the car's map gets lighter while the phone is hot.
+            phoneThermal = deviceLog.thermal,
+            lightWhenHot = settings.carLightWhenHot,
         ),
         look = lookController,
         debugLog = debugLog,

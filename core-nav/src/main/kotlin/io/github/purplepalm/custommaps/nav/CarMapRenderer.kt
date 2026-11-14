@@ -1,5 +1,7 @@
 package io.github.purplepalm.custommaps.nav
 
+import io.github.purplepalm.custommaps.nav.car.ThermalStatus
+
 /**
  * The map on the car's screen: the same map as the phone's ([MapRenderer]), drawn on the surface the
  * car's host gives the app. One per car session; the host's areas set its padding by themselves, so
@@ -25,6 +27,16 @@ interface CarMapRenderer : MapRenderer {
      * the surface there is, and every later surface starts with it.
      */
     fun setFrameTarget(fps: Int)
+
+    /**
+     * The phone's thermal status as Android reports it, null while none was read: from MODERATE on the
+     * map draws lighter, without its 3D objects, and full again after two minutes of a cooler phone
+     * ([io.github.purplepalm.custommaps.nav.car.CarLightRule]); the phone's own map keeps them.
+     */
+    fun setPhoneThermal(status: ThermalStatus?)
+
+    /** Debug: whether the map gets lighter while the phone is hot; off, the full map always. On until told otherwise. */
+    fun setLightWhenHot(enabled: Boolean)
 
     /**
      * The car session ends: the map lets go of the surface, the navigator and everything it drew.

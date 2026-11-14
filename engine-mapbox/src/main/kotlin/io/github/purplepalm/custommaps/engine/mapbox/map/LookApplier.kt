@@ -49,6 +49,14 @@ internal class LookApplier(request: LookOnMap) {
     var routeLineLook: Look = request.look
         private set
 
+    /**
+     * Whether the car's lighter map is asked for: the basemap's 3D objects off, whatever the look
+     * says, in every write of the basemap from now on ([MapLook.write]). False at first, and always on
+     * the phone's map.
+     */
+    var light: Boolean = false
+        private set
+
     /** A style load begins: nothing of the basemap is written for it yet. */
     fun onStyleLoading() {
         styleData = false
@@ -69,6 +77,17 @@ internal class LookApplier(request: LookOnMap) {
     fun onStyleLoaded(): Writes {
         styleLoaded = true
         return due()
+    }
+
+    /**
+     * The car's lighter map on or off: the look the basemap shows, for its 3D objects to be written
+     * now with [light] ([MapLook.writeObjects]); null when nothing is to be written now: the same again,
+     * or no style's data yet in this style load, which writes the whole look with it.
+     */
+    fun setLight(light: Boolean): Look? {
+        if (light == this.light) return null
+        this.light = light
+        return basemapLook
     }
 
     /** A new request: what of it can be written now. */

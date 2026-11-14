@@ -16,6 +16,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
+import io.github.purplepalm.custommaps.settings.CAR_LIGHT_WHEN_HOT_DEFAULT
 import io.github.purplepalm.custommaps.settings.LANE_COUNTS_HORIZON_DEFAULT
 import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenTripCounts
@@ -56,7 +57,7 @@ data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
 /**
  * The debug section: trip sessions started on this phone, the simulated drive, own route line and
- * measuring switches, the car map's frames, and the debug log.
+ * measuring switches, the car map's frames and its lighter map when hot, and the debug log.
  */
 data class DebugState(
     /** The month's trip sessions, and since when the count runs when that is after the month began. */
@@ -72,6 +73,8 @@ data class DebugState(
     val measureOwnLanes: Boolean = false,
     /** The frames a second the car's map draws: 30, or 60 ([CarFrameRate.TARGETS]). */
     val carMapFps: Int = CarFrameRate.TARGET_FPS,
+    /** Whether the car's map gets lighter while the phone is hot. */
+    val carLightWhenHot: Boolean = CAR_LIGHT_WHEN_HOT_DEFAULT,
     /** Size of the debug log on the phone; null until measured. */
     val logBytes: Long? = null,
 )
@@ -107,14 +110,20 @@ class SettingsViewModel(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
     /** The Debug switches, in one value. */
-    private data class Switches(val simulate: Boolean, val ownLine: Boolean, val measureLanes: Boolean, val carMapFps: Int)
+    private data class Switches(val simulate: Boolean, val ownLine: Boolean, val measureLanes: Boolean, val carMapFps: Int, val carLight: Boolean)
 
-    private val switches = combine(settings.simulateDrive, settings.ownRouteLine, settings.measureOwnLanes, settings.carMapFps) { simulate, ownLine, measure, fps ->
-        Switches(simulate, ownLine, measure, fps)
+    private val switches = combine(
+        settings.simulateDrive,
+        settings.ownRouteLine,
+        settings.measureOwnLanes,
+        settings.carMapFps,
+        settings.carLightWhenHot,
+    ) { simulate, ownLine, measure, fps, carLight ->
+        Switches(simulate, ownLine, measure, fps, carLight)
     }
 
     val debug: StateFlow<DebugState> =
-        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, measureLanes, carMapFps), bytes, list ->
+        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, measureLanes, carMapFps, carLight), bytes, list ->
             val time = now()
             DebugState(
                 trips = TripLog.monthCount(entries, time, installedAt()),
@@ -124,6 +133,7 @@ class SettingsViewModel(
                 ownRouteLine = ownLine,
                 measureOwnLanes = measureLanes,
                 carMapFps = carMapFps,
+                carLightWhenHot = carLight,
                 logBytes = bytes,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
@@ -186,6 +196,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the choice keeps showing the stored value, which the car's map keeps too.
                 debugLog.error("settings.setCarMapFps", e)
+            }
+        }
+    }
+
+    /** Applies at once, also during a drive: the car's map leaves out its 3D objects while the phone is hot, or never. */
+    fun setCarLightWhenHot(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setCarLightWhenHot(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the car's map keeps too.
+                debugLog.error("settings.setCarLightWhenHot", e)
             }
         }
     }

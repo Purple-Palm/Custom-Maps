@@ -4,6 +4,9 @@ import io.github.purplepalm.custommaps.engine.mapbox.map.LookApplier.Writes
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class LookApplierTest {
@@ -52,6 +55,34 @@ class LookApplierTest {
         val applier = loadedAtNight()
         assertEquals(Writes(basemap = Look.DAY, theme = Look.DAY, routeLine = Look.DAY), applier.setLook(day))
         assertEquals(Writes(basemap = Look.NIGHT, theme = Look.NIGHT, routeLine = Look.NIGHT), applier.setLook(night))
+    }
+
+    @Test
+    fun `the car's lighter map asked for before the style's data waits for it, and after it is written at once`() {
+        val applier = LookApplier(night)
+        applier.onStyleLoading()
+        // No basemap yet: nothing now, and the style's data writes the whole look with it.
+        assertNull(applier.setLight(true))
+        assertTrue(applier.light)
+        assertEquals(Writes(basemap = Look.NIGHT, theme = Look.NIGHT), applier.onStyleData())
+        // After it: the 3D objects of the look the basemap shows, at once, and once.
+        assertEquals(Look.NIGHT, applier.setLight(false))
+        assertNull(applier.setLight(false))
+        assertFalse(applier.light)
+        applier.onStyleLoaded()
+        applier.setLook(day)
+        assertEquals(Look.DAY, applier.setLight(true))
+        assertTrue(applier.light)
+    }
+
+    @Test
+    fun `a new style load keeps the car's lighter map for its whole look`() {
+        val applier = loadedAtNight()
+        assertEquals(Look.NIGHT, applier.setLight(true))
+        applier.onStyleLoading()
+        assertTrue(applier.light)
+        assertEquals(Writes(basemap = Look.NIGHT, theme = Look.NIGHT), applier.onStyleData())
+        assertTrue(applier.light)
     }
 
     @Test

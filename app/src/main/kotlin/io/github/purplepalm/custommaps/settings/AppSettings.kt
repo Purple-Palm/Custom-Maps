@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.transform
 /** Lane counts between lane points come from Mapbox's electronic horizon until the driver turns them off: a trial of the beta, as the owner chose. */
 const val LANE_COUNTS_HORIZON_DEFAULT = true
 
+/** The car's map gets lighter while the phone is hot until the Debug switch is turned off. */
+const val CAR_LIGHT_WHEN_HOT_DEFAULT = true
+
 /** Settings the driver changes on the phone. */
 interface AppSettings {
     /** Replay the route instead of following GPS; for testing at home. Still billed as a trip. */
@@ -81,6 +84,15 @@ interface AppSettings {
     val carMapFps: Flow<Int>
 
     suspend fun setCarMapFps(fps: Int)
+
+    /**
+     * Debug: whether the map on the car's screen leaves out its 3D objects while the phone is hot, from its
+     * thermal status MODERATE on, until two minutes after the phone cooled. On when never chosen
+     * ([CAR_LIGHT_WHEN_HOT_DEFAULT]); the phone's own map keeps them either way.
+     */
+    val carLightWhenHot: Flow<Boolean>
+
+    suspend fun setCarLightWhenHot(enabled: Boolean)
 }
 
 /**
@@ -224,6 +236,15 @@ class DataStoreAppSettings(
         onChanged(CAR_MAP_FPS.name, stored)
     }
 
+    /** An absent value reads as [CAR_LIGHT_WHEN_HOT_DEFAULT] and is never written. */
+    override val carLightWhenHot: Flow<Boolean> =
+        preferences.map { it[CAR_LIGHT_WHEN_HOT] ?: CAR_LIGHT_WHEN_HOT_DEFAULT }.distinctUntilChanged()
+
+    override suspend fun setCarLightWhenHot(enabled: Boolean) {
+        dataStore.edit { it[CAR_LIGHT_WHEN_HOT] = enabled }
+        onChanged(CAR_LIGHT_WHEN_HOT.name, enabled)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -238,6 +259,7 @@ class DataStoreAppSettings(
         private val OWN_ROUTE_LINE = booleanPreferencesKey("own_route_line")
         private val MEASURE_OWN_LANES = booleanPreferencesKey("measure_own_lanes")
         private val CAR_MAP_FPS = intPreferencesKey("car_map_fps")
+        private val CAR_LIGHT_WHEN_HOT = booleanPreferencesKey("car_light_when_hot")
 
         /** The switch Lane details on the map of the versions before [LANES_ON_MAP]: read once, to carry it over. */
         private val LANE_DETAILS = booleanPreferencesKey("lane_details")
