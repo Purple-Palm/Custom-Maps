@@ -283,7 +283,8 @@ class RoutePath private constructor(
                 stations.add(beforeStations[i])
             }
             for (i in after.indices) {
-                if (afterStations[i] <= at || (stations.isNotEmpty() && afterStations[i] <= stations.last())) continue
+                // Past the cut, the new path as it is, a point repeated where two steps meet too.
+                if (afterStations[i] <= at || (stations.isNotEmpty() && afterStations[i] < stations.last())) continue
                 points.add(after[i])
                 stations.add(afterStations[i])
             }

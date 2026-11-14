@@ -182,7 +182,7 @@ class HorizonDrawingTest {
             assertEquals(base.path.points.subList(0, kept), points.subList(0, kept))
             assertEquals(base.path.stations.take(kept), stations.take(kept))
             assertTrue(stations.drop(kept).all { it > windowEnd })
-            assertTrue(stations.asList().zipWithNext().all { (x, y) -> y > x })
+            assertTrue(stations.asList().zipWithNext().all { (x, y) -> y >= x })
             // The two paths lie on one another at the splice, to well under a centimetre.
             assertEquals(base.path.offsetAt(windowEnd), drawn.path.offsetAt(windowEnd), 1e-3)
             // Past it the new path keeps to the drawing through the gap, where the old one went back to the road's line.
