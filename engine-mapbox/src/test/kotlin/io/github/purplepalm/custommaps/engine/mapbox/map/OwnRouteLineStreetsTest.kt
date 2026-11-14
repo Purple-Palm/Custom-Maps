@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
+import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEdge
@@ -8,6 +9,7 @@ import io.github.purplepalm.custommaps.nav.lanes.HorizonRoadClass
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.GoreArrow
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
+import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneSwap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.abs
+import kotlin.math.log2
 
 /**
  * The own line with the app's lanes on streets (OL6), on a fake style ([OwnLineScene]) along a made-up street
@@ -204,6 +207,27 @@ class OwnRouteLineStreetsTest {
             car += 1.0
         }
         assertEquals(ends.keys, behind().intersect(ends.keys))
+    }
+
+    @Test
+    fun `on a drawn street the swap reads the street's lane at the car, in at its own width`() {
+        drawn()
+        drive(0.0, turn - 400.0) { horizonCut(it, oneWay = false) }
+        val own = requireNotNull(shown().lanes)
+        val car = turn - 100.0
+        assertTrue(own.drawnStreets.any { car in it })
+        assertEquals(LaneTopology.STREET_LANE_METERS, own.laneMetersAt(car))
+        assertEquals(LaneTopology.FREEWAY_LANE_METERS, own.laneMetersAt(-1.0))
+        puck(car)
+        // Where a freeway lane would show 10.42 dp the street's shows 9.54: no swap; at 10.5 dp of the street lane, the swap.
+        fun zoomOf(dp: Double, meters: Double) = log2(MapScale.metersPerDp(0.0, 0.0) * dp / meters)
+        line.onLatched(true)
+        line.onCameraZoom(zoomOf(10.42, LaneTopology.FREEWAY_LANE_METERS), 0.0)
+        line.onLatched(true)
+        assertFalse(line.swapped)
+        line.onCameraZoom(zoomOf(10.5, LaneTopology.STREET_LANE_METERS), 0.0)
+        assertTrue(line.swapped)
+        assertTrue(LaneSwap.laneDp(zoomOf(10.5, LaneTopology.STREET_LANE_METERS), 0.0, LaneTopology.STREET_LANE_METERS) >= LaneSwap.SWAP_IN_STREET_DP)
     }
 
     @Test

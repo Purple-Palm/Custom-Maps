@@ -12,6 +12,7 @@ import com.mapbox.geojson.Polygon
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
@@ -57,7 +58,15 @@ internal class OwnLanes(
     val drawnStreets: List<ClosedFloatingPointRange<Double>> = emptyList(),
     /** The streets with lane data left to the map's own road, for want of a source or for one that disagrees ([CrossSection.undrawnStreets]). */
     val undrawnStreets: List<CrossSection.UndrawnStreet> = emptyList(),
+    /** How every lane lies across the road ([laneMetersAt]); null where the lanes were made without it. */
+    private val section: CrossSection? = null,
 ) {
+
+    /**
+     * How wide a drawn lane is on the ground at [station]: a street's lane on a road of a run laid out as a street, else a
+     * freeway's, as the cross-section lays them ([CrossSection.roadAt]); for the swap's widths at the car. A lookup.
+     */
+    fun laneMetersAt(station: Double): Double = CrossSection.laneMeters(section?.roadAt(station) ?: RoadKind.FREEWAY)
 
     /** The step [step] of the leg [leg] of a route, both counted from 0 as the navigation SDK counts them. */
     data class StepAt(val leg: Int, val step: Int)
@@ -167,6 +176,7 @@ internal class OwnLanes(
                 arrows = arrowsOf(drawing.gores(), steps, path, drawing.turns()),
                 drawnStreets = section.drawnStreets,
                 undrawnStreets = section.undrawnStreets,
+                section = section,
             )
         }
 

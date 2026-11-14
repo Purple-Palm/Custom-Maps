@@ -21,6 +21,7 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
+import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
@@ -590,11 +591,15 @@ internal class OwnRouteLine(
 
     /**
      * The camera's word, once per progress update, whether a close view or the junction view is latched: with the lanes,
-     * the swap's state, the line's opacity written where it flips.
+     * the swap's state, with the drawn lane's width at the car ([OwnLanes.laneMetersAt], a lookup), the line's opacity
+     * written where it flips.
      */
     fun onLatched(latched: Boolean) {
         if (!enabled || !lanes) return
-        if (swap.onLatched(latched)) applySwap()
+        val before = swap.swapped
+        swap.onLane(drawing?.lanes?.laneMetersAt(trimStation) ?: LaneTopology.FREEWAY_LANE_METERS)
+        swap.onLatched(latched)
+        if (swap.swapped != before) applySwap()
     }
 
     /**

@@ -27,8 +27,14 @@ class LaneSwapTest {
     /** A drawn freeway lane on the ground. */
     private val lane = LaneTopology.FREEWAY_LANE_METERS
 
-    /** The zoom at latitude 0 where a drawn lane is [dp] wide. */
-    private fun zoomOf(dp: Double) = log2(MapScale.metersPerDp(0.0, 0.0) * dp / lane)
+    /** A drawn street lane on the ground. */
+    private val streetLane = LaneTopology.STREET_LANE_METERS
+
+    /** The held route line on the screen from zoom 16.5 on (the engine's RouteLineWidths; the design's 5.3). */
+    private val heldLineDp = 10.38
+
+    /** The zoom at latitude 0 where a drawn lane [meters] wide, a freeway's unless given, is [dp] wide. */
+    private fun zoomOf(dp: Double, meters: Double = lane) = log2(MapScale.metersPerDp(0.0, 0.0) * dp / meters)
 
     // The phone's screen as the camera tests have it: 2,400 px high, the car's row 459 px from the bottom, the card's
     // lane row at 838 px from the top, 3 px a dp.
@@ -101,6 +107,71 @@ class LaneSwapTest {
     }
 
     @Test
+    fun `on a street the swap reads the street's narrower lane at the car, in at 10_45 dp, each width on both sides of its border`() {
+        assertEquals(10.45, LaneSwap.SWAP_IN_STREET_DP)
+        assertEquals(LaneSwap.SWAP_IN_STREET_DP, LaneSwap.swapInDp(streetLane))
+        assertEquals(LaneSwap.SWAP_IN_DP, LaneSwap.swapInDp(lane))
+        val zIn = zoomOf(LaneSwap.SWAP_IN_STREET_DP, streetLane)
+        val zOut = zoomOf(LaneSwap.SWAP_OUT_DP, streetLane)
+        assertEquals(LaneSwap.SWAP_IN_STREET_DP, LaneSwap.laneDp(zIn, 0.0, streetLane), 1e-9)
+        val swap = LaneSwap()
+        swap.onLane(streetLane)
+        swap.onLatched(true)
+        // In at 10.45 dp of a street lane, not just under it, where a freeway lane would long have swapped.
+        assertTrue(LaneSwap.laneDp(zIn - 1e-6, 0.0) > LaneSwap.SWAP_IN_DP)
+        assertFalse(swap.onZoom(zIn - 1e-6, 0.0))
+        assertFalse(swap.swapped)
+        assertTrue(swap.onZoom(zIn, 0.0))
+        assertTrue(swap.swapped)
+        // Held down to 9.6 dp of the street lane, out just under it.
+        assertFalse(swap.onZoom(zOut + 1e-9, 0.0))
+        assertTrue(swap.swapped)
+        assertTrue(swap.onZoom(zOut - 1e-6, 0.0))
+        assertFalse(swap.swapped)
+        // The street lane's zoom in: 17.90 at latitude 0, about 0.13 later than a freeway lane's.
+        assertEquals(17.90, zIn, 0.005)
+        assertEquals(0.13, zIn - zoomOf(LaneSwap.SWAP_IN_DP), 0.01)
+    }
+
+    @Test
+    fun `from the swap the amber is at least 0_94 of the held line on a freeway lane and a street lane, and only grows`() {
+        assertEquals(0.94, LaneSwap.AMBER_SHARE)
+        for (meters in listOf(lane, streetLane)) {
+            val zIn = zoomOf(LaneSwap.swapInDp(meters), meters)
+            assertTrue(LaneSwap.amberDp(zIn, 0.0, meters) >= LaneSwap.AMBER_SHARE * heldLineDp, "$meters m: ${LaneSwap.amberDp(zIn, 0.0, meters)} dp")
+            var z = zIn
+            while (z < 20.0) {
+                z += 0.05
+                assertTrue(LaneSwap.amberDp(z, 0.0, meters) > LaneSwap.amberDp(z - 0.05, 0.0, meters))
+            }
+        }
+        // A street lane swapped in at a freeway lane's 10.4 dp would show less: the border of its own width.
+        assertTrue(LaneSwap.amberDp(zoomOf(LaneSwap.SWAP_IN_DP, streetLane), 0.0, streetLane) < LaneSwap.AMBER_SHARE * heldLineDp)
+        assertEquals(9.76, LaneSwap.amberDp(zoomOf(LaneSwap.SWAP_IN_STREET_DP, streetLane), 0.0, streetLane), 0.005)
+    }
+
+    @Test
+    fun `the lane at the car changing from a freeway's to a street's at one zoom brings the line back, and back again`() {
+        // At a zoom where a freeway lane is 10.45 dp a street lane is 9.57 dp: under the way out.
+        val z = zoomOf(10.45)
+        assertTrue(LaneSwap.laneDp(z, 0.0, streetLane) < LaneSwap.SWAP_OUT_DP)
+        val swap = LaneSwap()
+        swap.onLatched(true)
+        assertTrue(swap.onZoom(z, 0.0))
+        assertTrue(swap.onLane(streetLane))
+        assertFalse(swap.swapped)
+        assertFalse(swap.onLane(streetLane))
+        assertTrue(swap.onLane(lane))
+        assertTrue(swap.swapped)
+        // Before any zoom the lane alone flips nothing; a reset is a freeway lane again.
+        val fresh = LaneSwap()
+        fresh.onLatched(true)
+        assertFalse(fresh.onLane(streetLane))
+        fresh.reset()
+        assertFalse(fresh.onZoom(zoomOf(LaneSwap.SWAP_IN_STREET_DP, streetLane) - 0.02, 0.0))
+    }
+
+    @Test
     fun `a zoom resting between the two widths never makes the line blink`() {
         val zIn = zoomOf(LaneSwap.SWAP_IN_DP)
         val zOut = zoomOf(LaneSwap.SWAP_OUT_DP)
@@ -170,8 +241,10 @@ class LaneSwapTest {
         val closest = MapScale.zoomForLaneDp(tuning.junctionLaneDp, 0.0)
         fun frameZoom(toTurn: Double) = min(closest, log2(MapScale.metersPerDp(0.0, 0.0) * clearDp / (max(toTurn, 0.0) + 30.0)))
         val speed = 35.0 * 0.44704
-        for (stop in listOf(160.0, 140.0, 120.0, 112.0, 108.0, 104.0, 98.0, 90.0, 80.0)) {
+        // On a freeway's lanes, and on a street's, whose swap reads its narrower lane.
+        for (meters in listOf(lane, streetLane)) for (stop in listOf(160.0, 140.0, 120.0, 112.0, 108.0, 104.0, 98.0, 90.0, 80.0)) {
             val swap = LaneSwap()
+            swap.onLane(meters)
             var flips = 0
             var zoom = frameZoom(180.0)
             var toTurn = 180.0
@@ -182,6 +255,8 @@ class LaneSwapTest {
                 if (swap.onLatched(true)) flips++
                 if (swap.onZoom(zoom, 0.0)) flips++
                 assertTrue(swap.lineOpacity == 0.0 || swap.lineOpacity == 1.0)
+                // From the swap the amber is at least its share of the held line.
+                if (swap.swapped) assertTrue(LaneSwap.amberDp(zoom, 0.0, meters) >= LaneSwap.AMBER_SHARE * heldLineDp, "$meters m at $toTurn m")
                 if (toTurn <= stop && stopped < 60.0) {
                     // In the queue for a minute: the state the stop began with holds.
                     if (swappedAtStop == null) swappedAtStop = swap.swapped
@@ -191,7 +266,7 @@ class LaneSwapTest {
                 }
                 toTurn -= speed / fps
             }
-            assertEquals(1, flips, "stopped at $stop m")
+            assertEquals(1, flips, "$meters m lanes, stopped at $stop m")
             assertTrue(swap.swapped)
         }
     }
