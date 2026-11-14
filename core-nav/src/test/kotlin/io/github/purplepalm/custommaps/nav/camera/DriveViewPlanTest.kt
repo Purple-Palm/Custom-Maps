@@ -382,6 +382,26 @@ class DriveViewPlanTest {
     }
 
     @Test
+    fun `off the route nothing passed is kept, and back on the route the gap is measured from the car`() {
+        // Just past a turn, its hold running, the car leaves the route; it is back on it about 200 m past the turn, with
+        // the next turn 1.9 km from the car and 2.1 km from the turn it passed: from the car the gap is too short.
+        val d = Drive(listOf(turn(3_000.0), turn(5_100.0), turn(40_000.0)))
+        d.driveAt(13.0, 3_010.0)
+        assertEquals(Reason.JUST_PASSED, d.planner.planReason)
+        d.offRoute = true
+        d.drive(3_195.0) { 13.0 }
+        assertEquals(Reason.OFF_ROUTE, d.planner.planReason)
+        d.offRoute = false
+        d.drive(Double.POSITIVE_INFINITY, 1.0) { 13.0 }
+        assertEquals(Reason.GAP_TOO_SHORT, d.planner.planReason)
+        assertEquals(1_900.0, d.planner.gapMeters, 13.0)
+        assertEquals(CameraMode.FOLLOWING, d.planner.wanted)
+        // And so it stays down until that turn.
+        d.driveAt(13.0, 5_000.0)
+        assertTrue(d.asks.none { it.mode == CameraMode.OVERVIEW && it.t > 0.0 }, "${d.asks}")
+    }
+
+    @Test
     fun `after a new route the plan waits 30 s before it goes out by itself, also through a burst of reroutes`() {
         // The settle is the tuning's own number.
         assertEquals(30.0, tuning.rerouteSettleSeconds)
@@ -772,14 +792,20 @@ class DriveViewPlanTest {
 
     @Test
     fun `a seek back keeps no passed point ahead of the car, a seek forward no view for a point jumped over`() {
-        // Held after a turn; a seek back 2 km: the hold does not wait for the car to reach the old point again.
+        // Just past a turn, its hold running; a seek back 3 km: the turn is ahead of the car again, and nothing of the
+        // pass is kept, so the gap is the turn's distance from the car, not 0 from the turn behind the old place.
         val back = Drive(listOf(turn(5_000.0), turn(30_000.0)))
-        back.driveAt(13.0, 5_005.0)
+        back.driveAt(13.0, 5_015.0)
+        assertEquals(Reason.JUST_PASSED, back.planner.planReason)
         assertTrue(back.planner.near)
         back.x = 2_000.0
         back.planner.onJump(back.t)
         back.drive(Double.POSITIVE_INFINITY, 1.0) { 13.0 }
         // Decided from the new place, as at a new route: the turn 3 km ahead again, far enough for the overview.
+        assertEquals(CameraMode.OVERVIEW, back.asks.last().mode)
+        assertEquals(Reason.OPEN_ROAD, back.planner.planReason)
+        assertEquals(3_000.0, back.planner.gapMeters, 13.0)
+        assertFalse(back.planner.near)
         back.drive(Double.POSITIVE_INFINITY, 10.0) { 13.0 }
         assertEquals(CameraMode.OVERVIEW, back.asks.last().mode)
         assertFalse(back.planner.near)
