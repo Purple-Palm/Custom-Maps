@@ -71,6 +71,9 @@ import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.MapRenderer
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.CameraWish
+import io.github.purplepalm.custommaps.nav.camera.DriveCamera
+import io.github.purplepalm.custommaps.nav.camera.DriveViewTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
@@ -96,9 +99,13 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -108,6 +115,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -130,6 +138,16 @@ import kotlinx.coroutines.withContext
  * During guidance, while the map is on screen, it writes a "camera" line to the debug log once a
  * second: where the camera is and where the viewport data source wants it, how smoothly the camera
  * and the puck moved, and how fast the map rendered (see [cameraSample]).
+ *
+ * During guidance the drive views decide what the camera does ([DriveCamera], [setDriveCamera]): the
+ * Normal view follows the car; the Overview shows the rest of the route from above and comes down to
+ * the view behind the car before each turn, exit and lane choice the route has ahead
+ * ([MapboxNavigationEngine.viewAhead]), unless Zoom in before turns is off. A gesture or the compass
+ * makes the map the driver's: Recenter shows with its count ([recenterControl]) and the map goes back
+ * where the drive view says when it runs out, on Recenter ([recenter]) or on the Overview toggle
+ * ([toggleDriveView]). Each decision writes a "drive_view" line, each request of the camera a
+ * "camera_request" line and each hold that ends a "camera_hold" line. Only the camera moves: nothing
+ * here asks the navigator for a route or touches its trip.
  *
  * Who draws the lanes is Settings' Lanes on the map ([setLanesOnMap]). With Mapbox's lane details,
  * the lane markings Mapbox Standard can draw are on ([LaneDetails]) and the route line stays thin
@@ -191,6 +209,8 @@ internal class MapScene(
      * shows the map too ([MapboxNavigationEngine.carMapShown]): the phone's map, not the car's.
      */
     private val capWhileCarShows: Boolean = false,
+    /** The numbers of the drive views on this map's screen ([DriveCamera]). */
+    driveTuning: DriveViewTuning = DriveViewTuning.PHONE,
 ) : MapRenderer {
 
     /** What the scene needs to know of the screen its map is on, and tells it. Main thread only. */
@@ -486,6 +506,35 @@ internal class MapScene(
     private val _closeView = MutableStateFlow(false)
     override val closeView: StateFlow<Boolean> = _closeView.asStateFlow()
 
+    /**
+     * The drive views of this map during guidance ([DriveCamera]): the plan of the Normal and the
+     * Overview drive view, the map the driver holds, and their settings. It decides once per progress
+     * update and on the driver's taps, gestures and fingers; [carryOut] asks the camera for what it
+     * wants, only when that changes.
+     */
+    private val driveCamera = DriveCamera(tuning, driveTuning)
+
+    /** What the camera of the drive was last asked for by the drive camera; null when nothing yet, or for a camera made anew. */
+    private var handedWish: CameraWish? = null
+
+    /** The render before the one of now: a start right after the preview's is a start from the preview. */
+    private var rendered: GuidanceState? = null
+
+    /** The plan's count of changes the last "drive_view" line was written for. */
+    private var loggedPlan = -1
+
+    /** The clock of the hold of the map, four times a second while a count runs; null otherwise. */
+    private var holdTicker: Job? = null
+
+    /** The overview's room at the bottom beyond the following view's padding, in pixels ([setOverviewBottomReserve]). */
+    private var overviewReserve = 0
+
+    private val _driveViewControl = MutableStateFlow(driveCamera.driveViewControl())
+    override val driveViewControl: StateFlow<DriveViewControl> = _driveViewControl.asStateFlow()
+
+    private val _recenterControl = MutableStateFlow<RecenterControl?>(null)
+    override val recenterControl: StateFlow<RecenterControl?> = _recenterControl.asStateFlow()
+
     private val _accessDenied = MutableStateFlow(false)
 
     /**
@@ -571,8 +620,12 @@ internal class MapScene(
             lastKeyPoints = locationMatcherResult.keyPoints.size
             // A seek put the car here: the camera lets go of the road it was on, and goes there at
             // once and glides on from the new place, like after a jump of the navigator's. The
-            // engine has put the drawn car there already, for every map.
-            if (seek) camera.onJump()
+            // engine has put the drawn car there already, for every map. The drive views decide
+            // afresh from the new place, as at a new route.
+            if (seek) {
+                camera.onJump()
+                driveCamera.onJump(driveNow())
+            }
             camera.onLocation(locationMatcherResult.enhancedLocation, locationMatcherResult.isTeleport || seek)
         }
     }
@@ -619,8 +672,10 @@ internal class MapScene(
         // Says why the camera stopped following: a gesture, the compass, or something else.
         override fun onCameraTaken(owner: String?, animator: String, state: String) {
             debugLog.log("camera_taken", mapOf("owner" to owner, "animator" to animator, "from" to state))
-            // The map is the driver's now, also on the browsing map.
+            // The map is the driver's now, also on the browsing map; during a drive it is held, and
+            // Recenter shows with its count.
             idleFollow.onMapMoved()
+            onMapTaken()
         }
 
         // Once per latch of the view down onto a junction: what it went down for, how far ahead, and
@@ -637,10 +692,12 @@ internal class MapScene(
      * when the car appears. Touches on a map that is not shown yet do not count.
      */
     private val driverMoves = object : CameraAnimationsLifecycleListener {
-        // Called for every animator of every move of a drag: nothing here but the two comparisons.
+        // Called for every animator of every move of a drag: nothing here but the comparisons and one
+        // assignment of the hold's.
         override fun onAnimatorStarting(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
-            if (style != null && (owner == MapAnimationOwnerRegistry.GESTURES || owner == MapAnimationOwnerRegistry.COMPASS)) {
+            if (style != null && isDrivers(owner)) {
                 idleFollow.onMapMoved()
+                driveCamera.onMapMoved(driveNow())
             }
         }
 
@@ -652,9 +709,16 @@ internal class MapScene(
             newAnimatorOwner: String?,
         ) = Unit
 
-        override fun onAnimatorEnding(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) = Unit
+        // A fling goes on after the finger: the hold's count runs from the end of the driver's own move.
+        override fun onAnimatorEnding(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
+            if (isDrivers(owner)) driveCamera.onMapMoved(driveNow())
+        }
 
-        override fun onAnimatorCancelling(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) = Unit
+        override fun onAnimatorCancelling(type: CameraAnimatorType, animator: ValueAnimator, owner: String?) {
+            if (isDrivers(owner)) driveCamera.onMapMoved(driveNow())
+        }
+
+        private fun isDrivers(owner: String?): Boolean = owner == MapAnimationOwnerRegistry.GESTURES || owner == MapAnimationOwnerRegistry.COMPASS
     }
 
     init {
@@ -754,22 +818,91 @@ internal class MapScene(
     }
 
     override fun setCameraMode(mode: CameraMode) {
-        debugLog.log("camera_request", mapOf("mode" to mode, "from" to camera.state, "guidance" to guidanceState))
+        if (guidanceState == GuidanceState.ACTIVE) {
+            chooseDriveView(mode)
+            return
+        }
         when (mode) {
+            // My location: the camera goes to the car and stays on it.
             CameraMode.FOLLOWING -> when (guidanceState) {
-                GuidanceState.ACTIVE -> camera.requestFollowing()
-                // My location: the camera goes to the car and stays on it.
-                GuidanceState.IDLE, GuidanceState.ARRIVED -> if (idleFollow.onMyLocation()) followCar()
+                GuidanceState.IDLE, GuidanceState.ARRIVED -> if (idleFollow.onMyLocation()) followCar(BY_DRIVER, WHY_MY_LOCATION)
                 // The preview shows the route, and its screen has no button for this.
-                GuidanceState.PREVIEW -> Unit
+                GuidanceState.PREVIEW, GuidanceState.ACTIVE -> Unit
             }
-            CameraMode.OVERVIEW ->
-                if (guidanceState == GuidanceState.ACTIVE || guidanceState == GuidanceState.PREVIEW) camera.requestOverview()
+            CameraMode.OVERVIEW -> if (guidanceState == GuidanceState.PREVIEW) request(CameraMode.OVERVIEW, BY_DRIVER, WHY_ROUTES)
             CameraMode.IDLE -> {
                 idleFollow.onMapMoved()
-                camera.requestIdle()
+                request(CameraMode.IDLE, BY_DRIVER, WHY_TAKEN)
             }
         }
+    }
+
+    /**
+     * A button of the map's own during guidance, as the car's map strip has: [CameraMode.OVERVIEW] the
+     * Overview drive view for this map and this drive, [CameraMode.FOLLOWING] the Normal one, which
+     * ends a hold and brings the car at once, [CameraMode.IDLE] the map let go, as a gesture lets it go.
+     * Nothing is stored: the drive view kept for the next drive is Settings' and the phone's toggle's.
+     */
+    private fun chooseDriveView(mode: CameraMode) {
+        val now = driveNow()
+        val view = driveCamera.driveViewControl().driveView
+        when (mode) {
+            // In the Overview already, as while it is down for a turn: it goes out by itself after the turn.
+            CameraMode.OVERVIEW -> if (view == DriveView.NORMAL) toggle(now)
+            CameraMode.FOLLOWING -> if (view == DriveView.OVERVIEW) toggle(now) else carryOut(driveCamera.onRecenter(now), BY_DRIVER, WHY_RECENTER_TAP)
+            CameraMode.IDLE -> {
+                request(CameraMode.IDLE, BY_DRIVER, WHY_TAKEN)
+                onMapTaken()
+            }
+        }
+    }
+
+    override fun setDriveCamera(settings: DriveCameraSettings) {
+        val wish = driveCamera.setSettings(settings, driveNow())
+        if (guidanceState == GuidanceState.ACTIVE) carryOut(wish, BY_DRIVER, WHY_SETTINGS) else publishDriveControls()
+    }
+
+    override fun toggleDriveView(): DriveView = toggle(driveNow())
+
+    /** The other drive view, also during a hold, which it ends; carried out at once during guidance. */
+    private fun toggle(now: Double): DriveView {
+        val result = driveCamera.toggle(now)
+        if (guidanceState == GuidanceState.ACTIVE) {
+            carryOut(result.wish, BY_DRIVER, WHY_TOGGLE, extra = mapOf("held" to result.endedHold))
+        } else {
+            publishDriveControls()
+        }
+        return result.driveView
+    }
+
+    override fun recenter() {
+        if (guidanceState == GuidanceState.ACTIVE) carryOut(driveCamera.onRecenter(driveNow()), BY_DRIVER, WHY_RECENTER_TAP)
+    }
+
+    override fun lookAtRoutes() {
+        if (guidanceState == GuidanceState.ACTIVE) carryOut(driveCamera.onLook(driveNow()), BY_DRIVER, WHY_LOOK)
+    }
+
+    override fun setOverviewBottomReserve(pixels: Int) {
+        val reserve = pixels.coerceAtLeast(0)
+        if (reserve == overviewReserve) return
+        overviewReserve = reserve
+        // A new overview padding moves an overview that shows at once, as any padding does.
+        overviewPadding?.let { overview ->
+            viewportDataSource.overviewPadding = overviewInsets(overview)
+            viewportDataSource.evaluate()
+        }
+    }
+
+    /**
+     * The first finger went down on the map, or the last one came up: while it is down a hold's count
+     * stands at its full value, and from the lift it runs ([io.github.purplepalm.custommaps.nav.camera.MapHold]).
+     * Heard also before a hold begins. The phone's touch listener tells it; a touch is never consumed here.
+     */
+    fun onFinger(down: Boolean) {
+        if (guidanceState != GuidanceState.ACTIVE) return
+        driveCamera.onFinger(down, driveNow())
+        publishHold()
     }
 
     override fun setViewportPadding(padding: ViewportPadding) = setPadding(following = padding, overview = padding)
@@ -786,9 +919,12 @@ internal class MapScene(
         overviewPadding = overview
         paddingChanges += 1
         viewportDataSource.followingPadding = insetsOf(following)
-        viewportDataSource.overviewPadding = insetsOf(overview)
+        viewportDataSource.overviewPadding = overviewInsets(overview)
         viewportDataSource.evaluate()
     }
+
+    /** The overview's padding with its room at the bottom ([overviewReserve]). */
+    private fun overviewInsets(overview: ViewportPadding) = insetsOf(overview.copy(bottom = overview.bottom + overviewReserve))
 
     private fun insetsOf(padding: ViewportPadding) =
         EdgeInsets(padding.top.toDouble(), padding.left.toDouble(), padding.bottom.toDouble(), padding.right.toDouble())
@@ -803,9 +939,14 @@ internal class MapScene(
         // A gesture moves the map itself from here on.
         if (kind != ZOOM_KIND) zoomEase.cancel()
         idleFollow.onMapMoved()
-        if (camera.isIdle) return
+        // During a drive the map is held from the first of the moves, and each one is the driver's activity.
+        if (camera.isIdle) {
+            driveCamera.onMapMoved(driveNow())
+            return
+        }
         debugLog.log("camera_taken", mapOf("owner" to DRIVER_OWNER, "animator" to kind, "from" to camera.state))
-        camera.requestIdle()
+        request(CameraMode.IDLE, BY_DRIVER, WHY_TAKEN)
+        onMapTaken()
     }
 
     /**
@@ -879,11 +1020,18 @@ internal class MapScene(
         // It has seen no progress yet: its first one says whether it shows a close view.
         _closeView.value = false
         measure { onCameraStyle() }
+        // During a drive the new camera is asked for what the drive views want now: a map the driver
+        // holds stays where it is. Elsewhere for what the old camera did.
+        if (guidanceState == GuidanceState.ACTIVE) {
+            handedWish = null
+            carryOut(driveCamera.wish, BY_STYLE, WHY_STYLE, always = true)
+            return
+        }
         when (mode) {
-            CameraMode.FOLLOWING -> camera.requestFollowing()
-            CameraMode.OVERVIEW -> camera.requestOverview()
+            CameraMode.FOLLOWING -> request(CameraMode.FOLLOWING, BY_STYLE, WHY_STYLE)
+            CameraMode.OVERVIEW -> request(CameraMode.OVERVIEW, BY_STYLE, WHY_STYLE)
             // On the browsing map the new camera stays on the car if the old one did.
-            CameraMode.IDLE -> if (idleFollow.following) followCar()
+            CameraMode.IDLE -> if (idleFollow.following) followCar(BY_STYLE, WHY_STYLE)
         }
     }
 
@@ -1076,14 +1224,25 @@ internal class MapScene(
      * shows the list of the maneuvers ahead in its place, and with false when it is back. In between
      * the scene draws nothing, whatever [setVisible] says: its camera asks for no frames and starts no
      * animation, and the camera line goes on once a second while the phone's screen is on, with "away".
-     * The routes, the progress and the data source go on as before, so the map comes back as of now;
-     * back during a drive, the camera follows the car again, from the frame of now.
+     * The routes, the progress and the data source go on as before, so the map comes back as of now.
+     * The drive views do no work meanwhile: a hold of the map ends as it goes, and back during a drive
+     * the plan decides afresh from where the car is then, as after a seek, and the camera shows what
+     * it wants, from the frame of now.
      */
     fun setAway(away: Boolean) {
         if (away == this.away) return
         this.away = away
-        // Whatever the camera did before the map went away, overview or the driver's own view.
-        if (!away && guidanceState == GuidanceState.ACTIVE && _cameraMode.value != CameraMode.FOLLOWING) camera.requestFollowing()
+        if (guidanceState == GuidanceState.ACTIVE) {
+            if (away) {
+                // Nothing of it is carried out while the map is away; the hold's line says why it ended.
+                driveCamera.onAway(driveNow())
+                logHoldEnded()
+                publishDriveControls()
+            } else {
+                driveCamera.onJump(driveNow())
+                carryOut(driveCamera.wish, BY_START, WHY_BACK, always = true)
+            }
+        }
         camera.setAway(away)
         camera.setVisible(visible && !away)
         carLayer.setShown(visible && !away)
@@ -1103,6 +1262,8 @@ internal class MapScene(
         onLookSettled = null
         endLookSettled(null)
         stopCameraSampling()
+        holdTicker?.cancel()
+        holdTicker = null
         laneDetails.release()
         placePin.release()
         mapErrors.cancel()
@@ -1222,6 +1383,9 @@ internal class MapScene(
 
     private fun render(state: GuidanceState) {
         if (style == null) return
+        // From here on this is the render before the next one.
+        val before = rendered
+        rendered = state
         if (state == GuidanceState.ACTIVE) startCameraSampling() else stopCameraSampling()
         // The car drawn by the app from Start to the drive's end, with the switch on.
         carLayer.onGuidance(state == GuidanceState.ACTIVE)
@@ -1240,7 +1404,7 @@ internal class MapScene(
                 if (tracksPuckInPreview) lastPuck?.let(::feedPuck)
                 viewportDataSource.evaluate()
                 idleFollow.onRouteShown()
-                camera.requestOverview()
+                request(CameraMode.OVERVIEW, BY_START, WHY_PREVIEW)
             }
             GuidanceState.ACTIVE -> {
                 useLocationProvider(guidance = true)
@@ -1249,13 +1413,23 @@ internal class MapScene(
                 // Also brings back the route when the map is created again during a drive.
                 showNavigatorRoutes()
                 idleFollow.onRouteShown()
-                camera.requestFollowing()
+                // The drive views' start, once for the drive: from the preview the plan's overview or the
+                // car, on a map made during the drive the car at once, the plain Overview's overview for
+                // every start; handed on also when it is what the camera does. A render again asks nothing.
+                driveCamera.onGuidanceStarted(driveNow(), fromPreview = before == GuidanceState.PREVIEW)?.let { wish ->
+                    carryOut(wish, BY_START, WHY_START, always = true)
+                }
             }
             GuidanceState.IDLE, GuidanceState.ARRIVED -> {
                 useLocationProvider(guidance = false)
                 // The SDK's line shown again, for the next preview, and the own source cleared.
                 if (ownLine.enabled) ownLine.onGuidanceEnded()
                 clearRoutes()
+                // A hold of the map ends with the drive; the drive views keep only their settings.
+                driveCamera.onGuidanceEnded(driveNow())
+                logHoldEnded()
+                handedWish = null
+                publishDriveControls()
                 camera.onGuidanceEnded()
                 _closeView.value = false
                 measure { onCloseView(false, runUp = false, look = look) }
@@ -1266,10 +1440,10 @@ internal class MapScene(
                 // The car may have had its position before the map was ready, or during the drive.
                 val located = lastPuck != null && idleFollow.onCarLocated()
                 if (routeGone || located) {
-                    followCar()
+                    followCar(BY_START, WHY_BROWSE)
                 } else if (showedRoute) {
                     // The car has no position to go to yet.
-                    camera.requestIdle()
+                    request(CameraMode.IDLE, BY_START, WHY_BROWSE)
                 }
             }
         }
@@ -1310,7 +1484,10 @@ internal class MapScene(
         // And the facts of the step's own maneuver, read once per step: Smooth follow looks down onto
         // its junction and frames it by them.
         camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), runUpKey, engine.laneChoices.rampAhead, engine.maneuverFacts(progress))
-        // Once per update, and published only when it changes.
+        // The drive views decide on the same update, once the camera has its frame of it: a move that
+        // starts now starts from there. Nothing while the map is away.
+        if (!away) carryOut(driveCamera.onProgress(engine.viewAhead(progress)), BY_PLAN, WHY_PLAN)
+        // Once per update, after what the drive views asked, and published only when it changes.
         _closeView.value = camera.closeView
         // With the measuring switch: a measured view begins or ends with the close view.
         measure { onCloseView(camera.closeView, runUpKey != null, look) }
@@ -1334,7 +1511,7 @@ internal class MapScene(
             GuidanceState.ACTIVE -> updateTraveledRouteLine(style, point)
             GuidanceState.PREVIEW -> if (tracksPuckInPreview) trackPuckInPreview(point)
             // True once: at the car's first position, and when a position comes after it was asked for.
-            GuidanceState.IDLE, GuidanceState.ARRIVED -> if (idleFollow.onCarLocated()) followCar()
+            GuidanceState.IDLE, GuidanceState.ARRIVED -> if (idleFollow.onCarLocated()) followCar(BY_START, WHY_BROWSE)
         }
     }
 
@@ -1605,12 +1782,140 @@ internal class MapScene(
         if (current !== wanted) plugins.location.setLocationProvider(wanted)
     }
 
-    /** Sends the camera to the car on the browsing map, to stay on it until the driver moves the map. */
-    private fun followCar() {
+    /** Sends the camera to the car on the browsing map, to stay on it until the driver moves the map; [by] and [why] for its line. */
+    private fun followCar(by: String, why: String) {
         val puck = lastPuck ?: return
+        logRequest(IDLE_FOLLOW_MODE, by, why)
         camera.requestIdleFollow(puck)
         // The data source learns where the car is now, and then with every position while this lasts.
         feedPuck(puck)
+    }
+
+    /** The drive views' clock, in seconds: the engine's, which its view points are timed on too. */
+    private fun driveNow(): Double = SystemClock.elapsedRealtime() / MILLIS_PER_SECOND
+
+    /**
+     * Carries out [wish], what the drive camera wants the camera to do now, given by the call [why] of
+     * [by]: following the car or the overview asked of the camera, only when it is not what the camera
+     * was asked for last ([always] for the start's answer and for a camera that has to be asked anew);
+     * leaving the map asks nothing, since the driver's gesture took it already. Then the "drive_view"
+     * line when the plan or the wish changed, a hold's end, and the controls the screen shows.
+     */
+    private fun carryOut(wish: CameraWish?, by: String, why: String, always: Boolean = false, extra: Map<String, Any?> = emptyMap()) {
+        logHoldEnded()
+        if (wish != null && (always || wish != handedWish)) {
+            handedWish = wish
+            when (wish) {
+                CameraWish.FOLLOW -> request(CameraMode.FOLLOWING, by, why)
+                CameraWish.OVERVIEW -> request(CameraMode.OVERVIEW, by, why)
+                CameraWish.LEAVE -> Unit
+            }
+        }
+        logDriveView(why, wish != null, extra)
+        publishDriveControls()
+        // What the camera shows now may have stopped or begun to be close.
+        if (wish != null) _closeView.value = camera.closeView
+    }
+
+    /** Asks the camera for [mode], with a "camera_request" line: every request the map makes goes through here. */
+    private fun request(mode: CameraMode, by: String, why: String) {
+        logRequest(mode.name, by, why)
+        when (mode) {
+            CameraMode.FOLLOWING -> camera.requestFollowing()
+            CameraMode.OVERVIEW -> camera.requestOverview()
+            CameraMode.IDLE -> camera.requestIdle()
+        }
+    }
+
+    /**
+     * The "camera_request" line: the mode asked for, what the camera did, the drive's state, who asked
+     * ([by]) and on which call ([why]); during a drive also how far the plan's point is and the speed.
+     */
+    private fun logRequest(mode: String, by: String, why: String) {
+        val drive = if (guidanceState == GuidanceState.ACTIVE) driveCamera.driveViewFields() else emptyMap()
+        debugLog.log(
+            "camera_request",
+            mapOf(
+                "mode" to mode,
+                "from" to camera.state,
+                "guidance" to guidanceState,
+                "by" to by,
+                "why" to why,
+                "pointM" to drive["pointM"],
+                "speed" to drive["speed"],
+            ).filterValues { it != null },
+        )
+    }
+
+    /** The "drive_view" line ([DriveCamera.driveViewFields]): when the plan changed or the wish did, with the call [why] and [extra]. */
+    private fun logDriveView(why: String, wishChanged: Boolean, extra: Map<String, Any?>) {
+        val plan = driveCamera.planRevision
+        if (!wishChanged && plan == loggedPlan) return
+        loggedPlan = plan
+        debugLog.log("drive_view", driveCamera.driveViewFields() + ("why" to why) + extra)
+    }
+
+    /** The "camera_hold" line of a hold of the map that ended, once: its kind, why, how long, how often a touch started its count again. */
+    private fun logHoldEnded() {
+        val ended = driveCamera.takeHoldEnded() ?: return
+        debugLog.log(
+            "camera_hold",
+            mapOf(
+                "kind" to ended.kind,
+                "ended" to ended.ended.logName,
+                "heldMs" to Math.round(ended.heldSeconds * MILLIS_PER_SECOND),
+                "restarts" to ended.restarts,
+                "near" to ended.near,
+            ),
+        )
+    }
+
+    /** The map is the driver's during a drive, from a gesture, the compass or the car's own moves: held, Recenter with its count. */
+    private fun onMapTaken() {
+        if (guidanceState != GuidanceState.ACTIVE) return
+        driveCamera.onMapTaken(driveNow())
+        // The camera let go of the map itself: nothing to ask of it.
+        handedWish = driveCamera.wish
+        logHoldEnded()
+        logDriveView(WHY_TAKEN, wishChanged = true, extra = emptyMap())
+        publishDriveControls()
+        _closeView.value = camera.closeView
+    }
+
+    /** What the screen shows of the drive views: the Overview toggle's look and Recenter's count. */
+    private fun publishDriveControls() {
+        _driveViewControl.value = driveCamera.driveViewControl()
+        publishHold()
+    }
+
+    /**
+     * Recenter's count of the hold there is now, written only when it changes, a whole second; and the
+     * hold's clock while it can run out by itself. None while the map is away.
+     */
+    private fun publishHold() {
+        val control = if (away) null else driveCamera.recenterControl(driveNow())
+        if (control != _recenterControl.value) _recenterControl.value = control
+        if (control?.secondsLeft != null) startHoldTicker()
+    }
+
+    /**
+     * The hold's clock: four times a second while a count runs, it asks whether the hold is over and
+     * carries out where the map goes back to, and writes Recenter's count when its whole second changes.
+     * It stops by itself with the hold, and while the map is away.
+     */
+    private fun startHoldTicker() {
+        if (holdTicker?.isActive == true) return
+        holdTicker = scope.launch {
+            while (isActive) {
+                delay(HOLD_TICK_MS)
+                if (away || guidanceState != GuidanceState.ACTIVE) break
+                val now = driveNow()
+                driveCamera.onTick(now)?.let { carryOut(it, BY_TIMER, WHY_RECENTER_AUTO) }
+                val control = driveCamera.recenterControl(now)
+                if (control != _recenterControl.value) _recenterControl.value = control
+                if (control?.secondsLeft == null) break
+            }
+        }
     }
 
     /** Tells the data source where the car is, outside guidance. */
@@ -1771,11 +2076,20 @@ internal class MapScene(
      * "runUp" (the exit of the run-up whose close view holds), "laneCapZoom" (the closest zoom the
      * lanes may take and still show enough road) and "capSpeed" (the speed that floor is worked
      * out for, the highest of the last few seconds); Smooth follow's "laneChoice" has its "key".
+     *
+     * The drive views add theirs ([DriveCamera.debugFields]): "view" (the drive view chosen), "plan" and
+     * "planWhy" (what the Overview's plan wants and why, in every drive view, so a drive in Normal shows
+     * what the Overview would have done), "pointM" and "pointKind" (the point ahead it looks at),
+     * "approachM" (how far before it the view comes down), "near" (a point is near), and while the
+     * driver holds the map "hold" and "holdS" (its kind and the whole seconds left); while the camera
+     * shows the overview or is to, "over", the overview the data source fits ("zoom", and "m" from the
+     * camera's centre).
      */
     private fun cameraSample(): Map<String, Any?> {
         val now = SystemClock.elapsedRealtimeNanos()
         val shown = mapboxMap.cameraState
-        val target = viewportDataSource.getViewportData().cameraForFollowing
+        val viewport = viewportDataSource.getViewportData()
+        val target = viewport.cameraForFollowing
         val puck = lastPuck
         val fix = guidancePuck.lastLocation
         // False until this guidance has had a fix.
@@ -1810,7 +2124,7 @@ internal class MapScene(
             "steps" to cameraSteps.take(),
             "fixes" to fixes,
             "keyPoints" to lastKeyPoints.takeIf { hasFix },
-        ) + camera.diagnostics() + junctionPoints.diagnostics() + laneDetails.diagnostics() +
+        ) + camera.diagnostics() + driveFields(shown, viewport.cameraForOverview) + junctionPoints.diagnostics() + laneDetails.diagnostics() +
             // While the app draws its own route line: who draws it, and how its trim keeps up.
             (if (ownLine.enabled) ownLine.diagnostics() else emptyMap()) + mapOf(
             "padding" to padding?.takeIf { paddingChanges > 0 }?.let { listOf(it.top, it.left, it.bottom, it.right) },
@@ -1827,6 +2141,22 @@ internal class MapScene(
         fixes = 0
         paddingChanges = 0
         return sample.filterValues { it != null }
+    }
+
+    /**
+     * The drive views' part of the camera line ([DriveCamera.debugFields]): the drive view, what the plan
+     * of the Overview wants and why, its point, a point near and a hold with its count; and while the
+     * camera shows the overview or is to, "over", the overview the data source fits (its zoom, and how
+     * far its centre is from the camera's), as "to" is the following frame. Numbers and words only.
+     */
+    private fun driveFields(shown: CameraState, overview: CameraOptions): Map<String, Any?> {
+        val fields = driveCamera.debugFields(driveNow())
+        if (_cameraMode.value != CameraMode.OVERVIEW && driveCamera.wish != CameraWish.OVERVIEW) return fields
+        val over = mapOf(
+            "zoom" to overview.zoom?.let { Motion.round(it, 2) },
+            "m" to overview.center?.let { metersBetween(shown.center, it) },
+        ).filterValues { it != null }
+        return if (over.isEmpty()) fields else fields + ("over" to over)
     }
 
     /**
@@ -1925,6 +2255,37 @@ internal class MapScene(
 
         /** Who moved the map in a "camera_taken" line of a gesture without an animation of its own. */
         private const val DRIVER_OWNER = "driver"
+
+        /** How often the hold of the map looks at its count while one runs: four times a second. */
+        private const val HOLD_TICK_MS = 250L
+
+        private const val MILLIS_PER_SECOND = 1_000.0
+
+        /** The "mode" of a "camera_request" line for the camera that follows the car on the browsing map. */
+        private const val IDLE_FOLLOW_MODE = GuidanceCamera.IDLE_FOLLOW
+
+        // Who asked for a camera request, by its name in the "camera_request" line ("by").
+        private const val BY_DRIVER = "driver"
+        private const val BY_PLAN = "plan"
+        private const val BY_TIMER = "timer"
+        private const val BY_START = "start"
+        private const val BY_STYLE = "style"
+
+        // On which call, by its name in the "camera_request" and "drive_view" lines ("why").
+        private const val WHY_START = "start"
+        private const val WHY_PLAN = "plan"
+        private const val WHY_STYLE = "style"
+        private const val WHY_TAKEN = "taken"
+        private const val WHY_RECENTER_TAP = "recenter_tap"
+        private const val WHY_RECENTER_AUTO = "recenter_auto"
+        private const val WHY_LOOK = "look"
+        private const val WHY_TOGGLE = "toggle"
+        private const val WHY_SETTINGS = "settings"
+        private const val WHY_BACK = "back"
+        private const val WHY_PREVIEW = "preview"
+        private const val WHY_BROWSE = "browse"
+        private const val WHY_MY_LOCATION = "my_location"
+        private const val WHY_ROUTES = "routes"
 
         /** The zoom buttons, as a kind of the driver's moves, and the length of their ease. */
         const val ZOOM_KIND = "zoom"

@@ -34,6 +34,7 @@ import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.ViewportPadding
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.DriveViewTuning
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.car.CarArea
 import io.github.purplepalm.custommaps.nav.car.CarAreas
@@ -53,9 +54,13 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -150,6 +155,15 @@ internal class CarNavigationMap(
     private var lanesOnMap = LanesOnMap.DEFAULT
     private var ownRouteLine = false
     private var place: Place? = null
+
+    /**
+     * The drive views' settings, the phone's, as the car's map takes them: the drive view and Zoom in
+     * before turns as chosen, and never Recenter by itself. The car's host owns its pan mode and its
+     * buttons carry no count, so a map the driver moved on the car stays where it is until Recenter.
+     */
+    private var driveSettings = DriveCameraSettings(recenterSeconds = 0)
+
+    private val _driveViewControl = MutableStateFlow(DriveViewControl(driveSettings.driveView, driveSettings.turnZoom))
 
     /** Whether a new surface during the drive shows the overview again: only one the driver asked for in it and has not left. */
     private val overview = CarOverview()
@@ -321,6 +335,36 @@ internal class CarNavigationMap(
     /** The car's padding comes from the host's areas; one set from outside is not used. */
     override fun setViewportPadding(padding: ViewportPadding) = Unit
 
+    /** What the drive views show of the settings; the car's screen draws no toggle of its own. */
+    override val driveViewControl: StateFlow<DriveViewControl> = _driveViewControl.asStateFlow()
+
+    /** Never a count on the car: Recenter by itself is the phone's. */
+    override val recenterControl: StateFlow<RecenterControl?> = MutableStateFlow<RecenterControl?>(null).asStateFlow()
+
+    /** The phone's drive views' settings, without Recenter by itself: on the map of the surface there is, and on every later one. */
+    override fun setDriveCamera(settings: DriveCameraSettings) {
+        driveSettings = settings.copy(recenterSeconds = 0)
+        _driveViewControl.value = DriveViewControl(driveSettings.driveView, driveSettings.turnZoom)
+        guard("setDriveCamera") { scene?.setDriveCamera(driveSettings) }
+    }
+
+    override fun toggleDriveView(): DriveView {
+        var view = driveSettings.driveView
+        guard("toggleDriveView") { scene?.let { view = it.toggleDriveView() } }
+        return view
+    }
+
+    override fun recenter() {
+        guard("recenter") { scene?.recenter() }
+    }
+
+    override fun lookAtRoutes() {
+        guard("lookAtRoutes") { scene?.lookAtRoutes() }
+    }
+
+    /** The host's areas frame the car's overview; nothing is kept apart at its bottom. */
+    override fun setOverviewBottomReserve(pixels: Int) = Unit
+
     override fun setCameraStyle(style: CameraStyle) {
         cameraStyle = style
         guard("setCameraStyle") { scene?.setCameraStyle(style) }
@@ -454,6 +498,7 @@ internal class CarNavigationMap(
             tuning = CameraTuning.CAR,
             guidancePuck = engine.guidancePuck,
             host = sceneHost,
+            driveTuning = DriveViewTuning.CAR,
             onPlatformFix = { platformFixes += 1 },
             // Smooth follow moves on the car's own frames, also while the main thread gets none from the display.
             frames = frames,
@@ -461,6 +506,8 @@ internal class CarNavigationMap(
             puckRelay = CarPuck(frames, log),
         )
         scene = created
+        // The drive views first: a drive under way starts on this map as the settings say.
+        created.setDriveCamera(driveSettings)
         created.setCameraStyle(cameraStyle)
         created.setLaneZoom(laneZoom)
         created.setLanesOnMap(lanesOnMap)

@@ -38,6 +38,17 @@ object CloseView {
         large && (framesManeuver || laneWindow)
 
     /**
+     * Whether a close view the schedules hold ([smoothFollow], [mapboxTuned]) is on screen: only while the camera
+     * follows the car. The schedules go on in every mode, so in the overview, the Overview drive view's or the plain
+     * one, and while the driver holds the map nothing is close, and the moment the camera follows the car again the
+     * schedules' answer holds once more.
+     *
+     * @param scheduled the schedules' answer at the last progress update
+     * @param following the camera follows the car now, or is on its way to
+     */
+    fun onScreen(scheduled: Boolean, following: Boolean): Boolean = scheduled && following
+
+    /**
      * Smooth follow: whether a close view is latched, which the swap of the route line and the lit lane waits for (the
      * own lanes' design 8): the junction view while its junction is framed ([ManeuverFocus.framesManeuver], the camera's
      * latched decision, from the framing distance to the end of the step), or with Large the lanes' close view once it

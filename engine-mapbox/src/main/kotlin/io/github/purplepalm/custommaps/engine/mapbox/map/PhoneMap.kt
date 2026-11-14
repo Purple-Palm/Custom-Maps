@@ -1,7 +1,9 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import com.mapbox.maps.ImageHolder
 import com.mapbox.maps.MapInitOptions
@@ -25,9 +27,13 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -114,6 +120,24 @@ class PhoneMap internal constructor(
             capWhileCarShows = true,
         )
         mapView.gestures.addOnMapClickListener(mapClickListener)
+        watchFingers()
+    }
+
+    /**
+     * The first finger down on the map and the last one up, for the hold of the map during a drive
+     * ([MapScene.onFinger]): its count stands while a finger rests on the map. The listener only
+     * looks: it returns false, so the map handles every touch as before, its gestures and their
+     * accessibility included. A second finger's down and up are not the first or the last.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun watchFingers() {
+        mapView.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> scene.onFinger(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> scene.onFinger(false)
+            }
+            false
+        }
     }
 
     override val cameraMode: StateFlow<CameraMode> get() = scene.cameraMode
@@ -127,6 +151,20 @@ class PhoneMap internal constructor(
     val accessDenied: StateFlow<Boolean> get() = scene.accessDenied
 
     override fun setCameraMode(mode: CameraMode) = scene.setCameraMode(mode)
+
+    override val driveViewControl: StateFlow<DriveViewControl> get() = scene.driveViewControl
+
+    override val recenterControl: StateFlow<RecenterControl?> get() = scene.recenterControl
+
+    override fun setDriveCamera(settings: DriveCameraSettings) = scene.setDriveCamera(settings)
+
+    override fun toggleDriveView(): DriveView = scene.toggleDriveView()
+
+    override fun recenter() = scene.recenter()
+
+    override fun lookAtRoutes() = scene.lookAtRoutes()
+
+    override fun setOverviewBottomReserve(pixels: Int) = scene.setOverviewBottomReserve(pixels)
 
     override fun setViewportPadding(padding: ViewportPadding) = scene.setViewportPadding(padding)
 
@@ -220,6 +258,7 @@ class PhoneMap internal constructor(
     fun release() {
         scene.release()
         mapView.gestures.removeOnMapClickListener(mapClickListener)
+        mapView.setOnTouchListener(null)
     }
 
     companion object {

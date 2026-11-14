@@ -349,8 +349,13 @@ internal class SmoothNavigationCamera(
 
     override val state: String get() = if (arriving) "TRANSITION_TO_${mode.name}" else mode.name
 
-    override var closeView = false
-        private set
+    /**
+     * The close view of the schedules at the last progress update ([CloseView.smoothFollow]). They go on in
+     * every mode; on screen it is only while the camera follows the car.
+     */
+    private var closeScheduled = false
+
+    override val closeView: Boolean get() = CloseView.onScreen(closeScheduled, following = mode == Mode.FOLLOWING)
 
     override var swapLatched = false
         private set
@@ -497,7 +502,7 @@ internal class SmoothNavigationCamera(
         pacing.onProgress(SystemClock.elapsedRealtime())
         // Once for this update: the view down onto a junction, with either lane zoom, or in for
         // lanes, with Large; held there or on its way.
-        closeView = CloseView.smoothFollow(
+        closeScheduled = CloseView.smoothFollow(
             maneuverGoal = maneuverFocus.goal,
             maneuverMoving = maneuverFocus.isAnimating(now),
             laneGoal = laneFocus.goal,
@@ -609,7 +614,7 @@ internal class SmoothNavigationCamera(
         laneFocus.reset(now)
         zoomPlanner.reset()
         forgetSpeeds()
-        closeView = false
+        closeScheduled = false
         swapLatched = false
         laneChoices = emptyList()
         speedMps = null

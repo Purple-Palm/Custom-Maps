@@ -113,6 +113,21 @@ class CloseViewTest {
     }
 
     @Test
+    fun `a close view shows only while the camera follows the car, never in the overview or a held map`() {
+        // Down onto a turn with the drive view out in the overview, or with the map in the driver's hands: the
+        // schedules go on, and nothing is close on screen.
+        val down = CloseView.smoothFollow(1.0, false, 0.0, false, large = false)
+        assertTrue(CloseView.onScreen(down, following = true))
+        assertFalse(CloseView.onScreen(down, following = false))
+        val lanes = CloseView.mapboxTuned(framesManeuver = false, laneWindow = true, large = true)
+        assertTrue(CloseView.onScreen(lanes, following = true))
+        assertFalse(CloseView.onScreen(lanes, following = false))
+        // Nothing scheduled is nothing on screen, whatever the camera does.
+        assertFalse(CloseView.onScreen(scheduled = false, following = true))
+        assertFalse(CloseView.onScreen(scheduled = false, following = false))
+    }
+
+    @Test
     fun `a lane choice far from any turn makes a close view with Large only`() {
         val focus = LaneFocus(tuning)
         val choice = { metersAhead: Double -> listOf(LaneChoice("r/0/0/7", metersAhead, 5, 3, 0, onFreeway = true, atManeuver = false)) }

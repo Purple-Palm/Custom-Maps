@@ -179,8 +179,14 @@ internal class NavigationCameraAdapter(
 
     override val state: String get() = if (idleFollowing) GuidanceCamera.IDLE_FOLLOW else navigationCamera.state.name
 
-    override var closeView = false
-        private set
+    /** The close view of the tuned style's schedules at the last progress update ([CloseView.mapboxTuned]); on screen only while the camera follows the car. */
+    private var closeScheduled = false
+
+    override val closeView: Boolean
+        get() = CloseView.onScreen(
+            closeScheduled,
+            following = navigationCamera.state == NavigationCameraState.FOLLOWING || navigationCamera.state == NavigationCameraState.TRANSITION_TO_FOLLOWING,
+        )
 
     // Never latched for the swap: Mapbox's close views are the navigation SDK's frames, and in them the route line stays,
     // opaque, in the named lane (CloseView.mapboxTunedLatched).
@@ -293,7 +299,7 @@ internal class NavigationCameraAdapter(
             // Once for this update, from the limits just set: in close for a maneuver or for lanes, with Large.
             val large = laneZoom == LaneZoom.LARGE
             val framesManeuver = large && LaneZoomFrames.framesManeuver(progress, options)
-            closeView = CloseView.mapboxTuned(framesManeuver = framesManeuver, laneWindow = laneFocus.goal > 0.0, large = large)
+            closeScheduled = CloseView.mapboxTuned(framesManeuver = framesManeuver, laneWindow = laneFocus.goal > 0.0, large = large)
         }
         dataSource.evaluate()
         if (tuned) pacing.onProgress(SystemClock.elapsedRealtime())
@@ -318,7 +324,7 @@ internal class NavigationCameraAdapter(
 
     override fun onGuidanceEnded() {
         jumpFrame.reset()
-        closeView = false
+        closeScheduled = false
         // Mapbox standard keeps nothing else for a drive.
         if (!tuned) return
         laneFocus.reset(nowSeconds())

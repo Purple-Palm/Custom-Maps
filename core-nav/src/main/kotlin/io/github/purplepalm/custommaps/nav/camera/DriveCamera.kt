@@ -50,6 +50,9 @@ enum class HoldEnd(val logName: String) {
 
     /** A look ended at once: a point came near. */
     NEAR("near"),
+
+    /** The map was put away, the phone showing the list of the maneuvers ahead in its place. */
+    AWAY("away"),
 }
 
 /** A hold of the map that ended, for the log: its kind, why, how long it held, how often a touch started its count again, a point near. */
@@ -182,6 +185,17 @@ class DriveCamera(
 
     /** The next new route is one the driver picked ([DriveViewPlanner.onRouteChosenByDriver]). */
     fun onRouteChosenByDriver() = planner.onRouteChosenByDriver()
+
+    /**
+     * The map was put away, out of sight while the phone shows the list of the maneuvers ahead in its place:
+     * a hold of it ends, and the map is to show the plan's view again; nothing of it is carried out while it
+     * is away. Back, the plan decides afresh from where the car is then ([onJump]).
+     */
+    fun onAway(nowSeconds: Double): CameraWish? {
+        if (!guiding || hold.kind == MapHold.Kind.NONE) return null
+        endHold(nowSeconds, HoldEnd.AWAY)
+        return update()
+    }
 
     /** The car was put somewhere else along the route, as a seek puts it: the plan decides afresh from there. */
     fun onJump(nowSeconds: Double) {

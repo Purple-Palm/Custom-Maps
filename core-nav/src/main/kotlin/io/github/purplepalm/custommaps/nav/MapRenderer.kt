@@ -4,8 +4,12 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookOnMap
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import kotlinx.coroutines.flow.StateFlow
 
 /** Draws the map and the route and moves the camera, on the phone or in the car. */
@@ -19,7 +23,47 @@ interface MapRenderer {
      */
     val closeView: StateFlow<Boolean>
 
+    /**
+     * The camera on the browsing map and in the route preview: My location, and the routes framed again.
+     * During guidance the drive views decide ([setDriveCamera]); there a mode asked for here is a button
+     * of the map's own, as the car's map has: [CameraMode.OVERVIEW] the Overview drive view for this map
+     * and this drive, [CameraMode.FOLLOWING] the Normal one and the car at once, also out of a hold.
+     */
     fun setCameraMode(mode: CameraMode)
+
+    /** What the Overview toggle shows: it changes only when the drive view or Zoom in before turns is chosen. */
+    val driveViewControl: StateFlow<DriveViewControl>
+
+    /**
+     * What Recenter shows while the driver holds the map during guidance, its count in whole seconds;
+     * null while nothing is held. It changes once a second at most, and only during a hold.
+     */
+    val recenterControl: StateFlow<RecenterControl?>
+
+    /**
+     * The drive views' settings ([DriveCameraSettings]): the drive view, Zoom in before turns and Recenter
+     * by itself. A change applies at once, also during a drive: a new drive view ends a hold of the map
+     * and shows at once; the other two keep a hold, whose count takes the new value.
+     */
+    fun setDriveCamera(settings: DriveCameraSettings)
+
+    /**
+     * A tap on the Overview toggle during guidance: the other drive view, at once, also during a hold,
+     * which it ends. Returns the drive view chosen, for the caller to keep for the next drive.
+     */
+    fun toggleDriveView(): DriveView
+
+    /** A tap on Recenter: the map the driver holds goes back where the drive view says. Nothing without a hold. */
+    fun recenter()
+
+    /**
+     * A look at the overview for a few seconds, a hold of its own that ends by itself; none while a turn
+     * is near or where the overview could not stand that long.
+     */
+    fun lookAtRoutes()
+
+    /** How much more room than the following view the overview keeps at the bottom of the map, in pixels; 0 for none. */
+    fun setOverviewBottomReserve(pixels: Int)
 
     /** Screen area covered by UI, which the camera must keep the route out of. */
     fun setViewportPadding(padding: ViewportPadding)

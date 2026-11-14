@@ -313,6 +313,31 @@ class DriveCameraTest {
     }
 
     @Test
+    fun `a hold ends when the map is put away, and back the map shows the plan's view decided afresh`() {
+        val d = CameraDrive(listOf(3_000.0, 4_000.0, 30_000.0), smart)
+        d.drive(13.0, untilX = 1_000.0)
+        assertEquals(CameraWish.OVERVIEW, d.camera.wish)
+        d.camera.onMapTaken(d.t)
+        assertEquals(CameraWish.LEAVE, d.camera.wish)
+        // Away, the hold ends with its reason, and the wish is the plan's again, carried out when the map is back.
+        assertEquals(CameraWish.OVERVIEW, d.camera.onAway(d.t + 1.0))
+        assertEquals(HoldEnd.AWAY, d.camera.takeHoldEnded()!!.ended)
+        assertNull(d.camera.recenterControl(d.t + 1.0))
+        // Without a hold, or outside guidance, being put away changes nothing.
+        assertNull(d.camera.onAway(d.t + 2.0))
+        assertNull(d.camera.takeHoldEnded())
+        // Back past a turn it did not see, inside the next one's approach: the plan decides from there as after a
+        // seek, and the view comes down at the first update.
+        d.x = 3_700.0
+        d.camera.onJump(d.t)
+        d.drive(13.0, seconds = 1.5)
+        assertEquals(CameraWish.FOLLOW, d.lastWish())
+        d.camera.onGuidanceEnded(d.t)
+        d.camera.onMapTaken(d.t)
+        assertNull(d.camera.onAway(d.t))
+    }
+
+    @Test
     fun `random drives with the driver's hands never ask the same wish twice in a row`() {
         val random = Random(21)
         repeat(300) {

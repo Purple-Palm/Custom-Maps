@@ -28,8 +28,9 @@ internal interface GuidanceCamera {
 
     /**
      * Whether the camera shows a close view ([io.github.purplepalm.custommaps.nav.camera.CloseView]),
-     * as worked out at its last [onRouteProgress]: read right after it, never per frame. False
-     * before the first progress of a drive.
+     * as its schedules worked it out at its last [onRouteProgress], and only while it follows the car:
+     * none in the overview or while the driver holds the map. Read right after a progress update or a
+     * request, never per frame. False before the first progress of a drive.
      */
     val closeView: Boolean
 

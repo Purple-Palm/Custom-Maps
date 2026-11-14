@@ -11,8 +11,12 @@ import io.github.purplepalm.custommaps.nav.look.LookScreen
 import io.github.purplepalm.custommaps.nav.look.SharedLook
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
+import io.github.purplepalm.custommaps.nav.model.DriveCameraSettings
+import io.github.purplepalm.custommaps.nav.model.DriveView
+import io.github.purplepalm.custommaps.nav.model.DriveViewControl
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.Place
+import io.github.purplepalm.custommaps.nav.model.RecenterControl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -184,6 +188,13 @@ class CarLookSessionTest {
         }
 
         override fun setCameraMode(mode: CameraMode) = Unit
+        override val driveViewControl: StateFlow<DriveViewControl> = MutableStateFlow(DriveViewControl(DriveView.NORMAL, turnZoom = true))
+        override val recenterControl: StateFlow<RecenterControl?> = MutableStateFlow(null)
+        override fun setDriveCamera(settings: DriveCameraSettings) = Unit
+        override fun toggleDriveView(): DriveView = DriveView.NORMAL
+        override fun recenter() = Unit
+        override fun lookAtRoutes() = Unit
+        override fun setOverviewBottomReserve(pixels: Int) = Unit
         override fun setViewportPadding(padding: ViewportPadding) = Unit
         override fun setCameraStyle(style: CameraStyle) = Unit
         override fun setLaneZoom(mode: LaneZoom) = Unit
