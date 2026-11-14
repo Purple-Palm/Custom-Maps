@@ -35,6 +35,29 @@ class RouteHorizonTest {
     }
 
     @Test
+    fun `each update of the route keeps the edges the one before laid behind the car, until a route change or a seek`() {
+        val held = RouteHorizon()
+        held.take(street)
+        // The car 150 m along: on the second edge, the first behind it as the update before laid it.
+        val on = HorizonAhead.of("route-1", 650.0, 0.5, listOf(edge(oneWay = false, roadClass = HorizonRoadClass.RESIDENTIAL), edge(oneWay = true, roadClass = HorizonRoadClass.PRIMARY)))
+        held.take(on)
+        val joined = requireNotNull(held.aheadOf("route-1"))
+        assertEquals(listOf(500.0 to 600.0, 600.0 to 700.0, 700.0 to 800.0), joined.stretches.map { it.start to it.end })
+        assertEquals(650.0, joined.from)
+        assertEquals(true, held.oneWayAt("route-1", 550.0))
+        assertEquals(HorizonRoadClass.PRIMARY, held.roadClassAt("route-1", 750.0))
+        // A seek far ahead: no edge end of what was held meets the car's edge, the newest alone.
+        val seek = HorizonAhead.of("route-1", 3_000.0, 0.5, listOf(edge(oneWay = true, roadClass = HorizonRoadClass.PRIMARY)))
+        held.take(seek)
+        assertSame(seek, held.ahead)
+        // Another route's update starts over.
+        held.take(on)
+        val other = HorizonAhead.of("route-2", 650.0, 0.5, listOf(edge(oneWay = true, roadClass = HorizonRoadClass.PRIMARY)))
+        held.take(other)
+        assertSame(other, held.ahead)
+    }
+
+    @Test
     fun `whether a street of the route is one-way, and its class, where the horizon holds it`() {
         val held = RouteHorizon()
         held.take(street)

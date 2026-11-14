@@ -102,6 +102,73 @@ class HorizonAheadTest {
     }
 
     @Test
+    fun `a newer update keeps the earlier one's edges behind the car, the car's edge whole from where it began`() {
+        // The earlier update from 1,000 m, a quarter along an edge of 200 m; the newer from 1,230 m, the second edge's
+        // first 80 m behind the car, and an edge more ahead.
+        val earlier = HorizonAhead.of("route-1", 1_000.0, 0.25, listOf(edge(200.0), edge(300.0), edge(150.0, lanes = 2, ramp = true)))
+        val newer = HorizonAhead.of("route-1", 1_230.0, 80.0 / 300.0, listOf(edge(300.0), edge(150.0, lanes = 2, ramp = true), edge(420.0)))
+        assertEquals(1_230.0, newer.start)
+        val joined = newer.after(earlier)
+        assertEquals(listOf(1_000.0 to 1_150.0, 1_150.0 to 1_450.0, 1_450.0 to 1_600.0, 1_600.0 to 2_020.0), spans(joined))
+        assertEquals(listOf(earlier.stretches[0].edge, newer.stretches[0].edge, newer.stretches[1].edge, newer.stretches[2].edge), joined.stretches.map { it.edge })
+        // The car is where the newer update has it; the stretches begin behind it, end where it ends.
+        assertEquals(1_230.0, joined.from)
+        assertEquals(1_000.0, joined.start)
+        assertEquals(newer.to, joined.to)
+        assertSame(joined.stretches[1], joined.at(1_200.0))
+        // Kept again by the next one: the edges the car passed stay, each as the update that last had it ahead laid it.
+        val next = HorizonAhead.of("route-1", 1_470.0, 20.0 / 150.0, listOf(edge(150.0, lanes = 2, ramp = true), edge(420.0), edge(500.0)))
+        assertEquals(listOf(1_000.0 to 1_150.0, 1_150.0 to 1_450.0, 1_450.0 to 1_600.0, 1_600.0 to 2_020.0, 2_020.0 to 2_520.0), spans(next.after(joined)))
+    }
+
+    @Test
+    fun `two updates meet where an earlier edge end lies within the join of where the car's edge begins`() {
+        val earlier = HorizonAhead.of("route-1", 0.0, 0.0, listOf(edge(500.0), edge(500.0)))
+        fun joined(offset: Double): HorizonAhead {
+            // The newer update lays the car's edge, 500 m, from [offset] metres past where the earlier one ends its first edge.
+            val newer = HorizonAhead.of("route-1", 600.0 + offset, 100.0 / 500.0, listOf(edge(500.0), edge(300.0)))
+            return newer.after(earlier)
+        }
+        val join = HorizonAhead.JOIN_M
+        assertEquals(10.0, join)
+        assertEquals(0.0, joined(join - 0.1).start)
+        assertEquals(0.0, joined(-(join - 0.1)).start)
+        // The car's edge begins where the earlier one's end lies, whatever the newer update makes of it.
+        assertEquals(500.0, joined(join - 0.1).stretches[1].start)
+        assertEquals(600.0 + join + 0.1, joined(join + 0.1).start, 1e-9)
+        assertEquals(600.0 - join - 0.1, joined(-(join + 0.1)).start, 1e-9)
+    }
+
+    @Test
+    fun `edges are kept no farther than the trail behind the car, and not at all from another route, a seek or nothing`() {
+        val trail = HorizonAhead.TRAIL_M
+        assertEquals(HorizonAhead.HORIZON_AHEAD_M, trail)
+        // The earlier update's first edge ends 1,000 m along; the newer's car is on the third, which begins at 2,000 m.
+        fun firstKept(car: Double): Double {
+            val earlier = HorizonAhead.of("route-1", 0.0, 0.0, listOf(edge(1_000.0), edge(1_000.0), edge(4_000.0)))
+            val newer = HorizonAhead.of("route-1", car, (car - 2_000.0) / 4_000.0, listOf(edge(4_000.0), edge(800.0)))
+            return newer.after(earlier).start
+        }
+        assertEquals(0.0, firstKept(1_000.0 + trail))
+        assertEquals(1_000.0, firstKept(1_000.0 + trail + 0.1))
+        // Another route, a newer update with nothing, an earlier one with nothing: the newer one as it is.
+        val earlier = HorizonAhead.of("route-1", 0.0, 0.0, listOf(edge(500.0), edge(500.0)))
+        val newer = HorizonAhead.of("route-1", 600.0, 0.2, listOf(edge(500.0)))
+        assertSame(newer, newer.after(HorizonAhead.of("route-2", 0.0, 0.0, listOf(edge(500.0), edge(500.0)))))
+        assertSame(newer, newer.after(HorizonAhead.of("route-1", 0.0, 0.0, emptyList())))
+        val nothing = HorizonAhead.of("route-1", 600.0, 0.2, emptyList())
+        assertSame(nothing, nothing.after(earlier))
+        // A seek back, behind every edge the earlier update had, and one far past its end: no edge end meets.
+        val back = HorizonAhead.of("route-1", 300.0, 0.4, listOf(edge(500.0)))
+        assertSame(back, back.after(HorizonAhead.of("route-1", 1_000.0, 0.0, listOf(edge(500.0)))))
+        val far = HorizonAhead.of("route-1", 5_200.0, 0.4, listOf(edge(500.0)))
+        assertSame(far, far.after(earlier))
+        // An earlier edge end within the join of where the car's short edge begins, yet past where it ends: not that node.
+        val short = HorizonAhead.of("route-1", 502.0, 0.75, listOf(edge(8.0), edge(400.0)))
+        assertSame(short, short.after(HorizonAhead.of("route-1", 0.0, 0.0, listOf(edge(505.0), edge(500.0)))))
+    }
+
+    @Test
     fun `the horizon reaches past every drawing window when it is sent, the SDK's default would not`() {
         val reach = DrawingWindows.MAX_METERS - DrawingWindows.BEHIND_METERS
         assertEquals(3_500.0, HorizonAhead.HORIZON_AHEAD_M)

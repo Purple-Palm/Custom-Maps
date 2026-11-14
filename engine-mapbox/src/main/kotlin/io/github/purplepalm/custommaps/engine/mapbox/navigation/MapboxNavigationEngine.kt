@@ -306,8 +306,9 @@ internal class MapboxNavigationEngine(
     private var laneCountsHorizon: Boolean? = null
 
     /**
-     * The electronic horizon along the route the drive is on, as its newest update laid it out ([RouteHorizon]): for the
-     * drawing of the app's own lanes between lane points, and for whether a street of the route is one-way. Main thread.
+     * The electronic horizon along the route the drive is on, as its newest update laid it out with the edges behind the
+     * car the updates before laid ([RouteHorizon]): for the drawing of the app's own lanes between lane points, and for
+     * whether a street of the route is one-way. Main thread.
      */
     internal val routeHorizon = RouteHorizon()
 

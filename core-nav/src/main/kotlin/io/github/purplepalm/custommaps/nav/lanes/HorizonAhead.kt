@@ -1,5 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
+import kotlin.math.abs
+
 /*
  * Mapbox's electronic horizon as the app's own lanes read it (the own lanes' design 2.1, 3.1, OL9): what the horizon says
  * of each edge of the road ahead on the route, placed along the route from where the car is. The map engine maps the
@@ -58,7 +60,9 @@ data class HorizonStretch(val start: Double, val end: Double, val edge: HorizonE
  * [from] to the end of the edge the car is on, each next one from where the one before ends, as far as the horizon gave
  * each edge's length. They are placed by the route's own stations from the car's: where the horizon's edges and the
  * route's steps measure the road a little differently, the far end drifts by that much, which the "horizon_lanes" line
- * shows as each lane point's offset from the nearest edge end. Pure and never changed once made.
+ * shows as each lane point's offset from the nearest edge end. With the stretches of the updates before it laid behind
+ * the car ([after]), they begin at [start], the edges the car has passed whole, each as the update that last had it ahead
+ * laid it. Pure and never changed once made.
  */
 class HorizonAhead private constructor(
     /** The navigator's id of the route the stretches lie along. */
@@ -70,6 +74,34 @@ class HorizonAhead private constructor(
 
     /** Where the stretches end along the route; [from] where there are none. */
     val to: Double get() = stretches.lastOrNull()?.end ?: from
+
+    /** Where the stretches begin along the route: the car, or behind it where earlier updates' stretches are kept ([after]). */
+    val start: Double get() = stretches.firstOrNull()?.start ?: from
+
+    /**
+     * This update with the stretches of [earlier], an update of the same route before it, kept behind the car: those that
+     * end where the edge the car is on begins, as this update reckons it, or before, back to [TRAIL_M] behind the car, and
+     * that edge whole from there. A pair of lane points the window on screen has partly passed needs the edge that leads to
+     * its first point, which this update no longer gives. This update alone where [earlier] is of another route, where
+     * either has no stretches, and where no edge end of [earlier] lies within [JOIN_M] of where the car's edge begins: the
+     * two do not lay the road alike there, as after a seek or a spell without the horizon.
+     */
+    fun after(earlier: HorizonAhead): HorizonAhead {
+        if (earlier.routeId != routeId || stretches.isEmpty() || earlier.stretches.isEmpty()) return this
+        val car = stretches.first()
+        // Where the edge the car is on begins: the car's share of it back from its end.
+        val edgeStart = car.end - car.edge.lengthM
+        val old = earlier.stretches
+        val last = old.indexOfLast { it.end <= edgeStart + JOIN_M }
+        if (last < 0 || abs(old[last].end - edgeStart) > JOIN_M || old[last].end >= car.end) return this
+        val first = old.indexOfFirst { it.end >= from - TRAIL_M }
+        if (first < 0 || first > last) return this
+        val joined = ArrayList<HorizonStretch>(last - first + stretches.size + 1)
+        joined.addAll(old.subList(first, last + 1))
+        joined.add(HorizonStretch(old[last].end, car.end, car.edge))
+        joined.addAll(stretches.subList(1, stretches.size))
+        return HorizonAhead(routeId, from, joined)
+    }
 
     /** The stretch that holds [station], from its start up to, not at, its end; null outside every stretch. */
     fun at(station: Double): HorizonStretch? {
@@ -116,6 +148,22 @@ class HorizonAhead private constructor(
          * default of 500 m never would.
          */
         const val HORIZON_AHEAD_M = 3_500.0
+
+        /**
+         * How far behind the car the stretches of earlier updates are kept ([after]), in metres: as far as the horizon
+         * reaches ahead, so a pair of lane points as long as one horizon whose second point lies just past the window on
+         * screen still has the edge that leads to its first point. Its stretches stay in memory with the route alone.
+         */
+        const val TRAIL_M = HORIZON_AHEAD_M
+
+        /**
+         * An edge end of an earlier update at most this far, in metres, from where the edge the car is on begins, as the
+         * newer update reckons it, is that same node ([after]): two updates about a second apart lay the road from the car's
+         * stations, each moved on to its own moment ([carStation]), so they place the node the car just passed a few metres
+         * apart at most, far less than the road ahead drifts. Half the tolerance within which an edge end leads to a lane
+         * point ([HorizonLanesLine.MATCH_TOLERANCE_M]).
+         */
+        const val JOIN_M = 10.0
 
         /**
          * The horizon is updated at most once in this many seconds, as its options ask: the navigation SDK maps the whole
