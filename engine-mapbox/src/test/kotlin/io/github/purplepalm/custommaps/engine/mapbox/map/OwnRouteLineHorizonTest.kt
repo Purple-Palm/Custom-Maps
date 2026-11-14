@@ -78,18 +78,20 @@ class OwnRouteLineHorizonTest {
     )
 
     /**
-     * A horizon from a car at [car] that agrees with the lane lists only from the second point to the gore, where it counts
-     * a fourth lane for the first [extra] metres: the rule's bridge after that point becomes a zone of the horizon's.
+     * A horizon from a car at [car] that counts [toFirst] lanes to the first point, four agreeing with neither reading and
+     * three with every lane, and agrees from the second point to the gore, where it counts [lanes] lanes for the first
+     * [extra] metres: with four, the rule's bridge after that point becomes a zone of the horizon's; with three, the lanes
+     * the plan draws there, nothing of the drawing changes there.
      */
-    private fun horizonBeyond(car: Double, extra: Double = 640.0) = HorizonAhead.of(
+    private fun horizonBeyond(car: Double, extra: Double = 640.0, lanes: Int = 4, toFirst: Int = 4) = HorizonAhead.of(
         id,
         car,
         0.0,
         listOf(
-            edge(p - car, 4),
+            edge(p - car, toFirst),
             edge(road - p, 3),
             edge(q - road, 3),
-            edge(extra, 4),
+            edge(extra, lanes),
             edge(gore - q - extra, 3),
             HorizonEdge(200.0, 1, false, true, true, HorizonRoadClass.MOTORWAY),
         ),
@@ -246,7 +248,8 @@ class OwnRouteLineHorizonTest {
     fun `with the switch off the next send takes nothing new from the horizon, and what was sent stays`() {
         drawn()
         val windowEnd = built.single().lanes!!.windows.windowAt(0.0).to
-        ahead = horizonFrom(windowEnd - 1_200.0)
+        // Both pairs agree, and both change the drawing: the first bridges the gap, the second makes a zone after it.
+        ahead = horizonBeyond(windowEnd - 1_200.0, toFirst = 3)
         requireNotNull(driveUntilSent(0.0, windowEnd))
         scene.load()
         scene.loadWindow()
@@ -330,6 +333,33 @@ class OwnRouteLineHorizonTest {
         scene.loadWindow()
         assertEquals(OwnRouteLine.REASON_AHEAD, laneLines().last()["reason"])
         assertNull(scene.log.lines.firstOrNull { it.first == OwnRouteLine.ROUTE_LINE && it.second["reason"] == OwnRouteLine.REASON_FALLBACK })
+    }
+
+    @Test
+    fun `an update whose counts change no lane of the drawing sends no path anew, the window going as before`() {
+        drawn()
+        val windowEnd = built.single().lanes!!.windows.windowAt(0.0).to
+        ahead = horizonBeyond(windowEnd - 1_200.0, lanes = 3)
+        requireNotNull(driveUntilSent(0.0, windowEnd))
+        // Asked once, when the window came due; built with the counts on the worker, found to change nothing: no path.
+        assertEquals(1, asked)
+        assertTrue(style.sent.isEmpty())
+        assertEquals(1, lanes.sent.size)
+        assertTrue(horizonBuilds.isEmpty())
+        assertEquals(1, built.size)
+        scene.loadWindow()
+        assertEquals(OwnRouteLine.REASON_AHEAD, laneLines().last()["reason"])
+        assertEquals(0L, laneLines().last()["horizonM"])
+        assertTrue(told.isEmpty())
+        assertTrue(line.drawn)
+        assertFalse(style.primaryShown)
+        // A newer update at the next send, whose counts change a lane past the window: the path anew with its window.
+        ahead = horizonBeyond(windowEnd - 1_000.0)
+        val nextEnd = built.single().lanes!!.windows.windowAt(windowEnd - 1_000.0).to
+        requireNotNull(driveUntilSent(windowEnd - 980.0, nextEnd))
+        assertEquals(2, asked)
+        assertEquals(1, style.sent.size)
+        assertEquals(1, horizonBuilds.size)
     }
 
     @Test

@@ -18,6 +18,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.abs
@@ -108,6 +109,42 @@ class HorizonDrawingTest {
         assertEquals(0, off.taken)
         // Another route's update gives nothing.
         assertTrue(empty.next(HorizonAhead.of("another", p - 550.0, 0.5, listOf(edge(1_100.0, 5))), p - 130.0, cards).isEmpty)
+    }
+
+    @Test
+    fun `a send whose counts change nothing of the drawing draws as the holder before it, and needs no path anew`() {
+        val route = gapScene(5, "gap")
+        val plan = SceneLines.planOf(route)
+        val cards = DrawingWindows(plan.windows.map { it.from..it.to }, route.lengthMeters).cards
+        val empty = HorizonEvidence.of(plan)
+        assertTrue(empty.drawsAs(HorizonEvidence.of(plan)))
+        val first = empty.next(horizon(route, 5), p - 130.0, cards)
+        assertFalse(first.drawsAs(empty))
+        // The first pair alone, its bridge over the stretch without lane data: the stretches change, though no zone does.
+        val firstPair = HorizonAhead.of(route.routeId, p - 550.0, 0.5, listOf(edge(1_100.0, 5), edge(1_200.0, 5), edge(1_200.0, 5), edge(130.0, 6)))
+        val bridged = empty.next(firstPair, p - 130.0, cards)
+        assertEquals(listOf(p), bridged.lanes.between.map { it.from })
+        assertEquals(empty.evidence.zones, bridged.evidence.zones)
+        assertFalse(bridged.drawsAs(empty))
+        // The same counts from a later window on, in a newer update: the drawing stays as the first send made it.
+        val again = first.next(horizon(route, 5), p + 500.0, cards)
+        assertTrue(again.drawsAs(first))
+        // Switched off: the second pair goes past the window, and with it what it drew in the run-up.
+        assertFalse(first.next(null, p + 500.0, cards).drawsAs(first))
+        // IA, every count over a lane point's own reach: nothing of the plan's own drawing changes.
+        val ia = LaneScenes.ia()
+        val iaPlan = SceneLines.planOf(ia)
+        val iaAhead = HorizonAhead.of(
+            ia.routeId,
+            3_000.0,
+            0.5,
+            listOf(edge(1_640.0, 5), edge(850.0, 5), edge(640.0, 5), edge(50.0, 5), edge(640.0, 6), HorizonEdge(400.0, 2, motorway = false, ramp = true, oneWay = true, roadClass = HorizonRoadClass.MOTORWAY)),
+        )
+        val iaTaken = HorizonEvidence.of(iaPlan).next(iaAhead, 2_000.0, emptyList())
+        assertFalse(iaTaken.isEmpty)
+        assertTrue(iaTaken.drawsAs(HorizonEvidence.of(iaPlan)))
+        // Another plan's holder never.
+        assertFalse(HorizonEvidence.of(iaPlan).drawsAs(empty))
     }
 
     @Test

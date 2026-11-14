@@ -37,6 +37,19 @@ class HorizonEvidence private constructor(
     val isEmpty: Boolean get() = lanes.isEmpty
 
     /**
+     * Whether a drawing built with this holder is the one built with [other]: the same plan, and the same stretches, zones
+     * and placed gains, as where the horizon's counts lie over the lane points' own reaches or are those taken before. A
+     * send then needs no path anew.
+     */
+    fun drawsAs(other: HorizonEvidence): Boolean {
+        if (plan !== other.plan) return false
+        if (isEmpty && other.isEmpty) return true
+        val mine = evidence
+        val theirs = other.evidence
+        return mine.stretches == theirs.stretches && mine.zones == theirs.zones && mine.placedGains == theirs.placedGains
+    }
+
+    /**
      * The holder for the next window's send, with the window on screen ending at [windowEnd] and the route's merged card
      * windows [cards]: the pairs taken before [startFor] stay, and from there on the pairs of [ahead], the newest update of
      * the horizon along this route, replace those taken before; none where [ahead] is null (the switch is off, or the

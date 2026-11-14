@@ -86,15 +86,16 @@ import kotlin.math.max
  * route line and the lit lane swap on the camera's state ([LaneSwap]): the pair over them is drawn whole or not at all,
  * written only when the state flips ([onLatched], [onCameraZoom]).
  *
- * The lane counts of Mapbox's electronic horizon between lane points ([HorizonEvidence], OL9) come with the next window's
- * send, never sooner and never into a window already sent: where the horizon has an update newer than the one the drawing
- * took, the window that is due is built with a path and lanes built anew on the worker, the lane counts taken only past
- * the window on screen and past a card window there, the path kept point for point up to the window's end
- * ([PathPrefix]). The path and the window go to their sources together, each with its data id, while the line drawn
- * stays as it is (the SDK's line is not shown: the old path is right until the new one has loaded); once both have
- * loaded, the station table, the gradients and the trim switch to the new path together. With the switch off the next
- * send takes nothing new past the window on screen; what was sent stays until the next route. A failure costs the
- * horizon's counts for the route and one error line, never the own line. Main thread only.
+ * The lane counts of Mapbox's electronic horizon between lane points ([HorizonEvidence], OL9) come with the next
+ * window's send, never sooner and never into a window already sent: where the horizon has an update newer than the one
+ * the drawing took and its counts change a lane of the drawing, the window that is due is built with a path and lanes
+ * built anew on the worker, the lane counts taken only past the window on screen and past a card window there, the path
+ * kept point for point up to the window's end ([PathPrefix]). The path and the window go to their sources together,
+ * each with its data id, while the line drawn stays as it is (the SDK's line is not shown: the old path is right until
+ * the new one has loaded); once both have loaded, the station table, the gradients and the trim switch to the new path
+ * together. With the switch off the next send takes nothing new past the window on screen; what was sent stays until
+ * the next route. A failure costs the horizon's counts for the route and one error line, never the own line. Main
+ * thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
@@ -935,10 +936,11 @@ internal class OwnRouteLine(
 
     /**
      * Where the electronic horizon has an update newer than the one [drawing] took, or the switch went off after it took
-     * some, builds the window that is due with a path and lanes built anew on the worker (with [car] the car's station),
-     * and returns true; false where the window is built as before. The lane counts are taken only past the window on
-     * screen ([HorizonEvidence.next]), and the path is kept up to its end ([PathPrefix]). Nothing is built while nothing is
-     * drawn at the car, nor after a failure on this route.
+     * some, builds the window that is due on the worker (with [car] the car's station) and returns true: with a path and
+     * lanes built anew where the newest counts change a lane of the drawing, else the window alone, as before
+     * ([HorizonEvidence.drawsAs]); false where the caller builds the window as before. The lane counts are taken only past
+     * the window on screen ([HorizonEvidence.next]), and the path is kept up to its end ([PathPrefix]). Nothing is built
+     * while nothing is drawn at the car, nor after a failure on this route.
      */
     private fun withHorizon(drawing: OwnLineDrawing, own: OwnLanes, car: Double): Boolean {
         val held = drawing.horizon ?: return false
@@ -960,15 +962,28 @@ internal class OwnRouteLine(
         windowTask = worker.run({
             val from = nanos()
             val next = held.next(ahead, windowEnd, own.windows.cards)
-            val built = build.drawing(version, true, next, prefix)
-            // The traffic of the route as it is now, a refresh's too.
-            val rebuilt = traffic?.let { built.withRuns(it.runs(built)) } ?: built
-            val lanes = checkNotNull(rebuilt.lanes) { "No lanes" }
-            Triple(rebuilt, lanes.window(lanes.windows.windowAt(car), rebuilt.table, rebuilt.runs, rebuilt.horizon), nanos() - from)
+            if (next.drawsAs(held)) {
+                // The newest counts change no lane of the drawing: the window as before, no path anew.
+                HorizonBuild(null, own.window(own.windows.windowAt(car), drawing.table, drawing.runs, held), nanos() - from)
+            } else {
+                val built = build.drawing(version, true, next, prefix)
+                // The traffic of the route as it is now, a refresh's too.
+                val rebuilt = traffic?.let { built.withRuns(it.runs(built)) } ?: built
+                val lanes = checkNotNull(rebuilt.lanes) { "No lanes" }
+                HorizonBuild(rebuilt, lanes.window(lanes.windows.windowAt(car), rebuilt.table, rebuilt.runs, rebuilt.horizon), nanos() - from)
+            }
         }) { result ->
             windowTask = null
             result.fold(
-                onSuccess = { (rebuilt, built, took) -> takeHorizon(drawing, rebuilt, built, took, ahead) },
+                onSuccess = { made ->
+                    val rebuilt = made.drawing
+                    if (rebuilt != null) {
+                        takeHorizon(drawing, rebuilt, made.window, made.took, ahead)
+                    } else {
+                        if (drawing === this.drawing) horizonTaken = ahead
+                        takeWindow(drawing, own, made.window, made.took)
+                    }
+                },
                 // The horizon's counts cost only themselves: one error line, and the route's windows are built without them.
                 onFailure = { error ->
                     debugLog.error(WHERE, error)
@@ -978,6 +993,9 @@ internal class OwnRouteLine(
         }
         return true
     }
+
+    /** What the worker made for a send with the horizon's counts: a path anew with its window, or the window alone. */
+    private class HorizonBuild(val drawing: OwnLineDrawing?, val window: LaneWindow, val took: Long)
 
     /**
      * The path [rebuilt] with the horizon's counts of [ahead] and its window [built], made off the main thread in [took] for
