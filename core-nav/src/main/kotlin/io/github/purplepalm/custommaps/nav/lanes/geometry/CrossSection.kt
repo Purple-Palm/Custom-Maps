@@ -51,7 +51,9 @@ import kotlin.math.sign
  *   topology's own taper (a named deceleration lane over [LaneTopology.DECEL_TAPER_METERS], at full width
  *   [LaneTopology.DECEL_LATE_FULL_METERS] before the gore) or [LaneTopology.addedTaperMeters] (8:1 up to 45 mph,
  *   15:1 from 50); a lane on the exit's side that the plan does not name is drawn from where it may begin
- *   ([LaneTopology.Lane.possibleFrom]), [State.POSSIBLE] until it is known; a lane that ends with nothing to take
+ *   ([LaneTopology.Lane.possibleFrom]), [State.POSSIBLE] until it is known; so is a turn pocket, named or not
+ *   ([LaneTopology.Lane.pocket]: along an added lane's taper, at full width no later than its late taper is), which
+ *   the path enters from its neighbour along its late taper all the same ([lateEntry]); a lane that ends with nothing to take
  *   it narrows over [LaneTopology.endingTaperMeters] (W S from 45 mph, W S^2 / 60 below, at least 30 m), and so does one
  *   that leaves by a road between other lanes of its road. A lane that leaves by a road at an edge ends where it
  *   leaves; one followed in its place by another (its kinds changed: a lane kept for car pools or buses from there, or
@@ -132,7 +134,10 @@ class CrossSection private constructor(
         fun begin(axis: RoadAxis): Double = beginOf(axis, station)
     }
 
-    /** A lane as it is drawn: from [from] (where it may begin, or opens) to [to] (where it is gone), with its tapers. */
+    /**
+     * A lane as it is drawn: from [from] (where it may begin, or opens) to [to] (where it is gone), with its tapers; for a turn
+     * pocket drawn from where it may begin, the late taper the path enters it along ([lateFrom] to [lateTo]).
+     */
     internal class DrawnLane(
         val lane: LaneTopology.Lane,
         val width: Double,
@@ -141,9 +146,14 @@ class CrossSection private constructor(
         val openTo: Double,
         val possibleTo: Double,
         val closeFrom: Double,
+        val lateFrom: Double = Double.NaN,
+        val lateTo: Double = Double.NaN,
     ) {
         /** How much of its width the lane has gained by [station], 0 to 1. */
         fun opened(station: Double): Double = ramp(station, from, openTo)
+
+        /** How far along its late taper the path's entry has come by [station], 0 to 1; null without a late taper of its own. */
+        fun entered(station: Double): Double? = if (lateFrom.isNaN()) null else ramp(station, lateFrom, lateTo)
 
         /** How much of its width it has lost by [station], 0 to 1. */
         fun closed(station: Double): Double = ramp(station, closeFrom, to)
@@ -292,7 +302,24 @@ class CrossSection private constructor(
     fun place(lane: Int, station: Double, axis: RoadAxis? = null): Place? = lanes(station, axis).firstOrNull { it.lane == lane }
 
     /** Where [lane] begins to be drawn: where it may begin, or where its taper begins; null for a lane drawn nowhere. */
-    internal fun drawnFrom(lane: Int): Double? = layouts.firstNotNullOfOrNull { layout -> layout.lanes.firstOrNull { it.lane.id == lane } }?.from
+    internal fun drawnFrom(lane: Int): Double? = drawnLane(lane)?.from
+
+    /**
+     * For a turn pocket drawn from where it may begin ([LaneTopology.Lane.pocket]), how far the path's entry into it from its
+     * neighbour has come at [station], 0 to 1: along its late taper, from where it opens for the plan
+     * ([LaneTopology.Lane.opens]) over [LaneTopology.Lane.taperMeters], whatever its drawn width there. Null for any other lane,
+     * which the path enters along its drawn taper.
+     */
+    fun lateEntry(lane: Int, station: Double): Double? = drawnLane(lane)?.entered(station)
+
+    /** The first drawn piece of [lane], by its id; null for a lane no road of a run draws. */
+    private fun drawnLane(lane: Int): DrawnLane? = drawnById[lane]
+
+    private val drawnById: Map<Int, DrawnLane> by lazy {
+        val out = HashMap<Int, DrawnLane>()
+        for (layout in layouts) for (d in layout.lanes) out.putIfAbsent(d.lane.id, d)
+        out
+    }
 
     /** The first station at or after [station] where [lane] is drawn at its full width: past its taper where it opens. */
     fun fullFrom(lane: Int, station: Double): Double {
@@ -954,9 +981,19 @@ class CrossSection private constructor(
             val openTo: Double
             val possibleTo: Double
             val placed = placedAt(lane)
-            if (possibleFrom != null && lane.id !in plan.named && possibleFrom < lane.opens) {
+            var lateFrom = Double.NaN
+            var lateTo = Double.NaN
+            if (possibleFrom != null && (lane.id !in plan.named || lane.pocket) && possibleFrom < lane.opens) {
                 from = possibleFrom
-                openTo = from + LaneTopology.addedTaperMeters(speedAt(from), road)
+                val taper = from + LaneTopology.addedTaperMeters(speedAt(from), road)
+                if (lane.pocket) {
+                    // A turn pocket is at full width no later than its late taper is, and the path enters it along that taper.
+                    lateFrom = lane.opens
+                    lateTo = lane.opens + lane.taperMeters
+                    openTo = min(taper, lateTo)
+                } else {
+                    openTo = taper
+                }
                 possibleTo = lane.opens
             } else if (placed != null) {
                 // A gain on the far side the electronic horizon placed: it opens late inside its zone, which ends where the
@@ -977,7 +1014,7 @@ class CrossSection private constructor(
             }
             val tapers = vanishes(lane, run) || interiorEnd(lane, run)
             val to = if (tapers) lane.closes + LaneTopology.endingTaperMeters(speedAt(lane.closes), roadAt(lane.closes)) else lane.closes
-            return DrawnLane(lane, width, from, to, openTo, possibleTo, lane.closes)
+            return DrawnLane(lane, width, from, to, openTo, possibleTo, lane.closes, lateFrom, lateTo)
         }
 
         /**

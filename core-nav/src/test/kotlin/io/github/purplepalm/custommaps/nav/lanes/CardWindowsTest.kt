@@ -221,6 +221,27 @@ class CardWindowsTest {
     }
 
     @Test
+    fun `a street window is one value, the junction view's start, and the plan names a pocket only inside it`() {
+        // Today the navigation SDK's framing of the maneuver, read in one place.
+        assertEquals(180.0, CardWindows.streetWindowMeters())
+        assertEquals(CameraTuning.PHONE.maneuverFramingMeters, CardWindows.streetWindowMeters(CameraTuning.PHONE))
+        val shorter = CameraTuning.PHONE.copy(maneuverFramingMeters = 120.0)
+        assertEquals(120.0, CardWindows.streetWindowMeters(shorter))
+        assertEquals(LaneScenes.GORE - 120.0, CardWindows.latched(LaneScenes.junctionPocket(), shorter).single().from)
+        // The plan names the lane feeding the pocket from the window's start and the pocket where it opens, nothing before.
+        for (mph in listOf(25.0, 35.0, 50.0)) {
+            val route = LaneScenes.pocketAt(mph)
+            val plan = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), LaneScenes.sideBranches(route))
+            val window = CardWindows.latched(route).single()
+            val named = plan.segments.filter { it.named != null }
+            assertEquals(window.from, named.minOf { it.from }, 1e-9, "at $mph mph")
+            assertTrue(named.all { it.from >= window.from - 1e-9 && it.to <= window.to + LanePlanner.GRID_METERS + 1e-9 }, "at $mph mph")
+            val pocket = plan.topology.lanes.single { it.pocket }
+            assertTrue(named.any { it.named == pocket.id && it.from <= pocket.opens + LanePlanner.GRID_METERS }, "the pocket named where it opens at $mph mph")
+        }
+    }
+
+    @Test
     fun `a point where the route goes straight on counts as the lane choices count it`() {
         val approach = node(0.0)
         assertTrue(CardWindows.pointCounts(node(1.0, s(false), s(false), s(), s(), s()), approach), "five lanes, two leaving")

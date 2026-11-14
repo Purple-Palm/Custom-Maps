@@ -308,6 +308,72 @@ class StreetDrawingTest {
     }
 
     @Test
+    fun `the design's street junction - a left pocket may begin 82 m before the node, opens late and is entered along its late taper`() {
+        for (oneWay in listOf(false, true)) {
+            val d = draw(LaneScenes.junctionPocket(), oneWay)
+            val pocket = d.plan.topology.lanes.single { it.pocket }
+            val feeder = requireNotNull(pocket.fedBy)
+            // At 35 mph: possibly there at full width 45 m before the stop line after an 8:1 taper; for the plan it opens late,
+            // at full width 30 m before the stop line after a 15 m taper.
+            val possible = gore - 10.0 - 45.0 - 8.0 * lane
+            assertEquals(possible, requireNotNull(pocket.possibleFrom), MM)
+            assertEquals(gore - 55.0, pocket.opens, MM)
+            assertEquals(15.0, pocket.taperMeters, MM)
+            assertTrue(pocket.id in d.plan.named)
+            // Drawn as possible from where it may begin, plain asphalt widening toward it, at full width where it opens.
+            val widening = d.drawing.lanesAt(gore - 70.0).single { it.lane == pocket.id }
+            assertEquals(CrossSection.State.POSSIBLE, widening.state)
+            assertTrue(widening.width > 0.0 && widening.width < lane)
+            assertTrue(d.drawing.lanesAt(possible - 1.0).none { it.lane == pocket.id })
+            assertEquals(lane, d.drawing.lanesAt(gore - 55.0).single { it.lane == pocket.id }.width, MM)
+            // The path keeps to the lane feeding it until it opens, and enters it along its late taper, with no step.
+            val feederAt = { x: Double -> d.drawing.lanesAt(x).single { it.lane == feeder }.centre }
+            val pocketAt = { x: Double -> d.drawing.lanesAt(x).single { it.lane == pocket.id }.centre }
+            assertEquals(feederAt(gore - 60.0), d.path.offsetAt(gore - 60.0), PATH_METERS)
+            assertEquals(feederAt(gore - 55.0), d.path.offsetAt(gore - 55.0), PATH_METERS)
+            assertEquals(0.0, requireNotNull(d.section.lateEntry(pocket.id, gore - 55.0)), MM)
+            assertEquals(0.5, requireNotNull(d.section.lateEntry(pocket.id, gore - 47.5)), MM)
+            assertEquals(1.0, requireNotNull(d.section.lateEntry(pocket.id, gore - 40.0)), MM)
+            assertNull(d.section.lateEntry(feeder, gore - 47.5))
+            assertEquals((feederAt(gore - 47.5) + pocketAt(gore - 47.5)) / 2.0, d.path.offsetAt(gore - 47.5), PATH_METERS)
+            assertEquals(pocketAt(gore - 40.0), d.path.offsetAt(gore - 40.0), PATH_METERS)
+            var x = gore - 60.0
+            while (x < gore - 35.0) {
+                assertTrue(abs(d.path.offsetAt(x + 0.5) - d.path.offsetAt(x)) < 0.2, "a step in the path at $x")
+                x += 0.5
+            }
+            // The lit lane runs on across where the pocket opens: one lit stretch from the window's start to the stop line.
+            assertEquals(1, d.drawing.litStretches().size)
+            assertEquals(gore - 10.0, d.drawing.litStretches().single().endInclusive, MM)
+            // Beside the lit lane a dotted extension from where the possible pocket is half wide to where the path is in it,
+            // solid from there to the stop line, which the signal's flag gives.
+            val beside = d.of(Kind.LANE_LINE).filter { it.between == pocket.id to feeder || it.between == feeder to pocket.id }.sortedBy { it.from }
+            assertEquals(listOf(Pattern.EXTENSION, Pattern.SOLID), beside.map { it.pattern })
+            assertEquals(gore - 40.0, beside[0].to, MM)
+            assertEquals(gore - 40.0, beside[1].from, MM)
+            assertEquals(gore - 10.0, beside[1].to, MM)
+            val half = beside[0].from
+            assertEquals(lane / 2.0, d.drawing.lanesAt(half).single { it.lane == pocket.id }.width, 0.05)
+            assertTrue(half > possible && half < gore - 55.0)
+            assertEquals(0.61, LaneDrawing.Pattern.EXTENSION.dashMeters)
+            assertEquals(1.22, LaneDrawing.Pattern.EXTENSION.gapMeters)
+            assertEquals(listOf(LaneDrawing.StopLine(2, gore - 10.0)), d.drawing.stopLines)
+            // A tint opening toward the pocket where it may be: move over when it opens.
+            val tint = d.of(Kind.TINT).filter { it.lane == pocket.id }
+            assertTrue(tint.isNotEmpty())
+            assertEquals(possible, tint.minOf { it.from }, MM)
+            assertEquals(gore - 55.0, tint.maxOf { it.to }, MM)
+            val axis = requireNotNull(d.path.axisAt(gore - 60.0))
+            val narrow = DrawingProbe.across(axis, gore - 75.0, tint.flatMap { it.parts })
+            val wide = DrawingProbe.across(axis, gore - 60.0, tint.flatMap { it.parts })
+            assertTrue(narrow[1] - narrow[0] < wide[1] - wide[0], "the tint opens toward the pocket")
+            // One-way, the possible pocket widens the asphalt on the left; two-way it opens into the oncoming half.
+            val asphalt = requireNotNull(d.drawing.asphaltAt(gore - 70.0))
+            if (oneWay) assertTrue(asphalt.first > lane + apron + 1e-6) else assertEquals(2.0 * lane + apron, asphalt.first, MM)
+        }
+    }
+
+    @Test
     fun `without a source nothing of a street is drawn and the path is the route's own line`() {
         val d = draw(LaneScenes.streetTurn(), oneWay = null)
         assertTrue(d.path.drawings.isEmpty())
@@ -321,6 +387,9 @@ class StreetDrawingTest {
 
     private companion object {
         const val MM = 1e-3
+
+        /** The path between its samples, to a centimetre. */
+        const val PATH_METERS = 0.01
 
         /** How far a chord of the junction's curve, about a metre long, may turn from the road's way where the curve ends. */
         const val CHORD_DEGREES = 10.0

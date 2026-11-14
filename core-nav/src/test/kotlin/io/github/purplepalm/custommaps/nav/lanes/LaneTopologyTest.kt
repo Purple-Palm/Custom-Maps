@@ -202,7 +202,79 @@ class LaneTopologyTest {
         assertEquals(1_000.0 - 55.0, pocket.opens, "full width 30 m before a stop line 10 m before the node, after a 15 m taper")
         assertEquals(0, pocket.fedBy)
         assertEquals(LaneTopology.POCKET_TAPER_METERS, pocket.taperMeters)
-        assertEquals(800.0, pocket.possibleFrom)
+        assertTrue(pocket.pocket)
+        // It may already be there at full width 30 m before the stop line at 30 mph, after an 8:1 taper, well inside half the
+        // way back to the point 200 m before it.
+        assertEquals(1_000.0 - 10.0 - 30.0 - 8.0 * 3.35, requireNotNull(pocket.possibleFrom), 1e-9)
+        assertTrue(t.lanes.filter { it.id != 3 }.none { it.pocket })
+    }
+
+    /** The turn pocket of [t]: the one lane a street turn's point adds at the turn's side. */
+    private fun pocketOf(t: LaneTopology): LaneTopology.Lane = t.lanes.single { it.pocket }
+
+    @Test
+    fun `a turn pocket may already be there at full width 30, 45 or 75 m before the stop line, by the planning speed`() {
+        val mps = PlanningSpeed.MPS_PER_MPH
+        // Both sides of 30 mph and of 45 mph.
+        assertEquals(30.0, LaneTopology.pocketPossibleFullMeters(30.0 * mps))
+        assertEquals(45.0, LaneTopology.pocketPossibleFullMeters(31.0 * mps))
+        assertEquals(45.0, LaneTopology.pocketPossibleFullMeters(44.0 * mps))
+        assertEquals(75.0, LaneTopology.pocketPossibleFullMeters(45.0 * mps))
+        assertEquals(75.0, LaneTopology.pocketPossibleFullMeters(60.0 * mps))
+        // Before that an added lane's taper, 8:1 below 50 mph and 15:1 from 50; the stop line 10 m before the node.
+        val slowTaper = 8.0 * 3.35
+        val fastTaper = 15.0 * 3.35
+        for ((mph, from) in listOf(
+            30.0 to GORE - 10.0 - 30.0 - slowTaper,
+            31.0 to GORE - 10.0 - 45.0 - slowTaper,
+            44.0 to GORE - 10.0 - 45.0 - slowTaper,
+            45.0 to GORE - 10.0 - 75.0 - slowTaper,
+            49.0 to GORE - 10.0 - 75.0 - slowTaper,
+            50.0 to GORE - 10.0 - 75.0 - fastTaper,
+        )) {
+            val pocket = pocketOf(topology(LaneScenes.pocketAt(mph)))
+            assertEquals(from, requireNotNull(pocket.possibleFrom) { "no possible part at $mph mph" }, 1e-9, "at $mph mph")
+            assertTrue(requireNotNull(pocket.possibleFrom) < pocket.opens)
+        }
+    }
+
+    @Test
+    fun `a turn pocket opens late, full width 30 m before the stop line after 15 m up to 49 mph and 45 m after 30 m from 50`() {
+        for ((mph, late) in listOf(25.0 to (55.0 to 15.0), 45.0 to (55.0 to 15.0), 49.0 to (55.0 to 15.0), 50.0 to (85.0 to 30.0), 55.0 to (85.0 to 30.0))) {
+            val pocket = pocketOf(topology(LaneScenes.pocketAt(mph)))
+            assertEquals(GORE - late.first, pocket.opens, 1e-9, "at $mph mph")
+            assertEquals(late.second, pocket.taperMeters, 1e-9, "at $mph mph")
+            assertEquals(0, pocket.fedBy, "entered from the left lane")
+        }
+        assertEquals(30.0, LaneTopology.POCKET_FULL_LATE_METERS)
+        assertEquals(15.0, LaneTopology.POCKET_TAPER_METERS)
+        assertEquals(45.0, LaneTopology.POCKET_FULL_LATE_FAST_METERS)
+        assertEquals(30.0, LaneTopology.POCKET_TAPER_FAST_METERS)
+    }
+
+    @Test
+    fun `a turn pocket reaches back no more than half the way to the junction before it, and never past its far side`() {
+        val v = 35.0 * PlanningSpeed.MPS_PER_MPH
+        val rule = 1_000.0 - 10.0 - 45.0 - 8.0 * 3.35
+        // Half the way: 160 m back it holds the pocket, 170 m back the rule does.
+        assertEquals(1_000.0 - 80.0, LaneTopology.pocketPossibleFrom(1_000.0, v, 1_000.0 - 160.0), 1e-9)
+        assertEquals(rule, LaneTopology.pocketPossibleFrom(1_000.0, v, 1_000.0 - 170.0), 1e-9)
+        // The far side, 10 m past the junction's node: 15 m back it holds, 25 m back half the way does.
+        assertEquals(1_000.0 - 5.0, LaneTopology.pocketPossibleFrom(1_000.0, v, 1_000.0 - 15.0), 1e-9)
+        assertEquals(1_000.0 - 12.5, LaneTopology.pocketPossibleFrom(1_000.0, v, 1_000.0 - 25.0), 1e-9)
+        // On a route: a junction without lane data 160 m or 170 m before the turn.
+        assertEquals(GORE - 80.0, requireNotNull(pocketOf(topology(LaneScenes.pocketAt(35.0, 160.0))).possibleFrom), 1e-9)
+        assertEquals(GORE - 1_000.0 + rule, requireNotNull(pocketOf(topology(LaneScenes.pocketAt(35.0, 170.0))).possibleFrom), 1e-9)
+        // Its late part never opens inside that junction either: 60 m back its far side holds the pocket's start; 70 m back the
+        // late rule does. Half the way back lies past where it opens there: no possible part.
+        val near = pocketOf(topology(LaneScenes.pocketAt(35.0, 60.0)))
+        assertEquals(GORE - 50.0, near.opens, 1e-9)
+        assertNull(near.possibleFrom)
+        val farther = pocketOf(topology(LaneScenes.pocketAt(35.0, 70.0)))
+        assertEquals(GORE - 55.0, farther.opens, 1e-9)
+        assertNull(farther.possibleFrom)
+        assertEquals(0.5, LaneTopology.POCKET_POSSIBLE_SHARE)
+        assertEquals(LaneTopology.STOP_LINE_METERS, LaneTopology.FAR_SIDE_METERS)
     }
 
     @Test

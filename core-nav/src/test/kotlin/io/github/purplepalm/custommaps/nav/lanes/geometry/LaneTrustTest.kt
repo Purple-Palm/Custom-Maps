@@ -167,6 +167,7 @@ class LaneTrustTest {
             for (oneWay in listOf(false, true)) check(build("$name-${if (oneWay) "one-way" else "two-way"}", route, streets = LaneScenes.ways(route, oneWay)))
         }
         assertSeen("line", "named", "lit", "arrow", "kept", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
+        assertSeen("pocketLine", "pocketTint", "pocketEntry", "pocketPossible")
     }
 
     @Test
@@ -193,7 +194,7 @@ class LaneTrustTest {
         }
         assertTrue(undrawn > 0)
         assertSeen("line", "named", "lit", "tint", "arrow", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
-        assertSeen("litAcross", "beginsPastJunction")
+        assertSeen("litAcross", "beginsPastJunction", "pocketLine", "pocketTint", "pocketEntry", "pocketPossible")
     }
 
     @Test
@@ -408,10 +409,19 @@ class LaneTrustTest {
                         val lanes = b.drawing.lanesAt(x)
                         val l = lanes.indexOfFirst { it.lane == between.first }
                         assertTrue(l >= 0 && lanes.getOrNull(l + 1)?.lane == between.second, "${b.name}: the line $between at $x lies between no two neighbours")
-                        assertTrue(
-                            lanes[l].state != CrossSection.State.POSSIBLE && lanes[l + 1].state != CrossSection.State.POSSIBLE,
-                            "${b.name}: the line $between at $x beside a lane that is only possible",
-                        )
+                        // Beside a lane only possible no line, but for a turn pocket's dotted extension beside the lane feeding it.
+                        val left = b.plan.topology.lanes[between.first]
+                        val right = b.plan.topology.lanes[between.second]
+                        val pocket = left.pocket && left.fedBy == right.id || right.pocket && right.fedBy == left.id
+                        if (pocket && (lanes[l].state == CrossSection.State.POSSIBLE || lanes[l + 1].state == CrossSection.State.POSSIBLE)) {
+                            assertEquals(LaneDrawing.Pattern.EXTENSION, f.pattern, "${b.name}: the line $between at $x beside a pocket that may already be there")
+                            saw("pocketLine")
+                        } else {
+                            assertTrue(
+                                lanes[l].state != CrossSection.State.POSSIBLE && lanes[l + 1].state != CrossSection.State.POSSIBLE,
+                                "${b.name}: the line $between at $x beside a lane that is only possible",
+                            )
+                        }
                         saw("line")
                     }
                 }
@@ -782,12 +792,20 @@ class LaneTrustTest {
                 saw("opens")
                 val before = lane.opens - 1.0
                 if (b.path.drawings.any { before > it.from && before < it.to }) {
-                    assertTrue(b.drawing.lanesAt(before).none { it.lane == lane.id }, "${b.name}: the named lane ${lane.id} drawn at $before, before it opens")
+                    val place = b.drawing.lanesAt(before).firstOrNull { it.lane == lane.id }
+                    if (lane.pocket && lane.possibleFrom != null) {
+                        // A turn pocket the plan names is drawn before it opens only as possible, from where it may begin.
+                        assertTrue(place == null || place.state == CrossSection.State.POSSIBLE, "${b.name}: the named pocket ${lane.id} at $before, before it opens")
+                        saw("pocketPossible")
+                    } else {
+                        assertTrue(place == null, "${b.name}: the named lane ${lane.id} drawn at $before, before it opens")
+                    }
                 }
             }
             val possible = lane.possibleFrom ?: continue
-            if (lane.id in b.plan.named) continue
-            // An exit-side lane the plan does not name is drawn from where it may begin, as only possible until it opens.
+            if (lane.id in b.plan.named && !lane.pocket) continue
+            // An exit-side lane the plan does not name, and a turn pocket, are drawn from where they may begin, as only possible
+            // until they open.
             val at = possible + POSSIBLE_SHOWN_METERS
             if (at < lane.opens && b.path.drawings.any { at > it.from && at < it.to }) {
                 val place = b.drawing.lanesAt(at).firstOrNull { it.lane == lane.id }
@@ -981,10 +999,16 @@ class LaneTrustTest {
             for (x in middles) {
                 val seg = requireNotNull(b.plan.segmentAt(x))
                 if (f.kind == Kind.TINT) {
-                    // A lane that still works beside the lit one, drawn as there, where the data gives the lanes.
-                    assertTrue(lane.id in seg.band && lane.id != seg.named && seg.noLane == null, "${b.name}: lane ${lane.id} tinted at $x")
                     val place = b.drawing.lanesAt(x).firstOrNull { it.lane == lane.id }
-                    assertTrue(place != null && place.state != CrossSection.State.POSSIBLE, "${b.name}: lane ${lane.id} tinted at $x where it is not drawn as there")
+                    if (lane.pocket && lane.fedBy == seg.named && lane.id in b.plan.named && place?.state == CrossSection.State.POSSIBLE) {
+                        // A turn pocket the plan names later, where it may already be beside the lit lane that feeds it.
+                        assertTrue(x < lane.opens && x >= requireNotNull(lane.possibleFrom), "${b.name}: the pocket ${lane.id} tinted at $x")
+                        saw("pocketTint")
+                    } else {
+                        // A lane that still works beside the lit one, drawn as there, where the data gives the lanes.
+                        assertTrue(lane.id in seg.band && lane.id != seg.named && seg.noLane == null, "${b.name}: lane ${lane.id} tinted at $x")
+                        assertTrue(place != null && place.state != CrossSection.State.POSSIBLE, "${b.name}: lane ${lane.id} tinted at $x where it is not drawn as there")
+                    }
                     val stretch = b.evidence.stretches.firstOrNull { x >= it.from && x < it.to }
                     assertTrue(stretch != null && (stretch.kind == LaneEvidence.Kind.KNOWN || stretch.kind == LaneEvidence.Kind.BRIDGED), "${b.name}: a tint at $x on a ${stretch?.kind} stretch")
                 } else {
@@ -1135,6 +1159,14 @@ class LaneTrustTest {
                 if (moving.any { x >= it.first && x <= it.second }) continue
                 val place = places.firstOrNull { it.lane == named }
                 val feeder = lanes[named].fedBy?.let { f -> places.firstOrNull { it.lane == f } }
+                val late = b.section.lateEntry(named, x)
+                if (feeder != null && place != null && late != null && late < 1.0) {
+                    // Into a turn pocket along its late taper, from its feeder's middle to its own.
+                    val expected = feeder.centre * (1.0 - late) + place.centre * late
+                    assertEquals(expected, t, RoutePath.TOLERANCE_METERS + LIT_SLACK_METERS, "${b.name} at $x: the path entering pocket $named")
+                    saw("pocketEntry")
+                    continue
+                }
                 if (feeder != null && (place == null || place.width < 2.0 * half - 1e-6)) {
                     // Along a lane's taper, from its feeder.
                     val left = maxOf(place?.left ?: feeder.left, feeder.left)

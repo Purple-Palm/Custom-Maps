@@ -207,31 +207,37 @@ internal object RandomRoutes {
     }
 
     /**
-     * A made-up street to a turn at [LaneScenes.GORE] to either side, planned at 25 to 45 mph: one to three general lanes, a
+     * A made-up street to a turn at [LaneScenes.GORE] to either side, planned at 25 to 55 mph: one to three general lanes, a
      * lane kept for buses at the left edge in a fifth of the routes and one only for bicycles at the right edge in a third;
      * two to four junctions before the turn, 120 to 400 m apart, each with a road crossing it and a traffic signal or a stop
-     * sign at random, a lane point in four of five; the turn from the general lane at its side, at a signal, a stop sign or
-     * neither; in two of five a lane point 60 to 240 m along the road after it; the arrival 300 m past the turn.
+     * sign at random, a lane point in four of five; the turn from the general lane at its side or, in half the routes, from
+     * a turn pocket the turn's point adds at that side (left of the bicycle lane, never beside a lane kept for buses), at a
+     * signal, a stop sign or neither; in two of five a lane point 60 to 240 m along the road after it; the arrival 300 m past
+     * the turn.
      */
     fun street(rng: Random, id: String): LaneRoute {
-        val v = rng.nextDouble(25.0, 45.0) * PlanningSpeed.MPS_PER_MPH
+        val v = rng.nextDouble(25.0, 55.0) * PlanningSpeed.MPS_PER_MPH
         val general = rng.nextInt(1, 4)
-        val bus = rng.nextDouble() < 0.2
-        val bike = rng.nextDouble() < 1.0 / 3.0
         val right = rng.nextBoolean()
+        val pocket = rng.nextBoolean()
+        val bus = rng.nextDouble() < 0.2 && !(pocket && !right)
+        val bike = rng.nextDouble() < 1.0 / 3.0
         fun lanes(turn: Boolean): Array<RouteLane> {
             val out = ArrayList<RouteLane>()
             if (bus) out.add(LaneScenes.bus())
+            if (turn && pocket && !right) out.add(LaneScenes.left())
             val edge = if (right) general - 1 else 0
             repeat(general) { i ->
                 out.add(
                     when {
                         !turn -> s()
+                        pocket -> s(false)
                         i == edge -> if (right) LaneScenes.right() else LaneScenes.left()
                         else -> s(false)
                     },
                 )
             }
+            if (turn && pocket && right) out.add(LaneScenes.right())
             if (bike) out.add(LaneScenes.bike())
             return out.toTypedArray()
         }

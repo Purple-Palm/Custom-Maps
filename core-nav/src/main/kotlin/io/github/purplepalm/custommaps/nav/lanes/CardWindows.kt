@@ -43,13 +43,19 @@ data class CardWindow(val from: Double, val to: Double, val kind: Kind, val node
  *   the run-up's reach at the approach's planning speed ([RunUpLatch.reachMeters]: the close view's
  *   window, [LaneFocus.windowMeters], plus [CameraTuning.runUpSeconds] of driving, at least
  *   [CameraTuning.runUpMinMeters]) to the gore;
- * - a street window over the last [CameraTuning.maneuverFramingMeters] before every other maneuver
- *   the camera frames as a junction, on an approach that is no freeway: the navigation SDK's framing.
+ * - a street window over the last [streetWindowMeters] before every other maneuver the camera frames as
+ *   a junction, on an approach that is no freeway: from where the junction view begins.
  *
  * A window never reaches back past the start of its step: the car sees the step's maneuver only once
  * it is on that step. Pure; the debug log counts the route's lane gaps inside them.
  */
 object CardWindows {
+
+    /**
+     * How long a street window is: from where the junction view begins before its maneuver, today the navigation SDK's framing
+     * of the maneuver ([CameraTuning.maneuverFramingMeters]), the one value every street window reads, here.
+     */
+    fun streetWindowMeters(tuning: CameraTuning = CameraTuning.PHONE): Double = tuning.maneuverFramingMeters
 
     fun of(route: LaneRoute, tuning: CameraTuning = CameraTuning.PHONE): List<CardWindow> {
         val nodes = route.nodes
@@ -64,7 +70,7 @@ object CardWindows {
                     runUpCounts(node, approach, tuning) ->
                         CardWindow(node.station - RunUpLatch.reachMeters(tuning, PlanningSpeed.of(approach)), node.station, CardWindow.Kind.RUN_UP, m)
                     framesStreetManeuver(maneuver, approach) ->
-                        CardWindow(node.station - tuning.maneuverFramingMeters, node.station, CardWindow.Kind.STREET, m)
+                        CardWindow(node.station - streetWindowMeters(tuning), node.station, CardWindow.Kind.STREET, m)
                     else -> null
                 }
                 if (window != null) {
@@ -122,7 +128,7 @@ object CardWindows {
                     }
                     if (begin > 0.0) windows.add(CardWindow(node.station - begin, node.station, CardWindow.Kind.RUN_UP, m))
                 } else if (framesStreetManeuver(maneuver, approach)) {
-                    val from = max(stepStart, node.station - tuning.maneuverFramingMeters)
+                    val from = max(stepStart, node.station - streetWindowMeters(tuning))
                     if (node.station > from) windows.add(CardWindow(from, node.station, CardWindow.Kind.STREET, m))
                 }
             }

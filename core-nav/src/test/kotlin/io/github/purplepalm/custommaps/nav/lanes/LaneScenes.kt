@@ -662,6 +662,33 @@ internal object LaneScenes {
         return route(*nodes.toTypedArray(), id = id)
     }
 
+    /**
+     * The design's street junction (its street scene): two lanes each way at 35 mph to a left turn at [GORE] where a traffic
+     * signal stands and a road crosses, whose list adds a left pocket; a lane point 300 m before it; the road after it with two
+     * lanes to a lane point 150 m on; the arrival 300 m past the turn.
+     */
+    fun junctionPocket(): LaneRoute = route(
+        street(0.0, maneuver = DEPART),
+        street(GORE - 300.0, s(), s()),
+        street(GORE, left(), s(false), s(false), roads = CROSSING, maneuver = TURN_LEFT, signal = true),
+        street(GORE + 150.0, s(), s()),
+        street(GORE + 300.0, maneuver = ARRIVE),
+        id = "junction-pocket",
+    )
+
+    /**
+     * A left turn at [GORE] whose list adds a left pocket, planned at [mph]: a lane point 300 m before it, and where
+     * [junctionBack] is given a junction without lane data that far before the turn, a road crossing it.
+     */
+    fun pocketAt(mph: Double, junctionBack: Double? = null): LaneRoute {
+        val v = mph * PlanningSpeed.MPS_PER_MPH
+        val nodes = arrayListOf(street(0.0, maneuver = DEPART, planMps = v), street(GORE - 300.0, s(), s(), planMps = v))
+        if (junctionBack != null) nodes.add(street(GORE - junctionBack, roads = CROSSING, planMps = v))
+        nodes.add(street(GORE, left(), s(false), s(false), roads = CROSSING, maneuver = TURN_LEFT, planMps = v))
+        nodes.add(street(GORE + 300.0, maneuver = ARRIVE, planMps = v))
+        return route(*nodes.toTypedArray(), id = "pocket-$mph-${junctionBack ?: 0}")
+    }
+
     /** Every scene of the planner's tests, by name. */
     fun all(): Map<String, LaneRoute> = linkedMapOf(
         "ia" to ia(),

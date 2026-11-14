@@ -32,8 +32,9 @@ import kotlin.math.min
  *   between lanes is a half-cosine S of [moveMeters] per lane crossed (clamp(v x [MOVE_SECONDS_FREEWAY], 80, 270 m) on
  *   freeways, clamp(v x [MOVE_SECONDS_STREET], 25, 80 m) on streets, at the planning speed), starting at the plan's
  *   station, ahead of the car. Into a lane its neighbour feeds (a deceleration lane) it moves along that lane's own
- *   taper, with no S. The lane it heads for lies where it runs at its full width, and while that lane is still opening
- *   the path goes no farther toward it than where it begins. A move blends from where the path would be without it
+ *   taper, with no S; into a turn pocket drawn from where it may begin, along its late taper. The lane it heads for lies
+ *   where it runs at its full width, and while that lane is still opening the path goes no farther toward it than where
+ *   it begins. A move blends from where the path would be without it
  *   toward its lane as that lane lies along the way, so the path moves with lanes that move together (at a ramp's start,
  *   in a zone); a move into a lane still opening sets off only the way that lane lies where the move ends, so it waits
  *   for the lane rather than set off the wrong way and come back. A move out of a lane that leaves with no taper at the
@@ -238,7 +239,7 @@ class RoutePath private constructor(
          * The inside of a street junction reaches this far past its node, as far as its near side, where a stop line would
          * stand, lies before it ([LaneTopology.STOP_LINE_METERS]): the road the route turns onto is drawn from there.
          */
-        const val JUNCTION_FAR_SIDE_METERS = LaneTopology.STOP_LINE_METERS
+        const val JUNCTION_FAR_SIDE_METERS = LaneTopology.FAR_SIDE_METERS
 
         /**
          * A street junction's curve ([Junction]) leaves each side along the road's way, its handles reaching this share of the
@@ -1043,13 +1044,18 @@ class RoutePath private constructor(
             Piece.Across -> 0.0
         }
 
-        /** The named [lane]'s middle; into a lane its neighbour feeds, along its taper from the feeder's middle. */
+        /**
+         * The named [lane]'s middle; into a lane its neighbour feeds, along its taper from the feeder's middle; into a turn
+         * pocket drawn from where it may begin, along its late taper ([CrossSection.lateEntry]), whatever its drawn width.
+         */
         private fun namedCentre(lane: Int, station: Double, axis: RoadAxis): Double? {
             val places = section.lanes(station, axis)
             val place = places.firstOrNull { it.lane == lane } ?: return null
-            val feeder = topology.lanes[lane].fedBy?.let { f -> places.firstOrNull { it.lane == f } }
+            val feeder = topology.lanes[lane].fedBy?.let { f -> places.firstOrNull { it.lane == f } } ?: return place.centre
+            val late = section.lateEntry(lane, station)
+            if (late != null) return if (late >= 1.0) place.centre else feeder.centre * (1.0 - late) + place.centre * late
             val full = CrossSection.laneMeters(section.roadAt(station) ?: RoadKind.FREEWAY, topology.lanes[lane].kinds)
-            if (feeder == null || place.width >= full - 1e-9) return place.centre
+            if (place.width >= full - 1e-9) return place.centre
             val f = (place.width / full).coerceIn(0.0, 1.0)
             return feeder.centre * (1.0 - f) + place.centre * f
         }

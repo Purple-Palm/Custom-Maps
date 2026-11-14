@@ -66,6 +66,11 @@ import kotlin.math.sin
  *   it and no symbol; a lane only for bicycles at its own width with a solid line beside it.
  * - **A possible lane** (the evidence's rule 2a): the cross-section draws it from its possible start; here it is
  *   asphalt with the edge line beyond it, no line beside its neighbour, no arrow.
+ * - **A turn pocket** ([LaneTopology.Lane.pocket], the design's T9): drawn from where it may begin, named or not, as plain
+ *   asphalt; beside the lane that feeds it a dotted extension ([Pattern.EXTENSION]) from where it is half wide to where its
+ *   late taper ends and the path is in it, solid from there to the stop line; while it may already be there beside the lit
+ *   lane that feeds it, a tint on it, opening toward it ("move over when it opens"); the lit lane enters it along its late
+ *   taper ([CrossSection.lateEntry]).
  * - **Lane arrows** ([Kind.ARROW]): each lane point's arrows ([RouteLane.indications]) as white polygons in its lanes,
  *   [ARROW_NEAR_METERS] and [ARROW_FAR_METERS] before the point (within [ARROW_FAR_MIN_METERS] to
  *   [ARROW_FAR_MAX_METERS] where that one does not fit); at a maneuver only the far row, at [ARROW_FAR_MIN_METERS],
@@ -90,7 +95,8 @@ import kotlin.math.sin
  *   route line shows instead.
  * - **The tints** ([Kind.TINT]): in the same windows, where a lane is lit, each other lane of the plan's band as it is
  *   drawn, where the data gives the lanes (not in a zone, nor where only the horizon's count does), never a designated
- *   lane or one only possible, and not inside a street junction ([junctionInteriors]). Where its lane stops working (it
+ *   lane or one only possible (but a turn pocket the plan names later, beside the lit lane that feeds it), and not inside
+ *   a street junction ([junctionInteriors]). Where its lane stops working (it
  *   leaves the band while it is still there, or in a zone that begins where the tint ends) its far edge from the lit lane
  *   slides onto its near edge over [WEDGE_METERS], or the whole tint where it is shorter: a wedge pointing at the lit lane.
  * - Both are cut into pieces at multiples of [PIECE_METERS] from the route's start, with ids that stay the same in every
@@ -175,6 +181,7 @@ class LaneDrawing private constructor(
         SOLID(0.0, 0.0),
         BROKEN(BROKEN_DASH_METERS, BROKEN_GAP_METERS),
         DOTTED(DOTTED_DASH_METERS, DOTTED_GAP_METERS),
+        EXTENSION(EXTENSION_DASH_METERS, EXTENSION_GAP_METERS),
         ;
 
         /** A dash and its gap. */
@@ -314,6 +321,12 @@ class LaneDrawing private constructor(
 
         /** ...and its gap (three and nine feet). */
         const val DOTTED_GAP_METERS = 2.74
+
+        /** A dotted extension's dash, beside a turn pocket that may already be there or that the path is entering... */
+        const val EXTENSION_DASH_METERS = 0.61
+
+        /** ...and its gap (two and four feet). */
+        const val EXTENSION_GAP_METERS = 1.22
 
         /** A car-pool diamond's width... */
         const val DIAMOND_WIDTH_METERS = 0.91
@@ -704,6 +717,8 @@ class LaneDrawing private constructor(
                 lane.possibleFrom?.let { e.add(it) }
                 // Where the drawing opens it, where that is elsewhere (a gain the electronic horizon placed).
                 section.drawnFrom(lane.id)?.let { e.add(it) }
+                // Where the path's entry into a turn pocket along its late taper ends: its line turns solid there.
+                if (lane.pocket) e.add(lane.opens + lane.taperMeters)
             }
             for (d in drawings) {
                 e.add(d.from)
@@ -932,7 +947,7 @@ class LaneDrawing private constructor(
                 if (!bareHere) for (k in 0 until places.size - 1) {
                     val l = places[k]
                     val r = places[k + 1]
-                    val style = laneLine(l, r, stretch, road) ?: continue
+                    val style = laneLine(l, r, stretch, road, s) ?: continue
                     here[Pair(l.lane, r.lane)] = style to l.right
                 }
                 if (places.isNotEmpty() && !bareHere) {
@@ -1000,13 +1015,25 @@ class LaneDrawing private constructor(
         }
 
         /** The style of the line between the lanes [l] and [r] at a station of [stretch] on [road]; null where none is drawn. */
-        private fun laneLine(l: CrossSection.Place, r: CrossSection.Place, stretch: LaneEvidence.Stretch?, road: RoadKind): Style? {
+        private fun laneLine(l: CrossSection.Place, r: CrossSection.Place, stretch: LaneEvidence.Stretch?, road: RoadKind, s: Double): Style? {
             if (stretch == null || (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED)) return null
-            if (l.state == CrossSection.State.POSSIBLE || r.state == CrossSection.State.POSSIBLE) return null
             val left = topology.lanes[l.lane]
             val right = topology.lanes[r.lane]
+            // Beside a turn pocket its neighbour feeds: dotted while it may already be there and while the path enters it along
+            // its late taper, solid from there to the stop line.
+            val pocket = when {
+                left.pocket && left.fedBy == right.id -> left
+                right.pocket && right.fedBy == left.id -> right
+                else -> null
+            }
+            if (pocket == null && (l.state == CrossSection.State.POSSIBLE || r.state == CrossSection.State.POSSIBLE)) return null
             if (l.width < LINE_LANE_SHARE * CrossSection.laneMeters(road, left.kinds) - NO_WIDTH) return null
             if (r.width < LINE_LANE_SHARE * CrossSection.laneMeters(road, right.kinds) - NO_WIDTH) return null
+            if (pocket != null) {
+                val entered = section.lateEntry(pocket.id, s)
+                val place = if (pocket === left) l else r
+                return if (place.state == CrossSection.State.POSSIBLE || entered != null && entered < 1.0) EXTENSION_LINE else SOLID_LINE
+            }
             val hovLeft = DesignatedKind.HOV in left.kinds
             val hovRight = DesignatedKind.HOV in right.kinds
             if (hovLeft != hovRight) return CARPOOL
@@ -1525,7 +1552,8 @@ class LaneDrawing private constructor(
         /**
          * Whether [named] can be lit at [s] of the drawing [i] as its full width about the path: the path lies within half that
          * lane's width of its drawn middle (to the path's own [RoutePath.TOLERANCE_METERS]), or in its feeder while a lane its
-         * neighbour feeds opens along its taper, or a move of the path is under way there; and the lit lane lies on the lanes
+         * neighbour feeds opens along its taper, or between the feeder's middle and its own while the path enters a turn pocket
+         * along its late taper, or a move of the path is under way there; and the lit lane lies on the lanes
          * drawn there, its edges no farther than [LIT_FIT_METERS] past the outer edges of the drawn carriageway.
          */
         private fun lightable(i: Int, s: Double, named: Int): Boolean {
@@ -1539,6 +1567,13 @@ class LaneDrawing private constructor(
             val place = places.firstOrNull { it.lane == named }
             if (place != null && abs(t - place.centre) <= half + RoutePath.TOLERANCE_METERS) return true
             val feeder = lane.fedBy?.let { f -> places.firstOrNull { it.lane == f } } ?: return false
+            // Into a turn pocket along its late taper: between the feeder's middle and the pocket's.
+            val late = section.lateEntry(named, s)
+            if (late != null && place != null) {
+                val lo = min(feeder.centre, place.centre) - RoutePath.TOLERANCE_METERS
+                val hi = max(feeder.centre, place.centre) + RoutePath.TOLERANCE_METERS
+                return late < 1.0 && t >= lo && t <= hi
+            }
             if (place != null && place.width >= 2.0 * half - NO_WIDTH) return false
             val left = max(place?.left ?: feeder.left, feeder.left)
             val right = min(place?.right ?: feeder.right, feeder.right)
@@ -1692,7 +1727,18 @@ class LaneDrawing private constructor(
                 val place = places.firstOrNull { it.lane == lane } ?: continue
                 if (place.state != CrossSection.State.POSSIBLE) out.add(lane)
             }
+            // A turn pocket the plan names later, where it may already be beside the lit lane that feeds it: move over when it opens.
+            for (place in places) {
+                if (place.state != CrossSection.State.POSSIBLE) continue
+                if (possiblePocket(place.lane, named)) out.add(place.lane)
+            }
             return out
+        }
+
+        /** Whether [lane] is a turn pocket the plan names later, which [named], the lit lane, feeds. */
+        private fun possiblePocket(lane: Int, named: Int): Boolean {
+            val pocket = topology.lanes[lane]
+            return pocket.pocket && pocket.fedBy == named && lane in plan.named
         }
 
         /**
@@ -2153,6 +2199,7 @@ class LaneDrawing private constructor(
             val SOLID_LINE = Style(Kind.LANE_LINE, Paint.WHITE, Width.NORMAL, Pattern.SOLID)
             val CARPOOL = Style(Kind.LANE_LINE, Paint.WHITE, Width.WIDE, Pattern.SOLID)
             val DOTTED_LINE = Style(Kind.LANE_LINE, Paint.WHITE, Width.NORMAL, Pattern.DOTTED)
+            val EXTENSION_LINE = Style(Kind.LANE_LINE, Paint.WHITE, Width.NORMAL, Pattern.EXTENSION)
             val DROP = Style(Kind.LANE_LINE, Paint.WHITE, Width.WIDE, Pattern.DOTTED)
             val LEFT_EDGE = Style(Kind.EDGE_LINE, Paint.YELLOW, Width.NORMAL, Pattern.SOLID)
             val RIGHT_EDGE = Style(Kind.EDGE_LINE, Paint.WHITE, Width.NORMAL, Pattern.SOLID)

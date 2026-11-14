@@ -39,8 +39,13 @@ import kotlin.math.min
  *   before the gore after a taper of [DECEL_TAPER_METERS]; at a street turn a pocket, full width
  *   [POCKET_FULL_LATE_METERS] before a stop line [STOP_LINE_METERS] before the node after a taper of
  *   [POCKET_TAPER_METERS] (from [FAST_FROM_MPH]: [POCKET_FULL_LATE_FAST_METERS] and
- *   [POCKET_TAPER_FAST_METERS]). An added lane on the exit's side is entered from its neighbour along
- *   its taper ([Lane.fedBy]) and may already be there from the point before ([Lane.possibleFrom]). A
+ *   [POCKET_TAPER_FAST_METERS]; the design's pocketFullLateM and pocketTaperM), never before the far
+ *   side of the junction before it ([FAR_SIDE_METERS] past its node). An added lane on the exit's side is
+ *   entered from its neighbour along its taper ([Lane.fedBy]) and may already be there from the point
+ *   before ([Lane.possibleFrom]); a turn pocket ([Lane.pocket]) only by the pocket's own longer rule
+ *   ([pocketPossibleFrom], GEOM 2.6): at full width [pocketPossibleFullMeters] before the stop line after
+ *   an added lane's taper, never past the previous junction's far side and never more than
+ *   [POCKET_POSSIBLE_SHARE] of the way back to it. A
  *   lane gone without a road that explains it goes [VANISH_EARLY_METERS] after the point before; one
  *   a road explains goes there. A lane that becomes one kept for car pools does so
  *   [KINDS_EARLY_METERS] after the point before; one that opens to every car does so late.
@@ -82,10 +87,15 @@ class LaneTopology private constructor(
         val taperMeters: Double = 0.0,
         /**
          * For a lane added on the exit's side: where it may already be, the lane point before the one that
-         * first lists it, at most [EvidenceTuning.possibleLaneMaxM] back (the evidence's rule 2a); null
-         * otherwise. Before [opens] it is only possible.
+         * first lists it, at most [EvidenceTuning.possibleLaneMaxM] back (the evidence's rule 2a); for a turn
+         * pocket ([pocket]) by the pocket's own rule; null otherwise. Before [opens] it is only possible.
          */
         val possibleFrom: Double? = null,
+        /**
+         * A turn pocket: a lane a turn at a street junction adds on the turn's side, entered from its neighbour
+         * ([fedBy]) along its late taper, which may already be there from [possibleFrom].
+         */
+        val pocket: Boolean = false,
     ) {
         /** Kept for some kinds of vehicle only. */
         val designated: Boolean get() = kinds.isNotEmpty()
@@ -231,8 +241,11 @@ class LaneTopology private constructor(
         /** After a taper this long. */
         const val DECEL_TAPER_METERS = 60.0
 
-        /** The stop line lies this far before the node of a street turn. */
+        /** The stop line lies this far before the node of a street turn: the junction's near side. */
         const val STOP_LINE_METERS = 10.0
+
+        /** A junction's far side lies as far past its node as its near side, where the stop line stands, lies before it. */
+        const val FAR_SIDE_METERS = STOP_LINE_METERS
 
         /** A turn pocket opening late reaches full width this far before the stop line, below [FAST_FROM_MPH]. */
         const val POCKET_FULL_LATE_METERS = 30.0
@@ -246,6 +259,27 @@ class LaneTopology private constructor(
         /** [POCKET_TAPER_METERS] from [FAST_FROM_MPH]. */
         const val POCKET_TAPER_FAST_METERS = 30.0
 
+        /**
+         * A turn pocket may already be there before its late part (GEOM 2.6), at full width this far before the stop line up to
+         * [POCKET_POSSIBLE_SHORT_UP_TO_MPH]...
+         */
+        const val POCKET_POSSIBLE_FULL_SHORT_METERS = 30.0
+
+        /** ...this far above it and below [POCKET_POSSIBLE_LONG_FROM_MPH] (35 to 40 mph)... */
+        const val POCKET_POSSIBLE_FULL_METERS = 45.0
+
+        /** ...and this far from [POCKET_POSSIBLE_LONG_FROM_MPH], each after an added lane's taper ([addedTaperMeters]). */
+        const val POCKET_POSSIBLE_FULL_LONG_METERS = 75.0
+
+        /** The planning speed up to which a pocket's possible part is [POCKET_POSSIBLE_FULL_SHORT_METERS] long at full width. */
+        const val POCKET_POSSIBLE_SHORT_UP_TO_MPH = 30.0
+
+        /** The planning speed from which it is [POCKET_POSSIBLE_FULL_LONG_METERS] long. */
+        const val POCKET_POSSIBLE_LONG_FROM_MPH = 45.0
+
+        /** A pocket's possible part reaches back no more than this share of the way to the previous intersection. */
+        const val POCKET_POSSIBLE_SHARE = 0.5
+
         /** A lane gone between two points with nothing that explains where goes this far after the first: early. */
         const val VANISH_EARLY_METERS = 30.0
 
@@ -258,6 +292,9 @@ class LaneTopology private constructor(
         private const val FULL_TURN = 360
         private const val HALF_TURN = 180
         private const val FEET_PER_METER = 1.0 / 0.3048
+
+        /** A planning speed within this of a band's bound, in miles an hour, is at the bound: posted speeds are whole numbers. */
+        private const val MPH_EPSILON = 1e-6
 
         private val LEFT_TURNS = setOf(TurnModifier.SLIGHT_LEFT, TurnModifier.LEFT, TurnModifier.SHARP_LEFT, TurnModifier.U_TURN)
         private val RIGHT_TURNS = setOf(TurnModifier.SLIGHT_RIGHT, TurnModifier.RIGHT, TurnModifier.SHARP_RIGHT)
@@ -288,6 +325,31 @@ class LaneTopology private constructor(
         }
 
         private fun mph(speedMps: Double): Double = if (speedMps.isFinite() && speedMps > 0.0) speedMps / PlanningSpeed.MPS_PER_MPH else 0.0
+
+        /**
+         * How far before its stop line a turn pocket at a junction reached at [speedMps] may already be at full width (GEOM 2.6):
+         * [POCKET_POSSIBLE_FULL_SHORT_METERS] up to [POCKET_POSSIBLE_SHORT_UP_TO_MPH], [POCKET_POSSIBLE_FULL_LONG_METERS] from
+         * [POCKET_POSSIBLE_LONG_FROM_MPH], [POCKET_POSSIBLE_FULL_METERS] between.
+         */
+        fun pocketPossibleFullMeters(speedMps: Double): Double {
+            val v = mph(speedMps)
+            return when {
+                v <= POCKET_POSSIBLE_SHORT_UP_TO_MPH + MPH_EPSILON -> POCKET_POSSIBLE_FULL_SHORT_METERS
+                v >= POCKET_POSSIBLE_LONG_FROM_MPH - MPH_EPSILON -> POCKET_POSSIBLE_FULL_LONG_METERS
+                else -> POCKET_POSSIBLE_FULL_METERS
+            }
+        }
+
+        /**
+         * Where a turn pocket at the junction [node] may already begin, reached at [speedMps], the junction before it at
+         * [previous] (its node's station): at full width [pocketPossibleFullMeters] before the stop line ([STOP_LINE_METERS]
+         * before the node), after an added lane's taper on a street ([addedTaperMeters]); never past the previous junction's
+         * far side ([FAR_SIDE_METERS] past it), never more than [POCKET_POSSIBLE_SHARE] of the way back to it.
+         */
+        fun pocketPossibleFrom(node: Double, speedMps: Double, previous: Double): Double {
+            val rule = node - STOP_LINE_METERS - pocketPossibleFullMeters(speedMps) - addedTaperMeters(speedMps, RoadKind.STREET)
+            return max(rule, max(previous + FAR_SIDE_METERS, node - (node - previous) * POCKET_POSSIBLE_SHARE))
+        }
 
         /**
          * Of [lanes] at a point the route goes straight through, the indices of those that go on past it:
@@ -358,8 +420,9 @@ class LaneTopology private constructor(
         var fedBy: Int? = null
         var taper = 0.0
         var possibleFrom: Double? = null
+        var pocket = false
 
-        fun freeze() = Lane(id, run, slot, kinds, opens, closes, addedAt, fedBy, taper, possibleFrom)
+        fun freeze() = Lane(id, run, slot, kinds, opens, closes, addedAt, fedBy, taper, possibleFrom, pocket)
     }
 
     private class Builder(val evidence: LaneEvidence) {
@@ -647,18 +710,42 @@ class LaneTopology private constructor(
         /**
          * A lane the point [b] lists that none of the lanes going on past [a] is, lane [j] of [b], at
          * [slot], on [side] of the lanes that go on, beside [inner]. On the exit's side and open to every
-         * car it is entered from [inner] along its taper, and may be there from the point before.
+         * car it is entered from [inner] along its taper, and may be there from the point before; at a turn
+         * at a street junction it is a turn pocket, which may be there by the pocket's own rule.
          */
         private fun added(a: Int, b: Int, run: Int, j: Int, slot: Double, inner: Building?, side: LaneEdge): Building {
-            val lane = newLane(run, slot, nodes[b].lanes[j].kinds, opensAt(a, b))
+            val kinds = nodes[b].lanes[j].kinds
+            val exitSide = side == edges[b] && kinds.isEmpty()
+            val pocket = exitSide && turning[b] && route.approachRoad(b) == RoadKind.STREET
+            val previous = nodes[previousJunction(a, b)].station
+            // A turn pocket opens late, but never inside the junction before it: from its far side at the earliest.
+            val opens = if (pocket) max(opensAt(a, b), min(previous + FAR_SIDE_METERS, nodes[b].station)) else opensAt(a, b)
+            val lane = newLane(run, slot, kinds, opens)
             lane.addedAt = points.size
-            if (side == edges[b] && lane.kinds.isEmpty()) {
+            if (exitSide) {
                 lane.fedBy = inner?.id
                 lane.taper = lateOpening(b).second
-                val possible = max(nodes[a].station, nodes[b].station - tuning.possibleLaneMaxM)
+                lane.pocket = pocket
+                val possible = if (pocket) {
+                    pocketPossibleFrom(nodes[b].station, approachSpeed(b), previous)
+                } else {
+                    max(nodes[a].station, nodes[b].station - tuning.possibleLaneMaxM)
+                }
                 if (possible < lane.opens) lane.possibleFrom = possible
             }
             return lane
+        }
+
+        /**
+         * The junction before the point [b], [a] the point before it: the last intersection between them where a road other
+         * than the route's meets it, else [a].
+         */
+        private fun previousJunction(a: Int, b: Int): Int {
+            for (k in b - 1 downTo a + 1) {
+                val node = nodes[k]
+                if (node.bearings.indices.any { it != node.inIndex && it != node.outIndex && node.bearings[it] != null }) return k
+            }
+            return a
         }
 
         /** [old] becomes a lane kept for [kinds] between [a] and [b]: a new lane in its place. */

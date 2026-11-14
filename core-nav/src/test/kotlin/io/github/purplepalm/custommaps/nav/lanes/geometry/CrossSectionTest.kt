@@ -457,6 +457,40 @@ class CrossSectionTest {
     }
 
     @Test
+    fun `a turn pocket is drawn from where it may begin, at full width no later than its late taper is`() {
+        val street = 3.35
+        for (carriageway in CrossSection.Carriageway.entries) {
+            // At 35 mph: from 81.8 m before the node along an 8:1 taper, at full width where it opens late.
+            val section = section(LaneScenes.pocketAt(35.0), carriageway)
+            val pocket = section.topology.lanes.single { it.pocket }
+            val from = gore - 10.0 - 45.0 - 8.0 * street
+            assertTrue(section.place(pocket.id, from - 0.5).let { it == null || it.width == 0.0 })
+            val possible = requireNotNull(section.place(pocket.id, gore - 60.0))
+            assertEquals(CrossSection.State.POSSIBLE, possible.state)
+            assertTrue(possible.width > 0.0 && possible.width < street)
+            assertEquals(street, requireNotNull(section.place(pocket.id, gore - 55.0)).width, 1e-9)
+            assertEquals(CrossSection.State.FULL, requireNotNull(section.place(pocket.id, gore - 50.0)).state)
+            // The path's entry along its late taper, whatever its width: none before it opens, all of it past the taper.
+            assertEquals(0.0, requireNotNull(section.lateEntry(pocket.id, gore - 56.0)))
+            assertEquals(0.5, requireNotNull(section.lateEntry(pocket.id, gore - 47.5)), 1e-9)
+            assertEquals(1.0, requireNotNull(section.lateEntry(pocket.id, gore - 39.0)))
+            assertNull(section.lateEntry(0, gore - 47.5), "no lane but a pocket has a late taper of its own")
+        }
+        // Where its possible part begins late, half the way back to a junction 120 m before the node, its drawn taper is
+        // shorter: at full width where its late taper ends.
+        val short = section(LaneScenes.pocketAt(35.0, 120.0))
+        val pocket = short.topology.lanes.single { it.pocket }
+        assertEquals(gore - 60.0, requireNotNull(pocket.possibleFrom), 1e-9)
+        assertTrue(requireNotNull(short.place(pocket.id, gore - 41.0)).width < street)
+        assertEquals(street, requireNotNull(short.place(pocket.id, gore - 40.0)).width, 1e-9)
+        // A freeway's deceleration lane the plan names still opens late with no possible part, entered along its drawn taper.
+        val s9 = section(LaneScenes.s9())
+        assertFalse(s9.topology.lanes[5].pocket)
+        assertNull(s9.lateEntry(5, gore - 180.0))
+        assertNull(s9.place(5, gore - 210.1))
+    }
+
+    @Test
     fun `a junction the route turns at on a street is no ramp's start, and the road after it lies from its line`() {
         val route = LaneScenes.streetTurn(receiving = true)
         for (carriageway in CrossSection.Carriageway.entries) {
