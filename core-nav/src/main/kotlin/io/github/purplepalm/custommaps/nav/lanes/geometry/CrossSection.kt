@@ -267,6 +267,9 @@ class CrossSection private constructor(
     /** The lane [lane] at [station], where it is drawn; null elsewhere. */
     fun place(lane: Int, station: Double, axis: RoadAxis? = null): Place? = lanes(station, axis).firstOrNull { it.lane == lane }
 
+    /** Where [lane] begins to be drawn: where it may begin, or where its taper begins; null for a lane drawn nowhere. */
+    internal fun drawnFrom(lane: Int): Double? = layouts.firstNotNullOfOrNull { layout -> layout.lanes.firstOrNull { it.lane.id == lane } }?.from
+
     /** The first station at or after [station] where [lane] is drawn at its full width: past its taper where it opens. */
     fun fullFrom(lane: Int, station: Double): Double {
         val drawn = layouts.firstNotNullOfOrNull { layout -> layout.lanes.firstOrNull { it.lane.id == lane } } ?: return station
@@ -824,10 +827,17 @@ class CrossSection private constructor(
             val from: Double
             val openTo: Double
             val possibleTo: Double
+            val placed = placedAt(lane)
             if (possibleFrom != null && lane.id !in plan.named && possibleFrom < lane.opens) {
                 from = possibleFrom
                 openTo = from + LaneTopology.addedTaperMeters(speedAt(from), road)
                 possibleTo = lane.opens
+            } else if (placed != null) {
+                // A gain on the far side the electronic horizon placed: it opens late inside its zone, which ends where the
+                // horizon's count rises, rather than late before the point that lists it.
+                openTo = placed
+                from = max(run.from, placed - LaneTopology.addedTaperMeters(speedAt(placed), road))
+                possibleTo = from
             } else {
                 from = lane.opens
                 val taper = when {
@@ -842,6 +852,17 @@ class CrossSection private constructor(
             val tapers = vanishes(lane, run) || interiorEnd(lane, run)
             val to = if (tapers) lane.closes + LaneTopology.endingTaperMeters(speedAt(lane.closes), roadAt(lane.closes)) else lane.closes
             return DrawnLane(lane, width, from, to, openTo, possibleTo, lane.closes)
+        }
+
+        /**
+         * Where the electronic horizon placed the gain that adds [lane] ([LaneEvidence.placedGains]): the edge end where its
+         * count rises, for a lane of a slot of its own the plan opens later than that; null for any other lane.
+         */
+        private fun placedAt(lane: LaneTopology.Lane): Double? {
+            val k = lane.addedAt ?: return null
+            val at = evidence.placedGains[topology.points[k].node] ?: return null
+            if (replaces(lane) || at > lane.opens + 1e-9) return null
+            return at
         }
 
         /**

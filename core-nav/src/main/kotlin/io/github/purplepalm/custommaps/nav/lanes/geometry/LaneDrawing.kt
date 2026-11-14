@@ -33,7 +33,8 @@ import kotlin.math.sin
  *   [RoutePath.ASPHALT_TAPER_METERS] from the map's own road band ([STANDARD_FREEWAY_BAND_METERS], on ramps
  *   [STANDARD_RAMP_BAND_METERS]) and ends with one: where the drawing ends on its road, after the path's return to the
  *   road's line over asphalt without lines. A zone between two drawn stretches is part of the stretch: no taper there.
- * - **Lane lines** ([Kind.LANE_LINE]), only where the route's lane points give the count (a known or bridged stretch),
+ * - **Lane lines** ([Kind.LANE_LINE]), only where the route's lane points give the count (a known or bridged stretch, or
+ *   one the electronic horizon bridged where its count is the lanes the plan draws: [LaneEvidence.Stretch.horizon]),
  *   never in a zone and never beside a lane that is only possible: broken [LINE_METERS] wide, [BROKEN_DASH_METERS] on
  *   [BROKEN_GAP_METERS], cut as geometry; beside a lane kept for car pools one wide solid line ([WIDE_LINE_METERS]),
  *   never a double one; beside a lane kept for other vehicles a solid line; beside a lane only for an exit on a
@@ -73,10 +74,10 @@ import kotlin.math.sin
  *   elsewhere, as where the path waits on the road's line beside a lane still opening or keeps to it around a fold, the
  *   route line shows instead.
  * - **The tints** ([Kind.TINT]): in the same windows, where a lane is lit, each other lane of the plan's band as it is
- *   drawn, where the data gives the lanes (not in a zone), never a designated lane or one only possible. Where its lane
- *   stops working (it leaves the band while it is still there, or in a zone that begins where the tint ends) its far edge
- *   from the lit lane slides onto its near edge over [WEDGE_METERS], or the whole tint where it is shorter: a wedge
- *   pointing at the lit lane.
+ *   drawn, where the data gives the lanes (not in a zone, nor where only the horizon's count does), never a designated
+ *   lane or one only possible. Where its lane stops working (it leaves the band while it is still there, or in a zone that
+ *   begins where the tint ends) its far edge from the lit lane slides onto its near edge over [WEDGE_METERS], or the whole
+ *   tint where it is shorter: a wedge pointing at the lit lane.
  * - Both are cut into pieces at multiples of [PIECE_METERS] from the route's start, with ids that stay the same in every
  *   window ([litId], [tintId]): the map hides a tint behind the car and gives a lit piece its traffic by feature state.
  * - **A curve too sharp for the lanes** (3.3): where a line or an edge of the asphalt, a lane, a tint or the lit lane lies
@@ -624,6 +625,8 @@ class LaneDrawing private constructor(
                 e.add(lane.opens)
                 e.add(lane.closes)
                 lane.possibleFrom?.let { e.add(it) }
+                // Where the drawing opens it, where that is elsewhere (a gain the electronic horizon placed).
+                section.drawnFrom(lane.id)?.let { e.add(it) }
             }
             for (d in drawings) {
                 e.add(d.from)
@@ -1531,12 +1534,13 @@ class LaneDrawing private constructor(
 
         /**
          * The lanes tinted at [s] of the drawing [i]: the band's lanes beside the named one, where the data gives the lanes (not
-         * in a zone); never a designated lane, never one that is only possible.
+         * in a zone, nor where only the electronic horizon's count does, which says nothing of which lane is which); never a
+         * designated lane, never one that is only possible.
          */
         private fun tintedAt(i: Int, s: Double): Set<Int> {
             val named = litLane(s) ?: return emptySet()
             val stretch = stretchAt(s) ?: return emptySet()
-            if (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED) return emptySet()
+            if (stretch.kind != LaneEvidence.Kind.KNOWN && stretch.kind != LaneEvidence.Kind.BRIDGED || stretch.horizon) return emptySet()
             val band = plan.segmentAt(s)?.band ?: return emptySet()
             val places = placesAt(drawings[i], ends[i], s, axisAt(s))
             val out = LinkedHashSet<Int>()
@@ -1555,7 +1559,8 @@ class LaneDrawing private constructor(
          */
         private fun leavesBand(i: Int, lane: Int, s: Double): Boolean {
             val stretch = stretchAt(s)
-            if (stretch != null && stretch.kind == LaneEvidence.Kind.ZONE) {
+            // Where only the horizon's count holds, no lane is tinted either, as in a zone.
+            if (stretch != null && (stretch.kind == LaneEvidence.Kind.ZONE || stretch.horizon)) {
                 return plan.segments.any { seg ->
                     seg.from < stretch.to && seg.to > s && seg.named != null && seg.noLane == null && lane !in seg.band
                 }

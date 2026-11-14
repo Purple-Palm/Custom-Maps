@@ -260,6 +260,36 @@ class RoutePath private constructor(
             return min(length, max(toStart, shortest))
         }
 
+        /**
+         * A path that is [before]'s points (stations [beforeStations]) up to and at [at] and [after]'s (stations
+         * [afterStations]) past it: the route line the map draws stays point for point up to [at], the end of the drawing
+         * window on screen, where a path built anew with the electronic horizon's counts takes over (OL9). Both are paths of
+         * one route, built from one plan, with their evidence the same up to beyond [at], so they lie on one another there to
+         * a floating-point step. As the points and their stations.
+         */
+        fun spliced(
+            before: List<GeoPoint>,
+            beforeStations: DoubleArray,
+            after: List<GeoPoint>,
+            afterStations: DoubleArray,
+            at: Double,
+        ): Pair<List<GeoPoint>, DoubleArray> {
+            require(before.size == beforeStations.size && after.size == afterStations.size) { "One station per point" }
+            val points = ArrayList<GeoPoint>(max(before.size, after.size))
+            val stations = ArrayList<Double>(max(before.size, after.size))
+            for (i in before.indices) {
+                if (beforeStations[i] > at) break
+                points.add(before[i])
+                stations.add(beforeStations[i])
+            }
+            for (i in after.indices) {
+                if (afterStations[i] <= at || (stations.isNotEmpty() && afterStations[i] <= stations.last())) continue
+                points.add(after[i])
+                stations.add(afterStations[i])
+            }
+            return points to stations.toDoubleArray()
+        }
+
         /** The index of the last of the ascending [values] at or before [value]; -1 before the first. */
         internal fun indexAtOrBefore(values: DoubleArray, value: Double): Int {
             var lo = 0
