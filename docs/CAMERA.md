@@ -2120,9 +2120,14 @@ measures. With it on:
   lanes and the lit lane are hidden, and the app's route line stays, in the named lane. The drawing
   is shown or hidden when a view ends, never as the next begins: showing or hiding the layers makes
   the map lay out and upload their tiles again, which must not fall into a measured view. A view
-  that begins within 5 s of such a change, or that has no frames, is logged but not counted; a view
   under way when the measuring begins, or still held when a view ended for another reason, is not
   one of its views.
+- **Whole views only.** The gate counts a view only when it had frames, began 5 s or more after such
+  a change, lasted 3 s or more from the update it began on, and ended as its close view let go
+  (`let_go`). Every other view is logged and not counted: a shorter one has too few frames to say
+  what the drawing costs, and one that the guidance's end, the switch, Lanes on the map, the
+  background, Settings, the list, the camera style or a map made again cut short measured only part
+  of its close view, whatever its length.
 - **One statistics collection a view.** From the update a view begins on, Mapbox's performance
   statistics run for it, a sample a second, and stop however the view ends: it lets go, guidance
   ends, the switch or Lanes on the map changes, the app goes to the background, Settings covers the
@@ -2130,12 +2135,11 @@ measures. With it on:
   view's render p95 and longest frame are worked out over every frame time of all its seconds, the
   camera line's, never from the seconds' own p95s.
 - **One `lane_measure` line a view** ([DRIVES.md](DRIVES.md)): whether the drawing showed, its
-  seconds, frames, render p95 and longest frame, the display frames it missed, the largest upload
-  of a frame and the time the renderer spent making graphics programs as Mapbox counts it (in the
-  drive's first run-up, whether making the drawing's shaders falls there), the drawing windows that
-  loaded in it with
-  their set-to-loaded times and sizes, how many positions the car's layer was handed, why it ended
-  and whether it counts.
+  seconds, how long it lasted, its frames, render p95 and longest frame, the display frames it
+  missed, the largest upload of a frame and the time the renderer spent making graphics programs as
+  Mapbox counts it (in the drive's first run-up, whether making the drawing's shaders falls there),
+  the drawing windows that loaded in it with their set-to-loaded times and sizes, how many positions
+  the car's layer was handed, why it ended and whether it counts.
 - **Mapbox's lane details under the drawing, once a drive:** as the measuring begins they go on under
   the drawing for the whole drive, set once, with a `lane_measure` line that names the check
   (`details_under_drawing`), and they go back as Lanes on the map has them when it ends.

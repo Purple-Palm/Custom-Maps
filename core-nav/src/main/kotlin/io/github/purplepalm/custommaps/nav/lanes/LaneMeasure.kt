@@ -16,15 +16,20 @@ import io.github.purplepalm.custommaps.nav.look.Look
  * Settings covers the map, the phone's map is put away for the list, the camera style changes, or the map is made again.
  * Its frames are those of the camera line's seconds taken while it lasts ([onSecond]): its render p95 and longest frame
  * are worked out over every frame time of those seconds together, never from the seconds' own percentiles. Its
- * "lane_measure" line ([Effects.log]) says whether the drawing showed, its seconds and frames, the render p95 and longest
- * frame, the display frames missed, the largest upload of a frame and the time the renderer spent making graphics programs
- * ([onSample]), the drawing windows that loaded in it ([onWindowLoaded]), the positions the car's layer was handed, why it
- * ended and whether the gate counts it ([LaneMeasureGate]), to which every view goes ([Effects.report]).
+ * "lane_measure" line ([Effects.log]) says whether the drawing showed, its seconds and frames, how long it lasted, the
+ * render p95 and longest frame, the display frames missed, the largest upload of a frame and the time the renderer spent
+ * making graphics programs ([onSample]), the drawing windows that loaded in it ([onWindowLoaded]), the positions the car's
+ * layer was handed, why it ended and whether the gate counts it ([LaneMeasureGate]), to which every view goes
+ * ([Effects.report]).
  *
  * The drawing's state for the next view is set when a view ends, not when the next one begins: showing or hiding the
- * layers makes the map lay out and upload their tiles again, which must not fall into a measured view. A view that begins
- * within [SETTLE_NANOS] of such a change, or that has no frames, is logged but not counted; after a view that ended while
- * its close view held, the next one waits for that close view to let go.
+ * layers makes the map lay out and upload their tiles again, which must not fall into a measured view. The gate counts
+ * whole views only: a view with frames, begun at least [SETTLE_NANOS] after such a change, that lasted at least
+ * [MIN_VIEW_NANOS] and ended as its close view let go ([End.LET_GO]). Every other view is logged but not counted: one
+ * without frames or too short says too little, one begun too soon after a change measures the change, and one that the
+ * guidance's end, a switch, a setting, the background, Settings over the map, the list, a camera style or the map made
+ * again cut short measured only part of its close view. After a view that ended while its close view held, the next one
+ * waits for that close view to let go.
  *
  * Once per measuring drive Mapbox's lane details go on under the drawing, for the check of the own lanes' design 7 (T6),
  * with one "lane_measure" line that names it ([Effects.checkDetails]); they go back as Lanes on the map has them when the
@@ -216,7 +221,7 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
         begun += 1
         val now = nanos()
         val settled = shownChangedAt == NEVER || now - shownChangedAt >= SETTLE_NANOS
-        view = Recorder(begun, drawingShown, runUp, look, settled, effects.detailsShown())
+        view = Recorder(begun, drawingShown, runUp, look, settled, effects.detailsShown(), now)
         effects.startStats()
     }
 
@@ -224,8 +229,9 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
         val ended = view ?: return
         view = null
         effects.stopStats()
-        effects.log(ended.fields(why))
-        effects.report(ended.gateView())
+        val lasted = nanos() - ended.beganAt
+        effects.log(ended.fields(why, lasted))
+        effects.report(ended.gateView(why, lasted))
         waitLetGo = closeView && why != End.LET_GO
         // The drawing for the next view, set now, between the views: the odd ones show it.
         if (measuring && !released) show((ended.index + 1) % 2 == 1)
@@ -238,7 +244,7 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
         effects.showDrawing(shown)
     }
 
-    /** One view's numbers, added up as they come. */
+    /** One view's numbers, added up as they come; it began at [beganAt], in [nanos]. */
     private class Recorder(
         val index: Int,
         val drawn: Boolean,
@@ -246,6 +252,7 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
         val look: Look,
         val settled: Boolean,
         val hdRoads: Boolean?,
+        val beganAt: Long,
     ) {
         private var frameTimes = DoubleArray(INITIAL_FRAMES)
         private var frames = 0
@@ -279,7 +286,11 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
             windowBytesMax = maxOf(windowBytesMax, bytes)
         }
 
-        private val counts: Boolean get() = frames > 0 && settled
+        /**
+         * Whether the gate counts the view, which ended for [end] after [lastedNanos]: a whole close view, with frames,
+         * begun settled, of [MIN_VIEW_NANOS] at least, that its close view let go.
+         */
+        fun counts(end: End, lastedNanos: Long): Boolean = frames > 0 && settled && lastedNanos >= MIN_VIEW_NANOS && end == End.LET_GO
 
         /** Worked out once the view has ended, over every frame time of it; NaN without frames. */
         private val p95: Double by lazy {
@@ -290,15 +301,16 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
 
         private fun missedPerSecond(): Double = if (seconds > 0) missed.toDouble() / seconds else Double.NaN
 
-        fun gateView(): LaneMeasureGate.View =
-            LaneMeasureGate.View(look, drawn, p95, missedPerSecond(), uploadMaxMs, counts)
+        fun gateView(end: End, lastedNanos: Long): LaneMeasureGate.View =
+            LaneMeasureGate.View(look, drawn, p95, missedPerSecond(), uploadMaxMs, counts(end, lastedNanos))
 
-        fun fields(end: End): Map<String, Any?> = mapOf(
+        fun fields(end: End, lastedNanos: Long): Map<String, Any?> = mapOf(
             "view" to index,
             "drawn" to drawn,
             "kind" to if (runUp) KIND_RUN_UP else KIND_JUNCTION,
             "look" to look,
             "seconds" to seconds,
+            "ms" to lastedNanos.coerceAtLeast(0L) / NANOS_PER_MILLI,
             "frames" to frames,
             "p95Ms" to p95.takeUnless { it.isNaN() }?.let { Motion.round(it, 1) },
             "maxMs" to if (frames > 0) Motion.round(frameTimes.copyOf(frames).max(), 1) else null,
@@ -313,7 +325,7 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
             "carPositions" to positions,
             "hdRoads" to hdRoads,
             "end" to end.logName,
-            "counts" to counts,
+            "counts" to counts(end, lastedNanos),
         ).filterValues { it != null }
     }
 
@@ -323,6 +335,12 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
          * tiles again then, and the work must not be measured as the drawing's.
          */
         const val SETTLE_NANOS = 5_000_000_000L
+
+        /**
+         * How long a view must last to count, from the progress update it began on to its end: shorter ones hold too few
+         * frames for their percentile to say what the drawing costs.
+         */
+        const val MIN_VIEW_NANOS = 3_000_000_000L
 
         /** The percentile of a view's frame times its line gives. */
         const val P95 = 0.95
@@ -334,6 +352,8 @@ class LaneMeasure(private val effects: Effects, private val nanos: () -> Long) {
         const val KIND_JUNCTION = "junction"
 
         private const val NEVER = Long.MIN_VALUE
+
+        private const val NANOS_PER_MILLI = 1_000_000L
 
         /** Room for about two seconds of frames at 120 Hz before the first growth. */
         private const val INITIAL_FRAMES = 256

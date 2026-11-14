@@ -154,6 +154,8 @@ class LaneMeasureTest {
         measure.onSecond(List(100) { 10.0 }, 1, 50)
         now += SECOND
         measure.onSecond(List(20) { 30.0 }, 5, 40)
+        // Three seconds long, the camera line of its third not in yet: a whole view.
+        now += SECOND
         measure.onCloseView(false, true, Look.DAY)
         val line = map.viewLines.single()
         // 95 % of 120 frames is the 114th, and the 101st on are 30 ms.
@@ -161,6 +163,7 @@ class LaneMeasureTest {
         assertEquals(30.0, line["maxMs"])
         assertEquals(120, line["frames"])
         assertEquals(2, line["seconds"])
+        assertEquals(3_000L, line["ms"])
         assertEquals(6L, line["missedVsync"])
         assertEquals(3.0, line["missedPerS"])
         assertEquals(90L, line["carPositions"])
@@ -201,27 +204,33 @@ class LaneMeasureTest {
         assertTrue(map.views.last().uploadMaxMs.isNaN())
     }
 
+    /** Every way a view ends, each with what ends it. */
+    private val endings = listOf<Pair<End, (LaneMeasure) -> Unit>>(
+        End.LET_GO to { it.onCloseView(false, true, Look.NIGHT) },
+        End.GUIDANCE_END to { it.onGuidance(false) },
+        End.SWITCH to { it.setSwitch(false) },
+        End.SETTING to { it.setAppDraws(false) },
+        End.BACKGROUND to { it.setOnScreen(false, End.BACKGROUND) },
+        End.COVERED to { it.setOnScreen(false, End.COVERED) },
+        End.AWAY to { it.setOnScreen(false, End.AWAY) },
+        End.CAMERA_STYLE to { it.onCameraStyle() },
+        End.RELEASED to { it.release() },
+    )
+
+    /** A fresh measuring on [map]: the switch on, the lanes drawn by the app, the map on screen and guidance started. */
+    private fun measuringOn(map: Map): LaneMeasure = LaneMeasure(map) { now }.apply {
+        setSwitch(true)
+        setAppDraws(true)
+        setOnScreen(true, End.BACKGROUND)
+        onGuidance(true)
+    }
+
     @Test
     fun `the collection stops and the line says why on every way a view ends`() {
-        val ends = listOf<Pair<End, (LaneMeasure) -> Unit>>(
-            End.LET_GO to { it.onCloseView(false, true, Look.NIGHT) },
-            End.GUIDANCE_END to { it.onGuidance(false) },
-            End.SWITCH to { it.setSwitch(false) },
-            End.SETTING to { it.setAppDraws(false) },
-            End.BACKGROUND to { it.setOnScreen(false, End.BACKGROUND) },
-            End.COVERED to { it.setOnScreen(false, End.COVERED) },
-            End.AWAY to { it.setOnScreen(false, End.AWAY) },
-            End.CAMERA_STYLE to { it.onCameraStyle() },
-            End.RELEASED to { it.release() },
-        )
-        assertEquals(End.entries.toSet(), ends.map { it.first }.toSet())
-        for ((end, ending) in ends) {
+        assertEquals(End.entries.toSet(), endings.map { it.first }.toSet())
+        for ((end, ending) in endings) {
             val fresh = Map()
-            val one = LaneMeasure(fresh) { now }
-            one.setSwitch(true)
-            one.setAppDraws(true)
-            one.setOnScreen(true, End.BACKGROUND)
-            one.onGuidance(true)
+            val one = measuringOn(fresh)
             one.onCloseView(true, true, Look.NIGHT)
             one.onSecond(List(60) { 8.0 }, 1, 60)
             ending(one)
@@ -296,23 +305,101 @@ class LaneMeasureTest {
         now -= 30 * SECOND
         now += LaneMeasure.SETTLE_NANOS
         measure.onCloseView(true, true, Look.NIGHT)
-        seconds(2)
+        seconds(3)
         measure.onCloseView(false, true, Look.NIGHT)
         assertEquals(true, map.viewLines.last()["counts"])
         // The drawing shows again at that view's end.
         now += LaneMeasure.SETTLE_NANOS - 1
         measure.onCloseView(true, true, Look.NIGHT)
-        seconds(2)
+        seconds(3)
         measure.onCloseView(false, true, Look.NIGHT)
         assertEquals(false, map.viewLines.last()["counts"])
         assertFalse(map.views.last().counts)
-        // No frames at all: logged, not counted.
+        // No frames at all, though it lasted four seconds and its close view let it go: logged, not counted.
         now += 30 * SECOND
         measure.onCloseView(true, true, Look.NIGHT)
+        now += 4 * SECOND
         measure.onCloseView(false, true, Look.NIGHT)
         assertEquals(0, map.viewLines.last()["frames"])
+        assertEquals(4_000L, map.viewLines.last()["ms"])
+        assertEquals("let_go", map.viewLines.last()["end"])
         assertNull(map.viewLines.last()["p95Ms"])
         assertEquals(false, map.viewLines.last()["counts"])
+        assertFalse(map.views.last().counts)
+    }
+
+    @Test
+    fun `a view counts only when its close view let go after three seconds or more`() {
+        assertEquals(3_000_000_000L, LaneMeasure.MIN_VIEW_NANOS)
+        measuring()
+        // Two seconds, let go: too short to count.
+        view(2)
+        assertEquals("let_go", map.viewLines.last()["end"])
+        assertEquals(2_000L, map.viewLines.last()["ms"])
+        assertEquals(false, map.viewLines.last()["counts"])
+        assertFalse(map.views.last().counts)
+        // Three seconds, let go: a whole view.
+        view(3)
+        assertEquals(3_000L, map.viewLines.last()["ms"])
+        assertEquals(true, map.viewLines.last()["counts"])
+        assertTrue(map.views.last().counts)
+        // A nanosecond short of three seconds, with three camera seconds in it: not.
+        measure.onCloseView(true, true, Look.NIGHT)
+        seconds(2)
+        now += SECOND - 1
+        measure.onSecond(List(60) { 8.0 }, 2, 60)
+        measure.onCloseView(false, true, Look.NIGHT)
+        assertEquals(3, map.viewLines.last()["seconds"])
+        assertEquals(2_999L, map.viewLines.last()["ms"])
+        assertEquals(false, map.viewLines.last()["counts"])
+        assertEquals(listOf(false, true, false), map.views.map { it.counts })
+    }
+
+    @Test
+    fun `a view that guidance ends after a second, or the list cuts after four, is logged but not counted`() {
+        measuring()
+        measure.onCloseView(true, true, Look.NIGHT)
+        seconds(1)
+        measure.onGuidance(false)
+        val ended = map.viewLines.single()
+        assertEquals("guidance_end", ended["end"])
+        assertEquals(1, ended["seconds"])
+        assertEquals(1_000L, ended["ms"])
+        assertEquals(60, ended["frames"])
+        assertEquals(false, ended["counts"])
+        assertFalse(map.views.single().counts)
+        // The close view lets go after the drive; in the next drive, a view the list cuts as the phone's map is put away.
+        measure.onCloseView(false, true, Look.NIGHT)
+        now += 30 * SECOND
+        measure.onGuidance(true)
+        measure.onCloseView(true, false, Look.NIGHT)
+        seconds(4)
+        measure.setOnScreen(false, End.AWAY)
+        val away = map.viewLines.last()
+        assertEquals("away", away["end"])
+        assertEquals(4_000L, away["ms"])
+        assertEquals(false, away["counts"])
+        assertFalse(map.views.last().counts)
+    }
+
+    @Test
+    fun `a whole close view cut short any other way than its letting go never counts, however long it was`() {
+        for ((end, ending) in endings) {
+            val fresh = Map()
+            val one = measuringOn(fresh)
+            one.onCloseView(true, true, Look.NIGHT)
+            repeat(10) {
+                now += SECOND
+                one.onSecond(List(60) { 8.0 }, 1, 60)
+            }
+            ending(one)
+            val line = fresh.viewLines.single()
+            assertEquals(end.logName, line["end"], "$end")
+            assertEquals(10_000L, line["ms"], "$end")
+            assertEquals(end == End.LET_GO, line["counts"], "$end")
+            assertEquals(end == End.LET_GO, fresh.views.single().counts, "$end")
+            now += 30 * SECOND
+        }
     }
 
     @Test
