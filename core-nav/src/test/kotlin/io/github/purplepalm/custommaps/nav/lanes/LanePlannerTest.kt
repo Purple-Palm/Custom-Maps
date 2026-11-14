@@ -261,9 +261,10 @@ class LanePlannerTest {
 
     @Test
     fun `the named lane stays while it works and moves early to the lane the next point prefers`() {
-        // The street pocket: the left lane from the junction view's start, into the pocket where it opens.
+        // The street pocket: the left lane from the junction view's start, 294.76 m before the turn at 35 mph, at the plan's
+        // first 5 m station inside it, into the pocket where it opens.
         val plan = plan(LaneScenes.streetPocket())
-        assertEquals(GORE - 180.0 to 0, plan.firstNamed())
+        assertEquals(GORE - 290.0 to 0, plan.firstNamed())
         assertEquals(listOf(Triple(GORE - 55.0, 0, 2)), plan.moves.map { Triple(it.station, it.from, it.to) })
     }
 
@@ -297,11 +298,19 @@ class LanePlannerTest {
         // edge lane alone, one comfortable change and the reaction time before the gore.
         "s17" to Golden(GORE - 1_245.0 to 3, listOf(g(0.0, 4, 0)), listOf(Triple(GORE - 320.0, 3, 4))),
         "s20" to Golden(GORE - 2_295.0 to 1, listOf(g(1_600.0, 1, 2), g(700.0, 1, 1), g(0.0, 5, 0)), listOf(Triple(GORE - 210.0, 1, 5))),
-        "geom-s2-400" to Golden(GORE - 975.0 to 2, listOf(g(0.0, 2, 1), g(-400.0, null, null))),
+        // Split 400 m after the gore: nothing named on the ramp before it; from the split, its step's start, the street turn's
+        // window, the junction view's from 311.8 m before the turn at the ramp's 45 mph.
+        "geom-s2-400" to Golden(GORE - 975.0 to 2, listOf(g(0.0, 2, 1), g(-260.0, null, null), g(-400.0, 2, 0))),
         "geom-s2-150" to Golden(GORE - 975.0 to 2, listOf(g(0.0, 2, 1), g(-150.0, 2, 0))),
         "geom-s5" to Golden(null, listOf(g(0.0, null, null))),
         "geom-s6" to Golden(null, listOf(g(1_500.0, null, null), g(500.0, null, null), g(0.0, null, null))),
-        "street-pocket" to Golden(GORE - 180.0 to 0, listOf(g(200.0, null, null), g(0.0, 2, 0)), listOf(Triple(GORE - 55.0, 0, 2))),
+        // The junction view's window, from 294.76 m before the turn at 35 mph: nothing named 300 m before the turn, the left
+        // lane at the lane point 200 m before it.
+        "street-pocket" to Golden(
+            GORE - 290.0 to 0,
+            listOf(g(300.0, null, null), g(200.0, 0, 0), g(0.0, 2, 0)),
+            listOf(Triple(GORE - 55.0, 0, 2)),
+        ),
         // C1: nothing named where only a lane beyond the car-pool lane leads on, at a roundabout, at a turn only a bus may take.
         "carpool-beyond" to Golden(null, listOf(g(1_500.0, null, null), g(0.0, null, null))),
         // The car-pool lane opens to every car from 800 m before: the left open lane, the former car-pool lane where it
@@ -628,7 +637,9 @@ class LanePlannerTest {
         assertEquals(GORE - 1_245.0 to 4, plan.firstNamed(), "the edge lane from the run-up's start")
         assertTrue(plan.segments.filter { it.to <= GORE }.none { it.unknownExitAhead })
         assertTrue(plan.unknownExits.single().held)
-        assertFalse(plan.unknownExits.single().inWindow)
+        // 100 m past the gore it lies in the street turn's window, the junction view's from 310 m before the turn at the
+        // ramp's 20 m/s.
+        assertTrue(plan.unknownExits.single().inWindow)
     }
 
     @Test
@@ -717,14 +728,17 @@ class LanePlannerTest {
         val plan = plan(LaneScenes.roundabout())
         assertEquals(2, plan.noLane.size)
         val (approach, round) = plan.noLane
-        assertEquals(GORE - 180.0 to GORE, approach.from to approach.to, "the junction view's start to the roundabout")
+        // A roundabout is a complex junction: the junction view from 334.76 m before it at 35 mph.
+        val start = plan.windows.first().from
+        assertEquals(334.76, GORE - start, 0.01)
+        assertEquals(start to GORE, approach.from to approach.to, "the junction view's start to the roundabout")
         assertTrue(approach.zone)
         assertNoLane(plan, approach, LanePlan.NoLane.Cause.ROUNDABOUT, "roundabout")
         assertEquals(GORE to GORE + 60.0, round.from to round.to, "the way round to its exit")
         assertFalse(round.zone)
         assertTrue(plan.segments.all { it.named == null })
         val zone = plan.noLaneZones().single()
-        assertEquals(GORE - 180.0, zone.from, 1e-9)
+        assertEquals(start, zone.from, 1e-9)
         assertEquals(GORE - LaneTopology.STOP_LINE_METERS, zone.to, 1e-9, "a street approach to its stop line")
         assertEquals(2, zone.lanes)
         // The same lanes before a plain turn: a lane is named there.
@@ -737,10 +751,13 @@ class LanePlannerTest {
     fun `a street turn only a bus lane is valid for names no lane, its approach a zone to the stop line`() {
         val plan = plan(LaneScenes.busOnlyTurn())
         val approach = plan.noLane.single()
-        assertEquals(GORE - 180.0 to GORE, approach.from to approach.to)
+        // From the junction view's start, 294.76 m before the turn at 35 mph.
+        val start = plan.windows.single().from
+        assertEquals(294.76, GORE - start, 0.01)
+        assertEquals(start to GORE, approach.from to approach.to)
         assertNoLane(plan, approach, LanePlan.NoLane.Cause.DESIGNATED_ONLY, "bus-only-turn")
         val zone = plan.noLaneZones().single()
-        assertEquals(GORE - 180.0 to GORE - LaneTopology.STOP_LINE_METERS, zone.from to zone.to)
+        assertEquals(start to GORE - LaneTopology.STOP_LINE_METERS, zone.from to zone.to)
         assertEquals(3, zone.lanes)
     }
 

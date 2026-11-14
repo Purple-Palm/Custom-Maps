@@ -532,7 +532,7 @@ class StreetDrawingTest {
             val exit = gore + 60.0
             // No lane named from the window's start, the junction view's, to the way out: a zone there, nothing lit or tinted.
             val window = d.plan.windows.single { abs(it.to - entry) < MM }
-            assertEquals(entry - CardWindows.streetWindowMeters(), window.from, MM)
+            assertEquals(entry - CardWindows.streetWindowMeters(LaneScenes.roundabout(), window.node), window.from, MM)
             assertTrue(d.plan.segments.filter { it.to > window.from + MM && it.from < exit }.all { it.named == null })
             assertTrue(d.evidence.stretches.any { it.kind == LaneEvidence.Kind.ZONE && abs(it.from - window.from) < MM })
             assertTrue(d.of(Kind.LIT).isEmpty() && d.of(Kind.TINT).isEmpty())

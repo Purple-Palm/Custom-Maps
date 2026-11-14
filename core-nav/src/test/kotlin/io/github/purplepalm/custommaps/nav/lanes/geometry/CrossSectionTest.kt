@@ -492,7 +492,7 @@ class CrossSectionTest {
         val route = LaneScenes.streetTurn()
         val plan = SceneLines.planOf(route)
         val window = plan.windows.single()
-        assertEquals(gore - CardWindows.streetWindowMeters()..gore, window.from..window.to)
+        assertEquals(gore - CardWindows.streetWindowMeters(route, window.node)..gore, window.from..window.to)
         val twoWay = StreetWays.Way(CrossSection.Carriageway.TWO_WAY, StreetWays.Source.HORIZON)
         fun told(vararg nodes: Int) = CrossSection.of(plan, streets = StreetWays.taken(route, nodes.associateWith { twoWay }))
         // The streets that leave the intersections at 0, 400 and 200 m before the turn (nodes 0, 1 and 2) lie over the lanes

@@ -1,6 +1,9 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.FocusKind
+import io.github.purplepalm.custommaps.nav.camera.FocusRule
+import io.github.purplepalm.custommaps.nav.camera.FocusWindow
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.RunUpLatch
@@ -44,7 +47,8 @@ data class CardWindow(val from: Double, val to: Double, val kind: Kind, val node
  *   window, [LaneFocus.windowMeters], plus [CameraTuning.runUpSeconds] of driving, at least
  *   [CameraTuning.runUpMinMeters]) to the gore;
  * - a street window over the last [streetWindowMeters] before every other maneuver the camera frames as
- *   a junction, on an approach that is no freeway: from where the junction view begins.
+ *   a junction, on an approach that is no freeway: from where the junction view begins, the tilt starting
+ *   down for it, at the approach's planning speed.
  *
  * A window never reaches back past the start of its step: the car sees the step's maneuver only once
  * it is on that step. Pure; the debug log counts the route's lane gaps inside them.
@@ -52,10 +56,30 @@ data class CardWindow(val from: Double, val to: Double, val kind: Kind, val node
 object CardWindows {
 
     /**
-     * How long a street window is: from where the junction view begins before its maneuver, today the navigation SDK's framing
-     * of the maneuver ([CameraTuning.maneuverFramingMeters]), the one value every street window reads, here.
+     * How long a street window is: from where the junction view begins before its maneuver, the tilt starting down for it.
+     * That is the camera's own window ([FocusWindow.windowMeters]) for a junction of [kind] at [planningMps], with no screen
+     * cap, as the drive view's planner reads it: the one value every street window reads, here. It is never shorter than the
+     * navigation SDK's framing of the maneuver ([CameraTuning.maneuverFramingMeters]) with the descent before it.
      */
-    fun streetWindowMeters(tuning: CameraTuning = CameraTuning.PHONE): Double = tuning.maneuverFramingMeters
+    fun streetWindowMeters(kind: FocusKind, planningMps: Double, tuning: CameraTuning = CameraTuning.PHONE): Double =
+        FocusWindow.windowMeters(kind, planningMps, Double.POSITIVE_INFINITY, tuning)
+
+    /** [streetWindowMeters] for the maneuver [maneuver] at [node], reached from [approach]: its kind, at the approach's planning speed. */
+    fun streetWindowMeters(maneuver: NodeManeuver, node: RouteNode, approach: RouteNode, tuning: CameraTuning = CameraTuning.PHONE): Double =
+        streetWindowMeters(streetKind(maneuver, node, approach), PlanningSpeed.of(approach), tuning)
+
+    /** [streetWindowMeters] for the maneuver at the node at [node] of [route], reached from the node before it. */
+    fun streetWindowMeters(route: LaneRoute, node: Int, tuning: CameraTuning = CameraTuning.PHONE): Double {
+        val at = route.nodes[node]
+        return streetWindowMeters(checkNotNull(at.maneuver) { "no maneuver at node $node" }, at, route.nodes[node - 1], tuning)
+    }
+
+    /**
+     * The kind of junction the camera reads the maneuver [maneuver] at [node] as ([FocusRule.kind]): from its own type and
+     * modifier, the approach's freeway flag and the roads that meet there, as the map engine reads them for the camera.
+     */
+    fun streetKind(maneuver: NodeManeuver, node: RouteNode, approach: RouteNode): FocusKind =
+        FocusRule.kind(maneuver.type, maneuver.modifier, onFreeway = approach.freeway, roads = node.bearings.size)
 
     fun of(route: LaneRoute, tuning: CameraTuning = CameraTuning.PHONE): List<CardWindow> {
         val nodes = route.nodes
@@ -70,7 +94,7 @@ object CardWindows {
                     runUpCounts(node, approach, tuning) ->
                         CardWindow(node.station - RunUpLatch.reachMeters(tuning, PlanningSpeed.of(approach)), node.station, CardWindow.Kind.RUN_UP, m)
                     framesStreetManeuver(maneuver, approach) ->
-                        CardWindow(node.station - streetWindowMeters(tuning), node.station, CardWindow.Kind.STREET, m)
+                        CardWindow(node.station - streetWindowMeters(maneuver, node, approach, tuning), node.station, CardWindow.Kind.STREET, m)
                     else -> null
                 }
                 if (window != null) {
@@ -128,7 +152,7 @@ object CardWindows {
                     }
                     if (begin > 0.0) windows.add(CardWindow(node.station - begin, node.station, CardWindow.Kind.RUN_UP, m))
                 } else if (framesStreetManeuver(maneuver, approach)) {
-                    val from = max(stepStart, node.station - streetWindowMeters(tuning))
+                    val from = max(stepStart, node.station - streetWindowMeters(maneuver, node, approach, tuning))
                     if (node.station > from) windows.add(CardWindow(from, node.station, CardWindow.Kind.STREET, m))
                 }
             }

@@ -1,6 +1,8 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
+import io.github.purplepalm.custommaps.engine.mapbox.navigation.RouteLanePlan
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -54,6 +56,12 @@ class CarLayerTest {
     private val layer = CarLayer(port, log, later = { later += it }) { now }
 
     private fun carLines() = log.lines.filter { it.first == CarLayer.LINE }.map { it.second }
+
+    /**
+     * Where the run-up's card window ends, at the gore, over the freeway lanes the bar stands on. The street turn's window,
+     * the junction view's from the ramp's start, meets it there, and the two are one card on to the turn.
+     */
+    private fun runUpEnd(plan: RouteLanePlan): Double = plan.plan.windows.first { it.kind == CardWindow.Kind.RUN_UP }.to
 
     /** A map on screen, its style loaded, before any drive. */
     private fun ready(layer: CarLayer = this.layer) {
@@ -146,13 +154,14 @@ class CarLayerTest {
         val drawing = ownLineDrawing(id, legs, shapes, plan, 1, lanes = true)
         val own = requireNotNull(drawing.lanes)
         val card = own.windows.cards.first()
+        val gore = runUpEnd(plan)
         val bar = requireNotNull(own.window(own.windows.windowAt(card.start), drawing.table, drawing.runs).carBar)
         layer.setDrawing(true)
         ready()
         layer.onGuidance(true)
         port.calls.clear()
-        // Through the card window: the puck's place on the route's line, the bar there.
-        val seconds = (card.endInclusive - card.start - 12.0) / SPEED
+        // Through the run-up's card window: the puck's place on the route's line, the bar there.
+        val seconds = (gore - card.start - 12.0) / SPEED
         val count = frames(seconds, fromMeters = card.start + 9.0, bar = bar, check = false)
         assertEquals("showBar", port.calls.first())
         assertEquals(count, port.calls.count { it == "moveTo" }, "one move a frame")
@@ -187,13 +196,14 @@ class CarLayerTest {
         val drawing = ownLineDrawing(id, legs, shapes, plan, 1, lanes = true)
         val own = requireNotNull(drawing.lanes)
         val card = own.windows.cards.first()
+        val gore = runUpEnd(plan)
         val bar = requireNotNull(own.window(own.windows.windowAt(card.start), drawing.table, drawing.runs).carBar)
         layer.setDrawing(true)
         ready()
         layer.onGuidance(true)
         port.calls.clear()
-        // Through the whole card window with the bar at hand: the puck over the drawn lanes, but no close view on this map.
-        val count = frames((card.endInclusive - card.start - 12.0) / SPEED, fromMeters = card.start + 9.0, bar = bar, swapped = false, check = false)
+        // Through the whole run-up window with the bar at hand: the puck over the drawn lanes, but no close view on this map.
+        val count = frames((gore - card.start - 12.0) / SPEED, fromMeters = card.start + 9.0, bar = bar, swapped = false, check = false)
         assertTrue(bar.at(card.start + 9.0 + SPEED * count * FRAME / 1e9), "the bar would find the puck")
         assertEquals(listOf("showDot") + List(count) { "moveTo" }, port.calls)
         assertTrue(port.bars.isEmpty())

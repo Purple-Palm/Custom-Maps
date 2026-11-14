@@ -245,11 +245,12 @@ class HorizonStreetsTest {
         val route = longStretch()
         val plan = SceneLines.planOf(route)
         val window = plan.windows.single()
-        assertEquals(2_600.0 - CardWindows.streetWindowMeters()..2_600.0, window.from..window.to)
-        // Each street alone, but the three over the card window's approach together, from 60 m before the window.
+        assertEquals(2_600.0 - CardWindows.streetWindowMeters(route, window.node)..2_600.0, window.from..window.to)
+        // Each street alone, but the four over the card window's approach together, from 60 m before the window: the junction
+        // view's, from 294.76 m before the turn at 35 mph, so from 2,245 m, inside the street from 2,200 m.
         val stretches = CrossSection.streetStretches(plan)
         assertEquals(400.0, stretches.first().from)
-        assertEquals(listOf(2_300.0 to 2_600.0), stretches.filter { it.nodes.size > 1 }.map { it.from to it.to })
+        assertEquals(listOf(2_200.0 to 2_600.0), stretches.filter { it.nodes.size > 1 }.map { it.from to it.to })
         assertTrue(stretches.filter { it.nodes.size == 1 }.all { it.to - it.from == 100.0 })
         val empty = HorizonEvidence.of(plan)
         // The window on screen ends at 1,200 m: the streets from 1,300 m on take the horizon's way; the one from 1,200 m begins
@@ -265,11 +266,11 @@ class HorizonStreetsTest {
         val later = first.next(horizon(route, 1_500.0) { it >= 23 }, 2_320.0, emptyList())
         assertTrue(section(plan, later).drawsAt(2_550.0))
         assertEquals(Carriageway.TWO_WAY, section(plan, later).carriagewayAt(2_550.0))
-        // From nothing told, a send whose start lies past the approach's first street leaves the whole approach undrawn,
-        // though two of its streets begin past the start.
-        val late = empty.next(horizon(route, 1_500.0) { false }, 2_320.0, emptyList())
-        assertTrue(HorizonEvidence.startFor(2_320.0, plan.windows.map { it.from..it.to }) in 2_300.0..2_400.0)
-        assertFalse(section(plan, late).drawsAt(2_450.0) || section(plan, late).drawsAt(2_550.0))
+        // From nothing told, a send whose start lies past the approach's first street, short of the card window, leaves the
+        // whole approach undrawn, though three of its streets begin past the start.
+        val late = empty.next(horizon(route, 1_500.0) { false }, 2_220.0, emptyList())
+        assertTrue(HorizonEvidence.startFor(2_220.0, plan.windows.map { it.from..it.to }) in 2_200.0..window.from)
+        assertFalse(section(plan, late).drawsAt(2_350.0) || section(plan, late).drawsAt(2_450.0) || section(plan, late).drawsAt(2_550.0))
         assertTrue(section(plan, late).drawnStreets.isEmpty())
     }
 

@@ -1,6 +1,8 @@
 package io.github.purplepalm.custommaps.nav.lanes
 
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
+import io.github.purplepalm.custommaps.nav.camera.FocusKind
+import io.github.purplepalm.custommaps.nav.camera.FocusWindow
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteLane
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.ceil
 import kotlin.math.max
 
 /** Made-up routes: stations in metres from the route's start; speeds in miles an hour as signs post them. */
@@ -104,7 +107,7 @@ class CardWindowsTest {
     }
 
     @Test
-    fun `a street maneuver has the last 180 m of its step`() {
+    fun `a street maneuver's window begins where the junction view does, within its step`() {
         val street = RoadKind.STREET
         val route = route(
             node(0.0, road = street, maneuver = depart),
@@ -113,10 +116,14 @@ class CardWindowsTest {
             node(1_200.0, road = street, maneuver = arrive),
         )
         val windows = CardWindows.of(route)
-        assertEquals(180.0, tuning.maneuverFramingMeters)
+        // No posted speed: planned at 35 mph, 15.65 m/s. A plain turn's frame from 240 m, the tilt 3.5 s before that.
+        val v = 35.0 * mph
+        assertEquals(240.0 + v * 3.5, CardWindows.streetWindowMeters(FocusKind.TURN, v), 1e-9)
+        assertEquals(294.76, CardWindows.streetWindowMeters(route, 1), 0.01)
         assertEquals(2, windows.size, "the departure and the arrival have none")
-        assertEquals(CardWindow(420.0, 600.0, CardWindow.Kind.STREET, 1), windows[0])
+        assertEquals(CardWindow(600.0 - CardWindows.streetWindowMeters(route, 1), 600.0, CardWindow.Kind.STREET, 1), windows[0])
         assertEquals(CardWindow(600.0, 700.0, CardWindow.Kind.STREET, 2), windows[1], "a step of 100 m")
+        assertEquals(windows, CardWindows.latched(route))
     }
 
     @Test
@@ -214,27 +221,54 @@ class CardWindowsTest {
     }
 
     @Test
-    fun `street windows are the framing's 180 m, as the evidence counts them`() {
-        val streets = CardWindows.latched(LaneScenes.streetPocket())
-        assertEquals(listOf(CardWindow(LaneScenes.GORE - 180.0, LaneScenes.GORE, CardWindow.Kind.STREET, 2)), streets)
-        assertEquals(CardWindows.of(LaneScenes.streetPocket()), streets)
+    fun `street windows are the junction view's, as the evidence counts them`() {
+        val route = LaneScenes.streetPocket()
+        val streets = CardWindows.latched(route)
+        // The left turn planned at 35 mph on its approach: from 294.76 m, past the lane point 200 m before it.
+        assertEquals(listOf(CardWindow(LaneScenes.GORE - CardWindows.streetWindowMeters(route, 2), LaneScenes.GORE, CardWindow.Kind.STREET, 2)), streets)
+        assertEquals(294.76, LaneScenes.GORE - streets.single().from, 0.01)
+        assertEquals(CardWindows.of(route), streets)
     }
 
     @Test
     fun `a street window is one value, the junction view's start, and the plan names a pocket only inside it`() {
-        // Today the navigation SDK's framing of the maneuver, read in one place.
-        assertEquals(180.0, CardWindows.streetWindowMeters())
-        assertEquals(CameraTuning.PHONE.maneuverFramingMeters, CardWindows.streetWindowMeters(CameraTuning.PHONE))
-        val shorter = CameraTuning.PHONE.copy(maneuverFramingMeters = 120.0)
-        assertEquals(120.0, CardWindows.streetWindowMeters(shorter))
-        assertEquals(LaneScenes.GORE - 120.0, CardWindows.latched(LaneScenes.junctionPocket(), shorter).single().from)
-        // The plan names the lane feeding the pocket from the window's start and the pocket where it opens, nothing before.
+        // The camera's own window for the junction, uncapped as the drive view's planner reads it, read in one place.
+        for (mph in listOf(20.0, 25.0, 35.0, 50.0, 65.0)) {
+            val v = mph * this.mph
+            for (kind in FocusKind.entries) {
+                val window = CardWindows.streetWindowMeters(kind, v)
+                assertEquals(FocusWindow.windowMeters(kind, v, Double.POSITIVE_INFINITY, tuning), window, 1e-9, "$kind at $mph mph")
+                // Never shorter than the navigation SDK's framing with the descent before it.
+                assertTrue(window >= tuning.maneuverFramingMeters + v * tuning.descentSeconds - 1e-9, "$kind at $mph mph")
+            }
+            assertTrue(CardWindows.streetWindowMeters(FocusKind.COMPLEX, v) >= CardWindows.streetWindowMeters(FocusKind.TURN, v), "at $mph mph")
+        }
+        // A sharp turn reads as a complex junction, with its longer window.
+        val sharp = route(
+            node(0.0, road = RoadKind.STREET, maneuver = depart),
+            node(1_000.0, road = RoadKind.STREET, maneuver = NodeManeuver(ManeuverType.TURN, TurnModifier.SHARP_LEFT)),
+            node(1_500.0, road = RoadKind.STREET, maneuver = arrive),
+        )
+        assertEquals(FocusKind.COMPLEX, CardWindows.streetKind(sharp.nodes[1].maneuver!!, sharp.nodes[1], sharp.nodes[0]))
+        assertEquals(1_000.0 - CardWindows.streetWindowMeters(FocusKind.COMPLEX, 35.0 * mph), CardWindows.of(sharp).single().from, 1e-9)
+        // The window follows the camera's tuning.
+        val shorter = CameraTuning.PHONE.copy(turnFramingMinMeters = 200.0)
+        val v = 35.0 * mph
+        assertEquals(200.0 + v * tuning.descentSeconds, CardWindows.streetWindowMeters(FocusKind.TURN, v, shorter), 1e-9)
+        assertEquals(
+            LaneScenes.GORE - CardWindows.streetWindowMeters(LaneScenes.junctionPocket(), 2, shorter),
+            CardWindows.latched(LaneScenes.junctionPocket(), shorter).single().from,
+            1e-9,
+        )
+        // The plan names the lane feeding the pocket from the window's start, at the first station of its 5 m grid inside the
+        // window, and the pocket where it opens, nothing before.
         for (mph in listOf(25.0, 35.0, 50.0)) {
             val route = LaneScenes.pocketAt(mph)
             val plan = LanePlanner.plan(LaneTopology.of(LaneEvidence.of(route)), CardWindows.latched(route), LaneScenes.sideBranches(route))
             val window = CardWindows.latched(route).single()
             val named = plan.segments.filter { it.named != null }
-            assertEquals(window.from, named.minOf { it.from }, 1e-9, "at $mph mph")
+            val firstStation = ceil(window.from / LanePlanner.GRID_METERS - 1e-9) * LanePlanner.GRID_METERS
+            assertEquals(firstStation, named.minOf { it.from }, 1e-9, "at $mph mph")
             assertTrue(named.all { it.from >= window.from - 1e-9 && it.to <= window.to + LanePlanner.GRID_METERS + 1e-9 }, "at $mph mph")
             val pocket = plan.topology.lanes.single { it.pocket }
             assertTrue(named.any { it.named == pocket.id && it.from <= pocket.opens + LanePlanner.GRID_METERS }, "the pocket named where it opens at $mph mph")
