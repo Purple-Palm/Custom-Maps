@@ -1086,6 +1086,9 @@ the bridge clears its callback there without the refusal; the posted callback th
   - leaves the trip session, the phone screen and the phone notification running; the drive ends
     only with End or arrival. The host itself hides this app's turn notifications while another app
     is the active navigation app;
+  - silences the app's guidance tones while the car stays connected, so that two apps never sound
+    over each other; they come back when the car disconnects or the app navigates on the car's
+    screen again ([DECISIONS.md](DECISIONS.md), 56);
   - logs the call with the Session's lifecycle state and whether the car is still connected
     (`CarConnection`), so a disconnect can be told from a real host stop.
 - A disconnect also arrives as `onStopNavigation`. When the host unbinds, the Session reaches

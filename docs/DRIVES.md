@@ -23,6 +23,8 @@ Step 1d's are checks 77 to 82 of the next drive's list below
 hot phone, the card's lanes two miles before an exit and the measuring's whole views.
 Since step 1c the phone shows the list in place of its map during a drive with the car: for checks
 7 to 13, which look at the phone's map too, press **Map** on the list first.
+The guidance tones in the car are check 110 of that list: one sound for each tone, and none while
+another navigation app guides on the car's screen.
 
 1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
    the map, or first with a message while the phone has no token or no precise location (the setup
@@ -1460,6 +1462,62 @@ app's own lanes). Screenshots from a passenger or a simulated drive, never from 
     end of the window on screen; the next window draws no street past it (`streetM` falls,
     `streetNoOneWay` rises), and nothing moves on the screen as it loads.
 
+The guidance tones ([DECISIONS.md](DECISIONS.md), 56; [README](../README.md), Sound): nothing has been
+heard yet. First parked with the phone, then on a drive with music, one with a podcast, and in the
+car. Every tone the rule decides writes a `tone` line, every one it leaves out a `tone_skipped` line,
+and every sound the player plays or cannot play a `tone_played` line:
+
+97. **How each sound sounds.** Parked, **Settings → Sound → Play the tones** on the phone's speaker,
+    on a wire and in the car: the one tone, then 1.5 s later the two. Soft, calm or hurried; pitch,
+    ring and level are constants, so expect a round of tuning after the first listen. Each sound
+    writes a `tone_played` line with `result` `played` and `output` `speaker`, `wired`, `bluetooth`
+    or `car`.
+98. **Tone level.** Choose Soft, Normal and Loud in turn: each plays the one tone at once at that
+    level. Whether Normal carries over the owner's music with A little, and over road noise on the
+    phone's own speaker.
+99. **The dip.** With music playing in the owner's music app, on the phone and on the car's
+    Bluetooth: with **Lower the music** on A little the music dips briefly and is back within about
+    half a second; More, deeper and about a second; Off, untouched, the tone over it. On
+    `tone_played`: `focus` `granted` (`not_asked` with Off), `holdMs` 250 or 300 with A little and
+    700 to 850 with More, `musicActive` true. Whether the music app is lowered at all, or pauses.
+100. **A podcast.** With a podcast playing and A little: the podcast pauses for the moment and goes on
+    (note whether it rewinds); with Off it plays on untouched.
+101. **Bluetooth from silence.** In the car with nothing playing: how much of the start of a tone the
+    car loses with **Settings → Debug → Tone lead-in on Bluetooth** at 0, 150, 300 and 600.
+    `tone_played`: `leadInMs` as chosen, `musicActive` false.
+102. **The moments on a drive.** In town and at a freeway exit: the one tone about 25 seconds before
+    the maneuver, the two about 7 seconds before, by feel. Each `tone` line has `why`, `metersLeft`,
+    `secondsLeft`, `speed`, `aheadMeters` and `finalMeters`; set them against the step's `voiceAt`
+    in the route lines and the progress lines' `voice`, where Mapbox would have spoken.
+103. **How many, and why.** The drive's `tone` lines by `why` (`ahead`, `lane_choice`, `at_turn`,
+    `arrived`): how often a lane choice sounded, and how often a `tone_skipped` line with `too_close`
+    left a one tone out. At most one sound at a time: a `tone` line with `pacing` `hold` or `drop`
+    says one waited or was left out.
+104. **Slow traffic and a queue.** Creeping towards a turn, or standing in a queue before it: the two
+    tones come no earlier than about 30 m before the turn (`finalMeters` 30), however slow the car.
+105. **A reroute close to a turn.** Leave the route where it is safe to: when the new route's first
+    turn is already close, it gets no tone at once (`tone_skipped` with `new_route`), and the turns
+    after it get theirs as usual. The card's pending state right after the reroute makes no sound.
+    Nothing sounds while the car is off the route.
+106. **Arrival.** Whether the two tones come by their distance or with the arrival (`why` `arrived`),
+    and how they sit with "You have arrived".
+107. **A call, Do Not Disturb, the volume at zero.** A call during the approach to a turn: no tone
+    (`tone_played` with `in_call`), and none while the phone rings; each Do Not Disturb mode; with the
+    media volume at zero, Play the tones says "The media volume is at zero" (`volume_zero`).
+108. **Screen off and the app in the background** during guidance: the tones go on (`focus`
+    `granted`).
+109. **From the decision to the sound.** `tone_played` `startMs`: the time from the decision to the
+    sound's start, a few tens of milliseconds at most.
+110. **In the car.** A drive with the car screen: every `tone_played` line has `output` `car`, `focus`
+    `granted` and `holdMs` the whole tone, whatever Lower the music says; how far the car lowers its
+    own music. One sound for each tone, never two. Start another navigation app in the car: the car
+    shows it, and Custom Maps' tones stop while the car stays connected (no `tone` line); open Custom
+    Maps in the car again, or unplug the car: the tones come back at the next turn.
+111. **Settings by day and at night.** **Settings → Sound**, parked, by day and at night: the group's
+    title and Play the tones in amber, the names readable, the notes muted, the switches and the
+    segments with the chosen one's check mark, each segment's word on one line also at the largest
+    font sizes; Tones off leaves its switch alone. Each row is one tap.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -1531,6 +1589,12 @@ Then share the debug log. What to read in it:
 | `car_light` | Only with the car screen, `screen` `car`: one at each change of the car's lighter map, `on` (whether it draws without its 3D objects) and `thermal` (the phone's thermal status by Android's name, null while none was read). From `MODERATE` on it is light, after two minutes in a row of `LIGHT` or better full again; the car's camera line has `light` beside it. With **Settings → Debug → Lighter car map when hot** off (`settings` `car_light_when_hot` false) it is never light. Words only, a few a drive at most |
 | `lane_measure` | Only with **Settings → Debug → Measure the drawn lanes** on and Drawn by the app, from the phone's map: one as the measuring begins, `check` `details_under_drawing` with `on` true (Mapbox's lane details under the drawing for the drive), then one at the end of each close view. `view`, counted from 1 in the drive; `drawn`, whether the drawing showed (the odd views); `kind`, `run_up` or `junction`; `look`, `DAY` or `NIGHT`; `seconds` and `frames`; `ms`, how long the view lasted, from the update it began on to its end; `p95Ms` and `maxMs`, over every frame time of the view; `missedVsync` and `missedPerS`; `uploadMaxMs`, the longest upload of a frame in Mapbox's statistics; `programsMs` and `programs`, the time spent making graphics programs and how many there are, as Mapbox's statistics give them (whether a sample counts since its own start or the map's is not verified); `windows`, `windowLoadMaxMs` and `windowBytesMax`, the drawing windows that loaded in the view; `carPositions`, the positions handed to the car's layer; `hdRoads`, what the style said of Mapbox's lane details as the view began; `end`: `let_go`, `guidance_end`, `switch`, `setting`, `background`, `covered`, `away`, `camera_style` or `released`; `counts`, true only for a whole view, one with frames, begun 5 s or more after the drawing was shown or hidden, that lasted 3 s or more and ended `let_go`, and false for every other. Numbers and words only, about 390 bytes, one a close view |
 | `motion_sensors` | One each time the sensors are asked to start, as a drive comes onto a freeway: whether the phone has a gyroscope (`gyroscope`), a gravity sensor (`gravity`) and a linear acceleration sensor (`linearAcceleration`), the period asked for (`periodUs`, 40000: 25 samples a second, each delivered at once) and whether listening `started`. They stop at the first update off the freeway and when the drive ends. Without a gyroscope or a gravity sensor nothing is registered: one line a drive with `started` false, and no `motion`. Without linear acceleration, `fwd` and `side` stay null |
+| `tone` | One for each tone the rule decides, from the main thread: `tone` (`ahead`, `at_turn`, `start`, `demo`), `why` (`ahead`, `lane_choice`, `at_turn`, `arrived`, `start`, `demo`, `sample`: a level chosen in Settings), the maneuver's `maneuver` and `modifier`, `metersLeft` and `secondsLeft` to it, `speed` in m/s, the two distances of the update (`aheadMeters`, `finalMeters`), `laneMeters` and `laneKey` for a lane choice, `sinceLast` (seconds since the tone before) and `pacing` (`play`, `hold`: waits for the sound that plays, `drop`). With **Tones** off, and while another app guides on the car's screen, none |
+| `tone_skipped` | A tone the rule left out: `why` `too_close` (no room before the pair), `new_route` (already inside its distance at the new route's first update) or `exit_row` (a lane choice that is the exit's own one tone), with `tone`, `maneuver`, `metersLeft` and `speed` |
+| `tone_played` | One for each sound, from the player's thread: `tone`, `level`, `result` (`played`, `no_focus`, `in_call`, `volume_zero`, `failed` with the error's kind in `error`), `focus` (`granted`, `failed`, `not_asked`), `holdMs`, `leadInMs`, `musicActive`, `output` (`speaker`, `wired`, `bluetooth`, `car`, `other`), `volume` (the media volume as "9/15") and `startMs` |
+| Step fields `voiceAt` | Where along each step Mapbox's voice instructions would speak, in metres before the step's end, from the route the app has; no voice is played |
+| `settings` with `tones`, `tone_before_turn`, `tone_at_turn`, `tone_duck`, `tone_level`, `tone_lead_in_ms` | Each change of a Sound row, or of the Debug lead-in |
+| `error` with `where` `audio` or `tones` | A call to the tones failed: `audio` in the engine, once a drive; `tones` in the hand-over to the player, once while the app runs. The drive and the next tone go on |
 
 Reading the connectivity lines:
 

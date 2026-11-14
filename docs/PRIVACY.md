@@ -34,7 +34,8 @@ Last updated: 2026-11-14. It describes the app as it is today; see [Changes](#ch
   the debug log, which names the token in use only by its place in the list and its name.
 - **Settings:** day and night, camera style, lane zoom, lanes on the map (off, Mapbox's lane details
   or drawn by the app), lane counts between lane points (whether the app takes them from Mapbox's
-  electronic horizon), and the switches for the simulated drive, for the app's own route line, for
+  electronic horizon), the guidance tones (on or off, each of them, how the music is lowered and how
+  loud a tone is, and under Debug the silence before a tone on Bluetooth), and the switches for the simulated drive, for the app's own route line, for
   measuring the drawn lanes, for asking routes for the side roads' access and form of way, for how many
   frames a second the car's map draws and for a lighter car map while the phone is hot, under Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
@@ -58,8 +59,11 @@ Last updated: 2026-11-14. It describes the app as it is today; see [Changes](#ch
   on, off or dozing and its refresh rate), what the car screen did (when Android Auto connected and
   disconnected, which Android Auto app it was by its package name and the version of the car
   interface it speaks, the car screen's size and look, and what it showed, in states and numbers),
-  whether the phone showed its map or the list of the turns during a drive with the car, and
-  crashes. It never holds a token. Days that are over are kept compressed on the phone, and when the
+  whether the phone showed its map or the list of the turns during a drive with the car, the
+  guidance tones the app played or left out and why (the tone, the maneuver's kind, the distances
+  and the speed it was timed by), with the phone's sound as each played (whether something else was
+  playing, the kind of output, the media volume, and whether Android let the app lower the music),
+  in numbers and words only, and crashes. It never holds a token. Days that are over are kept compressed on the phone, and when the
   log grows past 50 MB the oldest days are deleted. It leaves the phone only when you tap
   **Share debug log** in Settings and pick an app, which gets it as plain text; from then on that
   app's own terms apply.
@@ -210,7 +214,9 @@ the settings; who drew the car, and the measured frames of the drawn lanes, in t
 the counts it gave, against the route's own, in the debug log; the switch for a lighter car map while
 the phone is hot among the settings, and whether the car's map was the lighter one, in the debug log;
 the switch for the side roads' fields among the settings, what the route requests ask with it, and
-what came of the fields on each route, in counts and sizes, in the debug log.
+what came of the fields on each route, in counts and sizes, in the debug log; the guidance tones'
+settings among the settings, and the tones with the phone's sound as each played, in the debug log.
+The tones are made and played on the phone: nothing is recorded and nothing new is sent.
 
 ## Contact
 

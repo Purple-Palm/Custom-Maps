@@ -13,7 +13,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 4 | Smart camera: automatic overview and following | Planned |
 | 5 | 3D navigation and visual polish | Planned |
 | 6 | Junction view in the car's routing card (variant A) | Planned |
-| 7 | Guidance tones instead of voice | Planned |
+| 7 | Guidance tones instead of voice | Tones built in stage 1.1; voice open |
 | 8 | Split screen with a live maneuver view (variant B) | Planned |
 
 ## Stage 0: skeleton (done)
@@ -92,6 +92,10 @@ zoom setting and the trip history with prediction.
   the dark look of before, by the sun at the phone's position (Auto) or by hand in **Settings → Day
   and night**; during a drive a change by the sun waits until no turn is close. Built; not yet on a
   drive ([DECISIONS.md](DECISIONS.md), 48).
+- **Guidance tones,** stage 7 brought forward, as the owner asked: soft tones of the app's own, one
+  about 25 seconds before a turn, an exit, a lane choice or the destination and two right before it,
+  with the music lowered only a little and briefly; **Settings → Sound** turns each part on or off
+  and plays them. Built; not yet on a drive ([DECISIONS.md](DECISIONS.md), 56).
 - **Trip history and prediction:** every trip is recorded on the phone (where, when, how often), and
   search shows the history. When the app opens it suggests likely destinations by time, day and how
   often each is visited. If the app stays open and the car drives off toward one of them, the
@@ -231,7 +235,7 @@ Mapbox logo and attribution rules apply in every view.
 ## Stages 6 to 8 (planned)
 
 - **6. Junction view (variant A):** snapshot image of the next complex maneuver in the routing card, highlighted lanes, distance countdown bar.
-- **7. Tones:** short own tones at the moments of Mapbox voice instructions, audio focus with ducking; tones, voice or silent.
+- **7. Tones:** short own tones before maneuvers, timed by the app from the route progress; a short dip of the music; voice is open. Built in stage 1.1 ([DECISIONS.md](DECISIONS.md), 56).
 - **8. Split screen (variant B):** live zoomed maneuver view next to the main map before complex maneuvers; falls back to variant A on small screens.
 
 ## Future (not scheduled; the owner decides when)

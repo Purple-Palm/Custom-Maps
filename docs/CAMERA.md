@@ -1600,7 +1600,8 @@ lane". The row never says "keep right", never "any lane but", and never names th
 for car pools or buses is drawn dim and is not lit while another lane can be used; where the route
 marks only such lanes, they keep their arrow lit, so the row is never empty. **Nothing is spoken:**
 asked on 2026-11-11 whether the lanes should be said aloud, the owner answered no. The words are on
-the card and for the screen reader only, and the app makes no sound.
+the card and for the screen reader only, and no voice says them: the app's only sounds are its
+guidance tones ([DECISIONS.md](DECISIONS.md), 56).
 
 The row has **no words** where the exit has no lane data or its side cannot be told; where the lanes
 to use are not side by side, or are every open lane; for a single lane three or more lanes in, or

@@ -116,6 +116,33 @@ takes it at once. The phone's own dark theme and Power saving change nothing. Un
 card gets a gear of its own, Settings opens only before Start and after arrival. The car's map shows
 the same look ([On the car screen](#on-the-car-screen)).
 
+### Sound
+
+During guidance the app plays soft tones of its own, made by the app itself: **one tone** about 25
+seconds before a turn, an exit, a fork, a roundabout, a freeway lane choice or the destination, and
+**two tones** about 7 seconds before it, never closer than about 30 m in slow traffic. Faster means
+earlier on the road. Two turns close together get only the two tones of the second. Off the route,
+during a call or while the phone rings there is no tone, and a new route makes no sound by itself.
+No voice speaks.
+
+The tones follow the media volume: the same keys and slider as music. **Settings → Sound** has
+**Tones**, which turns them all off, **Before a turn** and **Two tones at the turn**, **Lower the
+music** and **Tone level**. With **A little**, the default, music dips by about a third for a
+quarter of a second and is back within about half a second; **More** lowers it further for about a
+second; **Off** leaves it alone and plays the tone over it. A podcast or an audiobook is not
+lowered: its player pauses for that moment and goes on, unless Lower the music is Off. **Tone
+level** (Soft, Normal, Loud) sets a tone against the music, and choosing one plays the one tone at
+it. **Play the tones** plays the one tone and then the two; if they cannot be heard it says why in
+one line: the media volume is at zero, a call is active, or another app holds the sound. Until the
+maneuver card gets a gear of its own, Settings opens only before Start and after arrival.
+
+On the car's Bluetooth the tones come out of the car's speakers, like the music. With nothing
+playing, a tone starts after a short silence so that the car's output can wake first;
+**Settings → Debug → Tone lead-in on Bluetooth** sets it (0, 150, 300 or 600 ms). With the car
+screen connected every tone asks for the music to be lowered for the whole tone, whatever Lower the
+music says, and while another navigation app guides on the car's screen Custom Maps plays no tone
+until it is opened there again or the car disconnects.
+
 ### On the car screen
 
 Android Auto shows Custom Maps in its launcher, among the navigation apps. In a real car it runs
