@@ -416,10 +416,13 @@ class CameraMotionTest {
         focus.onBanner(13.0, "r/0/1", 270.0, 30.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
         assertEquals(ManeuverFocus.Latch.BRIDGE, focus.latchedBy)
+        // Over 3 s, the ascent's time: half at 1.5 s, still some at 2.9 s, none from 3 s.
         assertEquals(1.0, focus.keepAt(13.0), 1e-9)
-        assertEquals(0.5, focus.keepAt(13.0 + tuning.keptZoomReleaseSeconds / 2), 1e-9)
-        assertEquals(0.0, focus.keepAt(13.0 + tuning.keptZoomReleaseSeconds), 1e-9)
+        assertEquals(0.5, focus.keepAt(14.5), 1e-9)
+        assertTrue(focus.keepAt(15.9) > 0.0, "kept at 2.9 s")
+        assertEquals(0.0, focus.keepAt(16.0), 1e-9)
         assertEquals(0.0, focus.keepAt(20.0), 1e-9)
+        assertEquals(3.0, tuning.keptZoomReleaseSeconds)
         // The tilt stays down meanwhile, also once the next turn is framed.
         focus.onBanner(14.0, "r/0/1", 260.0, 40.0, "turn", excluded, 10.0)
         focus.onBanner(22.0, "r/0/1", 179.0, 121.0, "turn", excluded, 10.0)

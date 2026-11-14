@@ -109,6 +109,24 @@ class DriveViewPlanTest {
     private val phases = (0 until 10).map { it / 10.0 }
 
     @Test
+    fun `the drive views' numbers are the design's, the car's the phone's`() {
+        assertEquals(5.0, tuning.leaveLeadSeconds)
+        assertEquals(2_000.0, tuning.returnMeters)
+        assertEquals(30.0, tuning.minOverviewSeconds)
+        assertEquals(10.0, tuning.buttonOverviewSeconds)
+        assertEquals(8.0, tuning.minNormalSeconds)
+        assertEquals(10.0, tuning.lookSeconds)
+        assertEquals(3.0, tuning.recenterNearSeconds)
+        assertEquals(30.0, tuning.staleFingerSeconds)
+        assertEquals(0.5, tuning.holdEarlySeconds)
+        assertEquals(2_414.0, tuning.alwaysOutMeters)
+        assertEquals(2, tuning.offRouteUpdates)
+        assertEquals(30.0, tuning.rerouteSettleSeconds)
+        assertEquals(DriveViewTuning(), tuning)
+        assertEquals(tuning, DriveViewTuning.CAR)
+    }
+
+    @Test
     fun `every maneuver type and modifier has its kind of point`() {
         for (type in ManeuverType.values()) {
             for (modifier in TurnModifier.values().toList() + listOf<TurnModifier?>(null)) {
@@ -347,6 +365,14 @@ class DriveViewPlanTest {
     fun `1,5 miles or more always goes out, and below it the overview must stand 30 s`() {
         // 85 mph, a 1.5-mile gap to an exit: about 29 s of overview, out all the same.
         assertTrue(standSeconds(85 * MPH, 1.5 * MILE, exit = true, 0.0)!! in 27.0..31.0)
+        // Just under the edge, 1.47 miles at 85 mph: under 30 s of overview, so the view stays normal.
+        val under = Drive(listOf(turn(3_000.0), exit(3_000.0 + 1.47 * MILE), turn(30_000.0)))
+        under.driveAt(85 * MPH, 3_200.0)
+        assertEquals(Reason.STAY_TOO_SHORT, under.planner.reason)
+        assertEquals(1.47 * MILE, under.planner.gapMeters, 1e-6)
+        assertTrue(under.planner.standSeconds in 20.0..30.0, "${under.planner.standSeconds} s")
+        assertEquals(CameraMode.FOLLOWING, under.planner.wanted)
+        assertNull(standSeconds(85 * MPH, 1.47 * MILE, exit = true, 0.0))
         // 75 mph and 1.25 miles to an exit: under 30 s of overview, the view stays normal.
         val d = Drive(listOf(turn(3_000.0), exit(3_000.0 + 1.25 * MILE), turn(30_000.0)))
         d.driveAt(75 * MPH, 3_200.0)
@@ -377,7 +403,8 @@ class DriveViewPlanTest {
         d.drive(Double.POSITIVE_INFINITY, 20.0) { 13.0 }
         val out = d.asks.last()
         assertEquals(CameraMode.OVERVIEW, out.mode)
-        assertTrue(out.t - down.t >= tuning.minNormalSeconds, "down ${down.t}, out ${out.t}")
+        // 8 s of normal view, out at the first update after them.
+        assertTrue(out.t - down.t >= 8.0 - 1e-9 && out.t - down.t < 9.0, "down ${down.t}, out ${out.t}")
         assertEquals(2, d.asksAfter(0.0).size)
     }
 
@@ -545,6 +572,67 @@ class DriveViewPlanTest {
     }
 
     @Test
+    fun `a tap that waits off the route is honoured back on it, and one that waits in a normal view once the car slows`() {
+        // In Normal with the silent plan out, the car leaves the route; a tap on Overview then waits: nothing off the
+        // route, the overview at the first update back on it.
+        val off = Drive(listOf(turn(4_000.0), turn(40_000.0)), view = DriveView.NORMAL, fromPreview = false)
+        off.driveAt(13.0, 1_000.0)
+        assertEquals(CameraMode.OVERVIEW, off.planner.plan)
+        off.offRoute = true
+        off.drive(Double.POSITIVE_INFINITY, 3.0) { 13.0 }
+        assertEquals(Reason.OFF_ROUTE, off.planner.planReason)
+        assertNull(off.planner.setDriveView(DriveView.OVERVIEW, off.t))
+        assertEquals(Reason.OFF_ROUTE, off.planner.reason)
+        off.drive(Double.POSITIVE_INFINITY, 5.0) { 13.0 }
+        assertTrue(off.asksAfter(0.0).isEmpty(), "${off.asks}")
+        off.offRoute = false
+        off.drive(Double.POSITIVE_INFINITY, 1.0) { 13.0 }
+        assertEquals(CameraMode.OVERVIEW, off.asks.last().mode)
+        assertEquals(Reason.BUTTON, off.asks.last().reason)
+        // In Normal kept down between close turns, 5 s of overview before the next approach: the tap waits; the car
+        // slows to 5 m/s and the overview could stand 30 s: shown at that update, before the turn.
+        val (slow, next) = shortOfApproach(5.0, afterTurn = true, view = DriveView.NORMAL)
+        assertEquals(Reason.GAP_TOO_SHORT, slow.planner.planReason)
+        assertNull(slow.planner.setDriveView(DriveView.OVERVIEW, slow.t))
+        assertEquals(Reason.BUTTON_TOO_CLOSE, slow.planner.reason)
+        val before = slow.asks.size
+        val slowFrom = slow.t
+        slow.drive(next) { 5.0 }
+        val after = slow.asks.drop(before)
+        assertTrue(after.isNotEmpty(), "no overview before the turn")
+        val shown = after.first()
+        assertEquals(CameraMode.OVERVIEW, shown.mode)
+        assertEquals(Reason.BUTTON, shown.reason)
+        assertTrue(shown.t <= slowFrom + 1.0 + 1e-9, "shown ${shown.t - slowFrom} s after the car slowed, ${next - shown.x} m before the turn")
+    }
+
+    @Test
+    fun `the planner's hold is 25 m and 1,5 s past a maneuver and 30 m and 1,5 s past a lane choice`() {
+        for (lanes in listOf(false, true)) {
+            val planner = DriveViewPlanner(camera, tuning)
+            planner.setDriveView(DriveView.OVERVIEW, 0.0)
+            planner.onGuidanceStarted(0.0, fromPreview = false)
+            val kind = if (lanes) ApproachKind.LANE_CHOICE else ApproachKind.TURN
+            val focus = if (lanes) FocusKind.NONE else FocusKind.TURN
+            fun update(t: Double, x: Double, vararg at: Pair<String, Double>) =
+                planner.onProgress(ViewInput(t, "r1", x, false, 10.0, at.map { (key, p) -> ViewPoint(key, kind, focus, lanes, p - x) }))
+            // Down for the point at 1,000 m, the next one 29 km on.
+            update(0.0, 900.0, "a" to 1_000.0, "b" to 30_000.0)
+            assertTrue(planner.near, "lanes $lanes")
+            // Passed at 20 s: held for 1.5 s and the metres from the point.
+            update(20.0, 1_000.5, "b" to 30_000.0)
+            assertEquals(Reason.JUST_PASSED, planner.planReason)
+            val meters = if (lanes) 30.0 else 25.0
+            update(21.49, 1_000.0 + meters + 5.0, "b" to 30_000.0)
+            assertEquals(Reason.JUST_PASSED, planner.planReason, "lanes $lanes: 1.49 s")
+            update(21.5, 1_000.0 + meters - 0.5, "b" to 30_000.0)
+            assertEquals(Reason.JUST_PASSED, planner.planReason, "lanes $lanes: ${meters - 0.5} m")
+            assertEquals(CameraMode.OVERVIEW, update(21.6, 1_000.0 + meters, "b" to 30_000.0), "lanes $lanes")
+            assertEquals(Reason.OPEN_ROAD, planner.planReason)
+        }
+    }
+
+    @Test
     fun `a route the driver picked is judged as a tap on the Overview, with no wait for reroutes`() {
         val d = Drive(listOf(turn(3_000.0), turn(30_000.0)))
         d.driveAt(13.0, 1_000.0)
@@ -674,25 +762,23 @@ class DriveViewPlanTest {
         d.driveAt(13.0, 3_800.0)
         assertEquals(CameraMode.FOLLOWING, d.asks.last().mode)
         assertTrue(4_000.0 - d.asks.last().x <= d.planner.approachMeters + 13.0)
-        // The overview could stand 1, 5 or 9 s before the next approach: the car, and no overview before the point.
-        for (seconds in listOf(1.0, 5.0, 9.0, 11.0)) {
-            val v = 13.0
-            val approach = DriveViewRule.approachMeters(ViewPoint("k", ApproachKind.TURN, FocusKind.TURN, false, 9_000.0), v, camera, tuning)
-            val gapToApproach = (seconds + camera.longTransitionSeconds) * v
-            val r = Drive(listOf(turn(3_000.0), turn(3_000.0 + 400.0 + approach + gapToApproach), turn(40_000.0)))
-            r.driveAt(v, 3_400.0)
+        // The overview could stand 1, 5, 9 or 9.9 s before the next approach: the car, and no overview before the point;
+        // 10.1 or 11 s: the overview. The edge is 10 s.
+        for (seconds in listOf(1.0, 5.0, 9.0, 9.9, 10.1, 11.0)) {
+            val (r, next) = shortOfApproach(seconds, afterTurn = true)
+            assertEquals(Reason.GAP_TOO_SHORT, r.planner.reason, "$seconds s")
             // Exactly at the update where the overview could stand that long.
-            val stand = DriveViewRule.overviewSeconds(r.planner.point!!, v, camera, tuning)
-            assertTrue(abs(stand - seconds) < 0.7, "$seconds: $stand")
+            assertEquals(seconds, DriveViewRule.overviewSeconds(r.planner.point!!, 13.0, camera, tuning), 1e-6)
             val back = r.planner.onRecenter(r.t)
-            if (seconds < tuning.buttonOverviewSeconds) {
+            if (seconds < 10.0) {
                 assertEquals(CameraMode.FOLLOWING, back, "$seconds s")
                 assertEquals(Reason.RECENTER_TOO_CLOSE, r.planner.reason)
                 val before = r.asks.size
-                r.driveAt(v, 3_000.0 + 400.0 + approach + gapToApproach + 100.0)
-                assertTrue(r.asks.drop(before).none { it.mode == CameraMode.OVERVIEW && it.x < 3_000.0 + 400.0 + approach + gapToApproach })
+                r.driveAt(13.0, next + 100.0)
+                assertTrue(r.asks.drop(before).none { it.mode == CameraMode.OVERVIEW && it.x < next })
             } else {
                 assertEquals(CameraMode.OVERVIEW, back, "$seconds s")
+                assertEquals(Reason.RECENTERED, r.planner.reason)
             }
         }
         // Inside an approach, and off the route: the car.
