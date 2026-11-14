@@ -151,6 +151,52 @@ class SettingsViewModel(
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
 
+    /**
+     * Everything Settings shows, in one value, for the catalogue ([SettingsCatalogue]): the guidance, the look
+     * and the debug section as above.
+     */
+    val values: StateFlow<SettingsValues> =
+        combine(guidance, look, debug) { guidance, look, debug -> SettingsValues(guidance = guidance, look = look, debug = debug) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsValues())
+
+    /**
+     * What the driver did with a row: stored through the row's own setter, by the options the catalogue lists
+     * for a choice. A row that stores nothing, as a line of information or an action the screen carries out
+     * itself, changes nothing here. Every row is named, so a new one does not compile until it is handled.
+     */
+    fun onEvent(event: SettingsEvent) {
+        when (event.id) {
+            SettingId.CAMERA_STYLE -> event.chosen(SettingsCatalogue.cameraStyles, ::setCameraStyle)
+            SettingId.LANE_ZOOM -> event.chosen(SettingsCatalogue.laneZooms, ::setLaneZoom)
+            SettingId.LANES_ON_MAP -> event.chosen(SettingsCatalogue.lanesOnMap, ::setLanesOnMap)
+            SettingId.LANE_COUNTS_HORIZON -> event.switched(::setLaneCountsHorizon)
+            SettingId.DAY_NIGHT -> event.chosen(SettingsCatalogue.lookChoices, ::setDayNight)
+            SettingId.SIMULATE_DRIVE -> event.switched(::setSimulateDrive)
+            SettingId.OWN_ROUTE_LINE -> event.switched(::setOwnRouteLine)
+            SettingId.MEASURE_OWN_LANES -> event.switched(::setMeasureOwnLanes)
+            SettingId.SIDE_ROAD_FIELDS -> event.switched(::setSideRoadFields)
+            SettingId.CAR_MAP_FPS -> event.chosen(SettingsCatalogue.carMapFps, ::setCarMapFps)
+            SettingId.CAR_LIGHT_WHEN_HOT -> event.switched(::setCarLightWhenHot)
+            SettingId.CLEAR_LOG -> if (event is SettingsEvent.Acted) clearLog()
+            // Shown only, or carried out by the screen: the token list, the web pages, sharing the log and the crash.
+            SettingId.TOKENS, SettingId.TRIP_SESSIONS, SettingId.MAPBOX_STATISTICS, SettingId.RECENT_TRIPS,
+            SettingId.TEMPORARY_KEY, SettingId.DEBUG_LOG, SettingId.SHARE_LOG, SettingId.CRASH_NOW,
+            SettingId.ABOUT, SettingId.PRIVACY_POLICY,
+            -> Unit
+        }
+    }
+
+    /** The option this event chose, of [options] as the catalogue lists them; nothing for another kind of event. */
+    private inline fun <T> SettingsEvent.chosen(options: List<T>, store: (T) -> Unit) {
+        val option = (this as? SettingsEvent.Chosen)?.option ?: return
+        options.getOrNull(option)?.let(store)
+    }
+
+    /** The state this event switched to; nothing for another kind of event. */
+    private inline fun SettingsEvent.switched(store: (Boolean) -> Unit) {
+        (this as? SettingsEvent.Switched)?.let { store(it.on) }
+    }
+
     /** Applies at once, also during a drive: the screen and the map take the look in the same moment. */
     fun setDayNight(choice: LookChoice) {
         viewModelScope.launch {

@@ -169,6 +169,7 @@
     <string name="mapbox_beta_label">Mapbox beta</string>
 
     <string name="debug_title">Debug</string>
+    <string name="trip_sessions_title">Trip sessions</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>
     <string name="debug_trips_since_installation">Trip sessions this month: %1$d, since installation on %2$s</string>
     <string name="debug_trips_since_oldest_kept">Trip sessions this month: %1$d, since %2$s, the oldest one kept</string>

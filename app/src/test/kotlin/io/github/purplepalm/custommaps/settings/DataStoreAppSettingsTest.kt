@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 
 class DataStoreAppSettingsTest {
@@ -440,6 +441,78 @@ class DataStoreAppSettingsTest {
             ),
             changes,
         )
+    }
+
+    @Test
+    fun `the keys Settings lists are the keys every setting is stored under`() = runBlocking {
+        settings.setSimulateDrive(true)
+        settings.setCameraStyle(CameraStyle.MAPBOX_TUNED)
+        settings.setLaneZoom(LaneZoom.LARGE)
+        settings.setLanesOnMap(LanesOnMap.APP)
+        settings.setLaneCountsHorizon(false)
+        settings.setDayNight(LookChoice.NIGHT)
+        settings.setOwnRouteLine(true)
+        settings.setMeasureOwnLanes(true)
+        settings.setCarMapFps(60)
+        settings.setCarLightWhenHot(false)
+        settings.setSideRoadFields(true)
+        assertEquals(DataStoreAppSettings.KEYS, raw().keys)
+    }
+
+    /** A group of two settings for the helper's tests: invented, never stored by the app. */
+    private data class Pair2(val on: Boolean = true, val word: String = "one")
+
+    private val onKey = booleanPreferencesKey("test_on")
+    private val wordKey = stringPreferencesKey("test_word")
+
+    private val group = PreferenceGroup(
+        read = { Pair2(it[onKey] ?: true, it[wordKey]?.takeIf { word -> word in setOf("one", "two") } ?: "one") },
+        fields = listOf(PreferenceGroup.Field(onKey) { it.on }, PreferenceGroup.Field(wordKey) { it.word }),
+    )
+
+    @Test
+    fun `a group reads its defaults from an empty file and writes nothing for a change that changes nothing`() = runBlocking {
+        assertEquals(Pair2(), group.of(dataStore.data.first()))
+        val reported = mutableListOf<Pair<String, Any>>()
+        group.update(dataStore, { it.copy() }, { key, value -> reported += key to value })
+        assertEquals(emptyMap<String, Any>(), raw())
+        assertEquals(emptyList<Pair<String, Any>>(), reported)
+        assertEquals(listOf("test_on", "test_word"), group.keyNames)
+    }
+
+    @Test
+    fun `a group's change is one write of the keys that changed, each reported once`() = runBlocking {
+        val reported = mutableListOf<Pair<String, Any>>()
+        group.update(dataStore, { it.copy(word = "two") }, { key, value -> reported += key to value })
+        // The switch kept its default, so it is not written: a later default still reaches it.
+        assertEquals(mapOf<String, Any>("test_word" to "two"), raw())
+        assertEquals(listOf<Pair<String, Any>>("test_word" to "two"), reported)
+        group.update(dataStore, { Pair2(on = false, word = "one") }, { key, value -> reported += key to value })
+        assertEquals(mapOf<String, Any>("test_on" to false, "test_word" to "one"), raw())
+        assertEquals(listOf<Pair<String, Any>>("test_word" to "two", "test_on" to false, "test_word" to "one"), reported)
+        assertEquals(Pair2(on = false, word = "one"), group.of(dataStore.data.first()))
+    }
+
+    @Test
+    fun `a word the group does not know reads as its default, and a change made on top of it is kept`() = runBlocking {
+        dataStore.edit { it[wordKey] = "three" }
+        assertEquals(Pair2(), group.of(dataStore.data.first()))
+        val reported = mutableListOf<Pair<String, Any>>()
+        // The default again: nothing to write, the unknown word stays as the file has it.
+        group.update(dataStore, { it.copy(word = "one") }, { key, value -> reported += key to value })
+        assertEquals(mapOf<String, Any>("test_word" to "three"), raw())
+        group.update(dataStore, { it.copy(word = "two") }, { key, value -> reported += key to value })
+        assertEquals("two", raw()["test_word"])
+        assertEquals(listOf<Pair<String, Any>>("test_word" to "two"), reported)
+    }
+
+    @Test
+    fun `a group's change that cannot be written reports nothing`() = runBlocking {
+        val full = Probe(dataStore, diskFull = true)
+        val reported = mutableListOf<Pair<String, Any>>()
+        assertThrows<IOException> { runBlocking { group.update(full, { it.copy(on = false) }, { key, value -> reported += key to value }) } }
+        assertEquals(emptyList<Pair<String, Any>>(), reported)
+        assertEquals(Pair2(), group.of(dataStore.data.first()))
     }
 
     /** What the file holds, key by key. */

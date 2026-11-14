@@ -586,4 +586,109 @@ class SettingsViewModelTest {
         assertEquals(LookChoice.AUTO, viewModel.look.value.choice)
         assertEquals(listOf("error"), archive.logged)
     }
+
+    private fun TestScope.viewModelWithValues() =
+        SettingsViewModel(tripLog, settings, archive, now = { now }, installedAt = { installedAt }).also {
+            it.values.launchIn(backgroundScope)
+            runCurrent()
+        }
+
+    @Test
+    fun `a switch of the catalogue stores through its own setter`() = runTest(dispatcher) {
+        val viewModel = viewModelWithValues()
+        val stored = mapOf(
+            SettingId.SIMULATE_DRIVE to settings.simulateDrive,
+            SettingId.OWN_ROUTE_LINE to settings.ownRouteLine,
+            SettingId.MEASURE_OWN_LANES to settings.measureOwnLanes,
+            SettingId.SIDE_ROAD_FIELDS to settings.sideRoadFields,
+            SettingId.CAR_LIGHT_WHEN_HOT to settings.carLightWhenHot,
+            SettingId.LANE_COUNTS_HORIZON to settings.laneCountsHorizon,
+        )
+        // Every switch row of the page is one of these.
+        val switches = SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.filterIsInstance<SwitchRow>().map { it.id }.toSet()
+        assertEquals(stored.keys, switches)
+        for ((id, flow) in stored) {
+            val now = !flow.value
+            viewModel.onEvent(SettingsEvent.Switched(id, now))
+            runCurrent()
+            assertEquals(now, flow.value, "$id")
+            // And the row shows what was stored.
+            val row = SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.single { it.id == id } as SwitchRow
+            assertEquals(now, row.on, "$id")
+        }
+        assertEquals(emptyList<String>(), archive.logged)
+    }
+
+    @Test
+    fun `a choice of the catalogue stores the option at its place in the row`() = runTest(dispatcher) {
+        val viewModel = viewModelWithValues()
+        fun selected(id: SettingId) = (SettingsCatalogue.page(viewModel.values.value).flatMap { it.rows }.single { it.id == id } as ChoiceRow).selected
+        for ((index, style) in SettingsCatalogue.cameraStyles.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.CAMERA_STYLE, index))
+            runCurrent()
+            assertEquals(style, settings.cameraStyle.value)
+            assertEquals(index, selected(SettingId.CAMERA_STYLE))
+        }
+        for ((index, zoom) in SettingsCatalogue.laneZooms.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.LANE_ZOOM, index))
+            runCurrent()
+            assertEquals(zoom, settings.laneZoom.value)
+            assertEquals(index, selected(SettingId.LANE_ZOOM))
+        }
+        for ((index, lanes) in SettingsCatalogue.lanesOnMap.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.LANES_ON_MAP, index))
+            runCurrent()
+            assertEquals(lanes, settings.lanesOnMap.value)
+            assertEquals(index, selected(SettingId.LANES_ON_MAP))
+        }
+        for ((index, choice) in SettingsCatalogue.lookChoices.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.DAY_NIGHT, index))
+            runCurrent()
+            assertEquals(choice, settings.dayNight.value)
+            assertEquals(index, selected(SettingId.DAY_NIGHT))
+        }
+        for ((index, fps) in SettingsCatalogue.carMapFps.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.CAR_MAP_FPS, index))
+            runCurrent()
+            assertEquals(fps, settings.carMapFps.value)
+            assertEquals(index, selected(SettingId.CAR_MAP_FPS))
+        }
+        assertEquals(emptyList<String>(), archive.logged)
+    }
+
+    @Test
+    fun `an option the row does not have, or an event of another kind, stores nothing`() = runTest(dispatcher) {
+        val viewModel = viewModelWithValues()
+        viewModel.onEvent(SettingsEvent.Chosen(SettingId.CAMERA_STYLE, SettingsCatalogue.cameraStyles.size))
+        viewModel.onEvent(SettingsEvent.Switched(SettingId.CAMERA_STYLE, true))
+        viewModel.onEvent(SettingsEvent.Chosen(SettingId.SIMULATE_DRIVE, 1))
+        runCurrent()
+        assertEquals(CameraStyle.SMOOTH_FOLLOW, settings.cameraStyle.value)
+        assertFalse(settings.simulateDrive.value)
+    }
+
+    @Test
+    fun `an event that cannot be stored logs one error and the row keeps the stored value`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModelWithValues()
+        viewModel.onEvent(SettingsEvent.Switched(SettingId.SIDE_ROAD_FIELDS, true))
+        runCurrent()
+        assertFalse(settings.sideRoadFields.value)
+        assertFalse(viewModel.values.value.debug.sideRoadFields)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
+    fun `Clear of the catalogue clears the log, and the rows the screen carries out store nothing`() = runTest(dispatcher) {
+        val viewModel = viewModelWithValues()
+        for (id in listOf(SettingId.SHARE_LOG, SettingId.CRASH_NOW, SettingId.MAPBOX_STATISTICS, SettingId.PRIVACY_POLICY, SettingId.TOKENS)) {
+            viewModel.onEvent(SettingsEvent.Acted(id))
+        }
+        runCurrent()
+        assertFalse(archive.cleared)
+        assertEquals(FakeAppSettings().simulateDrive.value, settings.simulateDrive.value)
+        viewModel.onEvent(SettingsEvent.Acted(SettingId.CLEAR_LOG))
+        runCurrent()
+        assertTrue(archive.cleared)
+    }
 }

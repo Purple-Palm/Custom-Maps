@@ -266,6 +266,17 @@ class DataStoreAppSettings(
 
         /** Location of the file relative to the app's files directory, as the backup rules name it. */
         const val RELATIVE_PATH = "datastore/$FILE_NAME.preferences_pb"
+
+        /**
+         * Every key a setting is stored under, as Settings' catalogue gives each its row. Not the keys of earlier
+         * versions, which are only read once to be carried over and removed.
+         */
+        val KEYS: Set<String> by lazy {
+            linkedSetOf(
+                SIMULATE_DRIVE.name, CAMERA_STYLE.name, LANE_ZOOM.name, LANES_ON_MAP.name, LANE_COUNTS_HORIZON.name, DAY_NIGHT.name,
+                OWN_ROUTE_LINE.name, MEASURE_OWN_LANES.name, CAR_MAP_FPS.name, CAR_LIGHT_WHEN_HOT.name, SIDE_ROAD_FIELDS.name,
+            )
+        }
         private val SIMULATE_DRIVE = booleanPreferencesKey("simulate_drive")
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
         private val LANE_ZOOM = stringPreferencesKey("lane_zoom")

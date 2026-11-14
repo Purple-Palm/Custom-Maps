@@ -22,6 +22,7 @@ import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.car.PhoneScreen
 import io.github.purplepalm.custommaps.ui.map.MapScreen
+import io.github.purplepalm.custommaps.ui.settings.SettingsCatalogue
 import io.github.purplepalm.custommaps.ui.settings.SettingsScreen
 import io.github.purplepalm.custommaps.ui.settings.SettingsViewModel
 import io.github.purplepalm.custommaps.ui.settings.crashNow
@@ -98,32 +99,23 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
             }
             LaunchedEffect(Unit) { settingsViewModel.refreshLogSize() }
             val tokenState by tokenViewModel.state.collectAsStateWithLifecycle()
-            val lookSettings by settingsViewModel.look.collectAsStateWithLifecycle()
-            val guidanceSettings by settingsViewModel.guidance.collectAsStateWithLifecycle()
-            val debug by settingsViewModel.debug.collectAsStateWithLifecycle()
+            val values by settingsViewModel.values.collectAsStateWithLifecycle()
             // Debug builds only: read once from the app's own signing certificate.
-            val temporaryDebugKey = remember { context.isDebuggable() && context.signedWithDefaultDebugKey() }
+            val debuggable = remember { context.isDebuggable() }
+            val temporaryDebugKey = remember { debuggable && context.signedWithDefaultDebugKey() }
+            // Every row of the page, from the catalogue: again only when what it shows changed.
+            val groups = remember(values, debuggable, temporaryDebugKey) {
+                SettingsCatalogue.page(values.copy(crashNow = debuggable, temporaryDebugKey = temporaryDebugKey))
+            }
             SettingsScreen(
+                groups = groups,
                 tokens = tokenState,
-                look = lookSettings,
-                guidance = guidanceSettings,
-                debug = debug,
                 // Each checks again that no trip runs: the active token stays as it is during guidance.
                 onAddToken = tokenViewModel::add,
                 onRenameToken = tokenViewModel::rename,
                 onUseToken = tokenViewModel::use,
                 onDeleteToken = tokenViewModel::delete,
-                onDayNightChange = settingsViewModel::setDayNight,
-                onCameraStyleChange = settingsViewModel::setCameraStyle,
-                onLaneZoomChange = settingsViewModel::setLaneZoom,
-                onLanesOnMapChange = settingsViewModel::setLanesOnMap,
-                onLaneCountsHorizonChange = settingsViewModel::setLaneCountsHorizon,
-                onSimulateDriveChange = settingsViewModel::setSimulateDrive,
-                onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
-                onMeasureOwnLanesChange = settingsViewModel::setMeasureOwnLanes,
-                onSideRoadFieldsChange = settingsViewModel::setSideRoadFields,
-                onCarMapFpsChange = settingsViewModel::setCarMapFps,
-                onCarLightWhenHotChange = settingsViewModel::setCarLightWhenHot,
+                onEvent = settingsViewModel::onEvent,
                 onShareLog = {
                     scope.launch {
                         val files = settingsViewModel.exportLog(graph.debugLogHeader())
@@ -134,10 +126,8 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                         }
                     }
                 },
-                onClearLog = settingsViewModel::clearLog,
                 onBack = { showSettings = false },
-                onCrashNow = if (context.isDebuggable()) ::crashNow else null,
-                temporaryDebugKey = temporaryDebugKey,
+                onCrashNow = { if (debuggable) crashNow() },
             )
         }
     }
