@@ -110,14 +110,14 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *
  * The surface draws [CarFrameRate.TARGET_FPS] frames a second, or [CarFrameRate.HIGH_TARGET_FPS] with
  * the Debug switch "Car map frames" ([setFrameTarget], at once): the map library paces the car's surface
- * by its render thread's ticks against a display rate of 60, so its cap is worked out for the rate those
- * ticks really come at ([CarFrameCap]): during guidance from the render thread's own statistics, which
- * the camera line takes each second, otherwise from the rate of the display's frames ([CarFrames]),
- * and 60 while the frame clock runs on its timer. It is set again when the map would draw more than a
- * tenth off the target at the cap set now; a "car_surface" line with `event` fps says each new cap and
- * each new target, and every "car_surface" line and the car's camera line carry the target
- * (`targetFps`). The car's host may show fewer frames than the map draws: it shows the app's surface
- * at a rate of its own. Main thread only.
+ * by its render thread's ticks against a display rate of 60, so its cap starts from the one for the
+ * rate of the display's frames ([CarFrames]), 60 while the frame clock runs on its timer, and moves
+ * from there only when two windows of the render thread's statistics in a row, which the camera line
+ * takes each second during guidance, drew too few frames with quick ones or too many, never below
+ * the display's own cap ([CarFrameCap]). A "car_surface" line with `event` fps says each new cap, with
+ * the frames drawn that moved it, and each new target, and every "car_surface" line and the car's
+ * camera line carry the target (`targetFps`). The car's host may show fewer frames than the map
+ * draws: it shows the app's surface at a rate of its own. Main thread only.
  */
 @OptIn(MapboxExperimental::class)
 internal class CarNavigationMap(
@@ -212,7 +212,7 @@ internal class CarNavigationMap(
 
         // The frame clock's ticks of the second, from the display and from the timer while the main
         // thread got no frames, the cap on the surface's frames, the frames a second it is for and
-        // where its rate came from, and the display rate measured now. The render thread's next window
+        // where it comes from, and the display rate measured now. The render thread's next window
         // starts here.
         override fun cameraFields(): Map<String, Any?> {
             val fields = mapOf(
@@ -226,9 +226,9 @@ internal class CarNavigationMap(
             return fields
         }
 
-        // The render thread's window of the second: its ticks hold the surface's cap at 30 frames a second.
-        override fun onRenderWindow(calls: Int, missedVsync: Long, windowMillis: Long) = guard("renderWindow") {
-            if (frameCap.onRenderWindow(calls + missedVsync, windowMillis, frames.displayHz(), frames.stayedOnDisplay())) applyCap()
+        // The render thread's window of the second: the frames it drew hold the surface's cap at the target.
+        override fun onRenderWindow(calls: Int, missedVsync: Long, drawn: Long, p95Ms: Double?, windowMillis: Long) = guard("renderWindow") {
+            if (frameCap.onRenderWindow(calls + missedVsync, drawn, p95Ms, windowMillis, frames.displayHz(), frames.stayedOnDisplay())) applyCap()
         }
     }
 
@@ -606,9 +606,9 @@ internal class CarNavigationMap(
     }
 
     /**
-     * The surface's frame rate cap, once a second: 60 on the frame clock's timer, else the render
-     * thread's rate the cap was last held for, while the display's rate is what it was then, else the
-     * display's rate ([CarFrameCap.onSecond]).
+     * The surface's frame rate cap, once a second: the display's own cap, for 60 Hz on the frame
+     * clock's timer, and a cap the frames drawn moved while the display's rate is what it was then
+     * ([CarFrameCap.onSecond]).
      */
     private suspend fun followFrameRate() {
         while (true) {
@@ -619,10 +619,14 @@ internal class CarNavigationMap(
         }
     }
 
-    /** The cap worked out now on the surface, and a "car_surface" line with `event` fps that says it and its rate. */
+    /**
+     * The cap worked out now on the surface, and a "car_surface" line with `event` fps that says it, its
+     * rate and, when the frames drawn moved it, the frames a second they drew (`drawnFps`).
+     */
     private fun applyCap() {
         carSurface?.mapSurface?.setMaximumFps(frameCap.maxFps)
-        log.log(SURFACE_LINE, surfaceFields(EVENT_FPS))
+        val drawn = frameCap.drawnFps.takeUnless { it.isNaN() }?.let { mapOf("drawnFps" to Motion.round(it, 1)) }.orEmpty()
+        log.log(SURFACE_LINE, surfaceFields(EVENT_FPS) + drawn)
     }
 
     /**
@@ -671,10 +675,10 @@ internal class CarNavigationMap(
         )
     }
 
-    /** How a "car_surface" or camera line names where the rate of the cap came from. */
+    /** How a "car_surface" or camera line names where the cap comes from. */
     private fun basisName(basis: CarFrameCap.Basis): String = when (basis) {
         CarFrameCap.Basis.DISPLAY -> "display"
-        CarFrameCap.Basis.RENDER -> "render"
+        CarFrameCap.Basis.DRAWN -> "drawn"
         CarFrameCap.Basis.TIMER -> "timer"
     }
 

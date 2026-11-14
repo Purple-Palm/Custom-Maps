@@ -7,10 +7,10 @@ import kotlin.math.roundToInt
  * against the display rate it believes that surface has, 60 Hz (the car app library's own virtual
  * display), while the map's render thread is called at the phone's display rate. A cap of 30 so draws
  * 60 frames a second on a phone at 120 Hz, while Mapbox's own estimate still reads 30. So the cap
- * the car map sets is `round(target x 60 / rate)`, within 1 and 60, for the rate at which the map
- * library's render thread really ticks: its own count when there is one, else the display's rate,
- * 60 while the frame clock runs on its timer ([CarFrameCap]). The target is [TARGET_FPS] frames a
- * second, or [HIGH_TARGET_FPS] with the Debug switch "Car map frames" ([TARGETS]).
+ * the car map sets starts from `round(target x 60 / rate)`, within 1 and 60, for the display's rate,
+ * 60 while the frame clock runs on its timer, and moves from there only by the frames the map really
+ * draws ([CarFrameCap]). The target is [TARGET_FPS] frames a second, or [HIGH_TARGET_FPS] with the
+ * Debug switch "Car map frames" ([TARGETS]).
  */
 object CarFrameRate {
 

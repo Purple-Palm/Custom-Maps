@@ -58,6 +58,14 @@ class RenderStatsTest {
     }
 
     @Test
+    fun `the frames drawn that the car's cap takes are the line's own`() {
+        for ((calls, paced) in listOf(60 to 0L, 120 to 60L, 45 to 15L, 3 to 4L)) {
+            val fields = RenderStats.fields(callbacks = calls, pacedSkips = paced, missedVsync = 0, windowMillis = 1_000, p50Ms = null, p95Ms = null, maxMs = null)
+            assertEquals(fields["drawn"], RenderStats.drawn(calls, paced), "$calls calls, $paced paced")
+        }
+    }
+
+    @Test
     fun `the fields keep the camera line's order, the frames drawn after the calls`() {
         val keys = RenderStats.fields(callbacks = 1, pacedSkips = 0, missedVsync = 0, windowMillis = 1_000, p50Ms = 1.0, p95Ms = 1.0, maxMs = 1.0).keys.toList()
         assertEquals(listOf("frames", "fps", "drawn", "drawnFps", "missedVsync", "p50Ms", "p95Ms", "maxMs"), keys)

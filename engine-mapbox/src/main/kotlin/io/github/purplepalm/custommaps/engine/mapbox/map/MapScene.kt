@@ -217,11 +217,12 @@ internal class MapScene(
 
         /**
          * The render thread's window that the camera line has just taken, about a second: [calls]
-         * of the render thread and the display frames it counted as missed ([missedVsync]) in
-         * [windowMillis]; called right before [cameraFields]. The car's surface holds its frame rate
-         * cap from them; the phone does nothing with them.
+         * of the render thread and the display frames it counted as missed ([missedVsync]), the
+         * [drawn] frames among the calls ([RenderStats.drawn]) and the 95th percentile of the calls'
+         * times ([p95Ms], null for none), in [windowMillis]; called right before [cameraFields]. The
+         * car's surface holds its frame rate cap by the frames drawn; the phone does nothing with them.
          */
-        fun onRenderWindow(calls: Int, missedVsync: Long, windowMillis: Long) = Unit
+        fun onRenderWindow(calls: Int, missedVsync: Long, drawn: Long, p95Ms: Double?, windowMillis: Long) = Unit
     }
 
     private val scope = MainScope()
@@ -1695,9 +1696,9 @@ internal class MapScene(
      * is stopped, so "render.frames" is 0, and the camera's and the puck's fields are those it was
      * left with. The screen adds its own at the end
      * ([Host.cameraFields]): the car its frame clock's ticks of the second ("clock" with "vsyncTicks"
-     * and "timerTicks"), the cap on its surface's frames ("maxFps"), where the rate it was worked out
-     * for came from ("capFrom": render, display or timer) and the display rate measured now
-     * ("measuredHz").
+     * and "timerTicks"), the cap on its surface's frames ("maxFps"), where it comes from ("capFrom":
+     * display or timer for the display's own cap, drawn when the frames drawn moved it) and the
+     * display rate measured now ("measuredHz").
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
@@ -1832,7 +1833,7 @@ internal class MapScene(
         recorder.start()
         val frames = stats.frameTimeList
         renderCalls = frames.size
-        host.onRenderWindow(frames.size, stats.totalSkippedVsync, stats.totalTime)
+        host.onRenderWindow(frames.size, stats.totalSkippedVsync, RenderStats.drawn(frames.size, stats.pacedSkippedVsync), stats.percentile95, stats.totalTime)
         // The second's frame times, into a view the measuring switch measures; the positions the car's layer was handed.
         measure { onSecond(frames, stats.totalSkippedVsync, puckUpdates) }
         return RenderStats.fields(

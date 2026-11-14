@@ -28,7 +28,7 @@ object RenderStats {
         maxMs: Double?,
     ): Map<String, Any?> {
         val millis = windowMillis.coerceAtLeast(1L)
-        val drawn = (callbacks - pacedSkips).coerceAtLeast(0L)
+        val drawn = drawn(callbacks, pacedSkips)
         return mapOf(
             "frames" to callbacks,
             "fps" to Motion.round(callbacks * MILLIS_PER_SECOND / millis, 1),
@@ -40,6 +40,13 @@ object RenderStats {
             "maxMs" to maxMs?.let { Motion.round(it, 1) },
         )
     }
+
+    /**
+     * The frames the render thread drew of its [callbacks] calls, [pacedSkips] of which drew nothing
+     * because of the cap: the "drawn" of the camera line, and what holds the car's frame cap
+     * ([io.github.purplepalm.custommaps.nav.car.CarFrameCap]). Never below nothing.
+     */
+    fun drawn(callbacks: Int, pacedSkips: Long): Long = (callbacks - pacedSkips).coerceAtLeast(0L)
 
     private const val MILLIS_PER_SECOND = 1_000.0
 }
