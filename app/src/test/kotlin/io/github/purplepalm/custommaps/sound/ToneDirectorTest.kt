@@ -1,10 +1,14 @@
 package io.github.purplepalm.custommaps.sound
 
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
+import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.ManeuverAhead
 import io.github.purplepalm.custommaps.nav.sound.ToneKind
 import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import io.github.purplepalm.custommaps.nav.sound.ToneMoment
@@ -15,6 +19,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlin.time.Duration.Companion.seconds
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -120,6 +125,46 @@ class ToneDirectorTest {
         assertTrue((pair["sinceLast"] as Double) in 17.0..19.0)
         // Numbers, ids and words only: no name of a road.
         assertTrue(log.lines.none { (_, fields) -> fields.values.any { it == "Oak Street" } })
+    }
+
+    @Test
+    fun `a tone for a turn past a road's new name straight on says what it looked past, and how far the turn is`() = runTest {
+        val (director, _) = director()
+        val newName = Maneuver(ManeuverType.NEW_NAME, TurnModifier.STRAIGHT, "Main Street")
+        val turnAfter = listOf(ManeuverAhead("r1/0/1", FollowingManeuver(turn, Distance.meters(200.0), 15.seconds)))
+
+        /** The update [meters] before the new name, as the engine makes its moment, on [route]. */
+        fun beforeNewName(meters: Double, route: String = "r1") = ToneMoment.of(
+            RouteProgressSnapshot(newName, Distance.meters(meters), null, Distance.meters(5_000.0), 300.seconds, stepKey = "$route/0/0", speedMps = 13.41),
+            route,
+            laneChoiceKey = null,
+            ahead = turnAfter.map { it.copy(stepKey = "$route/0/1") },
+        )
+        var meters = 700.0
+        while (meters > 0.0) {
+            director.onProgress(beforeNewName(meters))
+            advanceTimeBy(1_000)
+            runCurrent()
+            meters -= 13.41
+        }
+        val single = log.of(ToneDirector.TONE_LINE).single()
+        assertEquals("ahead", single["why"])
+        assertEquals("TURN", single["maneuver"])
+        assertEquals("NEW_NAME", single["lookedPast"])
+        // To the turn itself: the new name about 125 m ahead, the turn 200 m after it.
+        assertTrue((single["metersLeft"] as Long) in 322L..335L)
+        // A new route whose turn past the new name is already inside the single's distance: its line says so too.
+        director.onGuidanceEnded()
+        director.onProgress(beforeNewName(50.0, route = "r2"))
+        val skipped = log.of(ToneDirector.SKIPPED_LINE).single()
+        assertEquals("new_route" to "NEW_NAME", skipped["why"] to skipped["lookedPast"])
+        assertEquals(250L, skipped["metersLeft"])
+        // A tone for the next maneuver itself has no such field.
+        director.onGuidanceEnded()
+        advanceTimeBy(20_000)
+        approach(director, from = 800.0, to = 300.0, step = "r3/0/0", route = "r3")
+        assertEquals(null, log.of(ToneDirector.TONE_LINE).last()["lookedPast"])
+        assertEquals("TURN", log.of(ToneDirector.TONE_LINE).last()["maneuver"])
     }
 
     @Test

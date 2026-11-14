@@ -231,12 +231,16 @@ class ToneDirector(
     /** How long a sound keeps the player busy, at most: its buffer and the longest silence in front it can get. */
     private fun busyMillis(kind: ToneKind): Int = Chime.spec(kind).lengthMillis + max(sound.leadInMillis, DuckPlan.MORE_LEAD_MILLIS)
 
-    /** The `tone` line: the tone, why, the maneuver and the distances it was decided by; numbers, ids and words only. */
+    /**
+     * The `tone` line: the tone, why, the maneuver and the distances it was decided by, and the next maneuver where the
+     * tones looked past it to this one; numbers, ids and words only.
+     */
     private fun toneFields(cue: ToneCue, moment: ToneMoment?, now: Long, before: Long?, verdict: TonePacing.Verdict): Map<String, Any?> = mapOf(
         "tone" to cue.kind.logName(),
         "why" to cue.reason.logName(),
         "maneuver" to moment?.maneuver?.type?.name,
         "modifier" to moment?.maneuver?.modifier?.name,
+        "lookedPast" to moment?.lookedPast?.name,
         "metersLeft" to moment?.metersToManeuver?.let { Math.round(it) },
         "secondsLeft" to moment?.secondsToManeuver?.takeIf { it > 0.0 }?.let { Motion.round(it, 1) },
         "speed" to moment?.speedMps?.let { Motion.round(it, 1) },
@@ -253,6 +257,7 @@ class ToneDirector(
         "why" to skipped.skip.logName(),
         "tone" to skipped.reason.logName(),
         "maneuver" to moment.maneuver.type.name,
+        "lookedPast" to moment.lookedPast?.name,
         "metersLeft" to Math.round(moment.metersToManeuver),
         "speed" to moment.speedMps?.let { Motion.round(it, 1) },
         "laneKey" to if (skipped.reason == ToneReason.LANE_CHOICE) moment.laneChoiceKey else null,
