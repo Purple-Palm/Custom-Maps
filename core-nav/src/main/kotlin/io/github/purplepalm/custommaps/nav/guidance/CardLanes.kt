@@ -30,7 +30,11 @@ data class CardLanes(
         /** No row: no lanes, a pending card, or the next maneuver's own lanes while it is far ([far]). */
         NONE,
 
-        /** The next maneuver's own lanes, as the navigation SDK reads them, within [MANEUVER_LANES_METERS] of it. */
+        /**
+         * The next maneuver's own lanes, as the navigation SDK reads them, within [MANEUVER_LANES_METERS] of it; at a
+         * maneuver on a street where the route has lanes, lit from the lane plan
+         * ([io.github.purplepalm.custommaps.nav.lanes.CardStreetRow]).
+         */
         MANEUVER,
 
         /** A lane choice the car reaches before the next maneuver, with its distance. */

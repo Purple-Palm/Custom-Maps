@@ -5,6 +5,7 @@ import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
+import io.github.purplepalm.custommaps.nav.lanes.CardStreetRow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindows
 import io.github.purplepalm.custommaps.nav.lanes.LaneCarry
@@ -16,6 +17,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.RunUpLanes
 
 /*
@@ -287,6 +289,14 @@ internal fun carryLine(shapes: List<List<List<Point>>>, input: LaneRouteInput): 
  */
 internal fun CardPlanRow.rowFrom(rule: RunUpLanes?, held: RouteLanePlan?, station: Double, atCar: PlanSegment?, coming: Boolean): RunUpLanes? =
     row(rule, held?.plan, rule?.let { held?.pointOf(it.key) }, station, atCar.takeIf { held != null }, coming)
+
+/**
+ * The card's own row of the maneuver that ends the step [stepKey] of a progress update, whose lanes the navigation SDK reads
+ * as [sdk], read from [held], the plan of the update's route ([CardStreetRow]): lit from the plan at a maneuver on a street
+ * where the route has lanes, its lane point found by the step's key (`route/leg/step/end`); else [sdk] itself.
+ */
+internal fun CardStreetRow.rowFrom(sdk: LaneInfo?, held: RouteLanePlan?, stepKey: String): LaneInfo? =
+    row(sdk, held?.plan, held?.pointOf("$stepKey/end"))
 
 /** Where an error line says a lane plan could not be made. */
 internal const val LANE_PLAN_ERROR = "lane_plan"

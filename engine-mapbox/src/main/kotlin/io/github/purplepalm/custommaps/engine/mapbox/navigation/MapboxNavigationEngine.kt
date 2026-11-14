@@ -67,6 +67,7 @@ import io.github.purplepalm.custommaps.nav.guidance.StopReason
 import io.github.purplepalm.custommaps.nav.guidance.ThenTracker
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanAgreement
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
+import io.github.purplepalm.custommaps.nav.lanes.CardStreetRow
 import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
 import io.github.purplepalm.custommaps.nav.lanes.HorizonListening
 import io.github.purplepalm.custommaps.nav.lanes.LaneAgreeLine
@@ -80,6 +81,7 @@ import io.github.purplepalm.custommaps.nav.lanes.SideRoadsLine
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.Place
 import io.github.purplepalm.custommaps.nav.model.RouteOption
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
@@ -290,6 +292,15 @@ internal class MapboxNavigationEngine(
 
     /** Whether reading the card's row from the plan failed in this drive: one error line, then the lane choices' row as it is. */
     private var cardPlanFailed = false
+
+    /**
+     * The card's own row at a maneuver on a street read from the lane plan ([CardStreetRow]): the same object while it does
+     * not change; every drive starts it over. Main thread.
+     */
+    private val cardStreetRow = CardStreetRow()
+
+    /** Whether reading a street maneuver's row from the plan failed in this drive: one error line, then the SDK's row as it is. */
+    private var cardStreetFailed = false
 
     /** Where the car was on the route of the plan held at the latest update that had one: for a change of route (D8). Main thread. */
     private var lanePlanCar: CarOnPlan? = null
@@ -1043,6 +1054,8 @@ internal class MapboxNavigationEngine(
         laneAgreeFailed = false
         cardPlanRow.reset()
         cardPlanFailed = false
+        cardStreetRow.reset()
+        cardStreetFailed = false
     }
 
     /** The "route_request" line of every route request the app sends, before a trip or inside one. */
@@ -1623,8 +1636,9 @@ internal class MapboxNavigationEngine(
     /**
      * For [progress], an update the guards let through, and [snapshot], the card it publishes: with the
      * update's one lookup in the plan of its route ([lookUpPlan]), a "lane_agree" line when the card begins
-     * to show a row at a lane point ([LaneAgreeLine.Rows]): the run-up's row, a lane choice's, and on a
-     * freeway the exit's or the fork's own, against the plan there ([CardPlanAgreement]). A progress update
+     * to show a row at a lane point ([LaneAgreeLine.Rows]): the run-up's row, a lane choice's, on a freeway
+     * the exit's or the fork's own and on a street the maneuver's own, against the plan there
+     * ([CardPlanAgreement]). A progress update
      * of another route than the plan's, and a pending card, read none. Reads only what the navigator already
      * handed over. A failure costs one error line and the lines of the rest of the drive, never the drive.
      */
@@ -1646,10 +1660,11 @@ internal class MapboxNavigationEngine(
             val point = held.pointOf(key)
             val result = when {
                 point != null -> {
-                    // The maneuver's own row counts on a freeway only, at an exit or a fork; street rows are later's.
+                    // The maneuver's own row counts at an exit or a fork on a freeway, and at a maneuver on a street.
                     val nodes = held.input.route.nodes
-                    val freeway = nodes[point.node].maneuver?.viewStaysUp == true && held.input.route.approachRoad(point.node) != RoadKind.STREET
-                    if (card.source == CardLanes.Source.MANEUVER && !freeway) return
+                    val approach = held.input.route.approachRoad(point.node)
+                    val freeway = nodes[point.node].maneuver?.viewStaysUp == true && approach != RoadKind.STREET
+                    if (card.source == CardLanes.Source.MANEUVER && !freeway && approach != RoadKind.STREET) return
                     CardPlanAgreement.of(row, held.plan, point, car, lanePlanAtCar)
                 }
                 card.source == CardLanes.Source.MANEUVER -> return
@@ -1708,6 +1723,24 @@ internal class MapboxNavigationEngine(
     }
 
     /**
+     * The card's own row of the maneuver that ends [snapshot]'s step, the navigation SDK's lanes of it, read from the lane
+     * plan of [progress]'s route at a maneuver on a street ([CardStreetRow]): the plan's amber set lit; elsewhere, and
+     * without a plan of the route, the SDK's row as it is. The same object while it does not change. A failure costs the
+     * plan's reading for the rest of the drive, the SDK's row standing, and one error line, never the drive.
+     */
+    private fun streetRowOf(progress: RouteProgress, snapshot: RouteProgressSnapshot): LaneInfo? {
+        val sdk = snapshot.lanes
+        if (sdk == null || cardStreetFailed) return sdk
+        return try {
+            cardStreetRow.rowFrom(sdk, lanePlanHeld?.takeIf { it.routeId == progress.navigationRoute.id }, snapshot.stepKey)
+        } catch (e: RuntimeException) {
+            cardStreetFailed = true
+            debugLog.error(CARD_STREET_ERROR, e)
+            sdk
+        }
+    }
+
+    /**
      * Gives the watch of diverges ([DivergeWatch]) [progress], an update the guards let through,
      * with what the lane choices, the card's row and the latest matched position say of it, and
      * writes the line that closes a watch. Reads only what the navigator already handed over.
@@ -1755,14 +1788,19 @@ internal class MapboxNavigationEngine(
 
     /**
      * The UI's view of [progress] with its [next] maneuver and the leg's maneuvers after it, the Then
-     * rule applied, and the run-up's lane row or, outside a run-up, the lanes of a lane choice ahead.
+     * rule applied, the maneuver's own lanes lit from the lane plan on a street, and the run-up's lane
+     * row or, outside a run-up, the lanes of a lane choice ahead.
      */
     private fun snapshotOf(progress: RouteProgress, next: MapboxManeuver): RouteProgressSnapshot {
         // The speed the camera gets with this update, so the card's lanes and the close view come
         // together. The snapshot carries the same one.
         val speed = lastMatch?.enhancedLocation?.speed
-        // The leg's maneuvers after the next one: the same list for every update of the step.
-        val decided = thenTracker.decide(progress.toSnapshot(next, speed, upcoming.of(progress)))
+        // The leg's maneuvers after the next one: the same list for every update of the step; on a
+        // street the maneuver's own lanes lit as the plan lights them.
+        val decided = thenTracker.decide(progress.toSnapshot(next, speed, upcoming.of(progress))).let { told ->
+            val lanes = streetRowOf(progress, told)
+            if (lanes === told.lanes) told else told.copy(lanes = lanes)
+        }
         // The latch moved for this update already; this is its row, lit from the lane plan of the route.
         val runUp = runUpRowOf(progress, laneChoices.runUp(progress, speed, nowSeconds()))
         // None on a run-up: its row stands in for a lane choice's, and nothing of one is kept.
@@ -1987,6 +2025,9 @@ internal class MapboxNavigationEngine(
 
         /** Where an error line says the card's run-up row could not be read from the lane plan. */
         const val CARD_PLAN_ERROR = "cardPlanRow"
+
+        /** Where an error line says a street maneuver's row could not be read from the lane plan. */
+        const val CARD_STREET_ERROR = "cardStreetRow"
     }
 }
 

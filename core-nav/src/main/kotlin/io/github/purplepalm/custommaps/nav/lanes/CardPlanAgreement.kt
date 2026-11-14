@@ -5,10 +5,10 @@ import io.github.purplepalm.custommaps.nav.model.Lane
 
 /**
  * Whether the maneuver card's lane row and the lane plan say the same at a lane point the card shows (the
- * design's section 6), for the debug log. The run-up's row reads the plan ([CardPlanRow]), so there the two
- * agree by construction and this checks it, but for an approach where no lane can be named, which says so
- * ([Why.NO_LANE]); the rows before the run-up are the navigation SDK's and the lane choices' own, and this
- * tells after a drive where they differ.
+ * design's section 6), for the debug log. The run-up's row and a street maneuver's own row read the plan
+ * ([CardPlanRow], [CardStreetRow]), so there the two agree by construction and this checks it, but for an
+ * approach where no lane can be named, which says so ([Why.NO_LANE]); the rows before the run-up are the
+ * navigation SDK's and the lane choices' own, and this tells after a drive where they differ.
  *
  * 1. Where the card lights one lane and the plan names one at the point's station, they are the same lane.
  * 2. Where the card lights several lanes, or the plan names none there (outside its card windows), the

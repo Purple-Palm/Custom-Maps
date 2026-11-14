@@ -741,6 +741,30 @@ private fun ManeuverCardLaneChoicePreview(@PreviewParameter(LookParameter::class
     }
 }
 
+/**
+ * A right turn on a street, its own row lit as the lane plan lights it at the turn: a lane for buses at the left edge, dim,
+ * a lane that goes straight on, the right lane to take, and a lane for bicycles at the right edge, dim and never lit. On a
+ * narrow phone, also with the largest font.
+ */
+@Preview(name = "street turn, lanes from the plan", widthDp = 360)
+@Preview(name = "street turn, lanes from the plan, largest font", widthDp = 360, fontScale = 2f)
+@Composable
+private fun ManeuverCardStreetTurnPreview(@PreviewParameter(LookParameter::class) look: Look) {
+    val kept = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false, designated = true)
+    val turn = Lane(setOf(TurnModifier.RIGHT), isRecommended = true, activeIndication = TurnModifier.RIGHT)
+    PreviewOnMap(look) {
+        ManeuverCard(
+            RouteProgressSnapshot(
+                nextManeuver = Maneuver(ManeuverType.TURN, TurnModifier.RIGHT, "Oak Street"),
+                distanceToNextManeuver = Distance.feet(400.0),
+                lanes = LaneInfo(listOf(kept, previewOn(false), turn, kept)),
+                distanceRemaining = Distance.miles(2.1),
+                durationRemaining = 7.minutes,
+            ),
+        )
+    }
+}
+
 @Preview(widthDp = 360)
 @Preview(name = "large font", widthDp = 360, fontScale = 1.3f)
 @Composable

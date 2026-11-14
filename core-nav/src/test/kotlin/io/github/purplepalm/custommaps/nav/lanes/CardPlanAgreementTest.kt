@@ -5,6 +5,7 @@ import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.GORE
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.LaneTarget
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RunUpLanes
@@ -450,6 +451,33 @@ class CardPlanAgreementTest {
         assertEquals(CardPlanAgreement.Why.AMBER, result.why)
         assertEquals(2, result.lit.size)
         assertEquals(1, result.amber.size)
+    }
+
+    @Test
+    fun `at a street maneuver the card's row from the plan agrees, one the SDK lights otherwise does not`() {
+        for (route in listOf(LaneScenes.streetTurn(), LaneScenes.streetTurn(bicycle = true, bus = true), LaneScenes.junctionPocket())) {
+            val plan = plan(route)
+            val point = plan.topology.points.single { it.station == GORE }
+            val lanes = route.nodes[point.node].lanes
+            val amber = CardPlanRow.amber(point, plan.segmentAt(point.station))
+            fun row(lit: List<Int>) = LaneInfo(
+                lanes.mapIndexed { i, lane ->
+                    val arrows = lane.indications.ifEmpty { setOf(TurnModifier.STRAIGHT) }
+                    Lane(arrows, isRecommended = i in lit, activeIndication = if (i in lit) arrows.first() else null, designated = lane.designated)
+                },
+            )
+            fun compare(shown: LaneInfo) =
+                CardPlanAgreement.of(CardPlanAgreement.Row(maneuver, shown.lanes, words = false), plan, point, GORE - 150.0)
+            // The SDK's row lit on every lane: the card's row from the plan lights the plan's amber set, and agrees.
+            val fromPlan = CardStreetRow.of(row(lanes.indices.toList()), plan, point)
+            val agreed = compare(fromPlan)
+            assertTrue(agreed.agree, "${route.routeId}: $agreed")
+            assertEquals(amber, agreed.lit, route.routeId)
+            // One lane open to every car lit other than the plan's: the lit lane disagrees; every lane lit, the amber set does.
+            val other = lanes.indices.first { it !in amber && !lanes[it].designated }
+            assertEquals(CardPlanAgreement.Why.LIT, compare(row(listOf(other))).why, route.routeId)
+            assertEquals(CardPlanAgreement.Why.AMBER, compare(row(lanes.indices.toList())).why, route.routeId)
+        }
     }
 
     @Test

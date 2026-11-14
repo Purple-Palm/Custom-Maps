@@ -8,19 +8,25 @@ import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.api.directions.v5.models.StepIntersection
 import com.mapbox.api.directions.v5.models.StepManeuver
 import com.mapbox.geojson.Point
+import io.github.purplepalm.custommaps.engine.mapbox.map.FreewayExit
+import io.github.purplepalm.custommaps.engine.mapbox.map.StreetJunction
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.guidance.RunUpRule
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.lanes.CardPlanRow
+import io.github.purplepalm.custommaps.nav.lanes.CardStreetRow
 import io.github.purplepalm.custommaps.nav.lanes.CardWindow
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidenceLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanLine
 import io.github.purplepalm.custommaps.nav.lanes.LanePlanner
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
+import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
+import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.LaneTarget
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
+import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -272,6 +278,27 @@ class LanePlansTest {
         assertSame(rule, CardPlanRow().rowFrom(rule, null, Double.NaN, held.at(near), coming = false))
         // A key of no lane point of the route: no words.
         assertNull(CardPlanRow().rowFrom(rule.copy(key = "route-b#0/0/0/end"), held, near, held.at(near), coming = false)?.target)
+    }
+
+    @Test
+    fun `the card's own row at a street turn is lit from the plan, found by the step's key, and the SDK's elsewhere`() {
+        // A street north to a right turn at the 12th point, at a signal: the right of its two lanes turns; lane points at 5 and 9.
+        val (legs, shapes) = StreetJunction.route(12, listOf(5, 9))
+        val held = requireNotNull(FreewayExit.plan("street-c#0", legs, shapes))
+        val straight = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT)
+        val right = Lane(setOf(TurnModifier.RIGHT), isRecommended = true, activeIndication = TurnModifier.RIGHT)
+        // The SDK lights both lanes: the card lights the right one, as the plan does at the turn.
+        val sdk = LaneInfo(listOf(straight, right))
+        val rows = CardStreetRow()
+        val row = requireNotNull(rows.rowFrom(sdk, held, "street-c#0/0/0"))
+        assertEquals(listOf(false, true), row.lanes.map { it.isRecommended })
+        assertEquals(TurnModifier.RIGHT, row.lanes[1].activeIndication)
+        assertSame(row, rows.rowFrom(LaneInfo(listOf(straight, right)), held, "street-c#0/0/0"))
+        // The arrival's step ends at no lane point, and another route's key names none: the SDK's row as it is.
+        assertSame(sdk, CardStreetRow().rowFrom(sdk, held, "street-c#0/0/1"))
+        assertSame(sdk, CardStreetRow().rowFrom(sdk, held, "street-d#0/0/0"))
+        // Without a plan of the route, the SDK's.
+        assertSame(sdk, CardStreetRow().rowFrom(sdk, null, "street-c#0/0/0"))
     }
 
     @Test

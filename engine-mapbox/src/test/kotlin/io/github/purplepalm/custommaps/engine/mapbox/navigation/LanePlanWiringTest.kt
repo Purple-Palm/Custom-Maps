@@ -53,6 +53,22 @@ class LanePlanWiringTest {
     }
 
     @Test
+    fun `the snapshot's own lanes at a street maneuver are the SDK's read from the plan of the update's route`() {
+        val snapshot = SourceText.body(engine, "private fun snapshotOf(progress: RouteProgress, next: MapboxManeuver): RouteProgressSnapshot").map { it.trim() }
+        for (line in listOf("val lanes = streetRowOf(progress, told)", "if (lanes === told.lanes) told else told.copy(lanes = lanes)")) {
+            assertTrue(line in snapshot, line)
+        }
+        val row = SourceText.body(engine, "private fun streetRowOf(progress: RouteProgress, snapshot: RouteProgressSnapshot): LaneInfo?").map { it.trim() }
+        assertTrue(
+            "cardStreetRow.rowFrom(sdk, lanePlanHeld?.takeIf { it.routeId == progress.navigationRoute.id }, snapshot.stepKey)" in row,
+            "$row",
+        )
+        // Every drive starts the row over.
+        val forget = SourceText.body(engine, "private fun forgetLaneAgree()").map { it.trim() }
+        assertTrue("cardStreetRow.reset()" in forget && "cardStreetFailed = false" in forget)
+    }
+
+    @Test
     fun `the lane choices' latch asks the plan of the update's route for the seam and the ramp`() {
         val arguments = SourceText.body(engine, "internal val laneChoices = LaneChoices(").map { it.trim() }
         for (line in listOf(
