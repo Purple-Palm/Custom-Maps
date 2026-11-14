@@ -324,12 +324,23 @@ class CameraMotionTest {
         val focus = ManeuverFocus(tuning)
         focus.onBanner(0.0, "r/0/0", 150.0, 450.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
+        assertTrue(focus.framesManeuver)
         focus.reset(1.0)
         assertEquals(0.0, focus.goal)
-        // The same route again from its start: the same step, now far from its turn.
+        assertFalse(focus.framesManeuver)
+        assertTrue(focus.framingMeters.isNaN())
+        // The same route again from its start, as a seek back puts it: the same step, now far from its turn, and the
+        // junction's frame latched before the reset is gone, so the navigation SDK does not frame it from here.
         focus.onBanner(60.0, "r/0/0", 600.0, 0.0, "turn", excluded, 10.0)
         assertEquals(0.0, focus.goal)
+        assertFalse(focus.framesManeuver, "framed from 600 m")
         assertEquals(tuning.cruisePitch, focus.pitchAt(70.0), 1e-9)
+        // Down again from its window, and framed again only from the framing distance (180 m without a cap).
+        focus.onBanner(80.0, "r/0/0", 200.0, 400.0, "turn", excluded, 10.0)
+        assertEquals(1.0, focus.goal)
+        assertFalse(focus.framesManeuver, "framed from 200 m")
+        focus.onBanner(81.0, "r/0/0", 180.0, 420.0, "turn", excluded, 10.0)
+        assertTrue(focus.framesManeuver)
     }
 
     @Test
