@@ -289,6 +289,28 @@ class HorizonReaderTest {
     }
 
     @Test
+    fun `nothing of a drive is kept after its end, the edges, the lane points and their plan`() {
+        drive()
+        reader.listen(navA)
+        reader.onPosition(update())
+        runAll()
+        // Three edges read, two lane points compared, one plan's points.
+        assertEquals(6, reader.heldOnWorker)
+        reader.endDrive()
+        runAll()
+        assertEquals(0, reader.heldOnWorker)
+        // The next drive, its first update right after the end, keeps its own.
+        reader.listen(navA)
+        reader.onPosition(update())
+        runAll()
+        reader.endDrive()
+        reader.listen(navA)
+        reader.onPosition(update())
+        runAll()
+        assertEquals(6, reader.heldOnWorker)
+    }
+
+    @Test
     fun `each lane point is compared once, and a new route's points afresh`() {
         drive()
         reader.listen(navA)

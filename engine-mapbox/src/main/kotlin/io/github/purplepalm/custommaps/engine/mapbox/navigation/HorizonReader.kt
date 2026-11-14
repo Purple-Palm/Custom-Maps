@@ -164,14 +164,19 @@ internal class HorizonReader<N : Any>(
         if (target != null) startOn(target)
     }
 
-    /** A drive ended: the reader stops listening, drops whatever is on its way, and the next drive reads the horizon afresh. */
+    /**
+     * A drive ended: the reader stops listening, drops whatever is on its way, and forgets on the worker what it kept of the
+     * drive (the edges read, the lane points and the plan they are of); the next drive reads the horizon afresh.
+     */
     fun endDrive() {
         listen(null)
+        val ended = drive
         drive++
         generation++
         failed = false
         carEdgeLanes = null
         measured = Measured()
+        scope.launch(worker) { forget(ended) }
     }
 
     /**
@@ -313,6 +318,19 @@ internal class HorizonReader<N : Any>(
         }
         return HorizonResult(ahead, edges.reads - readsBefore, compared, read.firstOrNull()?.laneCount)
     }
+
+    /** What the worker keeps of the drive [ended] goes, unless a later drive's reading already took its place. On the worker. */
+    private fun forget(ended: Int) {
+        if (edgesDrive > ended) return
+        edgesDrive = -1
+        edges.clear()
+        pointsOf = null
+        points = emptyList()
+        logged.clear()
+    }
+
+    /** How much the worker holds of the drive: edges read, lane points compared, and 1 for a plan's lane points. For tests, after the worker ran. */
+    internal val heldOnWorker: Int get() = edges.size + logged.size + if (pointsOf != null) 1 else 0
 
     /** One error line, then no more listening in this drive. */
     private fun fail(e: Throwable) {
