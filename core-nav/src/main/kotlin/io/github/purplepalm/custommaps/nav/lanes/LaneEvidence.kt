@@ -93,6 +93,12 @@ class LaneEvidence private constructor(
      * lanes at the side of the point's exit, [Stretch.point] the point that lists them. None in the first pass.
      */
     val possibleLanes: List<Stretch> = emptyList(),
+    /**
+     * Where the electronic horizon placed a gain the plan puts on the far side from the exit's edge ([HorizonLanes.placed]):
+     * the edge end where its count rises, by the intersection of the lane point that first lists the lanes. The drawing
+     * opens them there, late inside their zone, instead of late before that point. Empty without the horizon.
+     */
+    val placedGains: Map<Int, Double> = emptyMap(),
 ) {
 
     /** What is known of a stretch's lanes. */
@@ -124,9 +130,19 @@ class LaneEvidence private constructor(
      * [Kind.NONE]) as the lane point [point] lists them (its index in the route): for a known stretch
      * the point whose reach it is, for a bridged one the point before it, whose lanes go on; for a zone
      * the point at its downstream end, [lanes] being the zone's width in lanes; for a possible stretch
-     * the point that first lists the lanes, [lanes] being how many may already be there.
+     * the point that first lists the lanes, [lanes] being how many may already be there. [horizon]: a
+     * stretch bridged by the electronic horizon's count ([HorizonLanes]), not by the route's own lane
+     * points: lane lines, but no tint, since the horizon says nothing of which lane is which.
      */
-    data class Stretch(val from: Double, val to: Double, val kind: Kind, val lanes: Int, val road: RoadKind, val point: Int?) {
+    data class Stretch(
+        val from: Double,
+        val to: Double,
+        val kind: Kind,
+        val lanes: Int,
+        val road: RoadKind,
+        val point: Int?,
+        val horizon: Boolean = false,
+    ) {
         val meters: Double get() = to - from
     }
 
@@ -195,6 +211,13 @@ class LaneEvidence private constructor(
 
             /** An approach where the lane plan names no lane ([LanePlan.NoLane], C1). */
             NO_LANE,
+
+            /**
+             * From the electronic horizon ([HorizonLanes]): a change of its count where the plan's lanes do not change, or a
+             * stretch where it counts other lanes than the plan draws, or a gain the plan explains placed where the count
+             * rises. No lines.
+             */
+            HORIZON,
         }
     }
 
@@ -221,20 +244,43 @@ class LaneEvidence private constructor(
      * approaches [noLane]: the zones of rules 5, 7a and C1 and the possible lanes of rule 2a, on a new
      * evidence; this one is left as it is. Its [stretches] have [Kind.ZONE] wherever a zone lies; its
      * [gaps], [changes] and [added] are this pass's.
+     *
+     * With [horizon], the lane counts of Mapbox's electronic horizon between lane points that agree with them
+     * ([HorizonLanes]) for the drawing: a gain the plan puts on the far side opens where the horizon places it, its zone
+     * ending there in place of the zone placed late (with cause [Zone.Cause.HORIZON] where the plan explains the gain); a
+     * stretch without lane data, or a zone of rule 7a, is bridged where the horizon's count is the lanes the plan draws
+     * ([Stretch.horizon]); where its count changes at an edge end the plan's lanes do not change at, or differs from them,
+     * a bridge becomes a zone, and so does a stretch without lane data no longer than [EvidenceTuning.zoneBridgeMaxM]
+     * between drawn stretches (rule 7a's limit). A lane point's own reach, possible lanes and the zones of C1 stay as the
+     * plan made them; the plan itself is not touched.
      */
-    fun withPlan(topology: LaneTopology, named: Set<Int>, windows: List<CardWindow>, noLane: List<LanePlan.NoLane> = emptyList()): LaneEvidence {
+    fun withPlan(
+        topology: LaneTopology,
+        named: Set<Int>,
+        windows: List<CardWindow>,
+        noLane: List<LanePlan.NoLane> = emptyList(),
+        horizon: HorizonLanes? = null,
+    ): LaneEvidence {
         val zones = ArrayList<Zone>()
         for (alignment in topology.alignments) {
-            if (alignment.explained) continue
             val before = topology.points[alignment.before]
             val after = topology.points[alignment.after]
+            // A gain the horizon placed: its zone ends where the horizon's count rises.
+            val placed = horizon?.between?.firstOrNull { it.afterNode == after.node && it.placed != null }
+                ?.pieces?.firstOrNull { it.kind == HorizonLanes.Piece.Kind.PLACED }
+            val lanes = max(alignment.lanesBefore, alignment.lanesAfter)
+            if (alignment.explained) {
+                if (placed != null && placed.to > placed.from) {
+                    zones.add(Zone(placed.from, placed.to, lanes, Zone.Cause.HORIZON, after.node, CardWindows.metersInside(windows, placed.from, placed.to) > 0.0))
+                }
+                continue
+            }
             val road = route.approachRoad(after.node)
             val speed = PlanningSpeed.of(route.nodes[if (after.node > 0) after.node - 1 else after.node])
             val taper = if (alignment.change > 0) LaneTopology.addedTaperMeters(speed, road) else LaneTopology.endingTaperMeters(speed, road)
-            val to = after.station
-            val from = max(before.station, to - (2.0 * taper + ZONE_MIDDLE_METERS))
+            val to = placed?.to ?: after.station
+            val from = placed?.from ?: max(before.station, to - (2.0 * taper + ZONE_MIDDLE_METERS))
             if (to > from) {
-                val lanes = max(alignment.lanesBefore, alignment.lanesAfter)
                 zones.add(Zone(from, to, lanes, Zone.Cause.CHANGE, after.node, CardWindows.metersInside(windows, from, to) > 0.0))
             }
         }
@@ -286,7 +332,152 @@ class LaneEvidence private constructor(
                 Stretch(lanes.minOf { requireNotNull(it.possibleFrom) }, lanes.maxOf { it.opens }, Kind.POSSIBLE, lanes.size, route.approachRoad(point.node), point.node)
             }
             .sortedBy { it.from }
-        return LaneEvidence(route, this.windows, lanePoints, overlay(stretches, zones), gaps, changes, added, unknownExits, tuning, zones, possible)
+        val second = overlay(stretches, zones)
+        if (horizon == null || horizon.isEmpty || horizon.routeId != route.routeId) {
+            return LaneEvidence(route, this.windows, lanePoints, second, gaps, changes, added, unknownExits, tuning, zones, possible)
+        }
+        val (withHorizon, horizonZones) = horizonOver(second, zones, horizon, topology, windows)
+        return LaneEvidence(
+            route, this.windows, lanePoints, withHorizon, gaps, changes, added, unknownExits, tuning, horizonZones, possible, horizon.placedGains,
+        )
+    }
+
+    /**
+     * [drawn], the second pass's stretches, and its [zones] with the electronic horizon's pieces between lane points
+     * ([HorizonLanes.Between]) laid over them, as [withPlan] says; the zones of rule 7a that a bridge of the horizon covers
+     * lose that part, and the horizon's own zones are added.
+     */
+    private fun horizonOver(
+        drawn: List<Stretch>,
+        zones: List<Zone>,
+        horizon: HorizonLanes,
+        topology: LaneTopology,
+        windows: List<CardWindow>,
+    ): Pair<List<Stretch>, List<Zone>> {
+        val pairs = horizon.between.filter { it.pieces.isNotEmpty() }.sortedBy { it.from }
+        // Zones the horizon never takes the place of: rule 5's, C1's and its own placed gains'; rule 7a's it may.
+        val kept = zones.filter { it.cause != Zone.Cause.GAP }
+        val cuts = ArrayList<Double>()
+        for (pair in pairs) {
+            cuts.add(pair.from)
+            cuts.add(pair.to)
+            for (piece in pair.pieces) {
+                cuts.add(piece.from)
+                cuts.add(piece.to)
+            }
+        }
+        for (z in kept) {
+            cuts.add(z.from)
+            cuts.add(z.to)
+        }
+        cuts.sort()
+        // Each part of a stretch with nothing changing inside it, with what the horizon makes of it.
+        class Part(val stretch: Stretch, val pair: HorizonLanes.Between?, val zoneCandidate: Boolean)
+        val parts = ArrayList<Part>()
+        for (stretch in drawn) {
+            var from = stretch.from
+            var k = cuts.binarySearch(from).let { if (it < 0) -it - 1 else it }
+            while (from < stretch.to) {
+                while (k < cuts.size && cuts[k] <= from) k++
+                val to = if (k < cuts.size && cuts[k] < stretch.to) cuts[k] else stretch.to
+                if (to - from <= SAME_STATION) {
+                    from = to
+                    continue
+                }
+                val mid = (from + to) / 2.0
+                val pair = pairs.firstOrNull { mid >= it.from && mid < it.to }
+                if (pair == null) {
+                    parts.add(Part(stretch.copy(from = from, to = to), null, false))
+                } else {
+                    val bridge = pair.pieces.firstOrNull { it.kind == HorizonLanes.Piece.Kind.BRIDGED && mid >= it.from && mid < it.to }
+                    val change = pair.pieces.firstOrNull {
+                        (it.kind == HorizonLanes.Piece.Kind.CHANGE || it.kind == HorizonLanes.Piece.Kind.DIFFERS) && mid >= it.from && mid < it.to
+                    }
+                    val held = kept.any { mid >= it.from && mid < it.to }
+                    val before = topology.points[pair.before].node
+                    val bridged = Stretch(from, to, Kind.BRIDGED, bridge?.lanes ?: stretch.lanes, stretch.road, before, horizon = true)
+                    val zone = Stretch(from, to, Kind.ZONE, max(change?.lanes ?: 0, max(stretch.lanes, bridge?.lanes ?: 0)), stretch.road, pair.afterNode, horizon = true)
+                    val part = stretch.copy(from = from, to = to)
+                    parts.add(
+                        when (stretch.kind) {
+                            // A lane point's own reach, the plan's possible lanes: as the plan made them.
+                            Kind.KNOWN, Kind.POSSIBLE -> Part(part, pair, false)
+                            // A bridge of rule 4 where the horizon counts other lanes, or its count changes: no lines.
+                            Kind.BRIDGED -> if (change != null) Part(zone, pair, false) else Part(part, pair, false)
+                            Kind.NONE -> when {
+                                bridge != null && change != null -> Part(zone, pair, false)
+                                bridge != null -> Part(bridged, pair, false)
+                                else -> Part(part, pair, change != null)
+                            }
+                            Kind.ZONE -> when {
+                                held -> Part(part, pair, false)
+                                bridge != null && change != null -> Part(zone, pair, false)
+                                bridge != null -> Part(bridged, pair, false)
+                                else -> Part(part, pair, false)
+                            }
+                        },
+                    )
+                }
+                from = to
+            }
+        }
+        // Rule 7a's limit for what is still without lane data where the horizon differs: a short stretch between drawn ones
+        // is a zone, so the drawn road does not end and begin again around it.
+        var i = 0
+        while (i < parts.size) {
+            val p = parts[i]
+            if (p.stretch.kind != Kind.NONE || p.pair == null || !p.zoneCandidate) {
+                i++
+                continue
+            }
+            var j = i
+            while (j + 1 < parts.size && parts[j + 1].stretch.kind == Kind.NONE && parts[j + 1].pair === p.pair) j++
+            val from = parts[i].stretch.from
+            val to = parts[j].stretch.to
+            val beforeDrawn = i > 0 && parts[i - 1].stretch.let { it.kind != Kind.NONE && it.lanes > 0 }
+            val afterDrawn = j + 1 < parts.size && parts[j + 1].stretch.let { it.kind != Kind.NONE && it.lanes > 0 }
+            val short = to - from <= tuning.zoneBridgeMaxM || CardWindows.metersInside(windows, from, to) > 0.0
+            if (beforeDrawn && afterDrawn && short) {
+                val lanes = max(parts[i - 1].stretch.lanes, parts[j + 1].stretch.lanes)
+                for (m in i..j) {
+                    val s = parts[m].stretch
+                    parts[m] = Part(Stretch(s.from, s.to, Kind.ZONE, lanes, s.road, p.pair.afterNode, horizon = true), p.pair, false)
+                }
+            }
+            i = j + 1
+        }
+        val out = ArrayList<Stretch>(parts.size)
+        for (p in parts) {
+            val s = p.stretch
+            val last = out.lastOrNull()
+            if (last != null && last.to == s.from && last.kind == s.kind && last.lanes == s.lanes && last.road == s.road && last.point == s.point && last.horizon == s.horizon) {
+                out[out.size - 1] = last.copy(to = s.to)
+            } else {
+                out.add(s)
+            }
+        }
+        // The horizon's zones, and rule 7a's without the parts its bridges took.
+        val bridges = out.filter { it.horizon && it.kind == Kind.BRIDGED }
+        val newZones = ArrayList<Zone>()
+        for (z in zones) {
+            if (z.cause != Zone.Cause.GAP) {
+                newZones.add(z)
+                continue
+            }
+            var cursor = z.from
+            for (b in bridges) {
+                if (b.to <= cursor || b.from >= z.to) continue
+                if (b.from > cursor) newZones.add(z.copy(from = cursor, to = b.from, inWindow = CardWindows.metersInside(windows, cursor, b.from) > 0.0))
+                cursor = max(cursor, b.to)
+            }
+            if (cursor < z.to) newZones.add(if (cursor == z.from) z else z.copy(from = cursor, inWindow = CardWindows.metersInside(windows, cursor, z.to) > 0.0))
+        }
+        for (s in out) {
+            if (!s.horizon || s.kind != Kind.ZONE) continue
+            newZones.add(Zone(s.from, s.to, s.lanes, Zone.Cause.HORIZON, s.point ?: 0, CardWindows.metersInside(windows, s.from, s.to) > 0.0))
+        }
+        newZones.sortBy { it.from }
+        return out to newZones
     }
 
     private fun designatedCounts(): Map<DesignatedKind, Int> {
@@ -321,6 +512,9 @@ class LaneEvidence private constructor(
 
         /** A rule-5 zone is twice the taper of the change and this much more, without lines. */
         const val ZONE_MIDDLE_METERS = 60.0
+
+        /** Stations closer than this are one. */
+        private const val SAME_STATION = 1e-6
 
         /**
          * The parts of [gap] that are zones (rule 7a): every part inside [windows], and every part outside
@@ -381,7 +575,7 @@ class LaneEvidence private constructor(
             for (stretch in out) {
                 val last = merged.lastOrNull()
                 if (last != null && last.to == stretch.from && last.kind == stretch.kind && last.lanes == stretch.lanes &&
-                    last.road == stretch.road && last.point == stretch.point
+                    last.road == stretch.road && last.point == stretch.point && last.horizon == stretch.horizon
                 ) {
                     merged[merged.size - 1] = last.copy(to = stretch.to)
                 } else {
@@ -618,7 +812,7 @@ class LaneEvidence private constructor(
             if (stretch.meters <= 0.0) return
             val last = out.lastOrNull()
             if (last != null && last.to == stretch.from && last.kind == stretch.kind && last.lanes == stretch.lanes &&
-                last.road == stretch.road && last.point == stretch.point
+                last.road == stretch.road && last.point == stretch.point && last.horizon == stretch.horizon
             ) {
                 out[out.size - 1] = last.copy(to = stretch.to)
             } else {

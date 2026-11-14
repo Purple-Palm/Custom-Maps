@@ -387,8 +387,11 @@ class LanePlan internal constructor(
         return null
     }
 
-    /** The second pass of the evidence for this plan ([LaneEvidence.withPlan]). */
-    fun evidence(): LaneEvidence = topology.evidence.withPlan(topology, named, windows, noLane)
+    /**
+     * The second pass of the evidence for this plan ([LaneEvidence.withPlan]); with [horizon], for the drawing, the lane
+     * counts of the electronic horizon between lane points that agree with them ([HorizonLanes]). The plan is the same.
+     */
+    fun evidence(horizon: HorizonLanes? = null): LaneEvidence = topology.evidence.withPlan(topology, named, windows, noLane, horizon)
 
     /**
      * A ramp a run-up holds through after its gore ([CardWindow.Kind.RAMP], D20): the next point the plan constrains
