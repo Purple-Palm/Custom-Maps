@@ -1002,8 +1002,8 @@ internal class MapboxNavigationEngine(
      * Writes the "side_roads" line of [route] for [reason] while Debug's switch Side-road fields on routes is on, as the
      * route comes: whether Mapbox sent the side roads' fields on it, how their values fall, and what they take of the
      * route's size ([SideRoadsLine], [sideRoadsFields]). Read and measured once, on the route lines' worker after the lines
-     * before it, so a drive's route has it right after its "lane_evidence" line; nothing of it on the main thread. A size
-     * that cannot be measured costs one error line, a route that cannot be read its line, never the drive.
+     * before it, so a drive's route has it after its "lane_evidence" and "lane_plan" lines; nothing of it on the main
+     * thread. A size that cannot be measured costs one error line, a route that cannot be read its line, never the drive.
      */
     private fun logSideRoads(route: NavigationRoute, reason: SideRoadsLine.Reason) {
         if (!sideRoadFields) return

@@ -132,7 +132,8 @@ internal fun routeRequestFields(destination: Place, options: RouteOptions): Map<
  * taken away. With the switch off the request goes on exactly as it came.
  *
  * The navigator may call it on a thread of its own. Nothing here may fail the reroute: whatever
- * goes wrong with the line is written to the log instead, and the request goes on as it came.
+ * goes wrong is written to the log instead, and the request goes on, as it came where the switch
+ * could not be read.
  *
  * @param destination the place of the drive at this moment, or null
  * @param sideRoadFields whether the switch Side-road fields on routes is on, read at each reroute
