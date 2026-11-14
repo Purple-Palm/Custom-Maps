@@ -6,6 +6,8 @@ import io.github.purplepalm.custommaps.nav.lanes.HorizonEdge
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.HorizonRoadClass
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
+import io.github.purplepalm.custommaps.nav.lanes.RouteHorizon
+import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.look.Look
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -99,6 +101,26 @@ class OwnRouteLineHorizonTest {
 
     private fun edge(length: Double, lanes: Int) = HorizonEdge(length, lanes, true, false, true, HorizonRoadClass.MOTORWAY)
 
+    /**
+     * An update from a car at [car] as the navigator cuts it: edges ending at the route's intersections, three lanes each,
+     * the car's from where it is, the next ones whole, up to the first that reaches [HorizonAhead.HORIZON_AHEAD_M] past it.
+     */
+    private fun horizonCut(car: Double): HorizonAhead {
+        val ends = listOf(p, road, q, gore, gore + 200.0)
+        val edges = ArrayList<HorizonEdge>()
+        var along = 0.0
+        var begins = 0.0
+        for (end in ends) {
+            val from = begins
+            begins = end
+            if (end <= car) continue
+            if (edges.isEmpty()) along = (car - from) / (end - from)
+            edges += if (end > gore) HorizonEdge(end - from, 1, false, true, true, HorizonRoadClass.MOTORWAY) else edge(end - from, 3)
+            if (end - car >= HorizonAhead.HORIZON_AHEAD_M) break
+        }
+        return HorizonAhead.of(id, car, along, edges)
+    }
+
     private fun puck(station: Double) {
         val place = scene.at(station)
         line.onPuck(place.latitude, place.longitude, accepted = true, sdkRouteId = id, offset = reference.table.routeFraction(station), tracking = true)
@@ -190,6 +212,54 @@ class OwnRouteLineHorizonTest {
         assertEquals(3, told.single().first)
         // The first window's line had none.
         assertEquals(0L, laneLines().first()["horizonM"])
+    }
+
+    @Test
+    fun `with the horizon cut at its length from the car, the gap is bridged past the window on screen when it reaches`() {
+        drawn()
+        val firstEnd = built.single().lanes!!.windows.windowAt(0.0).to
+        // An update every 20 m, held as the engine holds them.
+        val held = RouteHorizon()
+        var car = 0.0
+        var windows = 0
+        while (car < gore && style.sent.isEmpty()) {
+            held.take(horizonCut(car))
+            ahead = held.aheadOf(id)
+            puck(car)
+            line.onProgress()
+            scene.jobs.runAll()
+            if (style.sent.isEmpty() && lanes.sent.isNotEmpty()) {
+                // A window alone: the horizon reached no second point 20 m past it yet.
+                scene.loadWindow()
+                windows++
+            }
+            car += 20.0
+        }
+        // The first window's send went alone; the next goes with the path built anew, the car past the first point's
+        // approach but before its point, the horizon now reaching past the second.
+        assertEquals(1, windows)
+        assertEquals(1, style.sent.size)
+        val shownEnd = requireNotNull(built.first().lanes).windows.windowAt(firstEnd - DrawingWindows.SEND_AHEAD_METERS).to
+        assertEquals(shownEnd, prefixes.single().at)
+        val start = shownEnd + HorizonEvidence.START_PAST_WINDOW_M
+        // The gap the route's own rules leave between the points: the window on screen holds its first part.
+        val gap = plan.plan.evidence().stretches.single { it.kind == LaneEvidence.Kind.NONE && it.from == p }
+        assertTrue(gap.to > start + 130.0, "${gap.from}..${gap.to} past $start")
+        val next = built.last()
+        val pair = requireNotNull(next.horizon).lanes.between.single { it.before == 0 }
+        assertEquals(HorizonConvention.ALL, pair.convention)
+        assertEquals(start, pair.from)
+        // The gap's part past the window on screen is bridged, nothing of the horizon before it.
+        val drawnWith = requireNotNull(next.horizon).evidence
+        val bridge = drawnWith.stretches.single { it.horizon && it.kind == LaneEvidence.Kind.BRIDGED && it.to <= q }
+        assertEquals(start to gap.to, bridge.from to bridge.to)
+        assertTrue(drawnWith.stretches.filter { it.horizon }.all { it.from >= start })
+        scene.load()
+        scene.loadWindow()
+        val logged = laneLines().last()
+        assertEquals(OwnRouteLine.REASON_HORIZON, logged["reason"])
+        assertTrue((logged["horizonM"] as Long) > 0L, "$logged")
+        assertEquals(listOf(pair.stretches to true), told)
     }
 
     @Test
