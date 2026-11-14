@@ -13,6 +13,9 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.DuckPlan
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -25,6 +28,21 @@ const val LANE_COUNTS_HORIZON_DEFAULT = true
 
 /** The car's map gets lighter while the phone is hot until the Debug switch is turned off. */
 const val CAR_LIGHT_WHEN_HOT_DEFAULT = true
+
+/**
+ * The guidance tones' settings, kept together: whether the tones sound at all, the one tone before a turn and
+ * the two at it, how the music is lowered, how loud a tone is against it, and Debug's silence in front of a
+ * tone on a Bluetooth output that may sleep.
+ */
+data class SoundSettings(
+    val tones: Boolean = true,
+    val beforeTurn: Boolean = true,
+    val atTurn: Boolean = true,
+    val duck: DuckMode = DuckMode.LITTLE,
+    val level: ToneLevel = ToneLevel.NORMAL,
+    /** One of [DuckPlan.WAKE_LEAD_INS]. */
+    val leadInMillis: Int = DuckPlan.WAKE_LEAD_IN_MILLIS,
+)
 
 /** Settings the driver changes on the phone. */
 interface AppSettings {
@@ -102,6 +120,12 @@ interface AppSettings {
     val sideRoadFields: Flow<Boolean>
 
     suspend fun setSideRoadFields(enabled: Boolean)
+
+    /** The guidance tones ([SoundSettings]); every one of them on, A little and Normal when never chosen. */
+    val sound: Flow<SoundSettings>
+
+    /** Stores [change] of the tones' settings in one write: only what it changes, each changed key reported once. */
+    suspend fun updateSound(change: (SoundSettings) -> SoundSettings)
 }
 
 /**
@@ -261,6 +285,11 @@ class DataStoreAppSettings(
         onChanged(SIDE_ROAD_FIELDS.name, enabled)
     }
 
+    /** A missing value reads as its default and is never written unless it changes; an unknown word or number too. */
+    override val sound: Flow<SoundSettings> = preferences.map(SOUND::of).distinctUntilChanged()
+
+    override suspend fun updateSound(change: (SoundSettings) -> SoundSettings) = SOUND.update(dataStore, change, onChanged)
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -288,6 +317,36 @@ class DataStoreAppSettings(
         private val CAR_MAP_FPS = intPreferencesKey("car_map_fps")
         private val CAR_LIGHT_WHEN_HOT = booleanPreferencesKey("car_light_when_hot")
         private val SIDE_ROAD_FIELDS = booleanPreferencesKey("side_road_fields")
+
+        private val TONES = booleanPreferencesKey("tones")
+        private val TONE_BEFORE_TURN = booleanPreferencesKey("tone_before_turn")
+        private val TONE_AT_TURN = booleanPreferencesKey("tone_at_turn")
+        private val TONE_DUCK = stringPreferencesKey("tone_duck")
+        private val TONE_LEVEL = stringPreferencesKey("tone_level")
+        private val TONE_LEAD_IN = intPreferencesKey("tone_lead_in_ms")
+
+        /** The tones' keys as one group: read together, each change one write of the keys it changes. */
+        internal val SOUND = PreferenceGroup(
+            read = { stored ->
+                SoundSettings(
+                    tones = stored[TONES] ?: true,
+                    beforeTurn = stored[TONE_BEFORE_TURN] ?: true,
+                    atTurn = stored[TONE_AT_TURN] ?: true,
+                    duck = duckModeOf(stored[TONE_DUCK]),
+                    level = toneLevelOf(stored[TONE_LEVEL]),
+                    leadInMillis = leadInOf(stored[TONE_LEAD_IN]),
+                )
+            },
+            fields = listOf(
+                PreferenceGroup.Field(TONES) { it.tones },
+                PreferenceGroup.Field(TONE_BEFORE_TURN) { it.beforeTurn },
+                PreferenceGroup.Field(TONE_AT_TURN) { it.atTurn },
+                PreferenceGroup.Field(TONE_DUCK) { it.duck.stored() },
+                PreferenceGroup.Field(TONE_LEVEL) { it.level.stored() },
+                // A number the Debug row does not offer is stored as the default it reads as.
+                PreferenceGroup.Field(TONE_LEAD_IN) { leadInOf(it.leadInMillis) },
+            ),
+        )
 
         /** The switch Lane details on the map of the versions before [LANES_ON_MAP]: read once, to carry it over. */
         private val LANE_DETAILS = booleanPreferencesKey("lane_details")
@@ -331,5 +390,23 @@ class DataStoreAppSettings(
 
         private fun lookChoiceOf(stored: String?): LookChoice =
             LookChoice.entries.firstOrNull { it.stored() == stored } ?: LookChoice.DEFAULT
+
+        private fun DuckMode.stored(): String = when (this) {
+            DuckMode.OFF -> "off"
+            DuckMode.LITTLE -> "little"
+            DuckMode.MORE -> "more"
+        }
+
+        private fun duckModeOf(stored: String?): DuckMode = DuckMode.entries.firstOrNull { it.stored() == stored } ?: DuckMode.LITTLE
+
+        private fun ToneLevel.stored(): String = when (this) {
+            ToneLevel.SOFT -> "soft"
+            ToneLevel.NORMAL -> "normal"
+            ToneLevel.LOUD -> "loud"
+        }
+
+        private fun toneLevelOf(stored: String?): ToneLevel = ToneLevel.entries.firstOrNull { it.stored() == stored } ?: ToneLevel.NORMAL
+
+        private fun leadInOf(stored: Int?): Int = stored?.takeIf { it in DuckPlan.WAKE_LEAD_INS } ?: DuckPlan.WAKE_LEAD_IN_MILLIS
     }
 }

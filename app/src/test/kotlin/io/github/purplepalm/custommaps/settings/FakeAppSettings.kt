@@ -23,6 +23,7 @@ class FakeAppSettings(
     carMapFps: Int = 30,
     carLightWhenHot: Boolean = CAR_LIGHT_WHEN_HOT_DEFAULT,
     sideRoadFields: Boolean = false,
+    sound: SoundSettings = SoundSettings(),
 ) : AppSettings {
 
     /** While true every change fails as it does on a full disk, and the stored value stays. */
@@ -71,6 +72,10 @@ class FakeAppSettings(
     override val sideRoadFields = MutableStateFlow(sideRoadFields)
 
     override suspend fun setSideRoadFields(enabled: Boolean) = store { sideRoadFields.value = enabled }
+
+    override val sound = MutableStateFlow(sound)
+
+    override suspend fun updateSound(change: (SoundSettings) -> SoundSettings) = store { sound.value = change(sound.value) }
 
     private fun store(change: () -> Unit) {
         if (storageFull) throw IOException("No space left on device")

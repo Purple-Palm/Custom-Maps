@@ -41,6 +41,8 @@ import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
  * @param lifecycle the session's lifecycle state, for the log
  * @param connection the car connection's type as CarConnection last reported it, null before it has
  * @param onShown the card's content changed: the home screen asks the host for its template again
+ * @param onYielded the host asked the app to stop navigating (true), or the app navigates on the car's screen again
+ *   (false): the tones stay silent in between, so that two navigation apps never sound over each other
  */
 class CarGuidanceBridge(
     private val port: NavigationManagerPort,
@@ -51,6 +53,7 @@ class CarGuidanceBridge(
     private val lifecycle: () -> String,
     private val connection: () -> Int?,
     private val onShown: () -> Unit,
+    private val onYielded: (Boolean) -> Unit = {},
 ) {
     /** Whether the bridge tells the host about the drive: from navigationStarted to its end or the host's stop. */
     var navigating: Boolean = false
@@ -138,6 +141,8 @@ class CarGuidanceBridge(
         startAsked = true
         if (call("navigationStarted") { port.navigationStarted() }) {
             navigating = true
+            // The app guides on the car's screen again: its tones may sound again.
+            yielded(false)
             log.log(NAV_LINE, mapOf("event" to "navigationStarted", "cause" to cause, "again" to again))
             // What the card shows now goes to the host at once.
             if (latest != null) send()
@@ -190,8 +195,19 @@ class CarGuidanceBridge(
             ).filterValues { it != null }
             navigating = false
             log.log(NAV_LINE, fields)
+            // Another app guides now: the tones are silent until the car is taken back or disconnects.
+            if (!gone) yielded(true)
         } catch (e: RuntimeException) {
             log.log(NAV_LINE, CarFailure.fields("onStopNavigation", e))
+        }
+    }
+
+    /** Tells the tones whether another app guides on the car's screen; what that throws is written and dropped. */
+    private fun yielded(yielded: Boolean) {
+        try {
+            onYielded(yielded)
+        } catch (e: RuntimeException) {
+            log.log(NAV_LINE, CarFailure.fields("yielded", e))
         }
     }
 

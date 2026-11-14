@@ -234,6 +234,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             Lifecycle.Event.ON_CREATE -> {
                 // The navigation manager's callback before anything else.
                 guard("startGuidance") { startGuidance() }
+                // The app's one player of tones hears of the car: every tone asks for the sound while it is here.
+                guard("sound") { parts.sound.onSession(this, connected = true) }
                 log.log(SESSION_LINE, fields + hostFields() + ("access" to parts.mapsAccess.value.toString()))
                 guard("watchConnection") { watchConnection() }
                 // The app's first look, when the car's host started the process and no activity has yet:
@@ -279,6 +281,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         destroyed = true
         // The bridge first: it is gone and lets go of the navigation manager before the map goes.
         guard("stopGuidance") { bridge?.stop() }
+        // The car is gone: the tones follow the phone alone again, also after another app had taken the car.
+        guard("sound") { parts.sound.onSession(this, connected = false) }
         guard("connection") { connection?.removeObserver(connectionObserver) }
         connection = null
         look.onStop()
@@ -458,6 +462,7 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
             lifecycle = { lifecycle.currentState.name },
             connection = { connectionType },
             onShown = { home?.refresh() },
+            onYielded = { yielded -> parts.sound.onYielded(this, yielded) },
         )
         this.bridge = bridge
         bridge.start()

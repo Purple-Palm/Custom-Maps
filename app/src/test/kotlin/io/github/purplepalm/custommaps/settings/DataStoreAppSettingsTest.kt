@@ -11,6 +11,8 @@ import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
+import io.github.purplepalm.custommaps.nav.sound.DuckMode
+import io.github.purplepalm.custommaps.nav.sound.ToneLevel
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
@@ -457,6 +459,94 @@ class DataStoreAppSettingsTest {
         settings.setCarLightWhenHot(false)
         settings.setSideRoadFields(true)
         assertEquals(DataStoreAppSettings.KEYS, raw().keys)
+    }
+
+    private val storedToneDuck = stringPreferencesKey("tone_duck")
+    private val storedToneLevel = stringPreferencesKey("tone_level")
+    private val storedLeadIn = intPreferencesKey("tone_lead_in_ms")
+
+    @Test
+    fun `the tones start on, both of them, with A little and Normal and 300 ms in front, and nothing is written`() = runBlocking {
+        assertEquals(
+            SoundSettings(tones = true, beforeTurn = true, atTurn = true, duck = DuckMode.LITTLE, level = ToneLevel.NORMAL, leadInMillis = 300),
+            settings.sound.first(),
+        )
+        // The defaults again: nothing to write, nothing reported.
+        settings.updateSound { it.copy() }
+        assertEquals(emptyMap<String, Any>(), raw())
+        assertEquals(emptyList<Pair<String, Any>>(), changes)
+    }
+
+    @Test
+    fun `each tone setting is stored under its own key and word, each change reported once`() = runBlocking {
+        settings.updateSound { it.copy(tones = false) }
+        settings.updateSound { it.copy(beforeTurn = false) }
+        settings.updateSound { it.copy(atTurn = false) }
+        assertEquals(mapOf<String, Any>("tones" to false, "tone_before_turn" to false, "tone_at_turn" to false), raw())
+        val ducks = mapOf(DuckMode.OFF to "off", DuckMode.MORE to "more", DuckMode.LITTLE to "little")
+        assertEquals(DuckMode.entries.toSet(), ducks.keys)
+        for ((duck, word) in ducks) {
+            settings.updateSound { it.copy(duck = duck) }
+            assertEquals(duck, settings.sound.first().duck)
+            assertEquals(word, raw()["tone_duck"])
+        }
+        val levels = mapOf(ToneLevel.SOFT to "soft", ToneLevel.LOUD to "loud", ToneLevel.NORMAL to "normal")
+        assertEquals(ToneLevel.entries.toSet(), levels.keys)
+        for ((level, word) in levels) {
+            settings.updateSound { it.copy(level = level) }
+            assertEquals(level, settings.sound.first().level)
+            assertEquals(word, raw()["tone_level"])
+        }
+        for (leadIn in listOf(0, 150, 600, 300)) {
+            settings.updateSound { it.copy(leadInMillis = leadIn) }
+            assertEquals(leadIn, settings.sound.first().leadInMillis)
+            assertEquals(leadIn, raw()["tone_lead_in_ms"])
+        }
+        assertEquals(
+            SoundSettings(tones = false, beforeTurn = false, atTurn = false, duck = DuckMode.LITTLE, level = ToneLevel.NORMAL, leadInMillis = 300),
+            settings.sound.first(),
+        )
+        assertEquals(
+            listOf<Pair<String, Any>>(
+                "tones" to false, "tone_before_turn" to false, "tone_at_turn" to false,
+                "tone_duck" to "off", "tone_duck" to "more", "tone_duck" to "little",
+                "tone_level" to "soft", "tone_level" to "loud", "tone_level" to "normal",
+                "tone_lead_in_ms" to 0, "tone_lead_in_ms" to 150, "tone_lead_in_ms" to 600, "tone_lead_in_ms" to 300,
+            ),
+            changes,
+        )
+    }
+
+    @Test
+    fun `a change of several tone settings is one write of the keys it changes`() = runBlocking {
+        val probe = Probe(dataStore)
+        val once = DataStoreAppSettings(probe) { key, value -> changes += key to value }
+        once.updateSound { it.copy(tones = false, duck = DuckMode.MORE, level = ToneLevel.NORMAL) }
+        assertEquals(listOf(setOf("tones", "tone_duck")), probe.written)
+        assertEquals(listOf<Pair<String, Any>>("tones" to false, "tone_duck" to "more"), changes)
+        assertEquals(SoundSettings(tones = false, duck = DuckMode.MORE), settings.sound.first())
+    }
+
+    @Test
+    fun `a tone word or silence it does not know reads as its default, and a silence Debug does not offer is not stored`() = runBlocking {
+        for (word in listOf("lots", "LITTLE", "true", "")) {
+            dataStore.edit { it[storedToneDuck] = word }
+            assertEquals(DuckMode.LITTLE, settings.sound.first().duck, word)
+        }
+        for (word in listOf("max", "NORMAL", "0.5", "")) {
+            dataStore.edit { it[storedToneLevel] = word }
+            assertEquals(ToneLevel.NORMAL, settings.sound.first().level, word)
+        }
+        for (millis in listOf(-1, 100, 299, 5_000)) {
+            dataStore.edit { it[storedLeadIn] = millis }
+            assertEquals(300, settings.sound.first().leadInMillis, "$millis")
+        }
+        dataStore.edit { it.remove(storedLeadIn) }
+        changes.clear()
+        settings.updateSound { it.copy(leadInMillis = 1_000) }
+        assertEquals(300, settings.sound.first().leadInMillis)
+        assertFalse("tone_lead_in_ms" in raw())
+        assertEquals(emptyList<Pair<String, Any>>(), changes)
     }
 
     /** A group of two settings for the helper's tests: invented, never stored by the app. */

@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps
 
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -37,6 +38,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val createdAt = SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
+        // The volume keys set the media volume, the tones' volume, while the app is in front.
+        volumeControlStream = AudioManager.STREAM_MUSIC
         // Transparent bars over the app's own colours. Their icons follow the look (showWindowLook):
         // nothing sets them back at a configuration change, as the activity library's own call did.
         WindowCompat.enableEdgeToEdge(window)

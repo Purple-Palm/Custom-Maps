@@ -40,6 +40,8 @@ class CarParts(
     /** The app's one look, the phone's, which the car's map shows too (the owner's choice). */
     val look: SharedLook,
     val debugLog: DebugLog,
+    /** The app's one player of guidance tones, for the phone and the car: told of each session and of another app's taking over. */
+    val sound: CarSound = CarSound.NONE,
 )
 
 /** The phone's settings that the car's map takes too, each as it changes. */

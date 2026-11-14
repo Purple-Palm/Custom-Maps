@@ -106,6 +106,9 @@ class CarGuidanceBridgeTest {
     private val log = Lines()
     private val time = Time()
     private var shownCount = 0
+
+    /** What the tones were told, in order: true while another app guides on the car's screen. */
+    private val yields = mutableListOf<Boolean>()
     private val bridge = CarGuidanceBridge(
         port = port,
         content = { progress -> CarRouting.of(progress, Drives.OFFICE, Drives.NOW, Drives.WORDS) },
@@ -115,6 +118,7 @@ class CarGuidanceBridgeTest {
         lifecycle = { "STARTED" },
         connection = { 2 },
         onShown = { shownCount += 1 },
+        onYielded = { yields += it },
     )
 
     private fun drive(vararg progress: RouteProgressSnapshot) {
@@ -264,6 +268,50 @@ class CarGuidanceBridgeTest {
         bridge.onGuidance(GuidanceState.IDLE)
         bridge.takeBack(CarGuidanceBridge.CAUSE_START)
         assertEquals(2, port.calls.count { it == "navigationStarted" })
+    }
+
+    @Test
+    fun `the host's stop silences the tones until the car is taken back`() {
+        drive(towardsExit(0.8))
+        assertEquals(listOf(false), yields)
+        port.hostStops()()
+        assertEquals(listOf(false, true), yields)
+        // The drive goes on, the tones stay silent.
+        time.advance(2_000)
+        bridge.onProgress(towardsExit(0.7))
+        assertEquals(listOf(false, true), yields)
+        bridge.takeBack(CarGuidanceBridge.CAUSE_INTENT)
+        assertEquals(listOf(false, true, false), yields)
+    }
+
+    @Test
+    fun `a new drive on the car's screen after the host's stop lets the tones sound again`() {
+        drive(towardsExit(0.8))
+        port.hostStops()()
+        bridge.onGuidance(GuidanceState.IDLE)
+        assertEquals(listOf(false, true), yields)
+        bridge.onGuidance(GuidanceState.ACTIVE)
+        assertEquals(listOf(false, true, false), yields)
+    }
+
+    @Test
+    fun `a stop that comes after the session's end does not silence the tones, and a throwing listener is written down`() {
+        drive(towardsExit(0.8))
+        val posted = port.hostStops()
+        bridge.stop()
+        posted()
+        assertEquals(listOf(false), yields)
+
+        val port = Port()
+        val log = Lines()
+        val bridge = CarGuidanceBridge(port, { CarRouting.of(it, Drives.OFFICE, Drives.NOW, Drives.WORDS) }, log, { 0L }, { _, _ -> {} }, { "STARTED" }, { 2 }, {}, { error("no tones") })
+        bridge.start()
+        bridge.onGuidance(GuidanceState.ACTIVE)
+        port.hostStops()()
+        assertEquals(listOf("yielded", "yielded"), log.errors().map { it["call"] })
+        assertFalse(bridge.navigating)
+        assertEquals(1, log.nav("navigationStarted").size)
+        assertEquals(1, log.nav("onStopNavigation").size)
     }
 
     @Test

@@ -16,6 +16,7 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import io.github.purplepalm.custommaps.car.CarMapSettings
 import io.github.purplepalm.custommaps.car.CarParts
 import io.github.purplepalm.custommaps.car.CarSession
+import io.github.purplepalm.custommaps.car.CarSoundLink
 import io.github.purplepalm.custommaps.diagnostics.DeviceLog
 import io.github.purplepalm.custommaps.diagnostics.ProcessHistory
 import io.github.purplepalm.custommaps.engine.mapbox.MapboxAccessTokens
@@ -35,6 +36,8 @@ import io.github.purplepalm.custommaps.nav.model.GuidanceState
 import io.github.purplepalm.custommaps.network.NetworkMonitor
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.DataStoreAppSettings
+import io.github.purplepalm.custommaps.sound.ToneDirector
+import io.github.purplepalm.custommaps.sound.TonePlayer
 import io.github.purplepalm.custommaps.token.DataStoreTokenStore
 import io.github.purplepalm.custommaps.token.TokenEntry
 import io.github.purplepalm.custommaps.token.TokenHandOver
@@ -89,6 +92,18 @@ class AppGraph(private val application: Application) {
         debugLog.log("settings", mapOf("key" to key, "value" to value, "guidance" to engine.navigation.guidanceState.value))
     }
 
+    /**
+     * The one player of the app's tones, the phone's and the car's: Android audio on a thread of its own. No
+     * permission and no manifest entry.
+     */
+    private val tonePlayer = TonePlayer(application, debugLog)
+
+    /**
+     * Which tone sounds when, from the drive the engine tells it of and the Sound settings, for the phone and the car
+     * alike: before the engine, which tells it. Main thread.
+     */
+    val tones = ToneDirector(applicationScope, settings, tonePlayer, debugLog, SystemClock::elapsedRealtime)
+
     /** How earlier processes ended and why this one started, as Android recorded it. */
     private val processHistory = ProcessHistory(application, debugLog)
 
@@ -109,7 +124,7 @@ class AppGraph(private val application: Application) {
      * it ran on, never the token.
      */
     val engine: MapboxEngine =
-        MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { tokenHandOver.appliedTokenId }, debugLog, network.status)
+        MapboxEngine.create(application, TokenTaggedTripLog(tripLogStore) { tokenHandOver.appliedTokenId }, debugLog, network.status, audio = tones)
 
     /** Where the sun is computed for: the newest position the app has, which never leaves memory. */
     private val sunPlaces = SunPlaces(
@@ -176,6 +191,11 @@ class AppGraph(private val application: Application) {
         ),
         look = lookController,
         debugLog = debugLog,
+        // One player for both screens: the car sessions tell it whether a car is there and whether another app took it.
+        sound = CarSoundLink { connected, yielded ->
+            tones.carSession = connected
+            tones.carYielded = yielded
+        },
     )
 
     /**
@@ -233,6 +253,8 @@ class AppGraph(private val application: Application) {
         }
         deviceLog.start()
         network.start()
+        // The tones follow the Sound settings from the first one on.
+        tones.start()
         // What the phone shows during a drive, from the drive and the car's surfaces; a line at each change.
         phoneScreens.start(applicationScope)
         network.logPolicy("app start")
