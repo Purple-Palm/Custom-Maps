@@ -73,6 +73,7 @@ class DataStoreAppSettingsTest {
         assertEquals(LaneZoom.DEFAULT, settings.laneZoom.first())
         assertEquals(LanesOnMap.OFF, settings.lanesOnMap.first())
         assertFalse(settings.ownRouteLine.first(), "the SDK draws the route line unless the Debug switch says otherwise")
+        assertTrue(settings.laneCountsHorizon.first(), "lane counts from the electronic horizon until switched off")
         // Read, never written: a later default reaches a phone that never chose.
         assertEquals(emptyMap<String, Any>(), raw())
         assertEquals(emptyList<Pair<String, Any>>(), changes)
@@ -221,6 +222,21 @@ class DataStoreAppSettingsTest {
 
         assertEquals(listOf(setOf("lanes_on_map")), probe.written)
         assertEquals(LanesOnMap.OFF, settings.lanesOnMap.first())
+    }
+
+    @Test
+    fun `the lane counts from the horizon are on until switched off, stored under their own key, each change reported`() = runBlocking {
+        assertTrue(settings.laneCountsHorizon.first())
+        assertEquals(emptyMap<String, Any>(), raw(), "on is read, never written")
+        settings.setLaneCountsHorizon(false)
+        assertFalse(settings.laneCountsHorizon.first())
+        assertEquals(mapOf<String, Any>("lane_counts_horizon" to false), raw())
+        assertEquals(LanesOnMap.OFF, settings.lanesOnMap.first(), "the switch chooses no lanes")
+        assertFalse(settings.measureOwnLanes.first(), "the Debug switches are their own")
+        settings.setLaneCountsHorizon(true)
+        assertTrue(settings.laneCountsHorizon.first())
+        assertEquals(mapOf<String, Any>("lane_counts_horizon" to true), raw())
+        assertEquals(listOf<Pair<String, Any>>("lane_counts_horizon" to false, "lane_counts_horizon" to true), changes)
     }
 
     @Test

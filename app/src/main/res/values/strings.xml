@@ -164,6 +164,9 @@
     <string name="lanes_on_map_app">Drawn by the app</string>
     <string name="lanes_on_map_app_note">On freeways where the route has lane data, the app draws the lanes with the route line in the lane to take. Close to an exit that lane is lit and the car is a bar across the road. Mapbox\'s lane details are off meanwhile.</string>
     <string name="lanes_on_map_note">The car shows where you are along the road, not which lane you are in. The lanes to use are in the card with every choice. The route line can hide under bridges.</string>
+    <string name="lane_counts_horizon_title">Lane counts between lane points</string>
+    <string name="lane_counts_horizon_note">Mapbox\'s electronic horizon, a beta. Mapbox may end its free use.</string>
+    <string name="mapbox_beta_label">Mapbox beta</string>
 
     <string name="debug_title">Debug</string>
     <string name="debug_trips_this_month">Trip sessions this month: %1$d</string>

@@ -16,6 +16,7 @@ class FakeAppSettings(
     cameraStyle: CameraStyle = CameraStyle.DEFAULT,
     laneZoom: LaneZoom = LaneZoom.DEFAULT,
     lanesOnMap: LanesOnMap = LanesOnMap.DEFAULT,
+    laneCountsHorizon: Boolean = LANE_COUNTS_HORIZON_DEFAULT,
     dayNight: LookChoice = LookChoice.DEFAULT,
     ownRouteLine: Boolean = false,
     measureOwnLanes: Boolean = false,
@@ -40,6 +41,10 @@ class FakeAppSettings(
     override val lanesOnMap = MutableStateFlow(lanesOnMap)
 
     override suspend fun setLanesOnMap(choice: LanesOnMap) = store { lanesOnMap.value = choice }
+
+    override val laneCountsHorizon = MutableStateFlow(laneCountsHorizon)
+
+    override suspend fun setLaneCountsHorizon(enabled: Boolean) = store { laneCountsHorizon.value = enabled }
 
     override val dayNight = MutableStateFlow(dayNight)
 

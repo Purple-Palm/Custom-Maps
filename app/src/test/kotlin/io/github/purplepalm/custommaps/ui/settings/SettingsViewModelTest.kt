@@ -314,6 +314,41 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `the lane counts from the electronic horizon are on until switched off, and the switch is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        assertTrue(viewModel.guidance.value.laneCountsHorizon)
+        viewModel.setLaneCountsHorizon(false)
+        runCurrent()
+        assertFalse(settings.laneCountsHorizon.value)
+        assertEquals(GuidanceSettings(CameraStyle.SMOOTH_FOLLOW, LaneZoom.DEFAULT, LanesOnMap.OFF, laneCountsHorizon = false), viewModel.guidance.value)
+        viewModel.setLaneCountsHorizon(true)
+        runCurrent()
+        assertTrue(settings.laneCountsHorizon.value)
+        assertTrue(viewModel.guidance.value.laneCountsHorizon)
+        assertEquals(LanesOnMap.OFF, viewModel.guidance.value.lanesOnMap, "the switch chooses no lanes")
+        assertEquals(emptyList<String>(), archive.logged)
+    }
+
+    @Test
+    fun `shows the stored horizon switch, off as well as on`() = runTest(dispatcher) {
+        for (on in listOf(false, true)) {
+            settings.laneCountsHorizon.value = on
+            assertEquals(on, viewModel().guidance.value.laneCountsHorizon)
+        }
+    }
+
+    @Test
+    fun `a horizon switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setLaneCountsHorizon(false)
+        runCurrent()
+        assertTrue(settings.laneCountsHorizon.value)
+        assertTrue(viewModel.guidance.value.laneCountsHorizon)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
     fun `a chosen lane zoom is stored and leaves the camera style alone`() = runTest(dispatcher) {
         val viewModel = viewModel()
         assertEquals(LaneZoom.DEFAULT, viewModel.guidance.value.laneZoom)

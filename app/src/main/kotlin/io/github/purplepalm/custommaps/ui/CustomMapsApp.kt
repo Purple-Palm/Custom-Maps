@@ -117,6 +117,7 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                 onCameraStyleChange = settingsViewModel::setCameraStyle,
                 onLaneZoomChange = settingsViewModel::setLaneZoom,
                 onLanesOnMapChange = settingsViewModel::setLanesOnMap,
+                onLaneCountsHorizonChange = settingsViewModel::setLaneCountsHorizon,
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
                 onMeasureOwnLanesChange = settingsViewModel::setMeasureOwnLanes,

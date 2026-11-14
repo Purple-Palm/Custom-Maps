@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transform
 
+/** Lane counts between lane points come from Mapbox's electronic horizon until the driver turns them off: a trial of the beta, as the owner chose. */
+const val LANE_COUNTS_HORIZON_DEFAULT = true
+
 /** Settings the driver changes on the phone. */
 interface AppSettings {
     /** Replay the route instead of following GPS; for testing at home. Still billed as a trip. */
@@ -44,6 +47,14 @@ interface AppSettings {
     val lanesOnMap: Flow<LanesOnMap>
 
     suspend fun setLanesOnMap(choice: LanesOnMap)
+
+    /**
+     * Whether guidance reads the lane counts between the route's lane points from Mapbox's electronic horizon, a beta whose
+     * free use Mapbox may end at any time. On when never chosen ([LANE_COUNTS_HORIZON_DEFAULT]).
+     */
+    val laneCountsHorizon: Flow<Boolean>
+
+    suspend fun setLaneCountsHorizon(enabled: Boolean)
 
     /** The look of the app and its map: by the sun (Auto), or always the day or the night look. */
     val dayNight: Flow<LookChoice>
@@ -172,6 +183,15 @@ class DataStoreAppSettings(
             }
         }
 
+    /** An absent value reads as [LANE_COUNTS_HORIZON_DEFAULT] and is never written, as an absent choice of Lanes on the map is. */
+    override val laneCountsHorizon: Flow<Boolean> =
+        preferences.map { it[LANE_COUNTS_HORIZON] ?: LANE_COUNTS_HORIZON_DEFAULT }.distinctUntilChanged()
+
+    override suspend fun setLaneCountsHorizon(enabled: Boolean) {
+        dataStore.edit { it[LANE_COUNTS_HORIZON] = enabled }
+        onChanged(LANE_COUNTS_HORIZON.name, enabled)
+    }
+
     override val dayNight: Flow<LookChoice> = preferences.map { lookChoiceOf(it[DAY_NIGHT]) }.distinctUntilChanged()
 
     override suspend fun setDayNight(choice: LookChoice) {
@@ -213,6 +233,7 @@ class DataStoreAppSettings(
         private val CAMERA_STYLE = stringPreferencesKey("camera_style")
         private val LANE_ZOOM = stringPreferencesKey("lane_zoom")
         private val LANES_ON_MAP = stringPreferencesKey("lanes_on_map")
+        private val LANE_COUNTS_HORIZON = booleanPreferencesKey("lane_counts_horizon")
         private val DAY_NIGHT = stringPreferencesKey("day_night")
         private val OWN_ROUTE_LINE = booleanPreferencesKey("own_route_line")
         private val MEASURE_OWN_LANES = booleanPreferencesKey("measure_own_lanes")

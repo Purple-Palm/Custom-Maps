@@ -16,6 +16,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripLog
 import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
+import io.github.purplepalm.custommaps.settings.LANE_COUNTS_HORIZON_DEFAULT
 import io.github.purplepalm.custommaps.token.TokenList
 import io.github.purplepalm.custommaps.token.TokenTripCounts
 import io.github.purplepalm.custommaps.token.TokenTrips
@@ -39,6 +40,8 @@ data class GuidanceSettings(
     val laneZoom: LaneZoom = LaneZoom.DEFAULT,
     /** Who draws the lanes on the map. */
     val lanesOnMap: LanesOnMap = LanesOnMap.DEFAULT,
+    /** Whether guidance reads the lane counts between lane points from Mapbox's electronic horizon, a beta. */
+    val laneCountsHorizon: Boolean = LANE_COUNTS_HORIZON_DEFAULT,
 )
 
 /** The look section: Auto, Day or Night, and under Auto when the look changes next. */
@@ -91,8 +94,8 @@ class SettingsViewModel(
     private val logBytes = MutableStateFlow<Long?>(null)
 
     val guidance: StateFlow<GuidanceSettings> =
-        combine(settings.cameraStyle, settings.laneZoom, settings.lanesOnMap) { style, laneZoom, lanesOnMap ->
-            GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, lanesOnMap = lanesOnMap)
+        combine(settings.cameraStyle, settings.laneZoom, settings.lanesOnMap, settings.laneCountsHorizon) { style, laneZoom, lanesOnMap, horizon ->
+            GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, lanesOnMap = lanesOnMap, laneCountsHorizon = horizon)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
 
     /**
@@ -222,6 +225,21 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the choice keeps showing the stored value, which the map keeps too.
                 debugLog.error("settings.setLanesOnMap", e)
+            }
+        }
+    }
+
+    /**
+     * Applies at once, also during a drive: guidance listens to Mapbox's electronic horizon for the lane counts between lane
+     * points from then on, or no longer. The drive itself goes on as it was.
+     */
+    fun setLaneCountsHorizon(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setLaneCountsHorizon(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which guidance keeps too.
+                debugLog.error("settings.setLaneCountsHorizon", e)
             }
         }
     }

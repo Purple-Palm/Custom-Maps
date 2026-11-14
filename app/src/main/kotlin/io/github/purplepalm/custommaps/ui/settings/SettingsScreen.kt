@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.ui.settings
 
 import android.widget.Toast
 import androidx.annotation.StringRes
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -112,6 +114,7 @@ fun SettingsScreen(
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
     onLanesOnMapChange: (LanesOnMap) -> Unit,
+    onLaneCountsHorizonChange: (Boolean) -> Unit,
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
     onMeasureOwnLanesChange: (Boolean) -> Unit,
@@ -158,7 +161,7 @@ fun SettingsScreen(
             SectionDivider()
             DayNightSection(look, onDayNightChange)
             SectionDivider()
-            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLanesOnMapChange)
+            GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLanesOnMapChange, onLaneCountsHorizonChange)
             SectionDivider()
             DebugSection(
                 debug,
@@ -282,6 +285,7 @@ private fun GuidanceSection(
     onCameraStyleChange: (CameraStyle) -> Unit,
     onLaneZoomChange: (LaneZoom) -> Unit,
     onLanesOnMapChange: (LanesOnMap) -> Unit,
+    onLaneCountsHorizonChange: (Boolean) -> Unit,
 ) {
     SectionTitle(R.string.guidance_title)
     Text(
@@ -337,6 +341,53 @@ private fun GuidanceSection(
 
     Spacer(Modifier.height(16.dp))
     LanesOnMapBlock(guidance.lanesOnMap, onLanesOnMapChange)
+
+    Spacer(Modifier.height(16.dp))
+    LaneCountsHorizonRow(guidance.laneCountsHorizon, onLaneCountsHorizonChange)
+}
+
+/**
+ * Whether guidance reads the lane counts between lane points from Mapbox's electronic horizon: a switch, its title with a
+ * label beside it that names it a Mapbox beta, and one line that says whose it is and that Mapbox may end its free use.
+ * On until the driver turns it off.
+ */
+@Composable
+private fun LaneCountsHorizonRow(on: Boolean, onLaneCountsHorizonChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The title takes what room the label leaves and wraps there; the label stays beside it.
+                Text(
+                    text = stringResource(R.string.lane_counts_horizon_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = LookTheme.tokens.onCard,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(8.dp))
+                MapboxBetaLabel()
+            }
+            Text(
+                text = stringResource(R.string.lane_counts_horizon_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = LookTheme.tokens.onCardMuted,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        AppSwitch(checked = on, onCheckedChange = onLaneCountsHorizonChange)
+    }
+}
+
+/** The words Mapbox beta in a thin frame, beside the title of a setting that uses a beta of Mapbox's: a word, not a colour, says it. */
+@Composable
+private fun MapboxBetaLabel() {
+    Text(
+        text = stringResource(R.string.mapbox_beta_label),
+        style = MaterialTheme.typography.labelSmall,
+        color = LookTheme.tokens.onCard,
+        modifier = Modifier
+            .border(1.dp, LookTheme.tokens.outline, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 /**
@@ -811,6 +862,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onCameraStyleChange = {},
             onLaneZoomChange = {},
             onLanesOnMapChange = {},
+            onLaneCountsHorizonChange = {},
             onSimulateDriveChange = {},
             onOwnRouteLineChange = {},
             onMeasureOwnLanesChange = {},
@@ -848,7 +900,8 @@ private fun DayNightSectionPreview(@PreviewParameter(LookParameter::class) look:
 
 /**
  * The Guidance group on a narrow phone with every font size: Drawn by the app, with the note under the camera style it
- * brings, and Mapbox's lane details, without it.
+ * brings, and the lane counts from the electronic horizon on; and Mapbox's lane details, without the note, the lane counts
+ * from the horizon off.
  */
 @Preview(name = "guidance, lanes drawn by the app", widthDp = 360)
 @Preview(name = "guidance, lanes drawn by the app, large font", widthDp = 360, fontScale = 1.3f)
@@ -858,9 +911,21 @@ private fun GuidanceSectionPreview(@PreviewParameter(LookParameter::class) look:
     CustomMapsTheme(look) {
         Surface(color = LookTheme.tokens.screen) {
             Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
-                GuidanceSection(GuidanceSettings(lanesOnMap = LanesOnMap.APP), onCameraStyleChange = {}, onLaneZoomChange = {}, onLanesOnMapChange = {})
+                GuidanceSection(
+                    GuidanceSettings(lanesOnMap = LanesOnMap.APP, laneCountsHorizon = true),
+                    onCameraStyleChange = {},
+                    onLaneZoomChange = {},
+                    onLanesOnMapChange = {},
+                    onLaneCountsHorizonChange = {},
+                )
                 SectionDivider()
-                GuidanceSection(GuidanceSettings(lanesOnMap = LanesOnMap.MAPBOX), onCameraStyleChange = {}, onLaneZoomChange = {}, onLanesOnMapChange = {})
+                GuidanceSection(
+                    GuidanceSettings(lanesOnMap = LanesOnMap.MAPBOX, laneCountsHorizon = false),
+                    onCameraStyleChange = {},
+                    onLaneZoomChange = {},
+                    onLanesOnMapChange = {},
+                    onLaneCountsHorizonChange = {},
+                )
             }
         }
     }
