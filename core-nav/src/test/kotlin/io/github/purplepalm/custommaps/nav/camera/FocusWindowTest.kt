@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.camera
 
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import java.util.Random
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -73,6 +74,27 @@ class FocusWindowTest {
     fun `the bridge reaches 6,5 s of driving past the window`() {
         assertEquals(13.4 * 6.5, FocusWindow.bridgeMeters(13.4, tuning), 1e-9)
         assertEquals(3.0 * 6.5, FocusWindow.bridgeMeters(0.0, tuning), 1e-9)
+    }
+
+    @Test
+    fun `while the lanes' close view holds with Large the frame fits at its zoom`() {
+        val lanes = MapScale.zoomForLaneDp(14.0, 40.0)
+        assertEquals(lanes, FocusWindow.capZoom(LaneZoom.LARGE, 1.0, lanes, tuning), 1e-9)
+        // Coming in or let go, with Default, or a lanes' zoom under the road's: the road's zoom.
+        assertEquals(tuning.defaultMaxZoom, FocusWindow.capZoom(LaneZoom.LARGE, 0.0, lanes, tuning), 1e-9)
+        assertEquals(tuning.defaultMaxZoom, FocusWindow.capZoom(LaneZoom.LARGE, 0.5, lanes, tuning), 1e-9)
+        assertEquals(tuning.defaultMaxZoom, FocusWindow.capZoom(LaneZoom.DEFAULT, 1.0, lanes, tuning), 1e-9)
+        assertEquals(tuning.defaultMaxZoom, FocusWindow.capZoom(LaneZoom.LARGE, 1.0, 15.0, tuning), 1e-9)
+        // At the lanes' zoom a 502 dp frame holds about 133 m: any junction is framed from 180 m.
+        val cap = FocusWindow.capMeters(502.0, 40.0, 30.0, 90.0, 0.0, tuning, lanes)
+        assertEquals(132.7, cap, 0.1)
+        for (v in listOf(11.2, 20.1, 27.0, 33.5)) {
+            assertEquals(180.0, FocusWindow.framingMeters(FocusKind.TURN, v, cap, tuning), 1e-9, "$v m/s")
+            assertEquals(180.0, FocusWindow.framingMeters(FocusKind.COMPLEX, v, cap, tuning), 1e-9, "$v m/s")
+        }
+        // The road's zoom is the default one.
+        assertEquals(FocusWindow.capMeters(502.0, 40.0, 30.0, 90.0, 0.0, tuning),
+            FocusWindow.capMeters(502.0, 40.0, 30.0, 90.0, 0.0, tuning, tuning.defaultMaxZoom), 1e-9)
     }
 
     @Test

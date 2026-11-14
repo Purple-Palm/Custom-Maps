@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.os.SystemClock
 import android.view.Choreographer
 import com.mapbox.common.location.Location
+import com.mapbox.annotation.MapboxDelicateApi
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.EdgeInsets
@@ -13,24 +14,31 @@ import com.mapbox.maps.plugin.animation.CameraAnimationsPlugin
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
 import com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
+import com.mapbox.navigation.base.ExperimentalPreviewMapboxNavigationAPI
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.trip.model.RouteProgressState
 import com.mapbox.navigation.ui.maps.camera.data.MapboxNavigationViewportDataSource
 import com.mapbox.navigation.ui.maps.camera.data.ViewportData
 import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserver
+import io.github.purplepalm.custommaps.engine.mapbox.navigation.ManeuverMapping
 import io.github.purplepalm.custommaps.nav.camera.Angles
 import io.github.purplepalm.custommaps.nav.camera.CameraSettling
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.CloseView
+import io.github.purplepalm.custommaps.nav.camera.FocusKind
+import io.github.purplepalm.custommaps.nav.camera.FocusRule
+import io.github.purplepalm.custommaps.nav.camera.FocusWindow
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
+import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFocus
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.camera.PeakSpeed
 import io.github.purplepalm.custommaps.nav.camera.SampleRamp
 import io.github.purplepalm.custommaps.nav.camera.Spring
+import io.github.purplepalm.custommaps.nav.camera.TurnAhead
 import io.github.purplepalm.custommaps.nav.camera.ZoomPlanner
 import io.github.purplepalm.custommaps.nav.camera.centerLeadSeconds
 import io.github.purplepalm.custommaps.nav.camera.easeInOut
@@ -63,7 +71,9 @@ import kotlin.math.sin
  * reached over [CameraTuning.sampleHoldSeconds]. The camera goes after the targets on critically
  * damped springs. While following it goes after the puck as it is drawn, not after the latest
  * position, so it trails the car a little and comes to rest on it when the car stops. The tilt
- * before a maneuver comes from [ManeuverFocus].
+ * before a maneuver comes from [ManeuverFocus], from the facts of the step's own maneuver, and so
+ * does when the data source frames the junction: the camera tells it with every progress, so the
+ * tilt and the frame are one latched decision. The two Mapbox styles keep the SDK's own 180 m.
  *
  * With the Large lane zoom ([setLaneZoom]) the camera also goes close. Toward a maneuver it takes
  * the zoom of the frame the data source fits around the car and the junction, which may then be
@@ -190,6 +200,28 @@ internal class SmoothNavigationCamera(
 
     /** How far the view has moved onto the next maneuver, from 0 to 1. */
     private val maneuverFocus = ManeuverFocus(tuning)
+
+    /** The facts of the maneuver of the step at the last progress update, as the camera framed by them; null before one. */
+    private var facts: ManeuverFacts? = null
+
+    /**
+     * The longest approach the frame of that junction fits at the road's zoom
+     * ([FocusWindow.capMeters]), worked out once per progress update; not a number before the map
+     * has a size.
+     */
+    private var frameCap = Double.NaN
+
+    /** The map's height less the following padding, in dp, at the last progress update. */
+    private var roomDp = Double.NaN
+
+    /** The zoom [frameCap] was fitted at, at the last progress update ([FocusWindow.capZoom]). */
+    private var capZoom = Double.NaN
+
+    /** How many latches of the maneuver focus the "focus" line has told of. */
+    private var latchesTold = 0
+
+    /** The last progress update of the drive, for a change of lane zoom between two of them; null without one. */
+    private var lastProgress: RouteProgress? = null
 
     /** Settings, Lane zoom. */
     private var laneZoom = LaneZoom.DEFAULT
@@ -370,7 +402,8 @@ internal class SmoothNavigationCamera(
         if (pacing.locationComputes(SystemClock.elapsedRealtime(), isTeleport)) dataSource.evaluate()
     }
 
-    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double) {
+    @OptIn(MapboxDelicateApi::class, ExperimentalPreviewMapboxNavigationAPI::class)
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double, maneuver: ManeuverFacts?) {
         val now = now()
         // The zoom planner sees the tilt only on frames that follow the car. In the overview,
         // with the map in the driver's hands or hidden, it would keep the last junction's zoom
@@ -379,17 +412,32 @@ internal class SmoothNavigationCamera(
         if (maneuverFocus.focusAt(now) <= 0.0) zoomPlanner.forgetJunction()
         val leg = progress.currentLegProgress
         val step = leg?.currentStepProgress
-        val excluded = dataSource.options.followingFrameOptions.pitchNearManeuvers.excludedManeuvers
+        var turnAhead: TurnAhead? = null
         if (leg != null && step != null) {
+            val stepKey = "${progress.navigationRoute.id}/${leg.legIndex}/${step.stepIndex}"
+            // The engine's facts of this step's own maneuver; without them, the navigation SDK's own
+            // rule on the banner's type, as the view went before it had the facts.
+            val facts = maneuver?.takeIf { it.stepKey == stepKey }
+                ?: ManeuverFacts(stepKey, FocusRule.fallback(progress.bannerInstructions?.primary()?.type()?.let(ManeuverMapping::type)))
+            this.facts = facts
+            frameCap = frameCapMeters(facts)
+            val metersToManeuver = step.distanceRemaining.toDouble()
             maneuverFocus.onProgress(
                 now = now,
-                stepKey = "${progress.navigationRoute.id}/${leg.legIndex}/${step.stepIndex}",
-                metersToManeuver = step.distanceRemaining.toDouble(),
+                stepKey = stepKey,
+                metersToManeuver = metersToManeuver,
                 metersOnStep = step.distanceTraveled.toDouble(),
-                maneuverType = progress.bannerInstructions?.primary()?.type(),
-                excludedTypes = excluded,
+                facts = facts,
+                capMeters = frameCap,
                 speedMps = speedMps,
             )
+            if (maneuverFocus.latches != latchesTold) {
+                latchesTold = maneuverFocus.latches
+                listener.onFocusLatched(focusFields(facts, metersToManeuver))
+            }
+            // A turn this step ends in, from where the camera begins to frame it: a lane choice right
+            // before it keeps its close view until then.
+            if (facts.kind != FocusKind.NONE) turnAhead = TurnAhead(stepKey, metersToManeuver - maneuverFocus.framingMeters)
         }
         this.laneChoices = laneChoices
         laneFocus.onProgress(
@@ -398,9 +446,7 @@ internal class SmoothNavigationCamera(
             choices = laneChoices,
             speedMps = speedMps,
             onRoute = progress.currentState != RouteProgressState.OFF_ROUTE,
-            // A turn the view goes down for, as [maneuverFocus] counts it, framed from where the
-            // view is down.
-            turnAhead = LaneZoomFrames.turnAhead(progress, { it !in excluded }, tuning.maneuverFramingMeters),
+            turnAhead = turnAhead,
             runUpKey = runUpKey,
             rampAhead = rampAhead,
         )
@@ -415,11 +461,18 @@ internal class SmoothNavigationCamera(
         val later = now + tuning.sampleHoldSeconds
         val laneShare = LaneZoomFrames.laneShare(laneZoom, following = true) { laneFocus.focusAt(later) }
         dataSource.followingPitchPropertyOverride(guidancePitch(tuning, laneShare, maneuverFocus.focusAt(later)))
+        // Whether the junction is framed is the camera's own latched decision, the one its tilt
+        // follows: the data source's own trigger, 180 m decided again with every progress, stays
+        // the Mapbox styles'. Delicate and experimental; if it goes, the same decision can be given
+        // through the data source's options (its trigger distance and the maneuvers it excludes).
+        dataSource.isFramingManeuverPropertyOverride(maneuverFocus.framesManeuver)
         dataSource.onRouteProgressChanged(progress)
-        // With this progress the data source has decided whether its frames are of the road or
-        // of a maneuver, until the next progress. Only the frame of a maneuver may be fitted
-        // closer with Large, so the upper limit follows that choice with every progress.
-        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction)
+        // With this progress the camera has decided whether the frames are of the road or of a
+        // maneuver, until the next progress. Only the frame of a maneuver may be fitted closer with
+        // Large, so the upper limit follows that choice with every progress, and so does the road
+        // past the maneuver point that the frame holds.
+        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction, maneuverFocus.framesManeuver)
+        lastProgress = progress
         dataSource.evaluate()
         pacing.onProgress(SystemClock.elapsedRealtime())
         // Once for this update: the view down onto a junction, with either lane zoom, or in for
@@ -431,16 +484,62 @@ internal class SmoothNavigationCamera(
             laneMoving = laneFocus.isAnimating(now),
             large = laneZoom == LaneZoom.LARGE,
         )
-        // And whether that view holds: the app's own lit lane may take the route line's place only then.
+        // And whether that view holds: the app's own lit lane may take the route line's place only
+        // then. The junction view holds while its junction is framed.
         swapLatched = CloseView.smoothFollowLatched(
-            maneuverGoal = maneuverFocus.goal,
-            maneuverMoving = maneuverFocus.isAnimating(now),
+            junctionFramed = maneuverFocus.framesManeuver,
             laneGoal = laneFocus.goal,
             laneMoving = laneFocus.isAnimating(now),
             large = laneZoom == LaneZoom.LARGE,
         )
         // The tilt may have begun to move, also when the frame of the data source is the same.
         requestFrame()
+    }
+
+    /**
+     * The longest approach whose frame fits above the car at the zoom the view holds
+     * ([FocusWindow.capMeters] at [FocusWindow.capZoom]: the road's, or with Large the lanes' close
+     * view's while that holds, as it did at the last update): the map's height less the following
+     * padding, at the car's latitude, less the road the frame keeps past the junction as far as it
+     * lies along the approach, and the steps framed with it. The junction is the step's own, or past
+     * a step the view stays up for, the one after it. Not a number for a map that is going; a map
+     * not laid out yet has no room, which frames at the SDK's own distance.
+     */
+    private fun frameCapMeters(facts: ManeuverFacts): Double {
+        if (!mapboxMap.isValid()) return Double.NaN
+        val size = mapboxMap.getSize()
+        val padding = dataSource.followingPadding
+        roomDp = (size.height.toDouble() - padding.top - padding.bottom) / mapboxMap.getMapOptions().pixelRatio.toDouble()
+        val junction = if (facts.kind != FocusKind.NONE) facts else facts.next ?: facts
+        val after = dataSource.options.followingFrameOptions.frameGeometryAfterManeuver.distanceToFrameAfterManeuver
+        val latitude = if (puckLat.isNaN()) lat.value else puckLat
+        capZoom = FocusWindow.capZoom(laneZoom, laneFocus.goal, zoomPlanner.lanesZoom(latitude, lanesCap), tuning)
+        return FocusWindow.capMeters(roomDp, latitude, after, junction.turnDegrees, junction.chainedMeters, tuning, capZoom)
+    }
+
+    /**
+     * The "focus" line of a latch: what the view went down for, how it latched, how far from the
+     * junction, where its frame begins and what the screen allowed. Numbers, kinds and words; never
+     * where the car is.
+     */
+    private fun focusFields(facts: ManeuverFacts, metersToManeuver: Double): Map<String, Any?> {
+        val own = facts.kind != FocusKind.NONE
+        val junction = if (own) facts else facts.next ?: facts
+        return mapOf(
+            "kind" to junction.kind,
+            "why" to junction.why?.logName,
+            "by" to maneuverFocus.latchedBy?.logName,
+            "atM" to Motion.round(if (own) metersToManeuver else metersToManeuver + facts.nextMeters, 0),
+            "framingM" to Motion.round(maneuverFocus.framingMeters, 0),
+            "capM" to frameCap.takeIf { it.isFinite() }?.let { Motion.round(it, 0) },
+            "capZoom" to capZoom.takeIf { it.isFinite() }?.let { Motion.round(it, 2) },
+            "roomDp" to roomDp.takeIf { it.isFinite() }?.let { Motion.round(it, 0) },
+            "afterM" to Motion.round(dataSource.options.followingFrameOptions.frameGeometryAfterManeuver.distanceToFrameAfterManeuver, 0),
+            "turnDeg" to junction.turnDegrees?.let { Motion.round(it, 0) },
+            "chainedM" to Motion.round(junction.chainedMeters, 0),
+            "speed" to speedMps?.let { Motion.round(it, 1) },
+            "laneZoom" to laneZoom,
+        ).filterValues { it != null }
     }
 
     override fun onJump() {
@@ -460,6 +559,9 @@ internal class SmoothNavigationCamera(
         zoomPlanner.reset()
         forgetPuckSpeed()
         if (mode == LaneZoom.DEFAULT) setBearingLead(LaneZoomFrames.SDK_BEARING_LEAD)
+        // The map set the frames up for the new mode by the data source's own rule; until the next
+        // progress they frame what this camera decided with the last one, as they did before.
+        lastProgress?.let { LaneZoomFrames.beforeSmoothEvaluate(dataSource, mode, tuning, it, junction, maneuverFocus.framesManeuver) }
         requestFrame()
     }
 
@@ -474,7 +576,14 @@ internal class SmoothNavigationCamera(
         laneChoices = emptyList()
         speedMps = null
         teleportUntil = 0.0
+        facts = null
+        frameCap = Double.NaN
+        capZoom = Double.NaN
+        lastProgress = null
         dataSource.clearFollowingOverrides()
+        // Which clears neither the framing decision nor its override, and the data source is the
+        // Mapbox styles' too: they frame by the SDK's own rule again.
+        clearFramingOverride()
         // The upper limit and the bearing lead moved with the drive. Without a progress no
         // maneuver is framed, and both are back where a drive starts.
         LaneZoomFrames.resetLimits(dataSource, tuning)
@@ -490,7 +599,14 @@ internal class SmoothNavigationCamera(
             "camWrites" to writes,
             "focus" to Motion.round(maneuverFocus.focusAt(now), 2),
             "focusGoal" to maneuverFocus.goal,
-            // How the step latched the tilt: its window, or the bridge from a turn right before.
+            // The kind of the step's maneuver, where its frame begins, what the screen allowed and
+            // whether the junction is framed now (latched to the step's end).
+            "focusKind" to facts?.kind,
+            "framingM" to maneuverFocus.framingMeters.takeIf { it.isFinite() }?.let { Motion.round(it, 0) },
+            "frameCapM" to frameCap.takeIf { it.isFinite() }?.let { Motion.round(it, 0) },
+            "frames" to maneuverFocus.framesManeuver,
+            // How the step latched the tilt: its window, the bridge from a turn right before, or
+            // ahead, past a step that goes straight on.
             "latchedBy" to maneuverFocus.latchedBy?.logName,
             // With Large, how much of the last junction's close zoom is kept.
             "keep" to Motion.round(maneuverFocus.keepAt(now), 2).takeIf { laneZoom == LaneZoom.LARGE },
@@ -544,8 +660,15 @@ internal class SmoothNavigationCamera(
         dataSource.unregisterUpdateObserver(dataObserver)
         cameraPlugin.removeCameraAnimationsLifecycleListener(otherAnimations)
         dataSource.clearFollowingOverrides()
+        clearFramingOverride()
         // The frames were fitted for this camera; the map sets them up again for the next one.
         LaneZoomFrames.resetLimits(dataSource, tuning)
+    }
+
+    /** The data source decides again by its own rule whether a maneuver is framed, as for the Mapbox styles. */
+    @OptIn(MapboxDelicateApi::class, ExperimentalPreviewMapboxNavigationAPI::class)
+    private fun clearFramingOverride() {
+        dataSource.isFramingManeuverPropertyOverride(null)
     }
 
     override fun doFrame(frameTimeNanos: Long) {

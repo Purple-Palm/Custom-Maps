@@ -19,14 +19,14 @@ import kotlin.math.min
  * of a maneuver closer than its own limit allows, and that frame holds less road after the
  * maneuver, so the junction fills it.
  *
- * - Smooth follow: the upper limit is raised only while the SDK frames a maneuver, before each
- *   frame of the drive is computed ([beforeSmoothEvaluate]). A frame of the road is fitted from
- *   the Default limit, as it always was ([smoothMaxZoom] says why). Near a lane choice the camera
- *   goes closer by itself.
+ * - Smooth follow: the camera decides when a maneuver is framed (its maneuver focus, which also
+ *   tells the SDK), and the upper limit is raised only while it is, before each frame of the drive
+ *   is computed ([beforeSmoothEvaluate]). A frame of the road is fitted from the Default limit, as
+ *   it always was ([smoothMaxZoom] says why). Near a lane choice the camera goes closer by itself.
  * - Mapbox tuned has no camera of its own that could hold the road back, so all its limits move
  *   with the drive, before each frame is computed ([beforeTunedEvaluate]).
- * - In both, while the SDK frames a maneuver, the frame also holds the road to where it bends past
- *   the maneuver point ([JunctionPoints]), and no point of it at any other time.
+ * - In both, while a maneuver is framed, the frame also holds the road to where it bends past the
+ *   maneuver point ([JunctionPoints]), and no point of it at any other time.
  * - Mapbox standard keeps the SDK's values whatever the setting says.
  *
  * The map calls [apply] when the lane zoom or the camera style changes. What a camera changes while
@@ -68,8 +68,10 @@ internal object LaneZoomFrames {
     /**
      * Smooth follow: with Large the frame of a maneuver holds
      * [CameraTuning.largeMetersAfterManeuver] of road after it. The upper limit is the one of
-     * [smoothMaxZoom] for the progress the data source frames by after this call, and the camera
-     * moves it with every progress that follows ([beforeSmoothEvaluate]).
+     * [smoothMaxZoom] for the progress the data source frames by its own rule after this call, as
+     * it does until the camera tells it otherwise. From then on the camera moves the limit with its
+     * own decision: at once when the lane zoom changes, and with every progress that follows
+     * ([beforeSmoothEvaluate]).
      */
     fun applySmoothFollow(
         dataSource: MapboxNavigationViewportDataSource,
@@ -128,9 +130,10 @@ internal object LaneZoomFrames {
     /**
      * Smooth follow, before the frame of each progress update is computed and after the data
      * source was given that [progress]: the upper limit is the one of [smoothMaxZoom], and while
-     * the SDK frames a maneuver with Large, the frame holds the road to where it bends past the
-     * maneuver point ([junction]). Nothing else is set here. How far the view turns toward the road
-     * ahead the camera sets itself, and the lower limit stays the SDK's.
+     * the camera frames a maneuver ([framesManeuver], its own latched decision, which it tells the
+     * data source too) with Large, the frame holds the road to where it bends past the maneuver
+     * point ([junction]). Nothing else is set here. How far the view turns toward the road ahead the
+     * camera sets itself, and the lower limit stays the SDK's.
      */
     fun beforeSmoothEvaluate(
         dataSource: MapboxNavigationViewportDataSource,
@@ -138,11 +141,12 @@ internal object LaneZoomFrames {
         tuning: CameraTuning,
         progress: RouteProgress,
         junction: JunctionPoints,
+        framesManeuver: Boolean,
     ) {
         val options = dataSource.options.followingFrameOptions
         // With Default nothing of the drive is asked: the limit is the same on every update,
         // nothing is written, and the junction frame gets none of the bend's points.
-        val maneuver = mode == LaneZoom.LARGE && framesManeuver(progress, options)
+        val maneuver = mode == LaneZoom.LARGE && framesManeuver
         val maxZoom = smoothMaxZoom(mode, tuning, framesManeuver = maneuver)
         if (options.maxZoom != maxZoom) options.maxZoom = maxZoom
         junction.update(progress, mode, maneuver, coalesceMeters(options), tuning)
@@ -359,8 +363,9 @@ internal object LaneZoomFrames {
         progress?.takeIf { route != null && it.navigationRoute.id == route.id }
 
     /**
-     * Whether the SDK frames the next maneuver at this [progress], for both styles that carry
-     * Large. Without a progress it frames none.
+     * Whether the SDK frames the next maneuver at this [progress] by its own rule: always in Mapbox
+     * tuned, the style that carries Large on the SDK's camera, and in Smooth follow until the camera
+     * says otherwise. Without a progress it frames none.
      */
     fun framesManeuver(progress: RouteProgress?, options: FollowingFrameOptions): Boolean {
         val step = progress?.currentLegProgress?.currentStepProgress ?: return false

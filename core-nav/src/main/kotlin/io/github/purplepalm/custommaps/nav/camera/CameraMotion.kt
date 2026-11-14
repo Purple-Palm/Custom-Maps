@@ -373,6 +373,10 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     var latchedBy: Latch? = null
         private set
 
+    /** How many times the view has latched down for a junction, so the camera can tell each latch once. */
+    var latches = 0
+        private set
+
     /**
      * How far before the junction of this step its frame begins, in meters: fixed when the view
      * latched down for it; until then as the window puts it at the last update. For a junction past a
@@ -470,6 +474,7 @@ class ManeuverFocus(private val tuning: CameraTuning) {
                 latchedStep = junctionKey
                 aheadFrom = if (own) null else stepKey
                 latchedBy = by
+                latches += 1
             }
         } else if (junction == null && !latchedHere()) {
             framingMeters = Double.NaN
@@ -489,24 +494,6 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         if (holdEnds && goal == 1.0 && latchedHere() && !framesManeuver) keptDownSince = now
         val newGoal = if (latchedHere() || inTurn) 1.0 else 0.0
         if (newGoal != goal) animateTo(newGoal, now)
-    }
-
-    /**
-     * As [onProgress] from the banner's maneuver type alone, as the camera knew it before the facts:
-     * a maneuver not in [excludedTypes] is a plain junction, framed at the navigation SDK's own
-     * distance. Kept for the camera until it hands the facts over.
-     */
-    fun onProgress(
-        now: Double,
-        stepKey: String,
-        metersToManeuver: Double,
-        metersOnStep: Double,
-        maneuverType: String?,
-        excludedTypes: Collection<String>,
-        speedMps: Double?,
-    ) {
-        val kind = if (maneuverType != null && maneuverType !in excludedTypes) FocusKind.TURN else FocusKind.NONE
-        onProgress(now, stepKey, metersToManeuver, metersOnStep, ManeuverFacts(stepKey, kind), Double.NaN, speedMps)
     }
 
     /**

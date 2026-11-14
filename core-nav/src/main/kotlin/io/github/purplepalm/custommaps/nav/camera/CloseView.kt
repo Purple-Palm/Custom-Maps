@@ -39,11 +39,15 @@ object CloseView {
 
     /**
      * Smooth follow: whether a close view is latched, which the swap of the route line and the lit lane waits for (the
-     * own lanes' design 8): the view down onto a junction, or with Large the lanes' close view, has reached its goal 1
-     * and no longer moves. [smoothFollow] also counts the moves in and out; a latched view is one that holds.
+     * own lanes' design 8): the junction view while its junction is framed ([ManeuverFocus.framesManeuver], the camera's
+     * latched decision, from the framing distance to the end of the step), or with Large the lanes' close view once it
+     * has reached its goal 1 and no longer moves. [smoothFollow] also counts the moves in and out; a latched view is one
+     * that holds.
+     *
+     * @param junctionFramed [ManeuverFocus.framesManeuver]
      */
-    fun smoothFollowLatched(maneuverGoal: Double, maneuverMoving: Boolean, laneGoal: Double, laneMoving: Boolean, large: Boolean): Boolean =
-        (maneuverGoal >= 1.0 && !maneuverMoving) || (large && laneGoal >= 1.0 && !laneMoving)
+    fun smoothFollowLatched(junctionFramed: Boolean, laneGoal: Double, laneMoving: Boolean, large: Boolean): Boolean =
+        junctionFramed || (large && laneGoal >= 1.0 && !laneMoving)
 
     /**
      * Mapbox tuned: whether a close view is latched for the swap. Never (the own lanes' design 8 and FIX T5: in Mapbox tuned

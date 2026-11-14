@@ -195,9 +195,9 @@ class CameraMotionTest {
             if (t >= next) {
                 next += 1.0
                 if (x < 600.0) {
-                    focus.onProgress(t, "r/0/0", 600.0 - x, x, "turn", excluded, v)
+                    focus.onBanner(t, "r/0/0", 600.0 - x, x, "turn", excluded, v)
                 } else {
-                    focus.onProgress(t, "r/0/1", 2600.0 - x, x - 600.0, "turn", excluded, v)
+                    focus.onBanner(t, "r/0/1", 2600.0 - x, x - 600.0, "turn", excluded, v)
                 }
             }
             val pitch = focus.pitchAt(t)
@@ -230,8 +230,8 @@ class CameraMotionTest {
     @Test
     fun `without the lanes the guidance tilt is the maneuver focus's own`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 300.0, 0.0, "turn", excluded, 15.0)
-        focus.onProgress(20.0, "r/0/1", 900.0, 5.0, "turn", excluded, 15.0)
+        focus.onBanner(0.0, "r/0/0", 300.0, 0.0, "turn", excluded, 15.0)
+        focus.onBanner(20.0, "r/0/1", 900.0, 5.0, "turn", excluded, 15.0)
         var t = 0.0
         while (t < 30.0) {
             assertEquals(focus.pitchAt(t), guidancePitch(tuning, 0.0, focus.focusAt(t)), 0.0, "at $t s")
@@ -242,28 +242,28 @@ class CameraMotionTest {
     @Test
     fun `braking never tilts the view back up before the turn`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 250.0, 0.0, "turn", excluded, 25.0)
+        focus.onBanner(0.0, "r/0/0", 250.0, 0.0, "turn", excluded, 25.0)
         assertEquals(1.0, focus.goal)
-        focus.onProgress(1.0, "r/0/0", 230.0, 20.0, "turn", excluded, 2.0)
+        focus.onBanner(1.0, "r/0/0", 230.0, 20.0, "turn", excluded, 2.0)
         assertEquals(1.0, focus.goal)
     }
 
     @Test
     fun `excluded maneuvers keep the cruise tilt`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 50.0, 0.0, "fork", excluded, 20.0)
+        focus.onBanner(0.0, "r/0/0", 50.0, 0.0, "fork", excluded, 20.0)
         assertEquals(tuning.cruisePitch, focus.pitchAt(10.0), 1e-9)
     }
 
     @Test
     fun `after a fork the view stays up`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 50.0, 500.0, "fork", excluded, 20.0)
+        focus.onBanner(0.0, "r/0/0", 50.0, 500.0, "fork", excluded, 20.0)
         assertEquals(0.0, focus.goal)
         // Past the fork, with a turn far ahead: there was no view down to hold.
-        focus.onProgress(1.0, "r/0/1", 900.0, 0.0, "turn", excluded, 20.0)
+        focus.onBanner(1.0, "r/0/1", 900.0, 0.0, "turn", excluded, 20.0)
         assertEquals(0.0, focus.goal)
-        focus.onProgress(2.0, "r/0/1", 880.0, 20.0, "turn", excluded, 20.0)
+        focus.onBanner(2.0, "r/0/1", 880.0, 20.0, "turn", excluded, 20.0)
         assertEquals(0.0, focus.goal)
         assertEquals(tuning.cruisePitch, focus.pitchAt(2.0), 1e-9)
     }
@@ -272,19 +272,19 @@ class CameraMotionTest {
     fun `the view stays down after a turn until the car is both far enough and long enough past it`() {
         // A car that stops just after the turn: long past it, but not far.
         val stopped = pastATurn()
-        stopped.onProgress(101.0, "r/0/1", 897.0, 3.0, "turn", excluded, 0.0)
-        stopped.onProgress(111.0, "r/0/1", 897.0, 3.0, "turn", excluded, 0.0)
+        stopped.onBanner(101.0, "r/0/1", 897.0, 3.0, "turn", excluded, 0.0)
+        stopped.onBanner(111.0, "r/0/1", 897.0, 3.0, "turn", excluded, 0.0)
         assertEquals(1.0, stopped.goal)
 
         // A car that is quickly far past the turn, but not long.
         val quick = pastATurn()
-        quick.onProgress(101.0, "r/0/1", 870.0, 30.0, "turn", excluded, 30.0)
+        quick.onBanner(101.0, "r/0/1", 870.0, 30.0, "turn", excluded, 30.0)
         assertEquals(1.0, quick.goal)
 
         // Far enough and long enough: the view rises.
         val gone = pastATurn()
-        gone.onProgress(101.0, "r/0/1", 870.0, 30.0, "turn", excluded, 30.0)
-        gone.onProgress(103.5, "r/0/1", 795.0, 105.0, "turn", excluded, 30.0)
+        gone.onBanner(101.0, "r/0/1", 870.0, 30.0, "turn", excluded, 30.0)
+        gone.onBanner(103.5, "r/0/1", 795.0, 105.0, "turn", excluded, 30.0)
         assertEquals(0.0, gone.goal)
     }
 
@@ -294,10 +294,10 @@ class CameraMotionTest {
         val window = tuning.maneuverFramingMeters + 3.0 * tuning.descentSeconds
         for (speed in listOf(null, 0.0)) {
             val outside = ManeuverFocus(tuning)
-            outside.onProgress(0.0, "r/0/0", window + 1.0, 0.0, "turn", excluded, speed)
+            outside.onBanner(0.0, "r/0/0", window + 1.0, 0.0, "turn", excluded, speed)
             assertEquals(0.0, outside.goal, "speed $speed")
             val inside = ManeuverFocus(tuning)
-            inside.onProgress(0.0, "r/0/0", window - 1.0, 0.0, "turn", excluded, speed)
+            inside.onBanner(0.0, "r/0/0", window - 1.0, 0.0, "turn", excluded, speed)
             assertEquals(1.0, inside.goal, "speed $speed")
         }
     }
@@ -309,10 +309,10 @@ class CameraMotionTest {
             val window = FocusWindow.windowMeters(FocusKind.TURN, speed, Double.NaN, tuning)
             assertEquals(tuning.maneuverFramingMeters + maxOf(speed, 3.0) * tuning.descentSeconds, window, 1e-9, "speed $speed")
             val outside = ManeuverFocus(tuning)
-            outside.onProgress(0.0, "r/0/0", window + 0.01, 0.0, "turn", excluded, speed)
+            outside.onBanner(0.0, "r/0/0", window + 0.01, 0.0, "turn", excluded, speed)
             assertEquals(0.0, outside.goal, "speed $speed")
             val at = ManeuverFocus(tuning)
-            at.onProgress(0.0, "r/0/0", window, 0.0, "turn", excluded, speed)
+            at.onBanner(0.0, "r/0/0", window, 0.0, "turn", excluded, speed)
             assertEquals(1.0, at.goal, "speed $speed")
         }
         // 180 m and 3.5 s at 13 m/s.
@@ -322,12 +322,12 @@ class CameraMotionTest {
     @Test
     fun `a drive that ends before a turn leaves nothing for the next drive`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 150.0, 450.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 150.0, 450.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
         focus.reset(1.0)
         assertEquals(0.0, focus.goal)
         // The same route again from its start: the same step, now far from its turn.
-        focus.onProgress(60.0, "r/0/0", 600.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(60.0, "r/0/0", 600.0, 0.0, "turn", excluded, 10.0)
         assertEquals(0.0, focus.goal)
         assertEquals(tuning.cruisePitch, focus.pitchAt(70.0), 1e-9)
     }
@@ -335,16 +335,16 @@ class CameraMotionTest {
     @Test
     fun `a step without a maneuver type keeps the cruise tilt`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 50.0, 0.0, null, excluded, 20.0)
+        focus.onBanner(0.0, "r/0/0", 50.0, 0.0, null, excluded, 20.0)
         assertEquals(0.0, focus.goal)
     }
 
     @Test
     fun `a close second turn keeps the view down`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 8.0)
-        focus.onProgress(20.0, "r/0/1", 120.0, 5.0, "turn", excluded, 8.0)
-        focus.onProgress(23.0, "r/0/1", 96.0, 29.0, "turn", excluded, 8.0)
+        focus.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 8.0)
+        focus.onBanner(20.0, "r/0/1", 120.0, 5.0, "turn", excluded, 8.0)
+        focus.onBanner(23.0, "r/0/1", 96.0, 29.0, "turn", excluded, 8.0)
         assertEquals(1.0, focus.goal)
     }
 
@@ -377,14 +377,14 @@ class CameraMotionTest {
     @Test
     fun `the junction keep follows the focus as the tilt rises and is 1 through the hold`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(10.0, "r/0/1", 900.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(10.0, "r/0/1", 900.0, 0.0, "turn", excluded, 10.0)
         for (t in listOf(10.0, 11.0, 11.5)) {
-            focus.onProgress(t, "r/0/1", 900.0 - 10.0 * (t - 10.0), 10.0 * (t - 10.0), "turn", excluded, 10.0)
+            focus.onBanner(t, "r/0/1", 900.0 - 10.0 * (t - 10.0), 10.0 * (t - 10.0), "turn", excluded, 10.0)
             assertEquals(1.0, focus.keepAt(t), 1e-9, "at $t s, in the hold")
         }
         // Far from the next turn the view goes up, and the keep with it.
-        focus.onProgress(13.0, "r/0/1", 870.0, 30.0, "turn", excluded, 10.0)
+        focus.onBanner(13.0, "r/0/1", 870.0, 30.0, "turn", excluded, 10.0)
         assertEquals(0.0, focus.goal)
         var t = 13.0
         while (t < 17.0) {
@@ -396,13 +396,13 @@ class CameraMotionTest {
     @Test
     fun `while the view stays down for a turn not framed yet the kept zoom is let go over 3 s`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(10.0, "r/0/1", 300.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(11.0, "r/0/1", 290.0, 10.0, "turn", excluded, 10.0)
-        focus.onProgress(12.0, "r/0/1", 280.0, 20.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(10.0, "r/0/1", 300.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(11.0, "r/0/1", 290.0, 10.0, "turn", excluded, 10.0)
+        focus.onBanner(12.0, "r/0/1", 280.0, 20.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.keepAt(12.0), 1e-9)
         // The hold ends 30 m past the turn: the next one is 270 m on, in the bridge's reach (215 + 65 m) and not framed.
-        focus.onProgress(13.0, "r/0/1", 270.0, 30.0, "turn", excluded, 10.0)
+        focus.onBanner(13.0, "r/0/1", 270.0, 30.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
         assertEquals(ManeuverFocus.Latch.BRIDGE, focus.latchedBy)
         assertEquals(1.0, focus.keepAt(13.0), 1e-9)
@@ -410,8 +410,8 @@ class CameraMotionTest {
         assertEquals(0.0, focus.keepAt(13.0 + tuning.keptZoomReleaseSeconds), 1e-9)
         assertEquals(0.0, focus.keepAt(20.0), 1e-9)
         // The tilt stays down meanwhile, also once the next turn is framed.
-        focus.onProgress(14.0, "r/0/1", 260.0, 40.0, "turn", excluded, 10.0)
-        focus.onProgress(22.0, "r/0/1", 179.0, 121.0, "turn", excluded, 10.0)
+        focus.onBanner(14.0, "r/0/1", 260.0, 40.0, "turn", excluded, 10.0)
+        focus.onBanner(22.0, "r/0/1", 179.0, 121.0, "turn", excluded, 10.0)
         for (at in listOf(13.0, 15.0, 22.0)) assertEquals(1.0, focus.focusAt(at), 1e-9, "at $at s")
         assertEquals(0.0, focus.keepAt(22.0), 1e-9)
         // The end of guidance takes the release back: the keep is the focus again.
@@ -423,9 +423,9 @@ class CameraMotionTest {
     @Test
     fun `a next turn framed already as the hold ends keeps the junction zoom with the focus`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(10.0, "r/0/1", 150.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(13.0, "r/0/1", 120.0, 30.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(10.0, "r/0/1", 150.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(13.0, "r/0/1", 120.0, 30.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
         assertEquals(ManeuverFocus.Latch.WINDOW, focus.latchedBy)
         for (at in listOf(13.0, 14.5, 16.0, 20.0)) assertEquals(focus.focusAt(at), focus.keepAt(at), 1e-12, "at $at s")
@@ -444,7 +444,7 @@ class CameraMotionTest {
                     val d = 1_500.0 - v * t
                     if (d < 0.0) break
                     byFacts.onProgress(t, "r/0/0", d, 3_000.0 - d, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, v)
-                    byBanner.onProgress(t, "r/0/0", d, 3_000.0 - d, "turn", excluded, v)
+                    byBanner.onBanner(t, "r/0/0", d, 3_000.0 - d, "turn", excluded, v)
                     assertEquals(byBanner.goal, byFacts.goal, "$v m/s phase $phase at $d m")
                     assertEquals(d <= 180.0 + maxOf(v, 3.0) * tuning.descentSeconds, byFacts.goal == 1.0, "$v m/s phase $phase at $d m")
                     // The SDK framed today's maneuvers from 180 m on.
@@ -620,6 +620,29 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `each latch is counted once, a latch ahead once for both of its steps`() {
+        val focus = ManeuverFocus(tuning)
+        val turn = ManeuverFacts("r/0/1", FocusKind.TURN)
+        val nameChange = ManeuverFacts("r/0/0", FocusKind.NONE, next = turn, nextMeters = 100.0)
+        assertEquals(0, focus.latches)
+        focus.onProgress(0.0, "r/0/0", 400.0, 0.0, nameChange, Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(0, focus.latches)
+        focus.onProgress(1.0, "r/0/0", 170.0, 230.0, nameChange, Double.POSITIVE_INFINITY, 10.0)
+        focus.onProgress(2.0, "r/0/0", 160.0, 240.0, nameChange, Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(1, focus.latches)
+        // The turn's own step: the same latch.
+        focus.onProgress(18.0, "r/0/1", 100.0, 0.0, turn, Double.POSITIVE_INFINITY, 10.0)
+        focus.onProgress(19.0, "r/0/1", 90.0, 10.0, turn, Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(1, focus.latches)
+        // The next turn latches anew; after a reset the same turn would latch again.
+        focus.onProgress(28.0, "r/0/2", 200.0, 0.0, ManeuverFacts("r/0/2", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(2, focus.latches)
+        focus.reset(29.0)
+        focus.onProgress(30.0, "r/0/2", 190.0, 10.0, ManeuverFacts("r/0/2", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(3, focus.latches)
+    }
+
+    @Test
     fun `settled, the focus is at its goal and does not move`() {
         val focus = ManeuverFocus(tuning)
         focus.onProgress(0.0, "r/0/0", 200.0, 0.0, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
@@ -670,17 +693,17 @@ class CameraMotionTest {
     @Test
     fun `a reroute with the same indices is a new step`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "a/0/0", 150.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "a/0/0", 150.0, 0.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
-        focus.onProgress(1.0, "b/0/0", 900.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(4.0, "b/0/0", 870.0, 30.0, "turn", excluded, 10.0)
+        focus.onBanner(1.0, "b/0/0", 900.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(4.0, "b/0/0", 870.0, 30.0, "turn", excluded, 10.0)
         assertEquals(0.0, focus.goal)
     }
 
     @Test
     fun `a reversal halfway down starts from where the tilt is and takes half of the way up`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 200.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 200.0, 0.0, "turn", excluded, 10.0)
         val turnedAt = tuning.descentSeconds / 2
         assertEquals(0.5, focus.focusAt(turnedAt), 1e-9)
 
@@ -700,15 +723,15 @@ class CameraMotionTest {
     @Test
     fun `the next turn coming up while the view rises turns it back down from where it is`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
         // Past the turn and past the hold: the view starts to rise.
-        focus.onProgress(20.0, "r/0/1", 400.0, 0.0, "turn", excluded, 10.0)
-        focus.onProgress(23.0, "r/0/1", 370.0, 30.0, "turn", excluded, 10.0)
+        focus.onBanner(20.0, "r/0/1", 400.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(23.0, "r/0/1", 370.0, 30.0, "turn", excluded, 10.0)
         assertEquals(0.0, focus.goal)
         // Halfway up, the next turn's window opens: 180 m and 3.5 s at 10 m/s.
         val turnedAt = 23.0 + tuning.ascentSeconds / 2
         assertEquals(0.5, focus.focusAt(turnedAt), 1e-9)
-        focus.onProgress(turnedAt, "r/0/1", 215.0, 185.0, "turn", excluded, 10.0)
+        focus.onBanner(turnedAt, "r/0/1", 215.0, 185.0, "turn", excluded, 10.0)
 
         assertEquals(1.0, focus.goal)
         assertEquals(0.5, focus.focusAt(turnedAt), 1e-9)
@@ -721,7 +744,7 @@ class CameraMotionTest {
     @Test
     fun `a reversal right after the start still takes a moment`() {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(0.0, "r/0/0", 200.0, 0.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/0", 200.0, 0.0, "turn", excluded, 10.0)
         focus.reset(0.2)
         assertTrue(focus.isAnimating(0.2 + 0.29))
         assertFalse(focus.isAnimating(0.2 + 0.301))
@@ -761,7 +784,7 @@ class CameraMotionTest {
             if (byFacts) {
                 focus.onProgress(t, "r/0/$step", end - s, if (step == 0) s else s - first, ManeuverFacts("r/0/$step", FocusKind.TURN), Double.POSITIVE_INFINITY, speed)
             } else {
-                focus.onProgress(t, "r/0/$step", end - s, if (step == 0) s else s - first, "turn", excluded, speed)
+                focus.onBanner(t, "r/0/$step", end - s, if (step == 0) s else s - first, "turn", excluded, speed)
             }
             if (down && focus.goal != last) moves += 1
             if (focus.goal == 1.0) down = true
@@ -775,9 +798,9 @@ class CameraMotionTest {
     /** A view that went down for the turn at the end of step r/0/0, as the car reaches the turn at 100 s. */
     private fun pastATurn(): ManeuverFocus {
         val focus = ManeuverFocus(tuning)
-        focus.onProgress(90.0, "r/0/0", 100.0, 500.0, "turn", excluded, 10.0)
+        focus.onBanner(90.0, "r/0/0", 100.0, 500.0, "turn", excluded, 10.0)
         assertEquals(1.0, focus.goal)
-        focus.onProgress(100.0, "r/0/0", 1.0, 599.0, "turn", excluded, 10.0)
+        focus.onBanner(100.0, "r/0/0", 1.0, 599.0, "turn", excluded, 10.0)
         return focus
     }
 

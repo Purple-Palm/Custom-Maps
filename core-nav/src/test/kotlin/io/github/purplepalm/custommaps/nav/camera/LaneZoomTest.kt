@@ -666,6 +666,56 @@ class LaneZoomTest {
         assertTrue(goals.filter { it.first in -197.0..667.0 }.all { it.second == 1.0 })
     }
 
+    /**
+     * S11 with the junction view's own windows, as the Smooth follow camera runs its parts: the run-up
+     * latch, the junction focus with the cap at [FocusWindow.capZoom] from the lane focus of the update
+     * before, then the lane focus with the turn ahead from where the junction is framed. A 502 dp frame
+     * at 40 degrees, 27 m/s, the turn a right angle. Returns how far past the gore the lanes let go and
+     * where the turn's frame begins.
+     */
+    private fun runUpThenTurn(mode: LaneZoom): Pair<Double, Double> {
+        val latch = RunUpLatch(tuning)
+        val lanes = LaneFocus(tuning)
+        val junction = ManeuverFocus(tuning)
+        val planner = ZoomPlanner(tuning)
+        val turn = ManeuverFacts("r1/0/4", FocusKind.TURN, turnDegrees = 90.0)
+        val ramp = ManeuverFacts("r1/0/3", FocusKind.NONE, next = turn, nextMeters = 400.0)
+        var letGo = Double.NaN
+        var framedAt = Double.NaN
+        for (t in 0..120) {
+            val now = t.toDouble()
+            val toGore = 2_800.0 - 27.0 * t
+            val onRamp = toGore < 0.0
+            val choices = if (!onRamp) listOf(LaneChoice("r1/0/3/end", toGore, 5, 1, 1, onFreeway = true, atManeuver = true)) else emptyList()
+            latch.onProgress(now, choices, 27.0)
+            val facts = if (onRamp) turn else ramp
+            val toManeuver = if (onRamp) 400.0 + toGore else toGore
+            val zoom = FocusWindow.capZoom(mode, lanes.goal, planner.lanesZoom(40.0), tuning)
+            val cap = FocusWindow.capMeters(502.0, 40.0, tuning.largeMetersAfterManeuver, turn.turnDegrees, 0.0, tuning, zoom)
+            junction.onProgress(now, facts.stepKey, toManeuver, if (onRamp) -toGore else 27.0 * t, facts, cap, 27.0)
+            val ahead = if (onRamp) TurnAhead(turn.stepKey, toManeuver - junction.framingMeters) else null
+            lanes.onProgress(now, 27.0 * t, choices, 27.0, turnAhead = ahead, runUpKey = latch.exitKey)
+            if (onRamp && letGo.isNaN() && lanes.goal == 0.0) letGo = -toGore
+            if (framedAt.isNaN() && junction.framesManeuver) framedAt = toManeuver
+        }
+        return letGo to framedAt
+    }
+
+    @Test
+    fun `a run-up right before a turn hands the view to the turn's frame where the lanes' view allows`() {
+        // With Large the lanes' close view holds the frame back to the navigation SDK's 180 m, so the
+        // zoom goes no farther out at the hand-over than it did before the junction view came earlier:
+        // let go 224 m past the gore, as above, and the turn framed from the first update within 180 m.
+        val (largeLetGo, largeFramed) = runUpThenTurn(LaneZoom.LARGE)
+        assertEquals(224.0, largeLetGo, 1e-9)
+        assertEquals(176.0, largeFramed, 1e-9)
+        // With Default nothing of the view is closer than the road: the turn is framed from 320 m,
+        // 12 s ahead, and the lanes' tilt lets go there.
+        val (defaultLetGo, defaultFramed) = runUpThenTurn(LaneZoom.DEFAULT)
+        assertEquals(89.0, defaultLetGo, 1e-9)
+        assertEquals(311.0, defaultFramed, 1e-9)
+    }
+
     // ------------------------------------------------------------------ the ramp bridge (D20)
 
     /** IW31's route; its gore, with the exit's lanes as the camera counts them. */
@@ -823,13 +873,13 @@ class LaneZoomTest {
             for (step in drive) {
                 assertEquals(17.25, planner.target(LaneZoom.DEFAULT, 17.25, 0.0, 0.0, false, step.focus, roadFrame = true), "at ${step.t} s")
                 assertFalse(CloseView.smoothFollow(0.0, false, step.goal, laneMoving = step.focus != step.goal, large = false))
-                assertFalse(CloseView.smoothFollowLatched(0.0, false, step.goal, false, large = false))
+                assertFalse(CloseView.smoothFollowLatched(false, step.goal, false, large = false))
                 assertFalse(CloseView.mapboxTuned(framesManeuver = false, laneWindow = step.goal > 0.0, large = false))
             }
         }
         // With Large the same drive does follow it: the ramp's hold is the close view's.
         val large = rampDrive(rampMeters = 260.0).single { it.t == 66 }
-        assertTrue(CloseView.smoothFollowLatched(0.0, false, large.goal, false, large = true))
+        assertTrue(CloseView.smoothFollowLatched(false, large.goal, false, large = true))
     }
 
     @Test
@@ -1031,6 +1081,22 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `the lanes' close zoom is the one the planner goes to on the open road`() {
+        val plan = ZoomPlanner(tuning)
+        for (latitude in listOf(0.0, 25.0, 35.0, 40.0, 60.0)) {
+            for (cap in listOf(Double.POSITIVE_INFINITY, 17.4, 16.0, Double.NaN)) {
+                val goes = ZoomPlanner(tuning).target(LaneZoom.LARGE, 16.35, latitude, 0.0, false, 1.0, roadFrame = true, lanesCap = cap)
+                assertEquals(goes, plan.lanesZoom(latitude, cap), 1e-9, "$latitude, cap $cap")
+            }
+        }
+        assertEquals(MapScale.zoomForLaneDp(14.0, 40.0), plan.lanesZoom(40.0), 1e-9)
+        // A cap below the road's zoom never takes the lanes' zoom under it, and nor does a latitude
+        // that is not a number.
+        assertEquals(tuning.defaultMaxZoom, plan.lanesZoom(40.0, 15.0), 1e-9)
+        assertEquals(tuning.defaultMaxZoom, plan.lanesZoom(Double.NaN), 1e-9)
+    }
+
+    @Test
     fun `in the frame of a maneuver a lane choice goes no closer than the frame`() {
         val lanes = MapScale.zoomForLaneDp(14.0, 35.0)
         val cap = MapScale.zoomForLaneDp(28.0, 35.0)
@@ -1141,11 +1207,11 @@ class LaneZoomTest {
     fun `the maneuver focus knows when the car is past the junction`() {
         val focus = ManeuverFocus(tuning)
         val excluded = listOf("continue", "merge", "on ramp", "off ramp", "fork")
-        focus.onProgress(0.0, "r/0/1", 150.0, 50.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/1", 150.0, 50.0, "turn", excluded, 10.0)
         assertFalse(focus.afterManeuver)
-        focus.onProgress(10.0, "r/0/2", 400.0, 5.0, "turn", excluded, 10.0)
+        focus.onBanner(10.0, "r/0/2", 400.0, 5.0, "turn", excluded, 10.0)
         assertTrue(focus.afterManeuver, "on the step after the turn")
-        focus.onProgress(20.0, "r/0/2", 200.0, 205.0, "turn", excluded, 10.0)
+        focus.onBanner(20.0, "r/0/2", 200.0, 205.0, "turn", excluded, 10.0)
         assertFalse(focus.afterManeuver, "the next turn has taken the view")
     }
 
@@ -1153,20 +1219,20 @@ class LaneZoomTest {
     fun `a step after a maneuver the view stayed up for is no step after a junction`() {
         val focus = ManeuverFocus(tuning)
         val excluded = listOf("continue", "merge", "on ramp", "off ramp", "fork")
-        focus.onProgress(0.0, "r/0/1", 150.0, 50.0, "fork", excluded, 10.0)
-        focus.onProgress(10.0, "r/0/2", 2_000.0, 5.0, "turn", excluded, 10.0)
+        focus.onBanner(0.0, "r/0/1", 150.0, 50.0, "fork", excluded, 10.0)
+        focus.onBanner(10.0, "r/0/2", 2_000.0, 5.0, "turn", excluded, 10.0)
         assertFalse(focus.afterManeuver)
         // And the end of guidance forgets the junction.
-        focus.onProgress(20.0, "r/0/2", 150.0, 1_855.0, "turn", excluded, 10.0)
-        focus.onProgress(30.0, "r/0/3", 900.0, 5.0, "fork", excluded, 10.0)
+        focus.onBanner(20.0, "r/0/2", 150.0, 1_855.0, "turn", excluded, 10.0)
+        focus.onBanner(30.0, "r/0/3", 900.0, 5.0, "fork", excluded, 10.0)
         assertTrue(focus.afterManeuver)
         // The view comes back up, and the step after that one starts at a fork it stayed up for:
         // the junction is far behind.
-        focus.onProgress(40.0, "r/0/3", 800.0, 105.0, "fork", excluded, 10.0)
-        focus.onProgress(90.0, "r/0/4", 3_000.0, 5.0, "turn", excluded, 10.0)
+        focus.onBanner(40.0, "r/0/3", 800.0, 105.0, "fork", excluded, 10.0)
+        focus.onBanner(90.0, "r/0/4", 3_000.0, 5.0, "turn", excluded, 10.0)
         assertFalse(focus.afterManeuver)
-        focus.onProgress(100.0, "r/0/4", 150.0, 2_855.0, "turn", excluded, 10.0)
-        focus.onProgress(110.0, "r/0/5", 900.0, 5.0, "turn", excluded, 10.0)
+        focus.onBanner(100.0, "r/0/4", 150.0, 2_855.0, "turn", excluded, 10.0)
+        focus.onBanner(110.0, "r/0/5", 900.0, 5.0, "turn", excluded, 10.0)
         assertTrue(focus.afterManeuver)
         focus.reset(111.0)
         assertFalse(focus.afterManeuver)

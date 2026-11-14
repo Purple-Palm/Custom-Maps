@@ -29,6 +29,7 @@ import io.github.purplepalm.custommaps.nav.camera.IdleFollow
 import io.github.purplepalm.custommaps.nav.camera.JumpFrame
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
+import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.camera.PeakSpeed
 import io.github.purplepalm.custommaps.nav.debug.Motion
@@ -245,7 +246,8 @@ internal class NavigationCameraAdapter(
         if (isTeleport && !away) navigationCamera.resetFrame()
     }
 
-    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double) {
+    // The facts of the maneuver go unused: the two Mapbox styles frame a maneuver by the SDK's own rule, from its 180 m.
+    override fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double, maneuver: ManeuverFacts?) {
         dataSource.onRouteProgressChanged(progress)
         if (tuned) {
             val now = nowSeconds()

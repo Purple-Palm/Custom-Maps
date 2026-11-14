@@ -46,6 +46,7 @@ import io.github.purplepalm.custommaps.engine.mapbox.offline.OfflineData
 import io.github.purplepalm.custommaps.nav.GuidanceAudio
 import io.github.purplepalm.custommaps.nav.NavigationEngine
 import io.github.purplepalm.custommaps.nav.RouteRequestResult
+import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.car.CarSurfaces
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.LaneRowLog
@@ -258,6 +259,14 @@ internal class MapboxNavigationEngine(
         rampOf = { routeId, exitKey -> lanePlans.planFor(routeId)?.rampAfter(exitKey) },
         seamOf = { routeId, exitKey -> lanePlans.planFor(routeId)?.seamBefore(exitKey) },
     )
+
+    /**
+     * The maneuver at the end of the step the car is on, as the map's cameras look down onto its
+     * junction ([ManeuverFacts]): read from the route once per step, the same facts for the phone's
+     * map and the car's. A route whose steps cannot be read costs one error line and the facts of
+     * that step, never the drive.
+     */
+    private val maneuverFactsReader = ManeuverFactsReader(onError = { error -> debugLog.error("maneuverFacts", error) })
 
     /**
      * Where the debug lines that describe whole routes are put together: off the main thread, since
@@ -1624,6 +1633,13 @@ internal class MapboxNavigationEngine(
         }
         return laneChoices.runUpKey
     }
+
+    /**
+     * The facts of the maneuver at the end of [progress]'s step, for the map's cameras: the step's
+     * own maneuver, read once per step ([ManeuverFactsReader]). Null where the route cannot tell; the
+     * cameras then frame by the banner as the navigation SDK does.
+     */
+    internal fun maneuverFacts(progress: RouteProgress): ManeuverFacts? = maneuverFactsReader.facts(progress)
 
     /**
      * Whether the progress update that comes with the latest matched position is one the screen

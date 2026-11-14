@@ -5,6 +5,7 @@ import com.mapbox.geojson.Point
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import io.github.purplepalm.custommaps.nav.camera.CameraSettling
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
+import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
 
@@ -90,9 +91,13 @@ internal interface GuidanceCamera {
      * (`RunUpLatch`): its close view stays in from the run-up's start to the gore. Null outside a
      * run-up. [rampAhead]: past the gore, while the same latch holds on through the ramp to the
      * next point the lane plan constrains there, how far that point still lies ahead, in metres
-     * (`RunUpLatch.rampAhead`): the close view stays in to it. Not a number elsewhere.
+     * (`RunUpLatch.rampAhead`): the close view stays in to it. Not a number elsewhere. [maneuver] is
+     * the maneuver at the end of this step as the engine reads it from the step's own maneuver, once
+     * per step (`ManeuverFactsReader`): Smooth follow looks down onto its junction and frames it by
+     * it; null where the route cannot tell, and then by the banner as the navigation SDK does. The
+     * two Mapbox styles keep the SDK's own rule and take no notice of it.
      */
-    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double)
+    fun onRouteProgress(progress: RouteProgress, laneChoices: List<LaneChoice>, runUpKey: String?, rampAhead: Double, maneuver: ManeuverFacts?)
 
     /** There is no guidance, or no longer: whatever the camera kept for the drive is dropped. */
     fun onGuidanceEnded()
@@ -153,5 +158,11 @@ internal interface GuidanceCamera {
          * camera was doing.
          */
         fun onCameraTaken(owner: String?, animator: String, state: String)
+
+        /**
+         * The view latched down onto the junction of a step, once for each latch: what it decided,
+         * for the "focus" line of the debug log ([fields]: numbers, kinds and words only).
+         */
+        fun onFocusLatched(fields: Map<String, Any?>) = Unit
     }
 }

@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav.camera
 
+import io.github.purplepalm.custommaps.nav.model.LaneZoom
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import kotlin.math.cos
@@ -138,10 +139,11 @@ object FocusRule {
  *
  * The frame of a junction holds the car, the rest of the step, the junction and some road past it,
  * fitted from straight above. It begins by time at the car's speed, within the kind's two distances,
- * and no farther out than the frame still fits at the road's own zoom ([capMeters]): it then never
- * widens the view, and the Large lane zoom never has to push the car under the bar. It never begins
- * later than the navigation SDK's own [CameraTuning.maneuverFramingMeters], which the two Mapbox
- * styles keep.
+ * and no farther out than the frame still fits at the zoom the view holds ([capMeters] at
+ * [capZoom]): the road's own, or the lanes' close view's while that holds the view with Large. It
+ * then never widens the view, and the Large lane zoom never has to push the car under the bar. It
+ * never begins later than the navigation SDK's own [CameraTuning.maneuverFramingMeters], which the
+ * two Mapbox styles keep.
  */
 object FocusWindow {
 
@@ -184,17 +186,37 @@ object FocusWindow {
     fun bridgeMeters(speedMps: Double, tuning: CameraTuning): Double = speedMps.coerceAtLeast(MIN_SPEED_MPS) * tuning.bridgeSeconds
 
     /**
-     * The longest approach whose frame fits above the car at the road's zoom
-     * ([CameraTuning.defaultMaxZoom]): what [roomDp] of map height holds at [latitude], less the road
-     * the frame keeps past the junction, [afterMeters], as far as it lies along the approach
-     * (`max(0, cos turnDegrees)` of it: a right-angle turn's road lies across the frame, whose width
-     * holds it), and less the steps the frame takes in with the junction, [chainedMeters].
+     * The longest approach whose frame fits above the car at [zoom], the road's
+     * ([CameraTuning.defaultMaxZoom]) unless the view holds a closer one ([capZoom]): what [roomDp]
+     * of map height holds at [latitude], less the road the frame keeps past the junction,
+     * [afterMeters], as far as it lies along the approach (`max(0, cos turnDegrees)` of it: a
+     * right-angle turn's road lies across the frame, whose width holds it), and less the steps the
+     * frame takes in with the junction, [chainedMeters].
      *
      * @param roomDp the map's height less the following padding at its top and bottom, in dp
      * @param turnDegrees the angle between the road in and the road out; null counts as straight on
      */
-    fun capMeters(roomDp: Double, latitude: Double, afterMeters: Double, turnDegrees: Double?, chainedMeters: Double, tuning: CameraTuning): Double {
+    fun capMeters(
+        roomDp: Double,
+        latitude: Double,
+        afterMeters: Double,
+        turnDegrees: Double?,
+        chainedMeters: Double,
+        tuning: CameraTuning,
+        zoom: Double = tuning.defaultMaxZoom,
+    ): Double {
         val along = if (turnDegrees == null) 1.0 else max(0.0, cos(Math.toRadians(turnDegrees)))
-        return MapScale.metersPerDp(tuning.defaultMaxZoom, latitude) * roomDp - afterMeters * along - chainedMeters
+        return MapScale.metersPerDp(zoom, latitude) * roomDp - afterMeters * along - chainedMeters
     }
+
+    /**
+     * The zoom the view holds as a junction's frame begins, for [capMeters]: the road's own
+     * ([CameraTuning.defaultMaxZoom]), or with Large, while the lanes' close view holds the view
+     * ([laneGoal] 1), that view's [lanesZoom] ([ZoomPlanner.lanesZoom]). A lane choice or a run-up
+     * right before a junction then hands the view to the junction's frame where that frame is no
+     * wider than the lanes' view allows, which is the navigation SDK's 180 m on a phone: no farther
+     * out than before the frame began earlier.
+     */
+    fun capZoom(mode: LaneZoom, laneGoal: Double, lanesZoom: Double, tuning: CameraTuning): Double =
+        if (mode == LaneZoom.LARGE && laneGoal >= 1.0) max(tuning.defaultMaxZoom, lanesZoom) else tuning.defaultMaxZoom
 }

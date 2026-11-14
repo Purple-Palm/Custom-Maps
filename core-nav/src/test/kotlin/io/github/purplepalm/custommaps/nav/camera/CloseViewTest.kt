@@ -46,24 +46,43 @@ class CloseViewTest {
     }
 
     @Test
-    fun `a close view is latched once it has reached its goal and holds, a junction's with either lane zoom`() {
+    fun `a close view is latched while its junction is framed, with either lane zoom, or the lanes' view holds`() {
         for (large in listOf(false, true)) {
-            assertTrue(CloseView.smoothFollowLatched(1.0, false, 0.0, false, large), "held down, large $large")
-            // On its way down, or back up, it is no latched view.
-            assertFalse(CloseView.smoothFollowLatched(1.0, true, 0.0, false, large), "going down, large $large")
-            assertFalse(CloseView.smoothFollowLatched(0.0, true, 0.0, false, large), "coming back, large $large")
-            assertFalse(CloseView.smoothFollowLatched(0.0, false, 0.0, false, large))
+            assertTrue(CloseView.smoothFollowLatched(junctionFramed = true, laneGoal = 0.0, laneMoving = false, large = large), "framed, large $large")
+            assertFalse(CloseView.smoothFollowLatched(junctionFramed = false, laneGoal = 0.0, laneMoving = false, large = large), "large $large")
         }
         // The lanes' close view only with Large, and only held.
-        assertTrue(CloseView.smoothFollowLatched(0.0, false, 1.0, false, large = true))
-        assertFalse(CloseView.smoothFollowLatched(0.0, false, 1.0, true, large = true))
-        assertFalse(CloseView.smoothFollowLatched(0.0, false, 1.0, false, large = false))
+        assertTrue(CloseView.smoothFollowLatched(false, 1.0, false, large = true))
+        assertFalse(CloseView.smoothFollowLatched(false, 1.0, true, large = true))
+        assertFalse(CloseView.smoothFollowLatched(false, 1.0, false, large = false))
         // Where CloseView counts a view that moves, the latched state does not.
         assertTrue(CloseView.smoothFollow(0.0, false, 0.0, true, large = true))
-        assertFalse(CloseView.smoothFollowLatched(0.0, false, 0.0, true, large = true))
+        assertFalse(CloseView.smoothFollowLatched(false, 0.0, true, large = true))
         // Mapbox tuned's close views are the SDK's frames: never latched for the swap, while its close view is on too.
         assertTrue(CloseView.mapboxTuned(framesManeuver = true, laneWindow = true, large = true))
         assertFalse(CloseView.mapboxTunedLatched())
+    }
+
+    @Test
+    fun `the junction view is latched from the framing distance to the end of the step, also between close turns`() {
+        val focus = ManeuverFocus(tuning)
+        val latched = { CloseView.smoothFollowLatched(focus.framesManeuver, 0.0, false, large = true) }
+        // The tilt goes down 240 m + 3.5 s before the turn at 10 m/s, and is flat at 240 m: from there the view holds.
+        focus.onProgress(0.0, "r/0/0", 270.0, 0.0, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(1.0, focus.goal)
+        assertFalse(latched())
+        focus.onProgress(4.0, "r/0/0", 240.0, 40.0, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertTrue(latched())
+        focus.onProgress(20.0, "r/0/0", 80.0, 200.0, ManeuverFacts("r/0/0", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertTrue(latched())
+        // Past the turn the view stays down for a next one 300 m on, not framed yet: no latched view until it is.
+        focus.onProgress(28.0, "r/0/1", 300.0, 0.0, ManeuverFacts("r/0/1", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertFalse(latched())
+        focus.onProgress(31.0, "r/0/1", 270.0, 30.0, ManeuverFacts("r/0/1", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(1.0, focus.goal)
+        assertFalse(latched())
+        focus.onProgress(34.0, "r/0/1", 240.0, 60.0, ManeuverFacts("r/0/1", FocusKind.TURN), Double.POSITIVE_INFINITY, 10.0)
+        assertTrue(latched())
     }
 
     /** Smooth follow's answer from the maneuver focus alone, as the camera reads it after a progress update. */
@@ -75,16 +94,16 @@ class CloseViewTest {
         for (large in listOf(false, true)) {
             val focus = ManeuverFocus(tuning)
             // 2 km from a turn at 15 m/s: the road view.
-            focus.onProgress(0.0, "r/0/0", 2_000.0, 0.0, "turn", excluded, 15.0)
+            focus.onBanner(0.0, "r/0/0", 2_000.0, 0.0, "turn", excluded, 15.0)
             assertFalse(maneuverOnly(focus, 0.0, large))
             // Inside the window (180 m + 3.5 s at 15 m/s): the view goes down.
-            focus.onProgress(100.0, "r/0/0", 200.0, 1_800.0, "turn", excluded, 15.0)
+            focus.onBanner(100.0, "r/0/0", 200.0, 1_800.0, "turn", excluded, 15.0)
             assertTrue(maneuverOnly(focus, 100.0, large))
             // Past the turn, held into the next step.
-            focus.onProgress(115.0, "r/0/1", 900.0, 5.0, "turn", excluded, 15.0)
+            focus.onBanner(115.0, "r/0/1", 900.0, 5.0, "turn", excluded, 15.0)
             assertTrue(maneuverOnly(focus, 115.0, large))
             // The hold is over: on the way back up, which takes the ascent's 3 s.
-            focus.onProgress(118.0, "r/0/1", 855.0, 50.0, "turn", excluded, 15.0)
+            focus.onBanner(118.0, "r/0/1", 855.0, 50.0, "turn", excluded, 15.0)
             assertEquals(0.0, focus.goal)
             assertTrue(maneuverOnly(focus, 118.0, large))
             assertTrue(maneuverOnly(focus, 120.9, large))

@@ -622,6 +622,12 @@ internal class MapScene(
             // The map is the driver's now, also on the browsing map.
             idleFollow.onMapMoved()
         }
+
+        // Once per latch of the view down onto a junction: what it went down for, how far ahead, and
+        // what the screen allowed ("focus"). Numbers, kinds and words only.
+        override fun onFocusLatched(fields: Map<String, Any?>) {
+            debugLog.log("focus", fields)
+        }
     }
 
     /**
@@ -1301,7 +1307,9 @@ internal class MapScene(
         // list, and the run-up's latch moves once for it, so the card and the camera agree, also on
         // the ramp the latch holds through after a gore.
         val runUpKey = engine.runUpKey(progress)
-        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), runUpKey, engine.laneChoices.rampAhead)
+        // And the facts of the step's own maneuver, read once per step: Smooth follow looks down onto
+        // its junction and frames it by them.
+        camera.onRouteProgress(progress, engine.laneChoices.ahead(progress), runUpKey, engine.laneChoices.rampAhead, engine.maneuverFacts(progress))
         // Once per update, and published only when it changes.
         _closeView.value = camera.closeView
         // With the measuring switch: a measured view begins or ends with the close view.
@@ -1729,9 +1737,15 @@ internal class MapScene(
      * source fits its frames within. Smooth follow: "camFps", "camMaxGapMs" and "camWrites" (its
      * frames, the longest time between two of them and how many set the map's camera), "focus" and
      * "focusGoal" (how far the view is tilted onto the next maneuver, from 0 to 1, and where that
-     * is going), "latchedBy" (how the step latched the tilt: "window", or "bridge" as the hold after a
-     * turn right before ended), with Large "keep" (how much of the last junction's close zoom is still
-     * kept), "zoomTarget", "bearingError" (the bearing still to turn) and "onPuck" (1 while the
+     * is going), "focusKind" (what the step's own maneuver is to the view: NONE, TURN or COMPLEX),
+     * "framingM" (how far before its junction the frame begins, fixed when the view latched),
+     * "frameCapM" (the longest approach the frame fits on this screen at the zoom the view holds:
+     * the road's, or with Large the lanes' close view's while that holds) and
+     * "frames" (whether the junction is framed now, latched to the step's end, which the camera tells
+     * the data source), "latchedBy" (how the step latched the tilt: "window", "bridge" as the hold
+     * after a turn right before ended, or "ahead" past a step that goes straight on), with Large
+     * "keep" (how much of the last junction's close zoom is still kept), "zoomTarget",
+     * "bearingError" (the bearing still to turn) and "onPuck" (1 while the
      * camera centers on the drawn car, 0 while it frames a maneuver or the route); "laneZoom",
      * "zoomPlan" (what sets the zoom: ROAD, JUNCTION, AFTER_JUNCTION or LANES), "laneFocus" and
      * "laneGoal" (the lane choices' schedule: how far it is in for one, and where that is going;

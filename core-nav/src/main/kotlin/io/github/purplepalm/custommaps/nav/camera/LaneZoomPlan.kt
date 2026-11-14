@@ -386,9 +386,7 @@ class ZoomPlanner(private val tuning: CameraTuning) {
             }
             lerp(road, full, junctionFocus)
         }
-        val lanesZoom = closest(tuning.freewayLaneDp, latitude)
-        // The lower of the two; a cap that is not a number fails the test and caps nothing.
-        val lanesGoal = max(road, if (lanesCap < lanesZoom) lanesCap else lanesZoom)
+        val lanesGoal = max(road, lanesClose(latitude, lanesCap))
         // A lane choice that still holds the view when a maneuver is framed stays within that frame.
         val lanes = lerp(road, if (roadFrame) lanesGoal else min(lanesGoal, max(road, frameZoom)), laneFocus)
         val zoom = max(junction, lanes)
@@ -412,10 +410,24 @@ class ZoomPlanner(private val tuning: CameraTuning) {
         junctionZoom = Double.NaN
     }
 
+    /**
+     * The zoom of the lanes' close view with Large, as [target] goes to it on the open road: where a
+     * freeway lane is [CameraTuning.freewayLaneDp] wide, no closer than [lanesCap], and never below
+     * the road's own [CameraTuning.defaultMaxZoom].
+     */
+    fun lanesZoom(latitude: Double, lanesCap: Double = Double.POSITIVE_INFINITY): Double =
+        max(tuning.defaultMaxZoom, lanesClose(latitude, lanesCap))
+
     /** Guidance ended or the lane zoom changed: nothing is remembered of the last junction. */
     fun reset() {
         kind = Kind.ROAD
         junctionZoom = Double.NaN
+    }
+
+    /** The lanes' zoom and [lanesCap], the lower of the two; a cap that is not a number fails the test and caps nothing. */
+    private fun lanesClose(latitude: Double, lanesCap: Double): Double {
+        val lanesZoom = closest(tuning.freewayLaneDp, latitude)
+        return if (lanesCap < lanesZoom) lanesCap else lanesZoom
     }
 
     /**
