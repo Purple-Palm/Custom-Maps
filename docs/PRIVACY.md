@@ -32,8 +32,9 @@ Last updated: 2026-11-14. It describes the app as it is today; see [Changes](#ch
   Settings. Each token names the Mapbox account that is billed for what the app does with it. They
   are stored only in the app's private storage, never in backups or device transfers, and never in
   the debug log, which names the token in use only by its place in the list and its name.
-- **Settings:** day and night, camera style, lane zoom, lanes on the map (off, Mapbox's lane details
-  or drawn by the app), lane counts between lane points (whether the app takes them from Mapbox's
+- **Settings:** day and night, camera style, lane zoom, the drive view (Normal or Overview), Zoom in
+  before turns and Recenter by itself, lanes on the map (off, Mapbox's lane details or drawn by the
+  app), lane counts between lane points (whether the app takes them from Mapbox's
   electronic horizon), the guidance tones (on or off, each of them, how the music is lowered and how
   loud a tone is, and under Debug the silence before a tone on Bluetooth), and the switches for the simulated drive, for the app's own route line, for
   measuring the drawn lanes, for asking routes for the side roads' access and form of way, for how many
@@ -216,7 +217,9 @@ the phone is hot among the settings, and whether the car's map was the lighter o
 the switch for the side roads' fields among the settings, what the route requests ask with it, and
 what came of the fields on each route, in counts and sizes, in the debug log; the guidance tones'
 settings among the settings, and the tones with the phone's sound as each played, in the debug log.
-The tones are made and played on the phone: nothing is recorded and nothing new is sent.
+The tones are made and played on the phone: nothing is recorded and nothing new is sent. The drive
+view, Zoom in before turns and Recenter by itself among the settings, and the drive views' decisions
+and the moves of the map, in numbers and words only, in the debug log; nothing new is sent.
 
 ## Contact
 

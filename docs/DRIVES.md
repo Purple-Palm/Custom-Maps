@@ -1521,6 +1521,79 @@ and every sound the player plays or cannot play a `tone_played` line:
     segments with the chosen one's check mark, each segment's word on one line also at the largest
     font sizes; Tones off leaves its switch alone. Each row is one tap.
 
+The Overview drive view, Recenter by itself and the earlier junction view
+([DECISIONS.md](DECISIONS.md), 57; [CAMERA.md](CAMERA.md), Drive view): nothing has been on a drive
+yet. Each decision of the drive views writes a `drive_view` line, each request of the camera a
+`camera_request` line, each hold of the map that ends a `camera_hold` line and each latch of the
+junction view a `focus` line; the camera line carries `view`, `plan`, `planWhy`, `near` and the
+hold's `holdS` every second:
+
+112. **The bar by day and at night.** Parked during a drive or the simulated drive, by day and at
+    night, at the phone's own width and with the font size at 1.3: **Overview** outlined in Normal,
+    filled with its amber ring in the Overview; hold the map, and **Recenter**, bright amber, takes the
+    arrival time's place with "Recenter 10" on one line, the bar as high as before, the card, the
+    Mapbox logo and the attribution uncovered. With the system's animations off the swap is at once.
+    TalkBack reads "Overview, off" or "on" as a switch, and on Recenter "Recenter. The map comes
+    back in 7 seconds." once, nothing at each tick.
+113. **The Overview switch at a stop.** Tap **Overview**: the overview at once (`camera_request` with
+    `by` `driver` and `why` `toggle`, a `drive_view` line with `wish` `OVERVIEW`); tap again: the car.
+    A `settings` line `drive_view` for each tap, and the next drive starts in the view chosen. Near a
+    turn the button fills at once and the overview comes after the turn (`BUTTON_TOO_CLOSE`).
+114. **The way out by the gap.** A drive in the Overview with turns about 1, 1.3 and 2 miles apart:
+    after a turn 1 mile before the next one the view stays normal (`GAP_TOO_SHORT`); 1.3 miles: out
+    at town speeds (`OPEN_ROAD`), normal at freeway speeds where the overview could not stand 30 s
+    (`STAY_TOO_SHORT`); 2 miles: out. Each way out goes from the flat junction view straight to the
+    flat overview, never up and down.
+115. **Down before a turn.** In the Overview at 30 mph the view glides down about 0.22 mi before a
+    turn and stands a moment before the tilt starts (`reason` `APPROACH`, `approachM` about 354); at a
+    red light before the turn it is down already; braking never sends it back out.
+116. **Two turns about 300 m apart.** The tilt stays down between them: the second's `focus` line has
+    `by` `bridge`, and with Large the camera line's `keep` falls from 1 to 0 over 3 s after the first
+    turn, then the second junction closes in as one approach. In the Overview the view does not go
+    out between them.
+117. **A roundabout.** Down before the way in (`focus` with `kind` `COMPLEX` and `why`
+    `roundabout`); nothing moves inside the circle; out after the way out only when the next turn is
+    far enough.
+118. **A freeway exit at 65 mph.** In the Overview the view comes down about half a mile before the
+    exit, about 5 s before the lanes' close view begins, and the run-up holds it to the gore.
+119. **Drag the map.** During a drive: **Recenter 10** in the arrival time's place, standing at 10
+    while the finger rests, counting down from the lift or from the end of a fling, then one glide
+    back (`camera_request` with `by` `timer`, a `camera_hold` line with `ended` `timer`, `heldMs` and
+    `restarts`). A tap of Recenter instead: `by` `driver`, `ended` `recenter`. In the Overview between
+    turns Recenter brings the overview; a few seconds before a turn, the normal view. With
+    **Recenter by itself** Off: "Recenter" alone, and the map stays until a tap.
+120. **Move the map close to a turn.** Inside a turn's approach the count starts at 3 at most
+    (`holdS`), and the view is back before the turn.
+121. **A drive in Normal.** Nothing moves by itself but the tilt and the lane zoom; the camera line's
+    `plan` and `planWhy` and the `drive_view` lines with `silent` true say what the Overview would
+    have done.
+122. **Zoom in before turns off.** A Start and a stretch of turns with it off: the overview all the way
+    (`reason` `PLAIN`), never down; Recenter after a drag brings the overview back.
+123. **The junction view in town, with Large.** Flat about 0.15 mi before right-angle turns: each
+    `focus` line's `atM`, `framingM`, `capM`, `roomDp` and `turnDeg` say where and why. A fork or a
+    ramp off a street from above (`kind` `COMPLEX`, `why` `split`). A turn right after a straight
+    change of the road's name: down before the step changes (`by` `ahead`). A freeway exit as before.
+124. **A Start near the first turn.** One glide into following, the tilt going down with it, no hump
+    of the pitch.
+125. **A tap during a Mapbox style's move.** In Mapbox tuned or Mapbox standard, tap the map while the
+    camera flies after Recenter or the Overview button: the move goes on. Drag during a move: the map
+    is yours, no second flight follows, and no `camera_request` with `by` `recover` (one comes only
+    where a move ended cancelled with nothing newer asked).
+126. **Day and night during a standing overview and a hold.** In the Overview with the overview
+    standing, and while holding the map: nothing is close then, so a change of the look by the sun
+    waits only for a maneuver within 300 m or 20 s, as on the open road; the overview keeps standing
+    through it (`overKept`), the count goes on, and the two buttons take the new look.
+127. **The car's map.** With the car screen: the car's map takes the phone's drive view, also when it
+    is switched on the phone during the drive; after Pan in the car the map stays, with no count,
+    until Recenter in its strip; the car's overview switch puts its map in the Overview for this drive
+    only.
+128. **A street turn with lanes, with Drawn by the app.** The card's lane row and the drawn lanes
+    light from where the view starts to tip, about 0.18 mi before the turn on a 30 mph street, the
+    same place the junction view begins; the `lane_plan` line's street window begins there.
+129. **The frames around each move.** The camera line's `render` (`p95Ms`, `maxMs`) and `camMaxGapMs`
+    in the seconds of each move into and out of the overview, and `camWrites` in a standing overview:
+    about one write every 10 s.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -1576,7 +1649,7 @@ Then share the debug log. What to read in it:
 | `map_style_loaded`: `look`, `keys`, `errors` | The look the map showed as its style loaded, with 16 settings written and 0 refused |
 | `settings` with `day_night` | Each change of Day and night in Settings |
 | `settings` with `lanes_on_map`, `own_route_line`, `measure_own_lanes`, `side_road_fields`, `lane_counts_horizon` | Each change of Lanes on the map (`off`, `mapbox` or `app`), also the one carry-over of the earlier switch Lane details on the map, of the three Debug switches App's own route line, Measure the drawn lanes and Side-road fields on routes, and of Lane counts between lane points |
-| `lane_evidence` | One for each route a drive uses: right after `routes_committed`, and after each `routes_updated` that brings a new route (a reroute, another route taken, the start's replan), never after a refresh. Numbers only, about 700 to 800 bytes: `routeId`; `lengthM`, along the steps' shapes; `steps`; `lanePoints`, the intersections with lane data by the road that leads to them (`freeway`, `ramp`, `street`); `freewayM`, `rampM` and `streetM`, the whole metres of each kind of road whose lanes are `known` (from a point with lane data back to the intersection before it, at most 1,000 m on freeways and ramps and 250 m on streets), `bridged` (between two points of one carriageway with the same lanes, across roads that join or leave on the exit's side; on streets only up to 400 m apart) or `none`; `gaps` without lane data between two points of one carriageway that are not bridged: `count`, `m`, `inWindow` and `inWindowM` (those reaching into a card window, a freeway exit's run-up or the 180 m before a street maneuver, and their metres inside it), `shortOutside` (at most 600 m and outside every window); `unexplained`, changes of the lane count between two points that nothing on the way explains; `exitSideAdded`, the lanes a point lists that the point before it does not (`count`), and of them `sideUnknown`, those whose arrows do not tell their side; `unknownExits`, roads without lane data that leave on the exit's side inside a bridge; `windows`, the run-ups (`runUps`) and street maneuvers (`street`); `streetTurns`, the turns at junctions off freeways, `withLanes` and `withoutLanes`; `designated`, the lanes the points list for each kind (`hov` for car pools, `bus`, `taxi`, `motorcycle`, `moped`, `bicycle`, `other`); `noLanes`, true for a route without any lane data. Then, from the route's lane plan (left out where it could not be made): `zones`, changes of the lane count that nothing on the way explains, drawn without lane lines; `zonesBridged`, stretches without lane data between two drawn ones, drawn the same way; `possibleLanes`, lanes on an exit's side that may already be there before the point that first lists them; `aligned`, changes of the lane count whose side a road, the arrows or the car-pool lanes told; `noneM`, the whole metres left without anything of the app's own lanes. Together: how much of a route the app's own lanes could draw, and how often a gap falls where the card names a lane |
+| `lane_evidence` | One for each route a drive uses: right after `routes_committed`, and after each `routes_updated` that brings a new route (a reroute, another route taken, the start's replan), never after a refresh. Numbers only, about 700 to 800 bytes: `routeId`; `lengthM`, along the steps' shapes; `steps`; `lanePoints`, the intersections with lane data by the road that leads to them (`freeway`, `ramp`, `street`); `freewayM`, `rampM` and `streetM`, the whole metres of each kind of road whose lanes are `known` (from a point with lane data back to the intersection before it, at most 1,000 m on freeways and ramps and 250 m on streets), `bridged` (between two points of one carriageway with the same lanes, across roads that join or leave on the exit's side; on streets only up to 400 m apart) or `none`; `gaps` without lane data between two points of one carriageway that are not bridged: `count`, `m`, `inWindow` and `inWindowM` (those reaching into a card window, a freeway exit's run-up or a street maneuver's approach from where its junction view begins, and their metres inside it), `shortOutside` (at most 600 m and outside every window); `unexplained`, changes of the lane count between two points that nothing on the way explains; `exitSideAdded`, the lanes a point lists that the point before it does not (`count`), and of them `sideUnknown`, those whose arrows do not tell their side; `unknownExits`, roads without lane data that leave on the exit's side inside a bridge; `windows`, the run-ups (`runUps`) and street maneuvers (`street`); `streetTurns`, the turns at junctions off freeways, `withLanes` and `withoutLanes`; `designated`, the lanes the points list for each kind (`hov` for car pools, `bus`, `taxi`, `motorcycle`, `moped`, `bicycle`, `other`); `noLanes`, true for a route without any lane data. Then, from the route's lane plan (left out where it could not be made): `zones`, changes of the lane count that nothing on the way explains, drawn without lane lines; `zonesBridged`, stretches without lane data between two drawn ones, drawn the same way; `possibleLanes`, lanes on an exit's side that may already be there before the point that first lists them; `aligned`, changes of the lane count whose side a road, the arrows or the car-pool lanes told; `noneM`, the whole metres left without anything of the app's own lanes. Together: how much of a route the app's own lanes could draw, and how often a gap falls where the card names a lane |
 | `lane_plan` | One for each route a drive uses, right after its `lane_evidence` line: the lanes the app takes, in numbers only; the card's run-up row, the run-up's start and the ramp it holds through read them, and with Drawn by the app the drawing. `routeId`; `ms`, how long reading the route and making its plan took; `windows`, in route order, the stretches where the plan names a lane and holds lane data, and the approaches where no lane can be named: `kind` (`run_up`; `ramp`, from a gore along the ramp to a split or point with lane data no more than 15 s of driving after it, which the plan names a lane for; `street`; or `approach`, an exit no lane open to every car leads to), `key` (the card's own key of its exit or point, as in `lane_row` and `lane_choice`) and `fromM`, where it begins, in metres from its end (the gore, the split or the junction, which every distance of the entry counts from, negative before it); a run-up's `seam`: `latchM`, where the latch would begin the run-up on its own, `narrowingM`, where the plan's lanes first narrow for a point within reach, and `earlierM`, how much earlier the run-up begins at the seam, where it begins now; `points`, the lane points in it (a ramp's after its gore): `atM`, `lane`, the lane the plan names there counted from the edge of the exit or fork ahead (0 at the edge, lanes that may already be there counted), and `amber`, how many lanes still work there; `moves` of the named lane: `atM` before the point it is made for, `from` and `to` counted from the edge, and `back` where it moves away from the edge, which the plan does only where the road leaves no other way (the named lane leaves the lanes that work, and no lane of them could get there otherwise); `tightM` and `conflictM`, how long the lanes that work allow only the latest lane changes, or none; `unknownExits`, the roads without lane data on the exit's side before it, and `unknownExitDropped`, where the plan lit the edge lane before them all the same; `conflict` (`designatedOnly`: only a car-pool lane leads on; `designatedBetween`: the lanes to take lie beyond one) or `roundabout`, where no lane is named; `possibleLanes` and `zones` in it. After a change of route: `replanMoves`, 1 where the lit lane would move once the new plan takes over, 2.5 s of driving ahead of the car, and `replanKept`, true where the old count from the edge was kept because both routes run on the same carriageway at the car. `odd`, over the route: `activeOutsideValid`, lanes the route prefers but says cannot be used, and `arrowContradicts`, lanes it can be followed from whose one arrow points away from the exit. About 400 to 650 bytes for a route with one freeway exit |
 | `side_roads` | Only with **Settings → Debug → Side-road fields on routes** on: one for each route of a preview's answer (`reason` `preview`, after `route_response`), and one for each route a drive uses, after its `lane_evidence` and `lane_plan` lines: `start`, `reroute` (the new route of a reroute) or `new_route` (the start's replan, another route taken); never for a refresh. `routeId`; `linkAccess` and `linkFormOfWay`, whether the route's own request asked for each field (null where the route holds no request); `intersections`, and of them `withAccess` and `withFormOfWay`, how many came with each field; `access`, every road at every intersection by its value: `none` (0), `forward` (-1), `backward` (1), `both` (2), `other` (a value the Directions models do not list) or `missing` (which way `forward` is, Mapbox does not document); `formOfWay`, the same by its word (`freeway`, `multiple_carriageway`, `single_carriageway`, `roundabout`, `ramp`, `service_road`, `pedestrian_zone`, `unknown`, `other` or `missing`); `streetManeuvers`, the turns at junctions the camera frames as a street junction (`total`), and of them those whose approach road had an access value (`withAccess`); `streetOwnRoad`, at each intersection a street leaves, the road the route leaves on: `oneWay` (forward or backward), `twoWay` (both), `none`, `other` or `missing`; `jsonBytes`, the route as the app holds it, in bytes of uncompressed JSON (null where it could not be measured, with an `error` line, `where` `side_roads`); `fieldsBytes`, the part of it that is the two fields, so that the same route without the switch is `jsonBytes` less `fieldsBytes`; `growthPct`, how much larger they make the route, in percent of it without them, to one decimal. Counts, sizes and kinds only, about 700 bytes, a few a drive |
 | `lane_agree` | One each time the card begins to show a lane row at a point with lane data, once the plan of its route is there: `source` (`run_up`, `choice` or `maneuver`: a maneuver's own row at an exit or a fork on a freeway, or at a maneuver on a street, where the row is read from the plan), `key`, `aheadM`, how far ahead of the car the point is; `lit`, the lanes the card lights, from the left (on a run-up the row read from the plan, outlines never lit); `planLit`, the lane the plan names there, and `amber`, the lanes that still work there; `agree`, and where they do not, `why`: `lit` (the card lights one lane, the plan another), `amber` (the card lights several lanes, or the plan names none there, and they are not the lanes that work), `not_named` (one lit lane where the plan names none and more work), `no_lane` (no lane can be named on this approach: only a car-pool lane leads on, the lanes to take lie beyond one, or a roundabout), `row` (the row's lanes are not the point's), `no_point` (not a point of the plan) or `words` (the card names the lanes in words where the plan would wait); then what the words depend on: `opensAhead`, a lane on the exit's side opens or may begin between the car and the point, or the lit lane's count from the edge changes; `unknownAhead`, a road without lane data on the exit's side still lies ahead on the step; `exact`, the card's own count leaves no doubt; and `outline`, the point's lanes the app's drawing would not show at the car yet. About 250 to 300 bytes; one to four for each run-up |
@@ -1598,6 +1671,12 @@ Then share the debug log. What to read in it:
 | Step fields `voiceAt` | Where along each step Mapbox's voice instructions would speak, in metres before the step's end, from the route the app has; no voice is played |
 | `settings` with `tones`, `tone_before_turn`, `tone_at_turn`, `tone_duck`, `tone_level`, `tone_lead_in_ms` | Each change of a Sound row, or of the Debug lead-in |
 | `error` with `where` `audio` or `tones` | A call to the tones failed: `audio` in the engine, once a drive; `tones` in the hand-over to the player, once while the app runs. The drive and the next tone go on |
+| `camera`: `view`, `plan`, `planWhy`, `pointM`, `pointKind`, `approachM`, `near`, `hold`, `holdS`, `over`; with Smooth follow `focusKind`, `framingM`, `frameCapM`, `frames`, `latchedBy`, `keep`, `overFits`, `overKept` | The drive views and the junction view each second: the view chosen, what the Overview's plan wants and why (also in Normal), the point ahead and its approach, a hold's count, the overview fitted, and where the junction is framed from ([CAMERA.md](CAMERA.md), Logging) |
+| `drive_view` | Each decision of the drive views or change of what the map wants: `view`, `wish`, `reason`, `pointKind`, `pointM`, `gapM`, `approachM`, `standS`, `speed`, `planSpeed`, `near`, `silent`, `turnZoom`, `why` |
+| `camera_request` | Every request of the camera: `mode`, `from`, `by` (`driver`, `plan`, `timer`, `start`, `style`, `recover`), `why`, during a drive `pointM` and `speed`, with a Mapbox style `serial` |
+| `camera_hold` | Each hold of the map that ended: `kind`, `ended`, `heldMs`, `restarts`, `near` |
+| `focus` | With Smooth follow, each latch of the junction view: `kind`, `why`, `by`, `atM`, `framingM`, `capM`, `capZoom`, `roomDp`, `afterM`, `turnDeg`, `chainedM`, `speed`, `laneZoom` |
+| `settings` with `drive_view`, `overview_turn_zoom`, `recenter_seconds` | Each change of the three rows, and each tap of Overview, which stores the drive view |
 
 Reading the connectivity lines:
 

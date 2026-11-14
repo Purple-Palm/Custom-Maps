@@ -60,6 +60,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 
 | Trip logs go to a private GitHub repository: a fine-grained token for that repository only, 366 days, a reminder two weeks before it expires, an upload after every trip and Upload now | [GitHub log upload](#github-log-upload) | 35 |
 | A bright, colourful day map in the car, the existing dark map at night; since step 1b the car's map shows the phone's look, Auto by the sun or the driver's choice | [Day and night](#day-and-night) | 36, 48, 50 |
 | No map on the phone while the car shows one during a drive: the list of the maneuvers ahead instead, the map one tap away | [Step 1c (built)](#step-1c-built) | 51 |
+| The car's map takes the phone's drive view and Zoom in before turns; no count and no move by itself after Pan; the bar's two buttons are the phone's | [The drive views on the car](#the-drive-views-on-the-car) | 57 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -861,6 +862,57 @@ Other notes:
 - The zoom buttons step by 0.5 and the zoom stays between 6 and 20, as in Mapbox's
   `CarNavigationCamera`.
 
+### The drive views on the car
+
+Built with the phone's drive views in stage 1.1's second round ([CAMERA.md](CAMERA.md), Drive view;
+DECISIONS 57):
+
+- **`DriveCamera` on the car.** Every car surface's `MapScene` has a `DriveCamera` of its own, so the
+  car's map has the Overview drive view and the earlier junction view as the phone's does, framed by
+  `CameraTuning.CAR` and the car's own padding and areas. It takes the drive view and **Zoom in
+  before turns** stored on the phone (the Settings rows and the phone's Overview button), on the
+  surface there is and on every later one.
+- **No count, and no move by itself after Pan.** Recenter by itself, its count and the two buttons
+  of the guidance bar are the phone's: the car's map keeps Recenter by itself at Off, so after Pan, a
+  scroll or a zoom it stays where the driver put it until Recenter in its strip.
+- **The car's strip as before.** The map action strip keeps Pan, zoom in, zoom out, and Recenter
+  while the map is the driver's, otherwise the switch between following and the overview; they go
+  through the drive views now: the overview switch puts the car's map in the Overview drive view for
+  the drive, not stored, and following or Recenter in the Normal one, the car at once. The screens
+  and the routing card (`CarHomeScreen`) are as before.
+- **Planned for a later step (W21 on the car).** The map action strip holds at most four actions:
+  Recenter only while the driver holds the map, empty otherwise, and the Overview switch on the
+  navigation action strip (also at most four, beside Search and End). No digits on a template
+  button, so no count in the car.
+
+### Two halves of the car screen (W20): facts only
+
+The owner's wish: the car screen in two halves, the left the Overview, the right the normal view
+with the strong lane zoom, each switchable to Overview. Not designed and not planned yet; it belongs
+with the roadmap's stage 8. The facts, read in the libraries:
+
+- **One surface per car screen.** The Car App Library gives a navigation app one surface callback
+  and one surface, with its size and dpi, a visible and a stable area of it, and the driver's
+  scroll, fling, scale and click in its coordinates.
+- **One map per surface.** Mapbox's `MapSurface` renders one map into the surface given to it, and
+  `MapboxCarMap` builds one on the app's one surface callback. An Android surface takes one producer
+  at a time, so two map surfaces cannot draw into the same car surface.
+- **Ways two views could share it:** two `MapSurface`s rendering offscreen with the app compositing
+  both halves with its own GL, replacing `MapboxCarMap` with its own surface callback; one map whose
+  camera alternates, which is not two live views; templates, which put a list or a pane over the
+  map, never a second map; or a private virtual display on the car's surface with a `Presentation`
+  holding two map views side by side, composed by the system (not tried on a car or a phone). Either
+  way the host's gestures arrive through the one callback and must be routed to a half by their
+  position.
+- **What each half would need:** its own camera and `DriveCamera` (already one per map), its own
+  padding inside the visible area, its own drive view and Zoom in before turns, and switches as
+  clicks on the map, since the action strips are one per screen (a click needs car API level 5); one
+  routing card still shows one next step.
+- **Risks:** two full map renders on the phone next to the phone's own map (GPU, heat and battery at
+  the car's 30 to 60 frames a second), twice the style loads and tile memory, halves partly covered
+  by the host's cards and strips, the logo and attribution visible in each map's own frame, an own
+  compositor on the car's render path where a dropped frame shows, and two moving maps at a glance.
+
 ### Day and night
 
 - **The car's map shows the app's one look, the phone's** (DECISIONS 50, the owner's choice of
@@ -973,7 +1025,8 @@ Other notes:
 
 - `NavigationTemplate.Builder.build()` throws without an action strip.
 - The fourth map button is Recenter while the camera is IDLE; otherwise it switches between following
-  and the overview.
+  and the overview. Since the drive views the two go through them
+  ([The drive views on the car](#the-drive-views-on-the-car)); Recenter never counts down in the car.
 
 ### The template quota
 

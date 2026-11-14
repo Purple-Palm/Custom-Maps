@@ -10,7 +10,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 1.1 | Guidance polish after the first drives, trip history and prediction (next build) | In progress |
 | 2 | Android Auto: car screen on the navigation template | Steps 1 and 1b built: the map and the drive in the car, Start on the phone; the rest in steps |
 | 3 | Signed release build and Google Play: internal testing, later production | Internal testing built (2026-11-11); production later |
-| 4 | Smart camera: automatic overview and following | Planned |
+| 4 | Smart camera: automatic overview and following | Built in stage 1.1 (the Overview drive view) |
 | 5 | 3D navigation and visual polish | Planned |
 | 6 | Junction view in the car's routing card (variant A) | Planned |
 | 7 | Guidance tones instead of voice | Tones built in stage 1.1; voice open |
@@ -92,6 +92,15 @@ zoom setting and the trip history with prediction.
   the dark look of before, by the sun at the phone's position (Auto) or by hand in **Settings → Day
   and night**; during a drive a change by the sun waits until no turn is close. Built; not yet on a
   drive ([DECISIONS.md](DECISIONS.md), 48).
+- **The Overview drive view and Recenter by itself,** stage 4 brought forward, as the owner asked:
+  **Overview** in the guidance bar, or **Settings → Drive view**, shows the rest of the route from
+  above and comes down to the normal view by itself before each turn, exit and lane choice, going
+  back out when the next one is at least 1.25 miles on; **Zoom in before turns** off keeps it up all
+  the way. A map moved during a drive goes back by itself 10 s after the last touch (**Recenter by
+  itself**: Off, 5, 10 or 20 s), sooner near a turn, with **Recenter** and its count in the arrival
+  time's place. The junction view comes earlier, flat and framed from about 0.15 mi before a town
+  turn, and stays down between two close turns. The car's map follows the drive view chosen on the
+  phone, without the count. Built; not yet on a drive ([DECISIONS.md](DECISIONS.md), 57).
 - **Guidance tones,** stage 7 brought forward, as the owner asked: soft tones of the app's own, one
   about 25 seconds before a turn, an exit, a lane choice or the destination and two right before it,
   with the music lowered only a little and briefly; **Settings → Sound** turns each part on or off
@@ -197,12 +206,16 @@ Left, for production (not scheduled; the owner decides when):
   privacy policy link in Play Console.
 - R8 on the internal track with drives, preferably without obfuscation.
 
-## Stage 4: smart camera (planned)
+## Stage 4: smart camera (built in stage 1.1)
 
-- Overview by default, following before maneuvers (distance threshold from speed, hysteresis, manual
-  touch pauses automation for 20 s), the same on phone and car, settings on the phone, scenario tests.
+- Built in stage 1.1's second round as the **Overview drive view** ([DECISIONS.md](DECISIONS.md), 57;
+  [CAMERA.md](CAMERA.md), Drive view): the overview, coming down to following before each maneuver
+  by the speed and the junction, back out when the next one is far enough away, the same on the
+  phone and the car, its settings on the phone, with scenario tests. The planned 20 s pause after a
+  touch became Recenter by itself, 10 s by default, counted from the last touch; the Overview is a
+  drive view of its own, not the default.
 - The strong zoom into the junction before each maneuver, once planned here, is the Large lane zoom
-  of stage 1.1.
+  of stage 1.1, from the junction view's earlier framing since the same round.
 
 ## Stage 5: 3D navigation and visual polish (planned)
 

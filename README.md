@@ -91,9 +91,15 @@ The same builds also reach the phone through Google Play, where they update by t
    Tap a route, on the map or in the list, to choose it.
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
    notification. The maneuver card shows the next turn, its distance and, from two miles before it,
-   its lanes; the bottom bar shows the arrival time, what is left, **Overview**/**Recenter** and
-   **End**. With the largest font sizes on a narrow phone, the arrival time and what is left take a
-   row of their own above the two buttons, for the whole drive, so that no number is cut off. Right
+   its lanes; the bottom bar shows the arrival time, what is left, **Overview** and **End**. With the
+   largest font sizes on a narrow phone, the arrival time and what is left take a row of their own
+   above the two buttons, for the whole drive, so that no number is cut off. **Overview** switches
+   the drive view and keeps it for the next drives (also **Settings → Drive view**): **Normal**
+   follows the car; **Overview** shows the rest of the route from above and comes down to the normal
+   view by itself before each turn, exit and lane choice, unless **Zoom in before turns** is off. When
+   you move the map during a drive, **Recenter** takes the arrival time's place and counts down; the
+   map goes back by itself after the last touch (**Recenter by itself**, 10 s unless set otherwise,
+   sooner near a turn), or at once on a tap. Right
    after a new route, as after leaving the route, the card can dim for a moment and show no
    distance, until the new route's first instruction arrives.
 5. Guidance stops at the destination (**Done**) or with **End**. Both stop the trip session, and so
@@ -164,7 +170,9 @@ car's quality guidelines.
    distance and road, the lanes to take, the turn after it when the phone shows **Then**, and the
    arrival time, the time and the distance left. **End** in the car ends the drive on both screens,
    as the phone's End does. At the destination the car says so until **Done** on the phone.
-4. The map's buttons in the car: pan, zoom in and out, and **Recenter** or the overview.
+4. The map's buttons in the car: pan, zoom in and out, and **Recenter** or the overview. The car's
+   map takes the drive view chosen on the phone; after a pan it stays where you put it until
+   **Recenter**, with no count.
 5. During a drive while the car shows the map, the phone shows the turns ahead as a list in place of
    its own map, so that the phone does not draw a second map: the maneuver card at the top, then the
    turns that follow with their distances from the car, and the guidance bar with **Map** and **End**,

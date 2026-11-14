@@ -221,6 +221,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - The choice is stored with the app settings as `camera_style`; a missing or unknown value reads as Smooth follow.
 - What is not camera behaviour is the same in every style: the top padding that only grows during guidance, the band it keeps free for the Then chip (37), the route line fix, a fresh puck for every drive, and following the car before guidance ([CAMERA.md](CAMERA.md)).
 - The debug log records the active style on every camera line and every change of the setting, so drives can be compared.
+- **Since the drive views (57):** every style carries out the Overview drive view and Recenter by itself; the two Mapbox styles do it with their own flights, which a tap on the map no longer stops (their camera's moves are protected from it), and a move that ends cancelled all the same is asked for once more. They keep the SDK's own junction framing from 180 m.
 - **Alternative:** a single camera. Comparing styles on the same roads is the quickest way to tune them.
 
 ## 27. A per-frame follow camera
@@ -753,3 +754,33 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - How deep the dip goes is Android's and the music app's: some apps pause or are not lowered at all.
   - With the car on another source than the phone, such as the radio, the tones are not heard; the card still guides.
   - No Mapbox request, no trip session touched, no new call into the Navigation SDK and nothing per display frame: one small call for each update of the navigator, and a short task on the player's thread for each tone.
+
+## 57. The Overview drive view and Recenter by itself
+
+- **Chosen** (stage 1.1's second round, the owner's W1 to W3, W18, W21 and W22; this replaces stage 4's plan in the roadmap):
+  - **Two drive views,** chosen with the guidance bar's **Overview** button or in Settings, stored and taken by the car's map too. **Normal** is guidance as before. **Overview** shows the rest of the route from above and comes down to the normal view by itself before each turn, exit, fork, merge or freeway lane choice: 5 s of driving before the camera's own schedule for it starts (the tilt, or the lanes' close view), at the larger of the car's and the route's speed, so the view has settled before the junction view begins and is down before a red light. After the maneuver it goes back out only when the next one is at least 1.25 miles on and the overview could stand at least 30 s before it; 1.5 miles or more always goes out; it waits 8 s after coming down by itself and 30 s after a new route, since reroutes come in bursts. With **Zoom in before turns** off it is a plain Overview that never comes down. In Normal the plan runs silently and is logged, so ordinary drives tune it.
+  - **Recenter by itself:** a map the driver moves during a drive is his; **Recenter** takes the arrival time's place in the bar and counts down from 10 s (5, 10 or 20, or Off) after the last touch and the end of the map's own move, at most 3 s while a turn is near, standing still under a resting finger. At 0, or on a tap, the map goes back to the drive view: the car in Normal, and in the Overview the overview, also between close turns, the normal view only where a turn is near, the overview could not stand 10 s before the next approach, or off the route. The car's map never counts down and never moves by itself after Pan.
+  - **Two buttons (W21):** Overview, always one word, a switch outlined in Normal and filled tonal with an amber ring in the Overview, in both looks; Recenter, the bright amber button, only while the map is held. The bar's height never changes.
+  - **The junction view earlier (W18),** in both drive views with Smooth follow, on the phone and on the car (the two Mapbox styles keep the SDK's own 180 m): the view is flat and the junction framed from 240 to 320 m before a turn (12 s of driving) and 280 to 400 m before a complex junction (15 s: a fork or ramp off a street, a roundabout's way in, five roads or more, a sharp turn or a U-turn), no farther than the frame fits on the screen and never later than the SDK's 180 m; the tilt starts 3.5 s before that, as before. The kind comes from the step's own maneuver, read once for each step, and a straight step does not hide the junction after it. The tilt and the frame are one decision, latched for the step, told to the navigation SDK through its framing override. Two close turns keep the tilt down between them (up to about 400 m apart at 30 mph), and the first junction's close zoom lets go over 3 s so the next frame closes in as one approach. The tilt is folded into a move into following. The lane plan's street card windows begin where the junction view begins, from the same function.
+  - **The plain Overview (W22):** the overview for the whole drive, also at the start and off the route; Recenter brings it back.
+- **Alternatives:**
+  - A way back out decided in seconds only: the owner gave miles, and at 70 mph it would need 2.2 miles where he said 1.5.
+  - An own overview of the road to the next turn, road ahead up: not asked, a large own fit, and it changes the view the owner liked.
+  - Calmer 3 s moves with a 7 s lead: more motion and more numbers; the 2.2 s move with a 5 s lead is checked in the replay.
+  - A look at the overview on the Overview button near a turn, or a "Normal" label on the button: a look takes the view away right before a turn, and a switch reads better than a second word.
+  - A ring instead of digits on Recenter: the owner asked for a countdown.
+  - Recenter back to what the plan would show, the normal view between close turns: the owner wants the Overview back, not the zoomed normal view.
+  - An overview that would stand under 10 s after a hold: a flight out and straight back down.
+  - The banner's type for the junction's kind: another vocabulary than the steps', in which straight name changes keep tilting, street on ramps are turns and a roundabout's way out is complex.
+  - Two copies of the SDK's 180 m, one for the tilt and one for the frame: the frame moved with the speed and dropped when the car braked or stood with a metre of wobble; one latched decision cannot drift.
+  - A zoom out before the frame, so 0.2 mi fits a small screen: the owner likes the move as it is, the tilt and then the frame and the zoom.
+  - The camera's screen cap for the planner too: on a small screen it would only shorten a harmless normal view, and the planner must never come down later than the camera.
+  - Asking a cancelled Mapbox move again from inside its end listener: the SDK calls it from inside the next request and from an idle request, and a flight started there could never be cancelled.
+  - A long press on Overview for the plain Overview: hidden, and a mis-press while driving would silently change what happens before the next turn.
+  - A third button, or Recenter floating over the map: the bar has room for two and Recenter; over the map it would cover what the driver moved the map to see.
+- **Why:** the owner asked for the whole route on the screen with the normal view before each maneuver, back to the Overview after a look around, and the junction from above earlier, as he liked it at about 500 ft, but earlier. One planner on the route's own points and the camera's own windows keeps the view down before the camera needs it and never flies out and straight back.
+- **Cost:**
+  - The numbers (5 s, 1.25 and 1.5 miles, 30 s, 8 s, 10 s, 3 s, 30 s after a new route; the junction view's 12 and 15 s) come from the owner's words and the replay; the camera and `drive_view` lines are there to tune them ([DRIVES.md](DRIVES.md), checks 112 to 129).
+  - In a town with a turn every half mile the Overview mostly looks like the normal view: that is the owner's own rule.
+  - The framing override is delicate and experimental in the SDK; if an upgrade drops it, the same decision goes through the public trigger distance and excluded list.
+  - No Mapbox request, no trip session touched and nothing per display frame: one decision per navigator update and per gesture, and a ticker four times a second while a count runs. The overview's tiles are the Maps SDK's, as the preview's.

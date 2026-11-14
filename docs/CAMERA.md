@@ -29,6 +29,9 @@ from simulation. The owner answered the camera questions; the answers are
 - The early turn on gently curving roads stays.
 - A strong zoom before turns, so the lanes are large.
 - Camera styles to choose from in Settings, so the old and the new camera can be compared.
+- Later, in stage 1.1's second round: the whole route on the screen during a drive, coming down to
+  the normal view before each maneuver and back out after it; a moved map that goes back by itself;
+  and the junction from above earlier than at about 500 ft ([Drive view](#drive-view)).
 
 ## Camera styles
 
@@ -395,9 +398,13 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 - While following, the centre chases the drawn puck, not the raw fix. The camera trails the car a
   little and settles onto it when the car stops.
 - `MapboxNavigationViewportDataSource` stays as the source of targets. The look-ahead bearing (the
-  early turn), the zoom, the maneuver framing and the overview are unchanged; with the Large lane
-  zoom the camera adds its close views on top (see [Lane zoom](#lane-zoom)).
-- A timed, eased schedule (`ManeuverFocus`) replaces the 45°/0° tilt switch.
+  early turn), the zoom and the overview are its own; whether it frames the next maneuver is the
+  camera's decision, made with the tilt and latched for the step; with the Large lane zoom the
+  camera adds its close views on top (see [Lane zoom](#lane-zoom)).
+- A timed, eased schedule (`ManeuverFocus`) replaces the 45°/0° tilt switch, from a distance by the
+  kind of junction and the speed ([The tilt before a turn](#the-tilt-before-a-turn)).
+- Whether the map shows the car or the overview during a drive is the drive view's
+  ([Drive view](#drive-view)); the camera carries it out.
 - When nothing moves, the loop stops: no frames, no camera writes.
 
 ### Classes
@@ -407,7 +414,14 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `CameraTuning` | `:core-nav`, `nav/camera/CameraMotion.kt` | Every constant, in seconds, degrees and metres, with `PHONE` and `CAR` presets. One place to tune after a drive. |
 | `Spring` | same file | Critically damped spring with an exact closed-form step. From rest it never passes its target. |
 | `SampleRamp` | same file | Moves from where it is to each new sample at a constant rate over 1.1 s. Its lead, rate × τ, is what a spring aims at: the spring then trails the ramp by τ × rate and stops on the last sample, not past it. |
-| `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). After a maneuver the Large lane zoom lets the junction's zoom go along the same curve. |
+| `ManeuverFocus` | same file | The tilt schedule: 0 on the road, 1 over the junction; tilt = lerp(45°, 0°, focus). It latches the junction and its frame once a step, keeps the tilt down between close turns, and gives the Large lane zoom the share of the last junction's zoom still kept (`keepAt`). |
+| `FocusRule`, `FocusWindow`, `ManeuverFacts` | `:core-nav`, `nav/camera/JunctionFocus.kt` | Which kind of junction a step's own maneuver is to the view (none, a plain turn or a complex junction), where its frame begins and where the tilt starts down, and how far back the screen lets the frame begin. One source for the camera and the drive views' planner. |
+| `DriveView`, `DriveCameraSettings`, `DriveViewControl`, `RecenterControl` | `:core-nav`, `nav/model/DriveView.kt` | The two drive views, their three settings, and what the guidance bar's two buttons read. |
+| `DriveViewRule`, `DriveViewPlanner`, `DriveViewTuning`, `ViewPoint`, `ViewInput` | `:core-nav`, `nav/camera/DriveViewPlan.kt` | When the Overview drive view comes down to the normal view before a point ahead and when it goes back out. See [Drive view](#drive-view). |
+| `MapHold` | `:core-nav`, `nav/camera/MapHold.kt` | The map the driver holds during a drive, and Recenter by itself's count. |
+| `DriveCamera` | `:core-nav`, `nav/camera/DriveCamera.kt` | One for each map: the planner, the hold and the settings together; what to ask the camera for, only when that changes; the buttons' states and the lines' fields. |
+| `OverviewHold` | `:core-nav`, `nav/camera/OverviewHold.kt` | Whether a standing overview keeps the frame it shows while the data source's new fit lies inside it. |
+| `RecoverRule` | `:core-nav`, `nav/camera/RecoverRule.kt` | Whether a Mapbox style's move that ended cancelled is asked for again. |
 | `Angles`, `easeInOut`, `lerp` | same file | Angle wrapping, smootherstep (zero speed and acceleration at both ends), interpolation. |
 | `OncePerUpdate` | `:core-nav`, `nav/camera/OncePerUpdate.kt` | Which message of a navigator update the frame is computed on: the progress, or the location when no progress came for 1.5 s or the position jumped. Used by Mapbox tuned and Smooth follow. |
 | `JumpFrame` | `:core-nav`, `nav/camera/JumpFrame.kt` | After a seek of a simulated drive, the new place's progress frames it and the camera goes there at once; the locations before it move nothing unless that progress is 1.5 s overdue. Used by both Mapbox styles. |
@@ -419,18 +433,20 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `guidancePitch` | `:core-nav`, `nav/camera/CameraMotion.kt` | Smooth follow's tilt: 45° on the road, up to 55° along the lane focus with Large, and down to 0° over a junction, which wins. |
 | `RunUpRule`, `CardLanes` | `:core-nav`, `nav/guidance/` | The card's row on a run-up, with its edge points, the composed lane and the lanes to use in words; and which lane row the card draws. |
 | `LaneChoices` | `:engine-mapbox`, `navigation/LaneChoices.kt` | The points with lanes ahead of the car, read from the route once for each step, and the run-up's one latch and row. The engine owns the one copy; the cameras and the maneuver card read from it. |
-| `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What `PhoneMap` asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress` (with the lane choices ahead), `onPuckGlide`, `onGuidanceEnded`, `setLaneZoom`, `setVisible`, `diagnostics`, `destroy`, and a listener for its state and for who took the map. |
+| `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What the map scene asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress` (with the lane choices ahead and the facts of the step's maneuver), `onPuckGlide`, `onGuidanceEnded`, `onJump`, `setLaneZoom`, `setVisible`, `diagnostics`, `requestSerial`, `destroy`, and a listener for its state, for who took the map, for each latch of the junction view and for a move asked again. |
+| `ManeuverFactsReader` | `:engine-mapbox`, `navigation/ManeuverFactsReader.kt` | The facts of the maneuver at the end of the car's step, read from the route once for each step: its kind, the turn's angle, the short steps framed with it, and the junction after a step the view stays up for. |
+| `ViewPoints` | `:engine-mapbox`, `navigation/ViewPoints.kt` | The points ahead the normal view is wanted for, read from the route once for each step, with their metres and seconds at each update, for the drive views' planner. |
 | `LaneZoomFrames` | `:engine-mapbox`, `map/camera/LaneZoomFrames.kt` | What the lane zoom changes on the viewport data source for each camera style, and the way a change of it reaches a route the data source already has. |
-| `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`. |
+| `NavigationCameraAdapter` | `:engine-mapbox`, `map/camera/NavigationCameraAdapter.kt` | The two Mapbox styles: `NavigationCamera` and `NavigationBasicGesturesHandler` behind `GuidanceCamera`, its moves protected from a tap ([The Mapbox styles' moves](#the-mapbox-styles-moves)). |
 | `FollowingTransition` | `:engine-mapbox`, `map/camera/FollowingTransition.kt` | Mapbox tuned's longer animators between following frames. |
 | `SmoothNavigationCamera` | `:engine-mapbox`, `map/camera/SmoothNavigationCamera.kt` | Smooth follow: the controller, a `GuidanceCamera` and `Choreographer.FrameCallback` with modes IDLE, IDLE_FOLLOW, FOLLOWING and OVERVIEW. Its frames come from a `FrameSource`. |
 | `FrameSource`, `DisplayFrames` | `:engine-mapbox`, `map/camera/FrameSource.kt` | Where Smooth follow and the zoom buttons' ease get their frames, as from Choreographer: the main thread's display frames on the phone (`DisplayFrames`), the car's frame clock in the car. |
 | `GuidancePuck` | `:engine-mapbox`, `map/camera/GuidancePuck.kt` | The puck during guidance: a `LocationProvider` around `NavigationLocationProvider`. It glides 1.1 s per fix and jumps on a teleport, from where it glides on for one glide along its heading at its speed (`PuckGlide`); for Mapbox standard it glides 1.0 s and slides also on a teleport. In every style, Mapbox standard included, the first position after a seek of a simulated drive (`onFix(jump = true)`) puts it at the new place at once, and it glides on from there in the same way. `newDrive()` swaps in a fresh inner provider at every Start, in every style. |
 | `PlatformPuck` | `:engine-mapbox`, `map/camera/PlatformPuck.kt` | The puck before guidance: the Maps SDK's `DefaultLocationProvider`, a report of each new position for the camera and the data source, and a jump in place of the glide when a position is far from the drawn car. |
 | `LaneDetails`, `RouteLineWidths` | `:engine-mapbox`, `map/LaneDetails.kt`, `map/RouteLineWidths.kt` | Lane markings on the map, set after the SDK has turned them off, and the route line that stays thin close in while they are on. |
-| `MapScene` | `:engine-mapbox`, `map/MapScene.kt` | Everything of a map that is not tied to a view, the same on the phone and in the car: creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, sets up the data source for the lane zoom, and writes the camera line to the debug log (in the car with `screen` `car`). |
+| `MapScene` | `:engine-mapbox`, `map/MapScene.kt` | Everything of a map that is not tied to a view, the same on the phone and in the car: creates the camera of the chosen style, hands it every navigator update with the lane choices ahead, carries out what its `DriveCamera` wants, sets up the data source for the lane zoom, and writes the camera line to the debug log (in the car with `screen` `car`). |
 | `PhoneMap` | `:engine-mapbox`, `map/PhoneMap.kt` | The phone's map view around its `MapScene`: the logo and attribution strip, the compass, the look's (i) dialog, the fade-in and the tap that picks a route. |
-| `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, the lane zoom and Lanes on the map, measures the padding, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
+| `MapScreen` | `:app`, `ui/map/MapScreen.kt` | Passes on the chosen style, the lane zoom, Lanes on the map and the drive views' settings, measures the padding, hands the Overview and Recenter buttons their states and taps, and says when the map is on screen: from the activity's start to its stop (`LifecycleStartEffect`). |
 | `CarNavigationMap` | `:engine-mapbox`, `car/CarNavigationMap.kt` | The car's map (stage 2, step 1): a `MapScene` with `CameraTuning.CAR` on the car's surface, with its padding, gestures, zoom buttons, logo and attribution, its frame clock, puck and frame rate cap (step 1b), and the app's look. |
 | `CarFrameClock` | `:core-nav`, `nav/car/CarFrameClock.kt` | The car map's frame clock, its decisions: the display's frames while they come, a timer every 16 ms once none has come for 50 ms while a frame is wanted, back to the display when two of its frames come within 25 ms, never two ticks within 15 ms. |
 | `CarFrames` | `:engine-mapbox`, `car/CarFrames.kt` | The clock on Android for each car surface: Choreographer and a main-thread `Handler`, the car's `FrameSource`, the `frame_clock` lines, and the rate of the display's frames and whether the clock left them, for the cap. |
@@ -454,11 +470,15 @@ The navigator delivers the location and then the progress of the same update, on
    it replaces routes, or if the position jumped (`OncePerUpdate`).
 2. **Progress.** `onRouteProgress` feeds `ManeuverFocus` with the step key (route id, leg, step), the
    metres to the maneuver and along the step (`RouteStepProgress.distanceRemaining` and
-   `distanceTraveled`), the banner's maneuver type, the data source's excluded maneuver types and
-   the speed. It then sets the data source's `followingPitchPropertyOverride` to the tilt the camera
-   will show 1.1 s from now, so the zoom is fitted for that tilt. The data source takes the progress
-   and is evaluated once.
+   `distanceTraveled`), the facts of the step's maneuver (`ManeuverFacts`, read by the engine once
+   for the step; without them the banner's type by the SDK's own rule), the screen's cap on the
+   junction's frame, worked out once per progress, and the speed. It then sets the data source's
+   `followingPitchPropertyOverride` to the tilt the camera will show 1.1 s from now, so the zoom is
+   fitted for that tilt, and `isFramingManeuverPropertyOverride` to whether the camera frames the
+   maneuver now. The data source takes the progress and is evaluated once.
 3. The new `ViewportData` reaches the controller's observer, which only stores it.
+4. After the camera, the map's `DriveCamera` takes the points ahead (`ViewPoints`) and asks the
+   camera for following or the overview only when what it wants changes ([Drive view](#drive-view)).
 
 Result: one sample per update, instead of two animator restarts.
 
@@ -531,39 +551,105 @@ From the compiled code, simulated at 60 frames a second:
 
 ### The tilt before a turn
 
-`ManeuverFocus` keeps the SDK's rule (the same maneuver types, flat from 180 m) and replaces its
-step with timed, eased moves:
+Since stage 1.1's second round (the owner's W18, DECISIONS 57) `ManeuverFocus` decides itself when
+the view goes down before a junction and when the junction is framed, by the kind of junction and
+the speed, and tells the data source; the moves are timed and eased:
 
-- **Which maneuvers.** Every banner type except the data source's excluded ones: continue, merge,
-  on ramp, off ramp and fork. For those the view stays at 45°.
-- **Down** over 3.5 s, starting at 180 m + speed × 3.5 s (speed counted as at least 3 m/s), so the
-  view is flat just as the SDK's maneuver framing starts at 180 m. Once started for a step it stays
-  latched: braking never tilts the view back up before the turn.
+- **Which maneuvers** (`FocusRule`), by the step's own maneuver, which the engine reads once for
+  each step (`ManeuverFactsReader`), never by the banner's word for it:
+
+  | Kind | Maneuvers | The view |
+  |---|---|---|
+  | none | merge, depart, notification; continue or new name straight on; and where the road leading to it is a freeway (its last intersection's freeway flag): fork, on ramp, off ramp, continue with a turn | stays at 45°; on freeways the long view and the lanes' close view |
+  | turn | turn, end of road, the way out of a roundabout or rotary, arrive, unknown, new name with a turn | flat from the turn's framing distance |
+  | complex | off a street: fork, on ramp, off ramp, continue with a turn; the way into a roundabout or rotary; a junction of five roads or more; a sharp turn or a U-turn | flat from the complex framing distance, about 3 s earlier |
+
+  A fork or an off ramp off a street now tilts and is framed (the SDK excludes both); a straight new
+  name, which the banner calls `turn straight`, no longer tilts. Without the facts, as for a step
+  the reader could not read, the view goes by the banner's type as the SDK does
+  (`FocusRule.fallback`): the five types the SDK excludes stay up, any other is a plain turn.
+- **Where** (`FocusWindow`), with v the speed, counted as at least 3 m/s: the frame begins at
+  v × 12 s within 240 to 320 m before a turn and v × 15 s within 280 to 400 m before a complex
+  junction (the framing distance), no farther out than the frame still fits on the screen (the cap,
+  below) and never later than the SDK's own 180 m; the tilt starts down 3.5 s of driving before
+  that, so the view is flat as the frame begins.
+- **The cap**: the longest approach whose frame fits above the car at the zoom the view holds (the
+  road's 16.35, or with Large the lanes' close view's while that holds the view): the map's height
+  under the padding at the car's latitude, less the road kept after the junction as far as it lies
+  along the approach (a right-angle turn's lies across the frame, whose width holds it), less the
+  short steps framed with it. On a 360 × 800 dp phone, once the card has shown a lanes row (a frame
+  of about 340 dp), a right-angle turn is framed from 240 m, a slight turn or a fork from about 215
+  to 225 m, a roundabout's way in at 180 m. While the Large lanes' close view holds the view as a
+  junction latches, as at a turn right after a freeway exit, the cap is fitted at the lanes' zoom, so
+  the frame begins no wider than the lanes' view allows: on a phone the SDK's 180 m.
+- **Latched for the step:** the framing distance is fixed when the tilt latches, and once the
+  junction is framed the frame stays until the step ends. Braking, or a car standing at the
+  framing distance with a metre of matched wobble, no longer drops the frame and takes it again
+  every second.
+- **The junction after a straight step** (`latchedBy` `ahead`): a step the view stays up for does
+  not hide the junction after it. Once that junction is inside its window the view goes down for it
+  while the car is still on the straight step, so it is down by the step change; the frame waits for
+  the junction's own step, unless that step is 150 m or shorter, which the SDK frames with the one
+  before.
+- **Down** over 3.5 s. Once started for a step it stays latched: braking never tilts the view back
+  up before the turn.
 - **Held** flat until at least 25 m and 2 s into the next step.
-- **Up** over 3.0 s, unless the next counted maneuver is already inside its own window. Close turns
-  keep the view down, with no bounce.
+- **Up** over 3.0 s, unless the next counted maneuver is already inside its own window.
+- **The bridge between close turns** (`latchedBy` `bridge`): as the hold after a turn ends with the
+  view still down, a next turn within its window plus 6.5 s of driving (`bridgeSeconds`, the ascent
+  and the descent) latches at once. Turns up to about 400 m apart at 30 mph and 480 m at 45 mph keep
+  the view down between them, in both drive views; before, only up to about 250 m, and between about
+  250 and 340 m the tilt rose for 3 s and came straight back down.
+- **The release:** while the view stays down for a next turn that is not framed yet, the Large
+  junction zoom kept from the turn before lets go over 3 s from the hold's end
+  (`keptZoomReleaseSeconds`, the camera line's `keep`), and the next junction's frame closes in
+  from its framing distance: one approach, with the car in its place between the two turns and no
+  zoom out right before the second.
 - A **reversal** starts from where the tilt is and takes the remaining share of the time, at least
   0.3 s.
 - The step key includes the route id, so a reroute is a new step even when its leg and step numbers
-  repeat.
+  repeat. A seek of the simulated drive (`onJump`) lets go of the latch, the frame and the kept
+  zoom.
+- **Folded into a move** (Smooth follow): when a move into following starts with the tilt latched,
+  or the tilt latches while that move runs (a Start near the first turn, the view coming down from
+  the overview, a reroute near a turn), the move's own eased pitch is the only motion of the pitch:
+  `ManeuverFocus.settle` puts the focus at its goal at once, and a latch during the move adds the
+  change of the pitch goal to the move's pitch offset over the share of the move still left (not
+  below 5 % left, where the eased descent is the same motion). Before, the pitch rose from 0° to
+  about 20° and back within 3.5 s at such a Start.
 
-Distances at the drawn puck:
+Where it happens, with no cap (a screen whose frame holds the window), at a steady speed:
 
-| Speed | Starts down | Halfway | Flat by | Rises from | 45° again |
-|---|---|---|---|---|---|
-| 30 km/h (19 mph) | 212 m | 201 m | 190 m | 21 m after | 40 m after |
-| 50 km/h (31 mph) | 230 m (16.6 s before) | 212 m | 194 m | 47 m after | 78 m after |
-| 80 km/h (50 mph) | 253 m | 224 m | 195 m | 57 m after | 107 m after |
+| Speed | Turn: tilt starts down | Turn: flat and framed | Complex: tilt starts down | Complex: flat and framed |
+|---|---|---|---|---|
+| 20 mph | 271 m | 240 m | 311 m | 280 m |
+| 30 mph | 287 m | 240 m (0.15 mi) | 327 m | 280 m |
+| 45 mph | 312 m | 241 m | 372 m | 302 m |
+| 55 mph | 381 m | 295 m | 455 m | 369 m |
+| 65 mph | 422 m | 320 m (0.2 mi) | 502 m | 400 m |
 
-- Braking from 50 to 20 km/h: the same descent, and the view stays down.
-- A second turn 120 m later: flat throughout.
-- Fork, merge and ramps: 45° throughout.
+- Braking: the same descent, and the view stays down.
+- Merges, and freeway forks and ramps: 45° throughout.
 - The tilt is 0° at the junction.
+- In the replay with the real camera (40° N, Large, a street turn, ten update phases) the view is
+  flat 230 to 240 m before the turn at 25 mph, 224 to 242 m at 45 mph and 293 to 319 m at 65 mph,
+  against 154 to 180 m before; the car leaves its place for the frame 0.8 to 1.8 s after the tilt is
+  flat, as before: one move, no pause. The zoom never drops below the road's 16.35 on the way in,
+  and zoom 18 and more still comes only in the last 40 to 68 m, where the frame holds both the car
+  and the junction.
 
-The SDK's maneuver framing stays: from 180 m the frame covers the rest of the step and 100 m after
-the turn (30 m with the Large lane zoom, which also lets that frame be fitted closer; see
-[The junction zoom](#the-junction-zoom)). It glides in over about 1.5 s through the on-puck weight
-instead of jumping.
+**One decision for the tilt and the frame.** The camera tells the data source whether it frames the
+maneuver through its public, delicate and experimental override
+`isFramingManeuverPropertyOverride`, on every progress before the data source takes it, and Large
+raises its upper limit from the same decision (`LaneZoomFrames.beforeSmoothEvaluate`). The override
+is cleared at the end of guidance and when the camera goes, since the data source is the one the
+Mapbox styles use too; they keep the SDK's own rule, framing from 180 m, as before. The frame itself
+is the SDK's: the car, the rest of the step and 100 m after the turn (30 m with the Large lane zoom,
+which also lets that frame be fitted closer; see [The junction zoom](#the-junction-zoom)). It glides
+in over about 1.5 s through the on-puck weight instead of jumping. If a later SDK drops the
+override, the same decision can go through the public options for each progress: the trigger
+distance at the latched framing, and no excluded maneuvers for a counted step, the SDK's own list
+otherwise.
 
 ### Modes and transitions
 
@@ -583,6 +669,14 @@ instead of jumping.
   most 3 levels.
 - Overview, also used for the route preview: the data source's overview frame and its tilt, through
   the same ramps and springs.
+- **The overview stands still** (`OverviewHold`): in the overview the camera keeps the frame it
+  shows while the data source's new fit lies inside it, and glides to a new fit only when that is
+  0.25 zoom levels or more closer, more than 0.02 levels wider, off the kept view by more than its
+  slack (3 % of the half view) or of another padding. A change of mode, a repeated request, a map
+  back on screen and the first frame from the world take the newest fit at once. A standing
+  overview writes the camera about once in 600 frames instead of on every frame; on a straight
+  20 km route at 45 mph it glides about 22 times in 16 minutes. The decision, its geometry included,
+  is pure Kotlin on plain numbers. The two Mapbox styles keep their own creeping overview.
 - While the activity is stopped (phone) or the surface is detached (car), no frames run. The
   navigator's updates still reach the data source during a drive. When the phone's activity
   starts again, the camera starts its mode over from the data source's newest frame, and the first
@@ -599,10 +693,12 @@ instead of jumping.
 - The controller never starts a camera animator. Gestures, the compass and any app `easeTo` do, and
   the camera plugin reports every start, even zero-length ones. So any animator start means someone
   else took the camera.
-- The mode then goes to IDLE in the same call, the frame loop stops and the **Recenter** button
-  appears.
+- The mode then goes to IDLE in the same call and the frame loop stops. During a drive the map is
+  then held: **Recenter** takes the arrival time's place in the bar, with its count
+  ([The map the driver holds](#the-map-the-driver-holds)).
 - A plain tap starts no animator, so it does not stop following.
-- **Recenter** calls `requestFollowing()` and comes back in one smooth flight.
+- **Recenter**, or its count at 0, asks the camera for what the drive view wants then, the car or the
+  overview, and the camera comes back in one smooth flight.
 - Rule for later code: nothing else may move the camera during guidance. An `easeTo` hands the
   camera to the driver, by design.
 - Car scroll and scale gestures call `setCamera` directly, without animators, so the car needs an
@@ -632,10 +728,21 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   `CameraTuning.CAR`. `MapboxCarMap` builds a new map surface whenever the host sends a new one, for
   example after a size change, so each attach starts a new data source and controller; the camera
   starts where it was on the surface before, or else at the newest position the app has. During a
-  drive it then follows the car, or shows the overview again when the driver asked for it during
-  this drive and has not pressed Recenter, moved the map or zoomed since (`CarOverview`); a drive
-  that ends forgets it, so the next one starts by following the car. In the route preview the
-  scene frames the routes on every surface, so the preview's Recenter is not kept.
+  drive it then does what its drive view wants (a new surface follows the car at once, and in the
+  plain Overview shows the overview), or shows the overview again when the driver asked for it
+  during this drive and has not pressed Recenter, moved the map or zoomed since (`CarOverview`); a
+  drive that ends forgets it, so the next one starts as its drive view says. In the route preview
+  the scene frames the routes on every surface, so the preview's Recenter is not kept.
+- **The drive views on the car** (stage 1.1's second round): the car's scene has a `DriveCamera` of
+  its own, and takes the drive view and Zoom in before turns stored on the phone (the Settings rows,
+  and the phone's Overview button), so its map comes down before turns and goes back out after them
+  as the phone's does, with the junction view's tilt, frame and close zoom framed by
+  `CameraTuning.CAR`. It never counts down and never moves by itself after Pan, a scroll or a zoom:
+  Recenter by itself is the phone's, and the car's map stays where the driver put it until Recenter
+  in its strip. The strip's buttons go through the drive views: the overview switch puts the car's
+  map in the Overview drive view for the drive, not stored; following and Recenter put it in the
+  Normal one and bring the car at once, also out of a hold. The car's screens and strips are
+  otherwise as before ([STAGE-2.md](STAGE-2.md)).
 - **Location:** as on the phone, the platform provider before Start (DECISIONS 14) and the engine's
   `GuidancePuck` during guidance.
 - **Padding:** following padding comes from the stable area, which does not change when the action
@@ -650,7 +757,7 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   eases with an animator, which the hand-over rule catches anyway and which, like every animator,
   waits for the main thread's display frames; Mapbox's default handler does nothing on a fling. The
   gesture handler calls `requestIdle()` before passing on scroll, fling and scale. **Recenter** comes
-  from the map's action strip.
+  from the map's action strip, with no count.
 - **One puck for both maps:** `GuidancePuck` and the navigator feed are the engine's. Each fix
   reaches the phone and car maps once, and `newDrive()` runs when guidance starts. Mapbox's
   `CarLocationProvider` is not used: it keeps the 1000 ms glide. On the car the puck is drawn on the
@@ -797,6 +904,13 @@ has no map, and so no line, until the map shows. The car's map writes its own, w
 | `routeLine` | only while the app draws the route line, with **Settings → Debug → App's own route line** on or with **Lanes on the map** at **Drawn by the app** ([The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch)): `own`, whether the app's own line is drawn; `trims`, how often its trim was set that second; `trimLagM`, the largest distance along the route between its trimmed end and the SDK's vanishing point; `trimMaxMs`, the longest the app's part of a puck update took on the main thread. The last two are left out without a sample. With the lanes also `swapped`, whether the lit lane takes the route line's place over the lit stretches ([The app's own lanes](#the-apps-own-lanes)); it is the camera's state, so a junction view with no lane lit sets it too; and `swaps`, how often that changed in the second | `trims` up to 16 while moving; `trimLagM` 0 but where the SDK skipped its point; `trimMaxMs` under 0.5; `swaps` 0, and 1 in the second the close view latches or lets go |
 | `bendM`, `bendDeg` | with Large, while the SDK frames a maneuver: how far past the maneuver point the road bends, in metres, and by how many degrees off the way in, negative to the left ([The frame reaches the bend](#the-frame-reaches-the-bend)); left out at other times | 0 at an ordinary turn |
 | `extraPts` | how many points of the road to the bend the data source frames besides its own | 0 but where a step begins well before its bend |
+| `view` | during a drive, the drive view chosen: `NORMAL` or `OVERVIEW` ([Drive view](#drive-view)) | |
+| `plan`, `planWhy` | what the Overview's plan wants, `FOLLOWING` or `OVERVIEW`, and why (`OPEN_ROAD`, `APPROACH`, `JUST_PASSED`, `NEXT_IS_NEAR`, `GAP_TOO_SHORT`, `STAY_TOO_SHORT`, `SETTLING`, `NEW_ROUTE`, `OFF_ROUTE`, `START`, `BUTTON`, `BUTTON_TOO_CLOSE`, `DRIVER_ROUTE`, `RECENTERED`, `RECENTER_TOO_CLOSE`, `PLAIN`, `NORMAL_VIEW`), in every drive view, so a drive in Normal shows what the Overview would have done | |
+| `pointM`, `pointKind` | the point ahead the plan looks at: metres to it and its kind, `TURN`, `RAMP` or `LANE_CHOICE` | |
+| `approachM` | how far before that point the view comes down | about 354 before a town turn at 30 mph |
+| `near` | a point is near: from the start of its approach until it is passed | |
+| `hold`, `holdS` | while the driver holds the map: `MAP_MOVED` or `LOOK`, and the whole seconds the count has left (none with Recenter by itself Off) | `holdS` 10 down to 0, at most 3 near a point |
+| `over` | while the camera shows the overview or is to: the overview the data source fits, its `zoom` and `m`, the metres from the camera's centre to its centre | |
 
 `puckLagM`, `sinceFixMs` and `keyPoints` are left out until the guidance has had its first position.
 
@@ -808,6 +922,12 @@ Smooth follow adds its controller's own numbers:
 | `camMaxGapMs` | the longest time between two frames in a row that second; a longer gap counts as 100 | under 25 ms at 60 Hz; spikes mean dropped frames |
 | `camWrites` | `setCamera` calls that second | about `camFps` while moving, 0 or 1 while parked |
 | `focus`, `focusGoal` | the tilt schedule: how far the view is tilted onto the next maneuver, 0 to 1, and where that is going | |
+| `focusKind` | what the step's own maneuver is to the view: `NONE`, `TURN` or `COMPLEX` | |
+| `framingM` | how far before its junction the frame begins, fixed when the view latched | 240 to 320 before a turn, 280 to 400 before a complex junction, less where the screen is short |
+| `frameCapM` | the longest approach the frame fits on this screen at the zoom the view holds: the road's, or with Large the lanes' close view's while that holds | |
+| `frames` | whether the junction is framed now, latched to the step's end; the camera tells the data source | |
+| `latchedBy` | how the step latched the tilt: `window`, `bridge` (as the hold after a turn right before ended) or `ahead` (past a step that goes straight on) | |
+| `keep` | with Large: how much of the last junction's close zoom is still kept, 0 to 1 | 1 through the hold after a turn; falling over 3 s while the view stays down for a turn not framed yet |
 | `zoomTarget` | the zoom the camera is going to | |
 | `bearingError` | target bearing minus camera bearing | within a few degrees |
 | `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview |
@@ -819,6 +939,7 @@ Smooth follow adds its controller's own numbers:
 | `runUp` | the exit of the run-up that holds the view, by its key, also through the hold past the gore, through the ramp the lane plan holds it through, and a turn's bridge; left out at other times | the same key from a run-up's start to about 2 s past its gore, or past the split on its ramp that the plan constrains within 15 s of the gore |
 | `laneCapZoom`, `capSpeed` | the closest zoom the lanes may take and still show 12 s of road, and the speed it is worked out for, the highest of the last 10 s, in m/s; left out without a speed, a padding or a laid-out map | below the 14 dp zoom only above about 25 m/s |
 | `centerLeadS` | how many seconds ahead of the drawn car the centre aims. It is logged also while `onPuck` is 0, in the frame of a maneuver, where it does not move the centre | 0 with Default, and with Large up to about zoom 17; closer in, up to about 0.3 |
+| `overFits`, `overKept` | in the overview only: the data source's new fits the camera glided to, and those the standing overview kept, since the last line | `overFits` 0 on most seconds while the overview stands |
 
 The two Mapbox styles do not run the controller. They add `frameUpdates`, the frame animations
 `NavigationCamera` started that second, and `frameUpdatesCut`, those cancelled before they
@@ -869,8 +990,29 @@ Other lines:
   (`Maps-Gestures` for a touch, `Maps-Compass` for the compass), `animator`, its kind, and `from`,
   the camera's state. The first drive's log could not say why the camera went idle about 22 s
   before End.
-- A **camera_request** line when **Recenter**, **Overview** or **My location** is tapped: `mode`,
-  `from` and `guidance`.
+- A **camera_request** line for every request the map makes of its camera: `mode`, `from` and
+  `guidance`; `by`, who asked (`driver`, `plan`, `timer`, the count of Recenter by itself, `start`,
+  `style`, or `recover`, a Mapbox style's move asked again), and `why` (`start`, `plan`, `style`,
+  `taken`, `recenter_tap`, `recenter_auto`, `look`, `toggle`, `settings`, `back`, `preview`,
+  `browse`, `my_location`, `routes`, `cancelled`); during a drive `pointM` and `speed`; with a
+  Mapbox style `serial`, the request's serial ([The Mapbox styles' moves](#the-mapbox-styles-moves)).
+- A **drive_view** line each time the plan of the drive views or what the map wants changes: `view`,
+  `wish` (`FOLLOW`, `OVERVIEW` or `LEAVE`, the map left to the driver), `reason` (as `planWhy`
+  above, for the view shown), `pointKind`, `pointM`, `gapM` (from the point passed to the next one),
+  `approachM`, `standS` (how long an overview asked for now would stand before the next approach),
+  `speed`, `planSpeed`, `near`, `silent` (true where the plan only computes, in Normal and in the
+  plain Overview), `turnZoom`, and `why`, the call it came with, as `camera_request`'s, with `held`
+  on a `toggle` that ended a hold. Numbers, kinds and words only.
+- A **camera_hold** line when the driver's hold of the map ends: `kind` (`MAP_MOVED` or `LOOK`),
+  `ended` (`timer`, `recenter`, `guidance`, `toggle`, `settings`, `look`, `plan`, `near` or `away`,
+  the map put away for the list), `heldMs`, `restarts` (how often a touch started the count again)
+  and `near`.
+- A **focus** line with Smooth follow, once a step, when the view latches down onto a junction:
+  `kind`, `why` for a complex one (`split`, `roundabout`, `roads`, `sharp`), `by` (`window`,
+  `bridge`, `ahead`), `atM` (metres to the junction at the latch), `framingM`, `capM` and `capZoom`
+  (the screen's cap and the zoom it is fitted at), `roomDp` (the map's height under the padding),
+  `afterM` (the road the frame keeps after the junction), `turnDeg`, `chainedM` (short steps framed
+  with it), `speed` and `laneZoom`. Never where the car is.
 - A **settings** line on every change of a setting: `key`, `value` as stored, and `guidance`. A
   change of `camera_style`, `lane_zoom` (`default` or `large`) or `lanes_on_map` (`off`, `mapbox` or
   `app`) during a drive shows there, and so do `day_night` (`auto`, `day` or `night`), `car_map_fps`
@@ -1028,22 +1170,22 @@ Other lines:
 
 ### Hooks for stages 4 and 5
 
-Stage 4, smart camera:
+Stage 4, smart camera: **built in stage 1.1's second round** as the Overview drive view
+([Drive view](#drive-view), DECISIONS 57).
 
-- **Junction zoom: done in stage 1.1** by the Large lane zoom ([Lane zoom](#lane-zoom)). It takes
-  the zoom of the SDK's own maneuver frame, fitted closer, so the hook once planned here, pulling
-  the centre toward the maneuver point, was not needed: that frame already holds the car and the
-  junction. Stage 4 may still use the tilt's curve for a view centred on a complex junction.
-  Its automatic following would start where the two schedules start, the tilt's and the lane
-  choices'.
-- **Keep the early turn.** If stage 4 shortens the framed geometry near turns or overrides the
+- **Junction zoom:** the Large lane zoom ([Lane zoom](#lane-zoom)), from the junction view's own
+  framing distance since W18. It takes the zoom of the SDK's own maneuver frame, fitted closer, so
+  the hook once planned here, pulling the centre toward the maneuver point, was not needed: that
+  frame already holds the car and the junction.
+- **Automatic overview and following:** the drive view's planner asks for `requestOverview()` and
+  `requestFollowing()` only when what it wants changes; the transitions chase a live target, so they
+  end without a surge. The planned 20 s pause after a touch became Recenter by itself, 10 s by
+  default, counted from the last touch.
+- **Keep the early turn.** If a later step shortens the framed geometry near turns or overrides the
   bearing (`followingBearingPropertyOverride` bypasses the data source's bearing smoothing), it must
   keep that smoothing or rebuild it. Otherwise the early turn disappears near junctions.
 - No tiles load for a closer view: Mapbox's tiles end at zoom 16, and above it the map draws the
   zoom 16 tiles larger, online and offline ([No new tiles](#no-new-tiles)).
-- **Automatic overview and following** call `requestOverview()` and `requestFollowing()`. The
-  transitions chase a live target, so they end without a surge.
-- The **20 s pause after a touch** is a timer started when the mode changes to IDLE.
 
 Stage 5, 3D:
 
@@ -1073,9 +1215,21 @@ Stage 5, 3D:
   puck from the controller.
 - **The puck may be read one frame late:** a constant offset of about 0.23 m at 50 km/h, which the
   spring absorbs.
-- **The junction framing still switches at 180 m.** The camera glides there over about 1.5 s, but
-  the car leaves its place near the bottom and moves up the screen. If that looks busy before stage
-  4, `maximizeViewableGeometryWhenPitchZero = false` is a one-line alternative.
+- **The junction framing switches at its framing distance**, about 240 m before a town turn since
+  W18 (the two Mapbox styles at the SDK's 180 m). The camera glides there over about 1.5 s, but the
+  car leaves its place near the bottom and moves up the screen. If that looks busy,
+  `maximizeViewableGeometryWhenPitchZero = false` is a one-line alternative.
+- **The framing override is delicate and experimental** in the SDK
+  (`isFramingManeuverPropertyOverride`). If an upgrade drops or changes it, the same decision goes
+  through the public trigger distance and excluded list for each progress; check the `frames` field
+  against the screen with each upgrade.
+- **The planner's numbers** (5 s, 1.25 and 1.5 miles, 30 s, 8 s, 10 s, 3 s near a turn) come from the
+  owner's words and the rigs, not from drives; the camera line's `plan` and `planWhy` and the
+  `drive_view` lines are there to tune them, also from drives in Normal.
+- **A tap during a Mapbox style's move** relies on the gestures plugin's protected animation
+  owners, which its own docs ask the owner to cancel on gestures itself; the SDK's gestures handler
+  does that for every animator of another owner. A plugin upgrade may change it; the
+  `camera_request` lines with `by` `recover` count the moves asked again.
 - **The zoom follows the tilt** during the 3.5 s descent and the 3 s ascent, because the data source
   fits the zoom at the coming tilt. That is deliberate, but check on a drive that it does not feel
   like breathing.
@@ -1146,6 +1300,187 @@ For the Large lane zoom and Mapbox's lane details:
 - **The route line's widths** with lane details on are the SDK's own stops, copied. A new SDK with
   other widths fails a unit test (`RouteLineWidthsTest`) instead of leaving the held line behind.
 
+## Drive view
+
+Built in stage 1.1's second round, for the owner's W1 to W3, W18, W21 and W22 (DECISIONS 57). A drive
+has two views, chosen with **Overview** in the guidance bar or in **Settings → Drive view**, and kept
+for the next drives:
+
+- **Normal**, the default: guidance as before, the map behind the car.
+- **Overview**: the rest of the route from straight above, north up, as the Overview button and the
+  route preview showed it before. Before each turn, exit, fork, merge or freeway lane choice it comes
+  down to the normal view by itself, where the tilt, the junction frame and the Large lane zoom run as
+  in Normal, and after the maneuver it goes back out when the next one is far enough away. With
+  **Zoom in before turns** off it is a plain Overview that never comes down.
+
+Every camera style carries the drive views out: the plan is the app's own (`DriveCamera`, one for
+each map) and only asks the camera for following or the overview, when that changes; the two Mapbox
+styles do it with their own flights. Nothing here starts, stops or changes a trip session or asks
+for a route: the drive camera only moves the camera.
+
+### View points
+
+`ViewPoints` in the engine reads, once for each step, the places ahead the normal view is wanted
+for, walking past at most 12 steps that go straight on, and at each update adds the step's metres
+and seconds left; at most two points, the nearest first. A point's kind comes from the step's own
+maneuver (`DriveViewRule.approachKind`): `TURN` (a turn, the end of a road, a roundabout's way in or
+out, the arrival, an unknown maneuver, a new name with a turn), `RAMP` (on and off ramps, forks,
+merges, a continue with a turn) or `LANE_CHOICE` (a freeway lane choice that counts, on the car's
+step or on a straight one walked past, with the lane choices' own key). Each carries the junction's
+kind for the view, by the camera's own rule. A roundabout's way out is its own point a few metres
+after its way in, so the view stays down inside the circle.
+
+### The approach
+
+The view leaves the overview at the first update with a point inside its approach, and stays down
+until that point is passed:
+
+```
+planSpeed = max(the car's speed, the route's speed to the point, 3 m/s)
+approach  = the camera's own schedule for the point at planSpeed + planSpeed × 5 s
+```
+
+The camera's schedule is where the tilt starts down (`FocusWindow.windowMeters`, with no screen
+cap, so it is never shorter than the camera's) for a turn and for a ramp off a street, and the lanes'
+close view's window (`LaneFocus.windowMeters`, 400 to 1,200 m) for a lane choice and a ramp, fork or
+merge on a freeway; a run-up to a freeway exit is one approach from its start to its gore. The 5 s
+leave about 1.5 s of settled normal view before the tilt or the lanes' zoom begins: the move in
+takes 2.2 s, and the decisions come once a second. With the route's speed the view is down before a
+red light, not when it turns green; braking, a light or a jam never send it back out before the
+point.
+
+| Speed | Turn | Complex junction | Freeway exit, fork, lane choice |
+|---|---|---|---|
+| 20 mph | 316 m | 356 m | (on a street: as a complex junction) |
+| 30 mph | 354 m (26 s) | 394 m | 467 m (slow freeway traffic) |
+| 45 mph | 412 m | 473 m | 604 m |
+| 65 mph | 567 m | 647 m | 872 m (0.54 mi, 30 s) |
+| 75 mph | 605 m | 685 m | 1,006 m |
+
+### The way out
+
+Decided once for each point passed, as the planner's hold after it ends: 25 m and 1.5 s past a
+maneuver, 30 m and 1.5 s past a lane choice, half an update before the camera's own hold, so the
+view pulls out flat on or before the update on which the tilt would rise.
+
+1. The next point is already inside its approach: stay.
+2. It lies less than 2,000 m (1.25 mi) from the point passed: stay normal until it is passed.
+3. It lies less than 2,414 m (1.5 mi) on and the overview would stand less than 30 s before its
+   approach, after the 2.2 s move out: stay normal. From 1.5 mi on the view always goes out.
+4. The view came down by itself less than 8 s ago: wait, then decide again.
+5. A new route came less than 30 s ago: wait. Reroutes come in bursts, and the view would jump out
+   and back between them.
+6. Otherwise out.
+
+Seconds of standing overview after the way out, at a steady speed (the planner's own test drive
+gives each up to 1.2 s less, from the once-a-second updates):
+
+| Gap | 30 mph, turn | 45 mph, turn | 65 mph, exit | 75 mph, exit |
+|---|---|---|---|---|
+| 1.0 or 1.2 mi | stays normal | stays normal | stays normal | stays normal |
+| 1.25 mi | 120 s | 76 s | 35 s | stays normal (out from 1.34 mi) |
+| 1.5 mi | 150 s | 96 s | 49 s | 38 s |
+| 2.0 mi | 210 s | 136 s | 77 s | 62 s |
+
+In a town with a turn every half mile the Overview mostly looks like the normal view: that is the
+owner's own rule. Off the route (two updates in a row; one alone moves nothing) the view comes down,
+and back on a route the same rules decide, with the gap measured from the car; so do a new route, a
+seek of the simulated drive and a map that comes back from being put away. While the overview stands
+only an approach, a run-up or the car leaving the route bring it down.
+
+### Other moments
+
+- **Start:** from the preview in the Overview the map stays in the overview, or goes back to it after
+  a moved preview map, with one glide down if a point is already near; a direct Start and a map made
+  during a drive follow the car at once, and the first update decides. The plain Overview shows the
+  overview at every start. `render` no longer asks for following each time it runs: only the start's
+  own answer, once for each drive.
+- **Overview tapped in Normal:** the overview at once, unless a point is near or the overview could
+  not stand 10 s; then the button fills at once and the tap is honoured as soon as the overview can
+  stand. **Overview tapped in the Overview:** the car at once. Each tap is stored: the car's map
+  takes it at once, and the next drive starts in it.
+- **Settings during a drive:** a drive view chosen there acts as the button. In the Overview, **Zoom
+  in before turns** off brings the overview at once, and on brings the view down at once inside an
+  approach, else at the next approach; in Normal it changes nothing on the map.
+- **Normal:** the planner runs silently. The camera line's `plan` and `planWhy` and the `drive_view`
+  lines (`silent` true) say what the Overview would have done, so a drive in Normal tunes it; so
+  does a drive in the plain Overview.
+- **The map put away** for the list of the maneuvers ahead (stage 2's step 1c): it asks its camera
+  for nothing, and a hold ends (`away`); back on screen it decides afresh.
+- **The camera style changed during a drive:** the new camera gets what the drive view wants; a map
+  the driver holds stays his.
+- **The look of a later step** (`DriveCamera.onLook`, for the routes badge): the overview for 10 s as
+  a hold; none while a point is near or where the overview could not stand 10 s. Nothing calls it
+  yet.
+
+### The overview standing still
+
+In Smooth follow the overview stands still while the car drives up it: the camera glides to the data
+source's new fit only when that is 0.25 zoom levels or more closer, wider, off the kept view or of
+another padding ([Modes and transitions](#modes-and-transitions)). The two Mapbox styles keep their
+own creeping overview.
+
+### The map the driver holds
+
+During a drive a gesture or the compass makes the map the driver's, as before (a hold), and
+**Recenter** takes the arrival time's place in the bar (`MapHold`):
+
+- The count runs from the later of the last finger lifted and the last start or end of the driver's
+  own move of the map (a fling ends when the map stops), for **Recenter by itself**: 10 s by
+  default, 5 or 20 s, or Off. While a finger is on the map the count stands at its full value; a
+  finger reported down with nothing moving for 30 s counts as lifted.
+- While a point is near, the count after the last touch is at most 3 s: one glance and a second,
+  and the turn is shown.
+- At 0, or on a tap of Recenter: in Normal the car; in the plain Overview the overview; in the
+  Overview the overview too, also where the view had stayed down between close turns (W21: back to
+  the Overview, not to the zoomed normal view), until the next approach brings it down. Only while a
+  point is near, where the overview could not stand 10 s before the next approach, or off the route
+  does it bring the normal view.
+- Off: the map stays where the driver put it until a tap of Recenter.
+- A plain tap on the map starts no hold. A tap of Overview during a hold ends it and switches the
+  view; a drive view chosen in Settings does the same; Zoom in before turns and Recenter by itself
+  keep the hold, and the count takes the new seconds at once.
+- The count is published in whole seconds only (`RecenterControl`), from a ticker that wakes four
+  times a second while a count runs; nothing runs per display frame.
+- Only during guidance, not on the browsing map or in the preview. The car's map is held too, but
+  with no count: its Recenter is in its strip ([The car map](#the-car-map-stage-2)).
+
+### The two buttons
+
+- **Overview** stays where the button was, the same size: 40 dp high with a 48 dp touch target. It
+  always says Overview, so its width never changes, and it is a switch: outlined in Normal, with a
+  1 dp border in the outline colour and the label in the card's ink; Material's filled tonal button
+  in the Overview, ringed with a 2 dp border in the amber ink (dark amber by day, amber at night), so
+  its state shows by its border as well as its fill. It stays filled while the view is down for a
+  turn and right after a tap that waits for one. TalkBack reads "Overview, on" or "Overview, off",
+  a switch.
+- **Recenter** shows only while the driver holds the map, in the arrival time's place: the bright
+  amber button in both looks, 48 dp high, "Recenter 7" counting down (14 sp, shrinking to 11 sp so it
+  never wraps, its digits all as wide), or "Recenter" alone with Recenter by itself Off. The arrival
+  time stays laid out under it, undrawn and hidden from TalkBack, so the bar's height never changes
+  and the camera's padding with it; the two swap in a 150 ms crossfade, at once with the system's
+  animations off. TalkBack reads "Recenter. The map comes back in 7 seconds." when it comes to the
+  button, and nothing at a tick.
+- The list's bar (stage 2's step 1c) keeps **Map** in Overview's place and has no Recenter.
+- Each button reads its own state, so the count's tick redraws Recenter alone. Recenter never
+  changes the rows the bar takes: at 360 dp and font scale 1.3 one row (two with List, as before),
+  at the largest fonts two.
+
+### The Mapbox styles' moves
+
+A plain tap during a flight of the two Mapbox styles used to stop it: the gestures plugin cancels
+every camera animator on a tap but those of its protected owners, and a cancelled transition left
+the SDK camera in a `TRANSITION_TO_*` state that computes no frames, so the map stood until the next
+position. Now `NavigationCameraAdapter` makes the SDK camera's animator owner a protected owner for
+the camera's life, so a tap no longer stops the flight; a drag still starts its own move and takes
+the map. A transition that ends cancelled all the same is asked for once more (`camera_request` with
+`by` `recover`), never from inside the SDK's own cancel: every request and every map taken raises a
+serial, the listener of a request only posts one check to the main looper when it ends cancelled,
+and the check asks again only when the serial is unchanged and the SDK camera still shows that
+request's transition (`RecoverRule`), once for each request. So a request that replaces a flight
+(the planner, Recenter, the toggle) and a drag during a flight are never answered by a second
+flight.
+
 ## Lane zoom
 
 **Settings → Guidance → Lane zoom** has two choices. They are stored under `lane_zoom` as `default`
@@ -1206,8 +1541,8 @@ centre, the car's place near the bottom; lanes farther up the screen are narrowe
 ### The junction zoom
 
 It runs for the maneuvers the tilt goes down for
-([The tilt before a turn](#the-tilt-before-a-turn)): turns, ends of roads, roundabouts, U-turns
-and the arrival.
+([The tilt before a turn](#the-tilt-before-a-turn)): turns, ends of roads, roundabouts, U-turns,
+forks and ramps off a street, and the arrival.
 
 - **What Large changes on the data source** (Smooth follow, `LaneZoomFrames`): the frame of a
   maneuver may be fitted as close as zoom 20 instead of 16.35, and it holds 30 m of road after the
@@ -1219,9 +1554,9 @@ and the arrival.
   both on screen all the way, and the frame gets closer as the car does.
 - **The upper limit is raised only for that frame.** With every navigator update the camera gives
   the data source the progress, sets the limit, and has the frame computed
-  (`LaneZoomFrames.beforeSmoothEvaluate`): zoom 20 while the SDK frames a maneuver, by its own
-  rule within 180 m of it, and 16.35 for every other frame. With Default the limit is 16.35 on
-  every update and nothing is written.
+  (`LaneZoomFrames.beforeSmoothEvaluate`): zoom 20 while the camera frames the maneuver, its latched
+  decision from the framing distance to the step's end, and 16.35 for every other frame. With
+  Default the limit is 16.35 on every update and nothing is written.
 - **The camera takes the zoom of that frame**, up to the zoom at which a lane is 28 dp wide
   (`ZoomPlanner`). It moves there over the 1.1 s of a sample and never faster than 1 zoom level a
   second.
@@ -1244,31 +1579,31 @@ and the arrival.
   - This comes from reading the native map library (11.34.1) and from two models of its fit. It
     was not seen on a device.
 
-  So a frame of the road never gets the raised limit. The view goes close from where the SDK
-  starts to frame the maneuver, 180 m before it, when the tilt is already down: first the tilt,
-  then the zoom. The first design blended the zoom in while the tilt went down; that would have
-  followed the road frame's zoom.
+  So a frame of the road never gets the raised limit. The view goes close from where the camera
+  starts to frame the maneuver, its framing distance (about 240 m before a town turn since W18;
+  180 m before it), when the tilt is already down: first the tilt, then the zoom. The first design
+  blended the zoom in while the tilt went down; that would have followed the road frame's zoom.
 - **A frame with the car on its usual place counts no closer than 16.35** in the camera as well.
   One such frame can still come with the raised limit: when the data source loses its route or
   its progress while it frames a maneuver, at a new route or at the end of guidance, it frames
   the car alone until the next progress, and its zoom is then the limit itself, with no fit.
 - **After the maneuver** the frame shows the road beyond it. The camera keeps the zoom the
   junction had for as long as the view is held over it, and lets it go along the same eased curve
-  as the tilt comes back up (`ManeuverFocus.afterManeuver`). Once the tilt is back up the
-  junction is forgotten. That is checked with every navigator update, also while the camera does
+  as the tilt comes back up (`ManeuverFocus.afterManeuver`, through `keepAt`). Once the tilt is back
+  up the junction is forgotten. That is checked with every navigator update, also while the camera does
   not follow the car: in the overview, with the map in the driver's hands, or with the app in the
   background. A camera that comes back on the approach to a later turn starts from the road's
   zoom and that turn's frame; one that comes back while the view is still held over the same
   junction finds its zoom kept.
-- **Close turns** keep the view down and close, as they keep the tilt down. Turns within 150 m
-  of each other the SDK frames together, so the zoom for both is a little farther out. A turn a
-  little farther on, near enough that the tilt stays down for it but not yet framed, leaves a
-  stretch where the frame is of the open road again: there the camera keeps the zoom the first
-  junction had until the SDK frames the second, and then eases to that frame. It does not go out
-  to the road's zoom and back in. A little farther apart still, about 250 to 300 m at town
-  speeds, the tilt has begun to come back up when the next turn takes the view and turns it down
-  again. The zoom that was let go by then is not taken up again: it waits where it is until the
-  SDK frames the next turn, and goes in once, with that frame.
+- **Close turns** keep the view down, as they keep the tilt down (the bridge, up to about 400 m
+  apart at 30 mph and 480 m at 45 mph). Turns within 150 m of each other the SDK frames together,
+  so the zoom for both is a little farther out. A turn farther on, near enough that the tilt stays
+  down for it but not yet framed, leaves a stretch where the frame is of the open road again: there
+  the zoom the first junction had is let go over 3 s from the end of the hold after it (`keep`), the
+  car comes back to its place, and the second junction's frame closes in from its own framing
+  distance: one approach. Kept until the second was framed, as before, the first junction's zoom
+  would have held the view close with the car low for 7 to 12 s across the bridge's longer reach,
+  then zoomed out by about 1.3 levels right before the second turn (found in the replay).
 
 #### The frame reaches the bend
 
@@ -1325,7 +1660,9 @@ of a zoom level.
 
 Simulated with the compiled camera at 60 frames a second, against a model of the data source (the
 car on its focal point on the road; from 180 m a flat fit of the rest of the step and the road
-after it into the padded height). The road is made up and lies on the equator, where 28 dp is zoom
+after it into the padded height), before W18 moved the frame's start to the framing distance
+([The tilt before a turn](#the-tilt-before-a-turn)); since then the same curve begins about 60 m
+earlier at town speeds. The road is made up and lies on the equator, where 28 dp is zoom
 19.18 and 16.35 shows a lane 3.9 dp wide. A turn approached at 50 km/h, braking over the last
 120 m to 20 km/h:
 
@@ -1503,9 +1840,9 @@ view is held 2 s and 30 m, as after any lane choice, then goes out unless a lane
 step is within 10 s of driving of its window, a run-up takes over, or a turn follows right away:
 
 - **A turn right after the exit** (`TurnAhead`). When the hold is over and the next maneuver is a
-  turn the camera frames as a junction, whose framing (from 180 m before it) begins within 13.5 s
-  of driving (the tilt's 3.5 s descent plus the 10 s above), the view stays in until that framing
-  begins, and the junction view takes over along its own curve. It ends there, at a new step or
+  turn the camera frames as a junction, whose framing (from its framing distance before it, the
+  latched one) begins within 13.5 s of driving (the tilt's 3.5 s descent plus the 10 s above), the
+  view stays in until that framing begins, and the junction view takes over along its own curve. It ends there, at a new step or
   route, or off the route, never past the turn. A turn farther on, a fork of the ramp (which the
   SDK does not frame) or a ramp that splits in two lanes (no lane choice) is not bridged this way:
   the view goes out after its 2 s, unless the ramp bridge above holds it to such a fork.
@@ -1696,8 +2033,9 @@ lanes at each point, an exit that takes the two right lanes of six, and 25 risin
 
 **The lane plan.** For every route a drive uses, once, the engine works out a lane plan, off the
 main thread together with the route's `lane_evidence` line, and keeps it in memory with the route,
-never stored: the lanes that work at each point of the route and, on the run-ups and the last 180 m
-before a street maneuver, the one lane to take, counted from the exit's edge. The plan names a lane
+never stored: the lanes that work at each point of the route and, on the run-ups and on a street
+maneuver's approach from where the junction view begins, the one lane to take, counted from the
+exit's edge. The plan names a lane
 only inside such a window, and never moves it back but where the road leaves no other way. It is
 read with every choice of Lanes on the map: the card's run-up row and its words (above), the seam
 that begins a run-up, the ramp the latch holds through, and with Drawn by the app the route line's
@@ -2172,8 +2510,11 @@ views rest is in the swap below.
   Mapbox's U-turn arrow do; no receiving lane is lit. A lane only for bicycles is a 1.8 m strip
   beside a solid line, never lit, tinted or counted.
   - **The junction view with the drawing.** A street maneuver's card window is the junction view's,
-    from 180 m before the maneuver: the plan names the lane to take there, the map lights it and the
-    card's own row lights the same lanes (`CardStreetRow`). Where the route turns, the lit lane goes
+    from where the tilt starts down for that kind of junction at the approach's planning speed
+    (`CardWindows.streetWindowMeters`, the camera's `FocusWindow.windowMeters` with no screen cap):
+    about 295 m before a plain turn on a street planned at 35 mph and 335 m before a roundabout or
+    a sharp turn, never back past the step's start. The plan names the lane to take there, the map
+    lights it and the card's own row lights the same lanes (`CardStreetRow`). Where the route turns, the lit lane goes
     on across the junction along the path's curve into the receiving road's lane, and the maneuver
     arrow is the app's along it, from 4 m before the stop line to 30 m past the junction; at a U-turn
     and a roundabout the arrow stays the SDK's. The swap is the camera's, as on freeways: with Large
@@ -2286,9 +2627,10 @@ zone's guess, waits for a quiet moment of the drive (`LookSwitch`, `LookTuning` 
 - **a close view** holds it for as long as it lasts (`MapRenderer.closeView`, worked out once per
   progress update): with Smooth follow while the tilt onto a maneuver is on or still moving, and with
   Large also while the lane-choice view or a run-up's is; with Mapbox tuned and Large while its lane
-  window holds or the SDK frames a maneuver at Large's zoom; never with Mapbox standard. So a change
-  never rebuilds the map's lane markings in the middle of a lane-choice close-up, 2 km before the
-  maneuver too;
+  window holds or the SDK frames a maneuver at Large's zoom; never with Mapbox standard; and only
+  while the camera follows the car or is on its way to (`CloseView.onScreen`): in the overview of the
+  drive views and while the driver holds the map nothing is close. So a change never rebuilds the
+  map's lane markings in the middle of a lane-choice close-up, 2 km before the maneuver too;
 - **a maneuver** holds it within 300 m or 20 s before it, and for 6 s after the step changes. After
   10 minutes of waiting, counted from the start of the wait with tunnels included, that window
   narrows to 150 m or 10 s before and 3 s after, and stays so, never to nothing: on a drive with a
@@ -2363,7 +2705,7 @@ Steps 1 to 4 are done, and so is the Lane zoom setting with lane details on top 
 
 ### JVM tests, no device
 
-`CameraMotionTest` in `:core-nav` (JUnit 6), 29 tests. Among them:
+`CameraMotionTest` in `:core-nav` (JUnit 6), 46 tests. Among them:
 
 - The spring is exact for any frame time and, from rest, never passes its target. After one time
   constant it has gone 1 − 2/e of the way, and a snapped spring is at rest.
@@ -2373,8 +2715,8 @@ Steps 1 to 4 are done, and so is the Lane zoom setting with lane details on top 
   passing it or turning back.
 - A ramp ends exactly on its sample, and one that is given the same sample every second comes to
   rest within a tolerance.
-- At 50 km/h the tilt is below 3° at 180 m, 0° at the junction and back at 45° after it, and peaks
-  below 30°/s.
+- Without the facts of the step (the banner's type, the SDK's rule): at 50 km/h the tilt is below
+  3° at 180 m, 0° at the junction and back at 45° after it, and peaks below 30°/s.
 - Braking never tilts the view up before the turn.
 - A car that stands, or whose speed is not known yet, gets the window of 3 m/s.
 - Excluded maneuver types keep 45°, also in the step after them.
@@ -2473,6 +2815,17 @@ below is the first real one. What `LaneZoomFrames` does to the data source itsel
 limit moved with each progress and the route taken out and given back when the road kept after a
 maneuver changes, has only these runs behind it: no JVM test reaches the data source.
 
+The drive views and the junction view of stage 1.1's second round add, among others:
+`FocusRuleTest` and `FocusWindowTest` (the kinds, the windows and the cap on real screens), the
+bridge, the release, the latched frame and the junction after a straight step in
+`CameraMotionTest`, `DriveViewPlanTest` (the approach table within 0.6 m, the way out against the
+table above, the reroute settle, the plain Overview, a planner never shorter than a capped camera
+over 2,000 seeded cases, 400 random drives), `MapHoldTest`, `DriveCameraTest` (a drive harness on
+the real planner), `OverviewHoldTest`, `RecoverRuleTest`, `CloseViewTest`; in the engine
+`ManeuverFactsReaderTest`, `ViewPointsTest`, `DriveCameraWiringTest` and
+`NavigationCameraAdapterWiringTest`, which pin the map scene's and the adapter's sources; in the app
+`ViewButtonsTest` and `GuidanceBarTest`.
+
 ### Build
 
 CI runs the debug build, lint and the unit tests on every push. The car observer of stage 2 is
@@ -2491,19 +2844,24 @@ Watch for:
 - The map moves on every frame, with no once-a-second steps.
 - The car glides a few dp ahead of its usual place near the bottom and settles back when it stops.
 - On the gentle curve the view starts turning before the curve, at an even rate.
-- Before a turn the tilt goes down over about 3.5 s and is flat about 180 m before the turn. It is
-  0° at the junction and rises over about 3 s, starting 20 to 60 m after it.
-- No tilt for forks, merges or ramps.
-- The two close turns stay flat throughout.
-- At 180 m the junction framing glides in over about 1.5 s, with no jump.
+- Before a turn the tilt goes down over about 3.5 s and is flat about 240 m before a town turn
+  (0.15 mi; farther at speed), earlier still before a roundabout's way in, a sharp turn, or a fork
+  or ramp off a street. It is 0° at the junction and rises over about 3 s, starting 20 to 60 m
+  after it.
+- No tilt for merges, or for forks and ramps on a freeway; none for a straight change of the road's
+  name.
+- The two close turns stay flat throughout, and so do two turns about 300 m apart.
+- As the view is flat the junction framing glides in over about 1.5 s, with no jump.
+- In the Overview drive view the checks of [DRIVES.md](DRIVES.md) from check 112 on.
 - Before the two close turns the Then chip slides out from under the maneuver card. The map does
   not move when it comes or goes, and the camera line shows no new `padding`.
 
 With **Lane zoom** on **Large**, in Smooth follow, on a route that also has a freeway with an
 exit and, if the data has one, a split:
 
-- Before each turn the view first goes flat and then close: from about 180 m the junction grows
-  until it fills the map's width, and the car and the junction both stay on screen all the way.
+- Before each turn the view first goes flat and then close: from the framing distance the junction
+  grows until it fills the map's width, and the car and the junction both stay on screen all the
+  way.
   After the turn the zoom eases back out as the tilt comes up.
 - The two close turns stay flat and close, with at most a small step out between them. The
   roundabout fits; the arrival ends close on the destination.
@@ -2547,9 +2905,9 @@ Before Start, in each style:
 Try:
 
 - Pan, pinch, rotate, tilt, double-tap and the compass: each switches to idle at once, and
-  **Recenter** appears.
+  **Recenter** appears in the arrival time's place with its count.
 - Changing the camera style in Settings during the drive: the new camera takes over in one glide.
-- **Recenter**: one smooth flight back.
+- **Recenter**, or its count at 0: one smooth flight back to what the drive view wants.
 - **Overview** on and off while moving: the camera tracks the moving target, with no surge at the
   end.
 - The preview, then Start.
@@ -2577,7 +2935,10 @@ The owner rates the overall smoothness and four things that each have one knob i
 |---|---|
 | How far the camera trails the car | `centerTau`, 0.15 to 0.3 s |
 | Whether the map turns late in curves | `rampLead`, 1 to 2; above 1 the map swings a few degrees past the end of a sharp turn |
-| When the tilt goes down | `descentSeconds` or `maneuverFramingMeters` |
+| When the tilt goes down | `descentSeconds` and the framing numbers (`turnFramingSeconds`, `turnFramingMinMeters`, `turnFramingMaxMeters`, the `complexFraming` three) |
+| Whether close turns keep the view down, and the zoom between them | `bridgeSeconds`, `keptZoomReleaseSeconds` |
+| When the Overview comes down and goes back out | `DriveViewTuning`: `leaveLeadSeconds`, `returnMeters`, `alwaysOutMeters`, `minOverviewSeconds`, `minNormalSeconds`, `rerouteSettleSeconds` |
+| Recenter by itself near a turn | `recenterNearSeconds` |
 | When it comes back up | `holdAfterManeuverMeters` and `holdAfterManeuverSeconds` |
 
 With Large, and Mapbox's lane details where the area has them, the owner also notes:
