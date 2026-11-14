@@ -164,4 +164,18 @@ class MapHoldTest {
         hold.onMapMoved(8.0)
         assertEquals(MapHold.Kind.NONE, hold.kind)
     }
+
+    @Test
+    fun `a count whose sum lands a hair above a whole second still shows that second`() {
+        // In doubles 6.1 + 10 - 6.1 is 10.000000000000002: Recenter shows 10 at the start, not 11.
+        val hold = MapHold(tuning)
+        hold.onTaken(6.1)
+        assertEquals(10, hold.secondsLeft(6.1, 10))
+        assertFalse(hold.isOver(16.09, 10))
+        // Near a point 1.4 + 3 - 1.4 is 3.0000000000000004: 3, not 4.
+        val near = MapHold(tuning)
+        near.onNear(true)
+        near.onTaken(1.4)
+        assertEquals(3, near.secondsLeft(1.4, 10))
+    }
 }
