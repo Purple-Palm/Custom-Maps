@@ -2,33 +2,20 @@ package io.github.purplepalm.custommaps.ui.settings
 
 import android.widget.Toast
 import androidx.annotation.StringRes
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,16 +26,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
@@ -65,7 +49,6 @@ import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.token.TokenProblem
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
-import io.github.purplepalm.custommaps.ui.theme.AppSwitch
 import io.github.purplepalm.custommaps.ui.theme.CustomMapsTheme
 import io.github.purplepalm.custommaps.ui.theme.LookParameter
 import io.github.purplepalm.custommaps.ui.theme.LookTheme
@@ -158,13 +141,13 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(24.dp))
 
-            SectionTitle(R.string.token_title)
+            GroupTitle(stringResource(R.string.token_title))
             TokenListSection(tokens, onAddToken, onRenameToken, onUseToken, onDeleteToken)
-            SectionDivider()
+            GroupDivider()
             DayNightSection(look, onDayNightChange)
-            SectionDivider()
+            GroupDivider()
             GuidanceSection(guidance, onCameraStyleChange, onLaneZoomChange, onLanesOnMapChange, onLaneCountsHorizonChange)
-            SectionDivider()
+            GroupDivider()
             DebugSection(
                 debug,
                 onSimulateDriveChange,
@@ -178,42 +161,36 @@ fun SettingsScreen(
                 onCrashNow,
                 temporaryDebugKey,
             )
-            SectionDivider()
-
-            SectionTitle(R.string.about_title)
-            Text(
-                text = stringResource(
-                    R.string.about_version,
-                    stringResource(R.string.app_version),
-                    stringResource(R.string.build_revision),
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = LookTheme.tokens.onCardMuted,
-            )
-            Text(
-                text = stringResource(R.string.about_map_data),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            PrivacyPolicyButton()
+            GroupDivider()
+            AboutSection()
         }
     }
 }
 
-/** Opens the privacy policy in the browser; a phone without one gets a short note instead. */
+/** The version and the map data's attribution, and the privacy policy, which opens in the browser. */
 @Composable
-private fun PrivacyPolicyButton() {
+private fun AboutSection() {
     val context = LocalContext.current
-    TextButton(
+    GroupTitle(stringResource(R.string.about_title))
+    InfoRowItem(
+        title = null,
+        lines = listOf(
+            RowLine(
+                stringResource(R.string.about_version, stringResource(R.string.app_version), stringResource(R.string.build_revision)),
+                LineTone.VALUE_MUTED,
+            ),
+            RowLine(stringResource(R.string.about_map_data)),
+        ),
+    )
+    // A phone without a browser gets a short note instead.
+    LinkRowItem(
+        title = stringResource(R.string.about_privacy_policy),
         onClick = {
             if (!context.openWebPage(PRIVACY_POLICY_URL)) {
                 Toast.makeText(context, R.string.about_no_browser, Toast.LENGTH_LONG).show()
             }
         },
-    ) {
-        Text(stringResource(R.string.about_privacy_policy))
-    }
+    )
 }
 
 /**
@@ -222,65 +199,22 @@ private fun PrivacyPolicyButton() {
  */
 @Composable
 private fun DayNightSection(look: LookSettings, onDayNightChange: (LookChoice) -> Unit) {
-    SectionTitle(R.string.day_night_title)
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp),
-    ) {
-        val choices = LookChoice.entries
-        choices.forEachIndexed { index, choice ->
-            SegmentedButton(
-                selected = choice == look.choice,
-                onClick = { onDayNightChange(choice) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = choices.size),
-                contentPadding = THREE_SEGMENT_PADDING,
-            ) {
-                SegmentLabel(stringResource(choice.titleRes()))
-            }
+    GroupTitle(stringResource(R.string.day_night_title))
+    val choices = LookChoice.entries
+    val lines = buildList {
+        if (look.choice == LookChoice.AUTO) {
+            add(RowLine(stringResource(R.string.day_night_auto_note)))
+            look.next?.let { next -> add(RowLine(stringResource(next.look.nextRes(), NEXT_LOOK_TIME.format(next.at)), LineTone.VALUE)) }
         }
     }
-    if (look.choice == LookChoice.AUTO) {
-        Text(
-            text = stringResource(R.string.day_night_auto_note),
-            style = MaterialTheme.typography.bodySmall,
-            color = LookTheme.tokens.onCardMuted,
-        )
-        look.next?.let { next ->
-            Text(
-                text = stringResource(next.look.nextRes(), NEXT_LOOK_TIME.format(next.at)),
-                style = MaterialTheme.typography.bodyMedium,
-                color = LookTheme.tokens.onCard,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-    }
-}
-
-/**
- * A segment's word on one line, smaller only when a large font leaves it no room, never below
- * 12 sp. Material measures the word as wide as the segment and sets the selected segment's check
- * mark beside it, so every segment keeps room for the mark and its words stay one size.
- */
-@Composable
-private fun SegmentLabel(text: String) {
-    Text(
-        text = text,
-        maxLines = 1,
-        autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = LocalTextStyle.current.fontSize),
-        modifier = Modifier.layout { measurable, constraints ->
-            val room = if (constraints.hasBoundedWidth) (constraints.maxWidth - CHECK_MARK_ROOM.roundToPx()).coerceAtLeast(0) else constraints.maxWidth
-            val label = measurable.measure(constraints.copy(minWidth = 0, maxWidth = room))
-            layout(label.width, label.height) { label.place(0, 0) }
-        },
+    ChoiceRowItem(
+        title = null,
+        options = choices.map { ChoiceItem(stringResource(it.titleRes())) },
+        selected = choices.indexOf(look.choice),
+        onSelect = { onDayNightChange(choices[it]) },
+        lines = lines,
     )
 }
-
-/** The selected segment's check mark and the space before its word, as Material 3 1.4.0 lays them out. */
-private val CHECK_MARK_ROOM = SegmentedButtonDefaults.IconSize + 8.dp
-
-/** Three segments on a narrow phone: less padding than Material's 12 dp a side, so a large font still fits. */
-private val THREE_SEGMENT_PADDING = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
 
 /** How the app guides. Every choice here applies at once, also during a drive. */
 @Composable
@@ -291,195 +225,57 @@ private fun GuidanceSection(
     onLanesOnMapChange: (LanesOnMap) -> Unit,
     onLaneCountsHorizonChange: (Boolean) -> Unit,
 ) {
-    SectionTitle(R.string.guidance_title)
-    Text(
-        text = stringResource(R.string.camera_style_title),
-        style = MaterialTheme.typography.titleSmall,
-        color = LookTheme.tokens.onCard,
+    GroupTitle(stringResource(R.string.guidance_title))
+    val styles = CameraStyle.entries
+    ChoiceRowItem(
+        title = stringResource(R.string.camera_style_title),
+        options = styles.map { ChoiceItem(stringResource(it.titleRes()), stringResource(it.noteRes())) },
+        selected = styles.indexOf(guidance.cameraStyle),
+        onSelect = { onCameraStyleChange(styles[it]) },
+        folds = true,
+        lines = buildList {
+            add(RowLine(stringResource(R.string.camera_style_note)))
+            // Where the app's lit lane does not take the line's place, the line stays in the lane to take.
+            if (guidance.lanesOnMap.appDraws) add(RowLine(stringResource(R.string.camera_style_app_lanes_note), LineTone.NOTE_NOW))
+        },
     )
-    Column(Modifier.selectableGroup()) {
-        CameraStyle.entries.forEach { style ->
-            val selected = style == guidance.cameraStyle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onCameraStyleChange(style) })
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // The whole row is the button.
-                RadioButton(selected = selected, onClick = null)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = stringResource(style.titleRes()),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = LookTheme.tokens.onCard,
-                    )
-                    Text(
-                        text = stringResource(style.noteRes()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LookTheme.tokens.onCardMuted,
-                    )
-                }
-            }
-        }
-    }
-    Text(
-        text = stringResource(R.string.camera_style_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = LookTheme.tokens.onCardMuted,
-    )
-    if (guidance.lanesOnMap.appDraws) {
-        // Where the app's lit lane does not take the line's place, the line stays in the lane to take.
-        Text(
-            text = stringResource(R.string.camera_style_app_lanes_note),
-            style = MaterialTheme.typography.bodySmall,
-            color = LookTheme.tokens.onCard,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
 
     Spacer(Modifier.height(16.dp))
-    LaneZoomBlock(guidance, onLaneZoomChange)
-
-    Spacer(Modifier.height(16.dp))
-    LanesOnMapBlock(guidance.lanesOnMap, onLanesOnMapChange)
-
-    Spacer(Modifier.height(16.dp))
-    LaneCountsHorizonRow(guidance.laneCountsHorizon, onLaneCountsHorizonChange)
-}
-
-/**
- * Whether guidance reads the lane counts between lane points from Mapbox's electronic horizon: a switch, its title with a
- * label beside it that names it a Mapbox beta, and one line that says whose it is and that Mapbox may end its free use.
- * On until the driver turns it off.
- */
-@Composable
-private fun LaneCountsHorizonRow(on: Boolean, onLaneCountsHorizonChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // The title takes what room the label leaves and wraps there; the label stays beside it.
-                Text(
-                    text = stringResource(R.string.lane_counts_horizon_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = LookTheme.tokens.onCard,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Spacer(Modifier.width(8.dp))
-                MapboxBetaLabel()
-            }
-            Text(
-                text = stringResource(R.string.lane_counts_horizon_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = on, onCheckedChange = onLaneCountsHorizonChange)
-    }
-}
-
-/** The words Mapbox beta in a thin frame, beside the title of a setting that uses a beta of Mapbox's: a word, not a colour, says it. */
-@Composable
-private fun MapboxBetaLabel() {
-    Text(
-        text = stringResource(R.string.mapbox_beta_label),
-        style = MaterialTheme.typography.labelSmall,
-        color = LookTheme.tokens.onCard,
-        modifier = Modifier
-            .border(1.dp, LookTheme.tokens.outline, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
-}
-
-/**
- * Who draws the lanes on the map: one of three, each row the whole button, with a line that says what it draws. The
- * note under them says what none of them is: the car's lane.
- */
-@Composable
-private fun LanesOnMapBlock(choice: LanesOnMap, onLanesOnMapChange: (LanesOnMap) -> Unit) {
-    Text(
-        text = stringResource(R.string.lanes_on_map_title),
-        style = MaterialTheme.typography.titleSmall,
-        color = LookTheme.tokens.onCard,
-    )
-    Column(Modifier.selectableGroup()) {
-        LanesOnMap.entries.forEach { option ->
-            val selected = option == choice
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onLanesOnMapChange(option) })
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // The whole row is the button.
-                RadioButton(selected = selected, onClick = null)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = stringResource(option.titleRes()),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = LookTheme.tokens.onCard,
-                    )
-                    Text(
-                        text = stringResource(option.noteRes()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LookTheme.tokens.onCardMuted,
-                    )
-                }
-            }
-        }
-    }
-    Text(
-        text = stringResource(R.string.lanes_on_map_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = LookTheme.tokens.onCardMuted,
-    )
-}
-
-/** How close the camera goes before turns and lane choices: one of two, each with a line that says what it does. */
-@Composable
-private fun LaneZoomBlock(guidance: GuidanceSettings, onLaneZoomChange: (LaneZoom) -> Unit) {
-    Text(
-        text = stringResource(R.string.lane_zoom_title),
-        style = MaterialTheme.typography.titleSmall,
-        color = LookTheme.tokens.onCard,
-    )
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-    ) {
-        val modes = LaneZoom.entries
-        modes.forEachIndexed { index, mode ->
-            SegmentedButton(
-                selected = mode == guidance.laneZoom,
-                onClick = { onLaneZoomChange(mode) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-            ) {
-                Text(stringResource(mode.titleRes()))
-            }
-        }
-    }
-    LaneZoom.entries.forEach { mode ->
-        Text(
-            text = stringResource(mode.noteRes()),
-            style = MaterialTheme.typography.bodySmall,
-            color = LookTheme.tokens.onCardMuted,
-        )
-    }
-    if (guidance.cameraStyle == CameraStyle.MAPBOX_STANDARD) {
+    val zooms = LaneZoom.entries
+    ChoiceRowItem(
+        title = stringResource(R.string.lane_zoom_title),
+        options = zooms.map { ChoiceItem(stringResource(it.titleRes()), stringResource(it.noteRes())) },
+        selected = zooms.indexOf(guidance.laneZoom),
+        onSelect = { onLaneZoomChange(zooms[it]) },
         // That style is the camera as it comes, for comparison: the choice above does not reach it.
-        Text(
-            text = stringResource(R.string.lane_zoom_mapbox_standard_note),
-            style = MaterialTheme.typography.bodySmall,
-            color = LookTheme.tokens.onCard,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
+        lines = if (guidance.cameraStyle == CameraStyle.MAPBOX_STANDARD) {
+            listOf(RowLine(stringResource(R.string.lane_zoom_mapbox_standard_note), LineTone.NOTE_NOW))
+        } else {
+            emptyList()
+        },
+    )
+
+    // Who draws the lanes on the map; the note under them says what none of them is: the car's lane.
+    Spacer(Modifier.height(16.dp))
+    val lanes = LanesOnMap.entries
+    ChoiceRowItem(
+        title = stringResource(R.string.lanes_on_map_title),
+        options = lanes.map { ChoiceItem(stringResource(it.titleRes()), stringResource(it.noteRes())) },
+        selected = lanes.indexOf(guidance.lanesOnMap),
+        onSelect = { onLanesOnMapChange(lanes[it]) },
+        folds = true,
+        lines = listOf(RowLine(stringResource(R.string.lanes_on_map_note))),
+    )
+
+    // A Mapbox beta, labelled as one beside its name; on until the driver turns it off.
+    Spacer(Modifier.height(8.dp))
+    SwitchRowItem(
+        title = stringResource(R.string.lane_counts_horizon_title),
+        checked = guidance.laneCountsHorizon,
+        onCheckedChange = onLaneCountsHorizonChange,
+        badge = stringResource(R.string.mapbox_beta_label),
+        lines = listOf(RowLine(stringResource(R.string.lane_counts_horizon_note))),
+    )
 }
 
 /** Trip sessions are what Mapbox bills for navigation, so their count is kept in sight. */
@@ -498,166 +294,93 @@ private fun DebugSection(
     temporaryDebugKey: Boolean,
 ) {
     val uriHandler = LocalUriHandler.current
-    SectionTitle(R.string.debug_title)
+    GroupTitle(stringResource(R.string.debug_title))
     val trips = debug.trips
-    Text(
-        text = when (val since = trips.partialSince) {
+    InfoRowItem(
+        title = when (val since = trips.partialSince) {
             null -> stringResource(R.string.debug_trips_this_month, trips.count)
             else -> stringResource(tripsSinceRes(trips.began), trips.count, TRIPS_SINCE_DAY.format(since))
         },
-        style = MaterialTheme.typography.titleMedium,
-        color = LookTheme.tokens.onCard,
+        // By the token each ran on, when there is more than one line.
+        lines = debug.tripsByToken.map { row -> RowLine(stringResource(R.string.debug_trips_token, tripsOfText(row.of), row.count), LineTone.VALUE) } +
+            RowLine(stringResource(R.string.debug_trips_note)),
     )
-    // By the token each ran on, when there is more than one line.
-    debug.tripsByToken.forEach { row ->
-        Text(
-            text = stringResource(R.string.debug_trips_token, tripsOfText(row.of), row.count),
-            style = MaterialTheme.typography.bodyMedium,
-            color = LookTheme.tokens.onCard,
-        )
-    }
-    Text(
-        text = stringResource(R.string.debug_trips_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = LookTheme.tokens.onCardMuted,
-    )
-    TextButton(onClick = { uriHandler.openUri(MAPBOX_STATISTICS_URL) }) {
-        Text(stringResource(R.string.debug_open_statistics))
-    }
+    LinkRowItem(title = stringResource(R.string.debug_open_statistics), onClick = { uriHandler.openUri(MAPBOX_STATISTICS_URL) })
 
     Spacer(Modifier.height(8.dp))
-    Text(
-        text = stringResource(R.string.debug_recent_title),
-        style = MaterialTheme.typography.titleSmall,
-        color = LookTheme.tokens.onCard,
+    InfoRowItem(
+        title = stringResource(R.string.debug_recent_title),
+        lines = if (debug.recentTrips.isEmpty()) {
+            listOf(RowLine(stringResource(R.string.debug_recent_empty), LineTone.VALUE_MUTED))
+        } else {
+            debug.recentTrips.map { (trip, token) ->
+                RowLine(
+                    listOfNotNull(
+                        TRIP_TIME.format(trip.startedAt.atZone(ZoneId.systemDefault())),
+                        stringResource(trip.kind.labelRes()),
+                        if (trip.simulated) stringResource(R.string.debug_trip_simulated) else null,
+                        // A session from before tokens were named shows none.
+                        if (token == TripsOf.BeforeNames) null else tripsOfText(token),
+                    ).joinToString(" · "),
+                    LineTone.VALUE_MUTED,
+                )
+            }
+        },
     )
-    if (debug.recentTrips.isEmpty()) {
-        Text(
-            text = stringResource(R.string.debug_recent_empty),
-            style = MaterialTheme.typography.bodyMedium,
-            color = LookTheme.tokens.onCardMuted,
-        )
-    }
-    debug.recentTrips.forEach { (trip, token) ->
-        Text(
-            text = listOfNotNull(
-                TRIP_TIME.format(trip.startedAt.atZone(ZoneId.systemDefault())),
-                stringResource(trip.kind.labelRes()),
-                if (trip.simulated) stringResource(R.string.debug_trip_simulated) else null,
-                // A session from before tokens were named shows none.
-                if (token == TripsOf.BeforeNames) null else tripsOfText(token),
-            ).joinToString(" · "),
-            style = MaterialTheme.typography.bodyMedium,
-            color = LookTheme.tokens.onCardMuted,
-        )
-    }
 
-    Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.debug_simulate_drive),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.debug_simulate_drive_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = debug.simulateDrive, onCheckedChange = onSimulateDriveChange)
-    }
-
+    Spacer(Modifier.height(8.dp))
+    SwitchRowItem(
+        title = stringResource(R.string.debug_simulate_drive),
+        checked = debug.simulateDrive,
+        onCheckedChange = onSimulateDriveChange,
+        lines = listOf(RowLine(stringResource(R.string.debug_simulate_drive_note))),
+    )
     // A test of the route line the app draws itself; the SDK's comes back by itself if it fails.
-    Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.debug_own_route_line),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.debug_own_route_line_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = debug.ownRouteLine, onCheckedChange = onOwnRouteLineChange)
-    }
-
+    SwitchRowItem(
+        title = stringResource(R.string.debug_own_route_line),
+        checked = debug.ownRouteLine,
+        onCheckedChange = onOwnRouteLineChange,
+        lines = listOf(RowLine(stringResource(R.string.debug_own_route_line_note))),
+    )
     // What the lanes drawn by the app cost the map's frames, measured on a drive.
-    Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.debug_measure_own_lanes),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.debug_measure_own_lanes_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = debug.measureOwnLanes, onCheckedChange = onMeasureOwnLanesChange)
-    }
-
+    SwitchRowItem(
+        title = stringResource(R.string.debug_measure_own_lanes),
+        checked = debug.measureOwnLanes,
+        onCheckedChange = onMeasureOwnLanesChange,
+        lines = listOf(RowLine(stringResource(R.string.debug_measure_own_lanes_note))),
+    )
     // What Mapbox sends of the side roads at each intersection of a route, measured before the street lanes use it.
-    Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.debug_side_road_fields),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.debug_side_road_fields_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = debug.sideRoadFields, onCheckedChange = onSideRoadFieldsChange)
-    }
+    SwitchRowItem(
+        title = stringResource(R.string.debug_side_road_fields),
+        checked = debug.sideRoadFields,
+        onCheckedChange = onSideRoadFieldsChange,
+        lines = listOf(RowLine(stringResource(R.string.debug_side_road_fields_note))),
+    )
 
     // The car's map at 30 or 60 frames a second, to compare what the car shows of each.
-    Spacer(Modifier.height(16.dp))
-    CarMapFramesBlock(debug.carMapFps, onCarMapFpsChange)
+    Spacer(Modifier.height(8.dp))
+    val targets = CarFrameRate.TARGETS
+    ChoiceRowItem(
+        title = stringResource(R.string.debug_car_map_fps),
+        options = targets.map { ChoiceItem(stringResource(R.string.debug_car_map_fps_value, it)) },
+        selected = targets.indexOf(debug.carMapFps),
+        onSelect = { onCarMapFpsChange(targets[it]) },
+        lines = listOf(RowLine(stringResource(R.string.debug_car_map_fps_note))),
+    )
 
     // The car's map without its 3D objects while the phone is hot.
-    Spacer(Modifier.height(16.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.debug_car_light_when_hot),
-                style = MaterialTheme.typography.titleSmall,
-                color = LookTheme.tokens.onCard,
-            )
-            Text(
-                text = stringResource(R.string.debug_car_light_when_hot_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = LookTheme.tokens.onCardMuted,
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        AppSwitch(checked = debug.carLightWhenHot, onCheckedChange = onCarLightWhenHotChange)
-    }
+    Spacer(Modifier.height(8.dp))
+    SwitchRowItem(
+        title = stringResource(R.string.debug_car_light_when_hot),
+        checked = debug.carLightWhenHot,
+        onCheckedChange = onCarLightWhenHotChange,
+        lines = listOf(RowLine(stringResource(R.string.debug_car_light_when_hot_note))),
+    )
 
     Spacer(Modifier.height(16.dp))
     if (temporaryDebugKey) {
-        Text(
-            text = stringResource(R.string.debug_temporary_key),
-            style = MaterialTheme.typography.bodyMedium,
-            color = LookTheme.tokens.danger,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
+        InfoRowItem(title = null, lines = listOf(RowLine(stringResource(R.string.debug_temporary_key), LineTone.WARNING)))
+        Spacer(Modifier.height(8.dp))
     }
     DebugLogBlock(debug.logBytes, onShareLog, onClearLog)
 
@@ -667,50 +390,15 @@ private fun DebugSection(
     }
 }
 
-/**
- * How many frames a second the map on the car's screen draws: one of two, applied at once, also
- * during a drive, with a line that says what the car shows of them.
- */
-@Composable
-private fun CarMapFramesBlock(fps: Int, onCarMapFpsChange: (Int) -> Unit) {
-    Text(
-        text = stringResource(R.string.debug_car_map_fps),
-        style = MaterialTheme.typography.titleSmall,
-        color = LookTheme.tokens.onCard,
-    )
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-    ) {
-        val targets = CarFrameRate.TARGETS
-        targets.forEachIndexed { index, target ->
-            SegmentedButton(
-                selected = target == fps,
-                onClick = { onCarMapFpsChange(target) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = targets.size),
-            ) {
-                SegmentLabel(stringResource(R.string.debug_car_map_fps_value, target))
-            }
-        }
-    }
-    Text(
-        text = stringResource(R.string.debug_car_map_fps_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = LookTheme.tokens.onCardMuted,
-    )
-}
-
 /** Debug builds only: a deliberate crash, to check the crash record on the phone. */
 @Composable
 private fun CrashNowBlock(onCrashNow: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
-    Text(
-        text = stringResource(R.string.debug_crash_now_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = LookTheme.tokens.onCardMuted,
+    ActionRowItem(
+        title = stringResource(R.string.debug_crash_now),
+        onClick = { confirm = true },
+        lines = listOf(RowLine(stringResource(R.string.debug_crash_now_note))),
     )
-    TextButton(onClick = { confirm = true }) { Text(stringResource(R.string.debug_crash_now)) }
     if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
@@ -734,31 +422,23 @@ private fun CrashNowBlock(onCrashNow: () -> Unit) {
 @Composable
 private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: () -> Unit) {
     var confirmClear by remember { mutableStateOf(false) }
-    Text(
-        text = stringResource(R.string.debug_log_title),
-        style = MaterialTheme.typography.titleSmall,
-        color = LookTheme.tokens.onCard,
-    )
-    Text(
-        text = when {
-            logBytes == null -> stringResource(R.string.debug_log_measuring)
-            logBytes == 0L -> stringResource(R.string.debug_log_empty)
-            else -> stringResource(R.string.debug_log_size, SizeFormat.bytes(logBytes))
-        },
-        style = MaterialTheme.typography.bodyMedium,
-        color = LookTheme.tokens.onCard,
-    )
-    Text(
-        text = stringResource(R.string.debug_log_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = LookTheme.tokens.onCardMuted,
+    InfoRowItem(
+        title = stringResource(R.string.debug_log_title),
+        lines = listOf(
+            RowLine(
+                when {
+                    logBytes == null -> stringResource(R.string.debug_log_measuring)
+                    logBytes == 0L -> stringResource(R.string.debug_log_empty)
+                    else -> stringResource(R.string.debug_log_size, SizeFormat.bytes(logBytes))
+                },
+                LineTone.VALUE,
+            ),
+            RowLine(stringResource(R.string.debug_log_note)),
+        ),
     )
     val hasLog = (logBytes ?: 0L) > 0L
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onShareLog, enabled = hasLog) { Text(stringResource(R.string.debug_log_share)) }
-        Spacer(Modifier.width(8.dp))
-        TextButton(onClick = { confirmClear = true }, enabled = hasLog) { Text(stringResource(R.string.debug_log_clear)) }
-    }
+    ActionRowItem(title = stringResource(R.string.debug_log_share), onClick = onShareLog, enabled = hasLog)
+    ActionRowItem(title = stringResource(R.string.debug_log_clear), onClick = { confirmClear = true }, enabled = hasLog)
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
@@ -777,23 +457,6 @@ private fun DebugLogBlock(logBytes: Long?, onShareLog: () -> Unit, onClearLog: (
             },
         )
     }
-}
-
-@Composable
-private fun SectionTitle(@StringRes text: Int) {
-    Text(
-        text = stringResource(text),
-        style = MaterialTheme.typography.titleMedium,
-        color = LookTheme.tokens.accentInk,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
-}
-
-@Composable
-private fun SectionDivider() {
-    Spacer(Modifier.height(24.dp))
-    HorizontalDivider(color = LookTheme.tokens.divider)
-    Spacer(Modifier.height(24.dp))
 }
 
 @StringRes
@@ -935,9 +598,9 @@ private fun DayNightSectionPreview(@PreviewParameter(LookParameter::class) look:
         Surface(color = LookTheme.tokens.screen) {
             Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
                 DayNightSection(LookSettings(LookChoice.AUTO, NextLook(Look.NIGHT, LocalTime.of(18, 5))), onDayNightChange = {})
-                SectionDivider()
+                GroupDivider()
                 DayNightSection(LookSettings(LookChoice.AUTO, NextLook(Look.DAY, LocalTime.of(6, 20))), onDayNightChange = {})
-                SectionDivider()
+                GroupDivider()
                 DayNightSection(LookSettings(LookChoice.NIGHT), onDayNightChange = {})
             }
         }
@@ -964,7 +627,7 @@ private fun GuidanceSectionPreview(@PreviewParameter(LookParameter::class) look:
                     onLanesOnMapChange = {},
                     onLaneCountsHorizonChange = {},
                 )
-                SectionDivider()
+                GroupDivider()
                 GuidanceSection(
                     GuidanceSettings(lanesOnMap = LanesOnMap.MAPBOX, laneCountsHorizon = false),
                     onCameraStyleChange = {},

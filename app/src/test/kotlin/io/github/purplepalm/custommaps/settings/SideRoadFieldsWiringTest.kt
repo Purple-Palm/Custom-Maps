@@ -23,8 +23,12 @@ class SideRoadFieldsWiringTest {
         val app = Sources.code("ui/CustomMapsApp.kt").lines().map { it.trim() }
         assertTrue("onSideRoadFieldsChange = settingsViewModel::setSideRoadFields," in app)
         val section = Sources.functionBody(Sources.code("ui/settings/SettingsScreen.kt"), "private fun DebugSection(").lines().map { it.trim() }
-        assertEquals(1, section.count { it == "AppSwitch(checked = debug.sideRoadFields, onCheckedChange = onSideRoadFieldsChange)" })
-        assertTrue("text = stringResource(R.string.debug_side_road_fields)," in section)
-        assertTrue("text = stringResource(R.string.debug_side_road_fields_note)," in section)
+        // One switch row, the whole row its target, that shows the stored value and stores a change.
+        assertEquals(1, section.count { it == "checked = debug.sideRoadFields," })
+        val row = section.indexOf("title = stringResource(R.string.debug_side_road_fields),")
+        assertTrue(row > 0 && section[row - 1] == "SwitchRowItem(")
+        assertEquals("checked = debug.sideRoadFields,", section[row + 1])
+        assertEquals("onCheckedChange = onSideRoadFieldsChange,", section[row + 2])
+        assertEquals("lines = listOf(RowLine(stringResource(R.string.debug_side_road_fields_note))),", section[row + 3])
     }
 }
