@@ -1237,8 +1237,8 @@ internal class MapScene(
      * animation, and the camera line goes on once a second while the phone's screen is on, with "away".
      * The routes, the progress and the data source go on as before, so the map comes back as of now.
      * The drive views do no work meanwhile: a hold of the map ends as it goes, and back during a drive
-     * the plan decides afresh from where the car is then, as after a seek, and the camera shows what
-     * it wants, from the frame of now.
+     * the plan decides afresh from where the car is then, as after a seek, on the latest update, before
+     * the camera is asked for what it wants, from the frame of now.
      */
     fun setAway(away: Boolean) {
         if (away == this.away) return
@@ -1250,7 +1250,10 @@ internal class MapScene(
                 logHoldEnded()
                 publishDriveControls()
             } else {
+                // Decided afresh as after a seek, on the update the map heard last while it was away (none the
+                // guard of an old position holds): what the camera is asked for first is where the car is now.
                 driveCamera.onJump(driveNow())
+                if (!oldPosition) lastProgress?.let { driveCamera.onProgress(engine.viewAhead(it)) }
                 carryOut(driveCamera.wish, BY_START, WHY_BACK, always = true)
             }
         }

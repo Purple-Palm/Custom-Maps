@@ -189,7 +189,8 @@ class DriveCamera(
     /**
      * The map was put away, out of sight while the phone shows the list of the maneuvers ahead in its place:
      * a hold of it ends, and the map is to show the plan's view again; nothing of it is carried out while it
-     * is away. Back, the plan decides afresh from where the car is then ([onJump]).
+     * is away. Back, the plan decides afresh from where the car is then: [onJump], and the latest update the
+     * map heard ([onProgress]) before its camera is asked for anything.
      */
     fun onAway(nowSeconds: Double): CameraWish? {
         if (!guiding || hold.kind == MapHold.Kind.NONE) return null

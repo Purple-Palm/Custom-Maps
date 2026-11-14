@@ -368,14 +368,27 @@ class DriveCameraTest {
         assertNull(d.camera.onAway(d.t + 2.0))
         assertNull(d.camera.takeHoldEnded())
         // Back past a turn it did not see, inside the next one's approach: the plan decides from there as after a
-        // seek, and the view comes down at the first update.
+        // seek, on the update the map heard last while it was away, so the car is what the camera is asked for
+        // first on the return, before the next update; no flash of the overview and second flight down.
         d.x = 3_700.0
         d.camera.onJump(d.t)
+        d.act { onProgress(ViewInput(d.t, d.routeId, d.x, false, 13.0, d.ahead())) }
+        assertEquals(CameraWish.FOLLOW, d.camera.wish)
+        assertEquals(listOf(CameraWish.OVERVIEW, CameraWish.FOLLOW), d.wishes.map { it.second })
         d.drive(13.0, seconds = 1.5)
-        assertEquals(CameraWish.FOLLOW, d.lastWish())
+        assertEquals(2, d.wishes.size, "nothing more at the next update")
         d.camera.onGuidanceEnded(d.t)
         d.camera.onMapTaken(d.t)
         assertNull(d.camera.onAway(d.t))
+        // Back on the open road, nothing near: the overview, as the plan had it.
+        val open = CameraDrive(listOf(3_000.0, 30_000.0), smart)
+        open.drive(13.0, untilX = 500.0)
+        open.camera.onMapTaken(open.t)
+        assertEquals(CameraWish.OVERVIEW, open.camera.onAway(open.t))
+        open.x = 1_200.0
+        open.camera.onJump(open.t)
+        assertNull(open.camera.onProgress(ViewInput(open.t, open.routeId, open.x, false, 13.0, open.ahead())))
+        assertEquals(CameraWish.OVERVIEW, open.camera.wish)
     }
 
     @Test

@@ -60,7 +60,14 @@ class DriveCameraWiringTest {
         val away = body("fun setAway(away: Boolean)")
         assertTrue("driveCamera.onAway(driveNow())" in away)
         val back = away.indexOf("driveCamera.onJump(driveNow())")
-        assertTrue(back >= 0 && away[back + 1] == "carryOut(driveCamera.wish, BY_START, WHY_BACK, always = true)")
+        assertTrue(back >= 0, "$away")
+        // Back, the plan decides on the update the map heard last, none the guard of an old position holds, before the
+        // camera is asked: else it would be asked for the wish of before, and for the car's only at the next update.
+        assertEquals("if (!oldPosition) lastProgress?.let { driveCamera.onProgress(engine.viewAhead(it)) }", away[back + 1])
+        assertEquals("carryOut(driveCamera.wish, BY_START, WHY_BACK, always = true)", away[back + 2])
+        // While away the map still keeps each update the guard lets through, for that return.
+        val progress = body("private fun onRouteProgress(progress: RouteProgress)")
+        assertTrue(progress.indexOf("lastProgress = progress") in 1 until progress.indexOf("if (!away) carryOut(driveCamera.onProgress(engine.viewAhead(progress)), BY_PLAN, WHY_PLAN)"))
         // The hold's clock stops while the map is away, and with the hold.
         val ticker = body("private fun startHoldTicker()")
         assertTrue("if (away || guidanceState != GuidanceState.ACTIVE) break" in ticker)
