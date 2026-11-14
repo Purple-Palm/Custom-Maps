@@ -295,9 +295,10 @@ fun guidancePitch(tuning: CameraTuning, laneShare: Double, junctionFocus: Double
  *
  * It keeps the navigation SDK's rule for which maneuvers count and where the view is down, and
  * replaces the SDK's one-step change of tilt with timed, eased moves:
- * - Down over [CameraTuning.descentSeconds], starting at maneuverFramingMeters + speed ×
- *   descentSeconds, so the view is down as the SDK starts to frame the maneuver. Once started for a
- *   step it stays: braking never tilts the view back up before the turn.
+ * - Down over [CameraTuning.descentSeconds], starting [windowMeters] before the maneuver,
+ *   maneuverFramingMeters + speed × descentSeconds, so the view is down as the SDK starts to frame
+ *   the maneuver. Once started for a step it stays: braking never tilts the view back up before the
+ *   turn.
  * - Held through the turn, for at least holdAfterManeuverMeters and holdAfterManeuverSeconds into
  *   the next step.
  * - Up over [CameraTuning.ascentSeconds], unless the next counted maneuver is already inside its own
@@ -359,9 +360,8 @@ class ManeuverFocus(private val tuning: CameraTuning) {
             }
             this.stepKey = stepKey
         }
-        val speed = (speedMps ?: 0.0).coerceAtLeast(MIN_SPEED_MPS)
         val counts = maneuverType != null && maneuverType !in excludedTypes
-        if (counts && metersToManeuver <= tuning.maneuverFramingMeters + speed * tuning.descentSeconds) {
+        if (counts && metersToManeuver <= windowMeters(tuning, speedMps)) {
             latchedStep = stepKey
         }
         val inTurn = holdStep == stepKey && (metersOnStep < tuning.holdAfterManeuverMeters || now < holdUntil)
@@ -387,11 +387,21 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         goal = newGoal
     }
 
-    private companion object {
+    companion object {
         /** A car that is slower than this, or stopped, still gets a window that opens before the maneuver. */
-        const val MIN_SPEED_MPS = 3.0
+        private const val MIN_SPEED_MPS = 3.0
 
         /** The shortest move, so a reversal right after a start is not a jerk. */
-        const val MIN_MOVE_SECONDS = 0.3
+        private const val MIN_MOVE_SECONDS = 0.3
+
+        /**
+         * How far before a maneuver the tilt starts down: [CameraTuning.maneuverFramingMeters] plus what
+         * the car covers in [CameraTuning.descentSeconds], so the view is flat as the navigation SDK
+         * starts to frame the maneuver. A car slower than 3 m/s, or with no speed yet, counts as 3 m/s.
+         *
+         * @param speedMps the car's speed; unknown counts as slow
+         */
+        fun windowMeters(tuning: CameraTuning, speedMps: Double?): Double =
+            tuning.maneuverFramingMeters + (speedMps ?: 0.0).coerceAtLeast(MIN_SPEED_MPS) * tuning.descentSeconds
     }
 }

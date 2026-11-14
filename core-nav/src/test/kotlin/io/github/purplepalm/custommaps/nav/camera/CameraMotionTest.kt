@@ -297,6 +297,25 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `the tilt starts down exactly at the window the camera names`() {
+        // Standing, slow, at town speed and on a freeway: the latch opens at the named distance and no farther out.
+        for (speed in listOf(0.0, 3.0, 13.0, 30.0)) {
+            val window = ManeuverFocus.windowMeters(tuning, speed)
+            assertEquals(tuning.maneuverFramingMeters + maxOf(speed, 3.0) * tuning.descentSeconds, window, 1e-9, "speed $speed")
+            val outside = ManeuverFocus(tuning)
+            outside.onProgress(0.0, "r/0/0", window + 0.01, 0.0, "turn", excluded, speed)
+            assertEquals(0.0, outside.goal, "speed $speed")
+            val at = ManeuverFocus(tuning)
+            at.onProgress(0.0, "r/0/0", window, 0.0, "turn", excluded, speed)
+            assertEquals(1.0, at.goal, "speed $speed")
+        }
+        // 180 m and 3.5 s at 13 m/s.
+        assertEquals(225.5, ManeuverFocus.windowMeters(tuning, 13.0), 1e-9)
+        // No speed yet is a slow car.
+        assertEquals(ManeuverFocus.windowMeters(tuning, 0.0), ManeuverFocus.windowMeters(tuning, null), 1e-9)
+    }
+
+    @Test
     fun `a drive that ends before a turn leaves nothing for the next drive`() {
         val focus = ManeuverFocus(tuning)
         focus.onProgress(0.0, "r/0/0", 150.0, 450.0, "turn", excluded, 10.0)
