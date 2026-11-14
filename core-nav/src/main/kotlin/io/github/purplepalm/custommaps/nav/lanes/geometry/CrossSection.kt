@@ -622,6 +622,9 @@ class CrossSection private constructor(
         private val route = topology.evidence.route
         private val nodes = route.nodes
 
+        /** The ways round the route's roundabouts, where nothing of the app's own is drawn ([RoutePath.roundaboutWays]). */
+        private val roundabouts = RoutePath.roundaboutWays(route)
+
         fun build(): CrossSection {
             val layouts = ArrayList<Layout>()
             // Each turn onto another road whose lanes go on, with the road before it and the road after it.
@@ -711,7 +714,9 @@ class CrossSection private constructor(
             val drawn = ArrayList<ClosedFloatingPointRange<Double>>()
             val streetsDrawn = ArrayList<ClosedFloatingPointRange<Double>>()
             val left = ArrayList<UndrawnStreet>()
-            for (unit in units) {
+            for (whole in units) {
+                // Nothing of a roundabout's way round is drawn, whatever lanes it lists or a source tells of it.
+                val unit = whole.filter { st -> roundabouts.none { st.from >= it.start - SAME_STATION && st.to <= it.endInclusive + SAME_STATION } }
                 // Only a unit's streets tell whether it is drawn: a freeway's or a ramp's stretch is one-way.
                 val ways = unit.filter { onStreet(it) }.map { wayOf(it) }
                 val unknown = ways.any { it == null }
@@ -734,7 +739,23 @@ class CrossSection private constructor(
                 }
             }
             undrawn.addAll(left)
-            return StreetLayout(first ?: Carriageway.ONE_WAY, drawn, streetsDrawn)
+            return StreetLayout(first ?: Carriageway.ONE_WAY, outsideRoundabouts(drawn), outsideRoundabouts(streetsDrawn))
+        }
+
+        /** [spans] without the ways round the route's roundabouts. */
+        private fun outsideRoundabouts(spans: List<ClosedFloatingPointRange<Double>>): List<ClosedFloatingPointRange<Double>> {
+            if (roundabouts.isEmpty()) return spans
+            val out = ArrayList<ClosedFloatingPointRange<Double>>()
+            for (span in spans) {
+                var from = span.start
+                for (way in roundabouts) {
+                    if (way.endInclusive <= from || way.start >= span.endInclusive) continue
+                    if (way.start - from > SAME_STATION) out.add(from..way.start)
+                    from = max(from, way.endInclusive)
+                }
+                if (span.endInclusive - from > SAME_STATION) out.add(from..span.endInclusive)
+            }
+            return out
         }
 
         /**

@@ -216,8 +216,8 @@ internal object RandomRoutes {
      * sign at random, a lane point in four of five; the turn from the general lane at its side or, in half the routes, from
      * a turn pocket the turn's point adds at that side (left of the bicycle lane, never beside a lane kept for buses), at a
      * signal, a stop sign or neither; in one route of ten a U-turn from the left lane instead and in one of ten the way into
-     * a roundabout, out of it 60 m on; in two of five a lane point 60 to 240 m along the road after it; the arrival 300 m past
-     * the turn.
+     * a roundabout, out of it 60 m on, where half of them list the lanes of the way round; in two of five a lane point 60 to
+     * 240 m along the road after it; the arrival 300 m past the turn.
      */
     fun street(rng: Random, id: String): LaneRoute {
         val v = rng.nextDouble(25.0, 55.0) * PlanningSpeed.MPS_PER_MPH
@@ -281,7 +281,11 @@ internal object RandomRoutes {
             else -> LaneScenes.TURN_LEFT
         }
         nodes.add(LaneScenes.street(LaneScenes.GORE, *lanes(true), roads = LaneScenes.CROSSING, maneuver = maneuver, signal = signal, stop = stop, planMps = v))
-        if (roundabout) nodes.add(LaneScenes.street(LaneScenes.GORE + 60.0, maneuver = NodeManeuver(ManeuverType.EXIT_ROUNDABOUT, TurnModifier.RIGHT), planMps = v))
+        if (roundabout) {
+            // In half of them the way out lists the lanes of the way round.
+            val round = if (right) Array(general) { s() } else emptyArray()
+            nodes.add(LaneScenes.street(LaneScenes.GORE + 60.0, *round, maneuver = NodeManeuver(ManeuverType.EXIT_ROUNDABOUT, TurnModifier.RIGHT), planMps = v))
+        }
         if (rng.nextDouble() < 0.4) nodes.add(LaneScenes.street(LaneScenes.GORE + rng.nextDouble(80.0, 240.0), *Array(rng.nextInt(1, 3)) { s() }, planMps = v))
         nodes.add(LaneScenes.street(LaneScenes.GORE + 300.0, maneuver = LaneScenes.ARRIVE, planMps = v))
         return LaneScenes.route(*nodes.toTypedArray(), id = id)

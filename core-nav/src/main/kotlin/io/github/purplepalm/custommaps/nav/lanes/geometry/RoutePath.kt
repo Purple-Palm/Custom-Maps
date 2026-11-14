@@ -4,6 +4,7 @@ import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalPoint
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
+import io.github.purplepalm.custommaps.nav.lanes.LaneRoute
 import io.github.purplepalm.custommaps.nav.lanes.LaneTopology
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.lanes.PlanningSpeed
@@ -263,6 +264,26 @@ class RoutePath private constructor(
         private val ROUNDABOUT_TYPES = setOf(
             ManeuverType.ROUNDABOUT, ManeuverType.ROUNDABOUT_TURN, ManeuverType.ROTARY, ManeuverType.EXIT_ROUNDABOUT, ManeuverType.EXIT_ROTARY,
         )
+
+        /** The maneuvers into a roundabout: its way round begins there ([roundaboutWays]). */
+        private val ROUNDABOUT_ENTRIES = setOf(ManeuverType.ROUNDABOUT, ManeuverType.ROUNDABOUT_TURN, ManeuverType.ROTARY)
+
+        /**
+         * The ways round the roundabouts of [route], in route order, each from the intersection where the route enters one (a
+         * maneuver into a roundabout) to [JUNCTION_FAR_SIDE_METERS] past the next intersection where the plan counts a maneuver
+         * ([LaneEvidence.planTurns]): its way out ([ManeuverType.EXIT_ROUNDABOUT], [ManeuverType.EXIT_ROTARY]) or, where the
+         * route gives none, the next maneuver. Nothing of the app's own lies on them, whatever lanes the route lists there.
+         */
+        fun roundaboutWays(route: LaneRoute): List<ClosedFloatingPointRange<Double>> {
+            val nodes = route.nodes
+            val out = ArrayList<ClosedFloatingPointRange<Double>>()
+            for ((i, node) in nodes.withIndex()) {
+                if (node.maneuver?.type !in ROUNDABOUT_ENTRIES) continue
+                val wayOut = (i + 1 until nodes.size).firstOrNull { LaneEvidence.planTurns(nodes[it]) }?.let { nodes[it].station } ?: route.lengthMeters
+                out.add(node.station..wayOut + JUNCTION_FAR_SIDE_METERS)
+            }
+            return out
+        }
 
         /** A right turn's modifiers. */
         private val RIGHT_TURNS = setOf(TurnModifier.SLIGHT_RIGHT, TurnModifier.RIGHT, TurnModifier.SHARP_RIGHT)
@@ -563,21 +584,38 @@ class RoutePath private constructor(
         /** A drawn stretch from [from] to [to], and whether it ends at a street junction's near side or begins at its far side. */
         private data class DrawnPart(val from: Double, val to: Double, val junctionEnd: Boolean, val junctionStart: Boolean)
 
+        /** The ways round the route's roundabouts ([roundaboutWays]), where nothing of the app's own is drawn. */
+        private val roundabouts = roundaboutWays(route)
+
         /**
          * The drawn stretch from [from] to [to] cut at every junction the route reaches on a street and turns at
          * ([LaneEvidence.planTurns]): the stretch before it ends at the junction, whose inside is the map's own road, and the
-         * one after it begins [JUNCTION_FAR_SIDE_METERS] past the junction's node; nothing of it within that of the node.
+         * one after it begins [JUNCTION_FAR_SIDE_METERS] past the junction's node; nothing of it within that of the node. So too
+         * where the route enters a roundabout on any road, and nothing of it from there to the far side of the way out
+         * ([roundaboutWays]), whatever lanes the route lists on the way round: a stretch that begins on the way round begins past
+         * it.
          */
         private fun atJunctions(from: Double, to: Double): List<DrawnPart> {
             val out = ArrayList<DrawnPart>()
             var start = from
             var startsAtJunction = false
+            // A stretch that begins on a way round, or where one ends (the cross-section draws no street on it), begins at the
+            // far side of its way out, square.
+            for (way in roundabouts) {
+                if (way.start <= start + 1e-6 && way.endInclusive >= start - 1e-6) {
+                    start = max(start, way.endInclusive)
+                    startsAtJunction = true
+                }
+            }
             for ((i, node) in nodes.withIndex()) {
-                if (i == 0 || node.station < from - 1e-6 || node.station > to + 1e-6) continue
-                if (!LaneEvidence.planTurns(node) || route.approachRoad(i) != RoadKind.STREET) continue
-                // A stretch whose carriageway would end before it begins, at the junction's near side, is none.
+                if (i == 0 || node.station < start - 1e-6 || node.station > to + 1e-6) continue
+                if (!LaneEvidence.planTurns(node)) continue
+                val way = roundabouts.firstOrNull { abs(it.start - node.station) < 1e-6 }
+                if (way == null && route.approachRoad(i) != RoadKind.STREET) continue
+                // A stretch whose carriageway would end before it begins, at the junction's near side, is none. A roundabout's
+                // way in ends so whatever road reaches it.
                 if (node.station - LaneTopology.STOP_LINE_METERS > start + 1e-6) out.add(DrawnPart(start, node.station, junctionEnd = true, junctionStart = startsAtJunction))
-                start = max(start, node.station + JUNCTION_FAR_SIDE_METERS)
+                start = max(start, way?.endInclusive ?: (node.station + JUNCTION_FAR_SIDE_METERS))
                 startsAtJunction = true
             }
             if (to > start + 1e-6) out.add(DrawnPart(start, to, junctionEnd = false, junctionStart = startsAtJunction))

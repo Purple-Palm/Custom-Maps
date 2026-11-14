@@ -168,7 +168,7 @@ class LaneTrustTest {
             for (oneWay in listOf(false, true)) check(build("$name-${if (oneWay) "one-way" else "two-way"}", route, streets = LaneScenes.ways(route, oneWay)))
         }
         assertSeen("line", "named", "lit", "arrow", "kept", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
-        assertSeen("pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout", "roadLineTwoWay")
+        assertSeen("pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout", "roundaboutLanes", "roadLineTwoWay")
     }
 
     @Test
@@ -195,7 +195,7 @@ class LaneTrustTest {
         }
         assertTrue(undrawn > 0)
         assertSeen("line", "named", "lit", "tint", "arrow", "stopLine", "twoWayLine", "junctionEnd", "junctionStart", "begins", "ends", "interiorPlain")
-        assertSeen("litAcross", "beginsPastJunction", "pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout")
+        assertSeen("litAcross", "beginsPastJunction", "pocketLine", "pocketTint", "pocketEntry", "pocketPossible", "litTurn", "uTurn", "roundabout", "roundaboutLanes")
     }
 
     @Test
@@ -675,13 +675,21 @@ class LaneTrustTest {
             val uTurn = nodes[j.node].maneuver?.modifier == TurnModifier.U_TURN
             assertEquals(!uTurn, nodes[j.node].station in b.drawing.turns(), "${b.name}: the arrow at the curve at ${j.from}")
         }
-        // A roundabout: nothing of ours from its approach's near side to the end of the way round it.
+        // A roundabout: nothing of ours from its approach's near side to the far side of the way out of it, whatever lanes the
+        // route lists on the way round; no lane there for the car's bar to span.
         for ((i, node) in nodes.withIndex()) {
             if (node.maneuver?.type !in ROUNDABOUTS || node.maneuver?.type in ROUNDABOUT_EXITS || i == 0) continue
             val exit = nodes.drop(i + 1).firstOrNull { it.maneuver?.type in ROUNDABOUT_EXITS }?.station ?: continue
-            val inside = b.features.filter { it.to > node.station - LaneTopology.STOP_LINE_METERS + 1e-6 && it.from < exit }
+            val farSide = exit + RoutePath.JUNCTION_FAR_SIDE_METERS
+            val inside = b.features.filter { it.to > node.station - LaneTopology.STOP_LINE_METERS + 1e-6 && it.from < farSide - 1e-6 }
             assertTrue(inside.isEmpty(), "${b.name}: ${inside.map { it.kind }} inside the roundabout at ${node.station}")
             assertTrue(b.drawing.turns().none { it == node.station })
+            var x = node.station - LaneTopology.STOP_LINE_METERS + 0.5
+            while (x < farSide) {
+                assertTrue(b.drawing.lanesAt(x).isEmpty(), "${b.name}: lanes for the car's bar inside the roundabout at $x")
+                x += 1.0
+            }
+            if (nodes.subList(i + 1, nodes.indexOfFirst { it.station >= exit } + 1).any { it.lanes.isNotEmpty() }) saw("roundaboutLanes")
             saw("roundabout")
         }
     }
@@ -1471,6 +1479,10 @@ class LaneTrustTest {
         "street-roundabout" to LaneScenes.roundabout(),
         "street-onto-freeway" to LaneScenes.streetOntoFreeway(),
         "freeway-onto-street" to LaneScenes.freewayOntoStreet(),
+        "street-roundabout-lanes-out" to LaneScenes.roundaboutLanesRound(atExit = true),
+        "street-roundabout-lanes-round" to LaneScenes.roundaboutLanesRound(atExit = false, onWayRound = true),
+        "street-roundabout-lanes-both" to LaneScenes.roundaboutLanesRound(atExit = true, onWayRound = true),
+        "ramp-roundabout-lanes-both" to LaneScenes.roundaboutLanesRound(atExit = true, onWayRound = true, onRamp = true),
     )
 
     /**

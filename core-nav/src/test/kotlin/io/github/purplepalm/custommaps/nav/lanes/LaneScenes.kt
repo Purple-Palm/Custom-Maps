@@ -575,6 +575,27 @@ internal object LaneScenes {
         )
     }
 
+    /**
+     * [roundabout] with lanes listed on its way round: two lanes at the way out 80 m past the entry where [atExit], and at an
+     * intersection on the way round 40 m past it, where a road crosses, where [onWayRound]; the road out with two lanes to a
+     * lane point 200 m past the entry, the arrival 300 m past it. [onRamp]: the way in a ramp. 35 mph planned.
+     */
+    fun roundaboutLanesRound(atExit: Boolean = true, onWayRound: Boolean = false, onRamp: Boolean = false): LaneRoute {
+        val mps = 35.0 * PlanningSpeed.MPS_PER_MPH
+        val approach = if (onRamp) RoadKind.RAMP else RoadKind.STREET
+        val nodes = arrayListOf(
+            node(0.0, road = approach, maneuver = DEPART, planMps = mps),
+            node(GORE - 150.0, s(), s(), road = approach, planMps = mps),
+            street(GORE, s(), s(), maneuver = NodeManeuver(ManeuverType.ROUNDABOUT, TurnModifier.RIGHT), planMps = mps),
+        )
+        if (onWayRound) nodes.add(street(GORE + 40.0, s(), s(), roads = CROSSING, planMps = mps))
+        val exitLanes = if (atExit) arrayOf(s(), s()) else emptyArray()
+        nodes.add(street(GORE + 80.0, *exitLanes, maneuver = NodeManeuver(ManeuverType.EXIT_ROUNDABOUT, TurnModifier.RIGHT), planMps = mps))
+        nodes.add(street(GORE + 200.0, s(), s(), planMps = mps))
+        nodes.add(street(GORE + 300.0, maneuver = ARRIVE, planMps = mps))
+        return route(*nodes.toTypedArray(), id = "roundabout-lanes-${if (atExit) "exit" else "none"}-${if (onWayRound) "round" else "none"}${if (onRamp) "-ramp" else ""}")
+    }
+
     /** A street turn right that only the bus lane on the right is valid for; two open lanes beside it. 35 mph planned. */
     fun busOnlyTurn(): LaneRoute {
         val street = RoadKind.STREET

@@ -493,6 +493,41 @@ class StreetDrawingTest {
     }
 
     @Test
+    fun `nothing of ours lies on a roundabout's way round whatever lanes it lists, the road out drawn from the way out's far side`() {
+        val entry = gore
+        val exit = gore + 80.0
+        val farSide = exit + RoutePath.JUNCTION_FAR_SIDE_METERS
+        for ((atExit, onWayRound, onRamp) in listOf(Triple(true, false, false), Triple(false, true, false), Triple(true, true, false), Triple(true, true, true))) {
+            val route = LaneScenes.roundaboutLanesRound(atExit, onWayRound, onRamp)
+            for (oneWay in listOf(false, true)) {
+                val d = draw(route, oneWay)
+                val name = "${route.routeId} ${if (oneWay) "one-way" else "two-way"}"
+                // The evidence has lanes on the way round; the drawing none, nor lanes for the car's bar, nor a street counted.
+                assertTrue(d.evidence.stretches.any { it.lanes > 0 && it.from >= entry - MM && it.to <= exit + MM && it.to > it.from }, name)
+                assertTrue(d.features.none { it.to > entry - 10.0 + MM && it.from < farSide - MM }, "$name: ${d.features.filter { it.to > entry - 10.0 + MM && it.from < farSide - MM }.map { it.kind }}")
+                var x = entry - 9.5
+                while (x < farSide) {
+                    assertTrue(d.drawing.lanesAt(x).isEmpty(), "$name: lanes at $x")
+                    if (x > entry) assertFalse(d.section.drawsAt(x), "$name: drawn at $x")
+                    x += 1.0
+                }
+                assertTrue(d.section.drawnStreets.none { it.endInclusive > entry + MM && it.start < farSide - MM }, "$name: ${d.section.drawnStreets}")
+                assertTrue(d.section.undrawnStreets.none { it.to > entry + MM && it.from < exit - MM }, "$name: ${d.section.undrawnStreets}")
+                // The approach, a street's or a ramp's, ends at the junction's near side; the road out begins square at the way
+                // out's far side, and the path is on the road's line all the way round.
+                assertEquals(listOf(entry to true, farSide to false), d.path.drawings.map { (if (it.junctionEnd) it.to else it.from) to it.junctionEnd }, name)
+                assertTrue(d.path.drawings.last().junctionStart, name)
+                assertTrue(d.path.junctions.isEmpty() && d.drawing.turns().isEmpty(), name)
+                x = entry - 10.0
+                while (x <= farSide) {
+                    assertEquals(0.0, d.path.offsetAt(x), 1e-9, "$name: the path off the road's line at $x")
+                    x += 1.0
+                }
+            }
+        }
+    }
+
+    @Test
     fun `a two-way street that goes on onto a freeway without a turn leaves the freeway one-way, with its edge lines`() {
         // The street's lanes up to 800 m before the gore, the freeway's on to 300 m before it.
         val d = draw(LaneScenes.streetOntoFreeway(), oneWay = false)
