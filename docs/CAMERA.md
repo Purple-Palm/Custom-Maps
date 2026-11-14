@@ -941,6 +941,12 @@ Other lines:
   **lane_measure** line for each close view; see
   [The app's own route line, behind a Debug switch](#the-apps-own-route-line-behind-a-debug-switch),
   [The app's own lanes](#the-apps-own-lanes) and [DRIVES.md](DRIVES.md).
+- With **Lane counts between lane points** on, a **horizon_lanes** line for each lane point of the
+  route that Mapbox's electronic horizon covers, once: its list against the horizon's count of the
+  edge that leads to it, and under which reading they agree. The progress line's `motion` has
+  `ehLanes` on freeways, with **Measure the drawn lanes** the line has `horizon`, the observer's
+  main-thread time, and the `trip_summary` line has `horizon`, the drive's counts; see
+  [The app's own lanes](#the-apps-own-lanes) and [DRIVES.md](DRIVES.md).
 - The **route_response** and **routes_updated** lines carry, for each step with any, the
   intersections that have lanes (`laneIntersections`): `meters` from the start of the step,
   `lanes`, `usable`, `active`, `designated`, the `classes` of the road that leaves it, and
@@ -1319,8 +1325,10 @@ goes straight through, with a mark on each lane the route can be followed from. 
 the engine reads them once for each step, with the distance of each along the step, and adds the
 next maneuver's own lanes where that maneuver is one the view stays up for (an exit, a fork, a
 merge, an on ramp or a continue). No request is made for this and no other service is asked: the
-data is in every route. Mapbox's Electronic Horizon also knows lane counts; it is a beta whose
-pricing may change and is not used.
+data is in every route. Mapbox's Electronic Horizon also knows lane counts; it is a beta whose free
+use Mapbox may end, and the lane choices and the zoom do not read it. Only the app's own drawing
+takes its counts, between lane points that agree with them
+([The app's own lanes](#the-apps-own-lanes), lane counts between lane points).
 
 **Which points count** (`LaneChoice.skipReason`):
 
@@ -2060,10 +2068,41 @@ views rest is in the swap below.
   If they do, a later step keeps them on under the drawing for every drive
   (`LanesOnMap.DETAILS_UNDER_DRAWING`), set once a drive and never per window, since setting them
   fades them.
+- **Lane counts between lane points** (`HorizonLanes`, `HorizonEvidence`), with **Settings →
+  Guidance → Lane counts between lane points** on, as it is unless turned off: during guidance the
+  app listens to Mapbox's electronic horizon, the navigator's reading of the road about 3.5 km
+  ahead, at most once a second, each edge with its count of lanes where Mapbox has one
+  ([DECISIONS.md](DECISIONS.md), 54). Between two lane points in a row on one freeway carriageway,
+  where the route does not turn and every edge between them is a motorway with a count and no
+  ramp, the count of the edge that ends at each point (within 20 m) must be that point's list,
+  every lane of it or the lanes open to every car; under neither reading nothing is taken there.
+  Where they agree, a stretch without lane data, or one bridged by a rule, gets lane lines where
+  the count is the lanes the plan draws there, with no lit lane, tint or arrow of its own: the
+  lanes keep the identities the plan gives them. A change of the count that the plan does not have
+  is a zone ending at the edge end where the count changes (twice the lane's taper and 60 m), and
+  where the count is not the plan's lanes, a rule's bridge is a zone too, and a stretch without
+  lane data where it lies between drawn stretches and is at most 600 m long, or in a card window.
+  A lane the plan adds on the side away from the exit, where the horizon has that one rise, opens
+  at the edge end where the count rises, its taper before it inside the zone, instead of late
+  before the point that lists it; a lane on the exit's side and every lane that ends stay where
+  the plan has them, so the lit lane counts from the edge as the card does. A lane point's own reach
+  stays as the route's list draws it. The counts come only with the next window's send, from 40 m
+  past the window on screen on and past a card window there, never while nothing is drawn at the
+  car and never into a window already sent: the window that is due is built off the main thread
+  with the route's path built anew past the window on screen, its points up to that window's end
+  kept as they are, and the path and the window go to the map together, the line drawn as it is
+  until both have loaded; Mapbox's line is not shown for it. Where the newest counts change nothing
+  of the drawing the window goes alone. With the switch off, the next windows take nothing new;
+  what was sent stays until the next route. A build with the counts that fails costs them for the
+  route and one `error` line, never the line. The `lane_drawing` line's `horizonM` and
+  `horizonZones` say what they drew in each window ([DRIVES.md](DRIVES.md)).
 - **Not checked on a device:** the frame cost (the measuring drive); whether the chained order holds
   on a phone (the `map_layers` line says); how the drawing reads at speed by day and at night;
   whether the puck's position still comes every frame while the puck is invisible (a `car_layer`
-  fallback with `no_position` would say it does not), and how the bar lies on a map tilted 55°.
+  fallback with `no_position` would say it does not), and how the bar lies on a map tilted 55°;
+  what the electronic horizon's lane count counts, lanes kept for car pools and one direction or
+  both, and how well its edge ends meet the route's lane points ([DRIVES.md](DRIVES.md), checks 70
+  and 71).
 
 #### Measuring the drawn lanes
 

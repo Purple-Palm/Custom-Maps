@@ -6,7 +6,7 @@ Google Play's internal testing and as test builds made by the repository's CI; a
 described here. This policy says what the app keeps on the phone, what leaves the phone and why, and
 how to delete it.
 
-Last updated: 2026-11-13. It describes the app as it is today; see [Changes](#changes).
+Last updated: 2026-11-14. It describes the app as it is today; see [Changes](#changes).
 
 ## In short
 
@@ -33,7 +33,8 @@ Last updated: 2026-11-13. It describes the app as it is today; see [Changes](#ch
   are stored only in the app's private storage, never in backups or device transfers, and never in
   the debug log, which names the token in use only by its place in the list and its name.
 - **Settings:** day and night, camera style, lane zoom, lanes on the map (off, Mapbox's lane details
-  or drawn by the app), and the switches for the simulated drive, for the app's own route line, for
+  or drawn by the app), lane counts between lane points (whether the app takes them from Mapbox's
+  electronic horizon), and the switches for the simulated drive, for the app's own route line, for
   measuring the drawn lanes and for how many frames a second the car's map draws under Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
@@ -41,10 +42,12 @@ Last updated: 2026-11-13. It describes the app as it is today; see [Changes](#ch
 - **The debug log**, which records what the app did, for finding faults after a drive: each route
   request with its start and destination, the routes and their roads with the lanes the app would
   take on them and how it drew the route line and its own lanes (counts, sizes and times only: the
-  drawing itself stays in memory with its route and is never stored), whether the app or Mapbox drew
-  the car and why that changed (in words only), with the switch for measuring the drawn lanes the
-  frame times of each close view and whether the drawing kept within its budget (numbers only), the
-  position, speed and road every second of guidance (on freeways also the phone's turn rate and
+  drawing itself stays in memory with its route and is never stored), the lane counts Mapbox's
+  electronic horizon gave the roads ahead against the route's own (counts, distances and kinds of
+  road only: what the horizon gives stays in memory and is never stored), whether the app or Mapbox
+  drew the car and why that changed (in words only), with the switch for measuring the drawn lanes
+  the frame times of each close view and whether the drawing kept within its budget (numbers only),
+  the position, speed and road every second of guidance (on freeways also the phone's turn rate and
   acceleration from its motion sensors, summarised as a few numbers each second; the sensors are
   read only then, and no reading itself is kept), a summary of each drive (how it ended, its length
   and time, and the data and battery it used), what was searched and found, settings changes, the
@@ -86,6 +89,11 @@ over encrypted connections (HTTPS):
   to; the phone's IP address; the app's identifier and the versions of the Mapbox software; and
   random identifiers that Mapbox uses for billing. Mapbox counts the usage against the Mapbox
   account the token belongs to. The other saved tokens are not sent.
+
+With **Lane counts between lane points** on in Settings, Guidance, as it is unless turned off, the
+Mapbox software also tells the app during guidance how many lanes the roads ahead have: Mapbox's
+electronic horizon, a beta. The Mapbox software works it out on the phone from the road data it
+already loads for the drive, and the app sends nothing new for it.
 
 Mapbox uses this data to provide, secure and improve its services, to prevent fraud and to bill, and
 to compute de-identified, aggregated data such as traffic. Mapbox says that it does not sell personal
@@ -190,6 +198,8 @@ screen is on, and its refresh rate, in the debug log; the car map's frames among
 whether the phone showed its map or the list during a drive with the car, in the debug log; lanes
 on the map in place of the lane details switch, and the switch for measuring the drawn lanes, among
 the settings; who drew the car, and the measured frames of the drawn lanes, in the debug log.
+2026-11-14: lane counts between lane points from Mapbox's electronic horizon among the settings, and
+the counts it gave, against the route's own, in the debug log.
 
 ## Contact
 

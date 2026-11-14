@@ -329,7 +329,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - A fixed higher zoom limit. It brings the whole town drive closer, not the approach to a turn, and the view jumps to it whenever only the car's position is framed.
   - A zoom that follows the speed. It has nothing to do with where a lane has to be chosen.
   - Going close on every wide freeway. It ends the long view ahead for no lane choice.
-  - Mapbox's Electronic Horizon for lane counts. It is a beta whose pricing may change; the route's own data is free and says more.
+  - Mapbox's Electronic Horizon for lane counts. It is a beta whose free use Mapbox may end; the route's own data is free and says more. The zoom still reads only the route's lanes; since then the app's own drawing takes the horizon's counts between lane points that agree with them, as the owner's trial (54).
   - Large as what a phone starts with. The owner chose Default, with Large one tap away.
 - **Why:** the lanes are large exactly where a lane has to be chosen, and nowhere else.
 - **Cost:** at a junction the view is only about 55 m wide, wider where the road bends well after the maneuver point; what comes after the turn is left to the Then chip (37). None of it has been on a drive yet; the numbers are in [CAMERA.md](CAMERA.md), Lane zoom.
@@ -638,7 +638,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - An aerial photo under the route: withdrawn by the owner.
   - Lane markings from OpenStreetMap: another source with its own terms and gaps, and nothing that ties its lanes to the route's.
   - Mapbox's lane details alone: their lanes are not the route's, so the route line could not be put into the lane to take consistently.
-  - Lane counts between points from Mapbox's electronic horizon: a beta whose terms allow internal evaluation only (38).
+  - Lane counts between points from Mapbox's electronic horizon: a beta whose terms allow internal evaluation only (38). Since then the drawing takes them between lane points that agree with them, as the owner's trial, never in place of the route's own lanes (54).
   - Drawing the app's road above Mapbox's route line: the line would lie under the lanes.
   - A stripe for each usable lane, or a thinner line in the lane: busier, and a line in one lane reads as a claim.
   - Handing over from the line to the lit lane along a zoom ramp: a view that rests at such a zoom rests half-transparent.
@@ -671,3 +671,25 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - A run-up can begin earlier, on invented approaches from not at all to about a kilometre: the close view for longer.
   - The row needs the route's plan: while a new route's plan is on its way the row has no words; where no plan could be made it is the interim rule's row.
   - None of it has run on a phone yet.
+
+## 54. Lane counts from Mapbox's electronic horizon
+
+- **Chosen (owner):** the owner's answer of 2026-11-11 to the design's question whether to use it: turn it on, against the design's proposal to wait for Mapbox's written answer. Settings, Guidance has **Lane counts between lane points**, right under Lanes on the map, with a **Mapbox beta** label beside it and the note "Mapbox's electronic horizon, a beta. Mapbox may end its free use." It is on unless turned off; a missing stored value reads as on.
+  - **What it is.** During guidance, with the switch on, the app listens to Mapbox's electronic horizon: the navigator's own reading of the road ahead on the most probable path, about 3.5 km of it, at most once a second, each edge of the road with the number of its lanes where Mapbox knows it. The navigator works it out on the phone from the road data it already loads for the drive.
+  - **Counts only between lane points that agree with them.** Between two lane points in a row on one freeway carriageway, where the route does not turn and every edge between them is a motorway with a count and no ramp, the horizon's count of the edge that leads to each point must be that point's list: every lane it lists, or the lanes open to every car, where it lists lanes kept for car pools or other vehicles. Under neither reading nothing of the horizon is taken there.
+  - **Changes at edge ends.** Where they agree, a stretch the route's rules leave without lane data, or bridge by a rule, gets lane lines where the horizon's count is the lanes the plan draws there. A change of the count that the plan does not have is a zone, asphalt without lines, ending at the edge end where the count changes. Where the count is not the lanes the plan draws, a stretch bridged by a rule is a zone too, and one without lane data where it lies between drawn stretches and is at most 600 m long, or lies in a card window. A lane the plan adds on the side away from the exit opens at the edge end where the horizon's count rises, instead of late before the point that lists it. A lane point's own reach stays as the route's list draws it.
+  - **Never a lane's identity.** The horizon counts lanes and says nothing of which lane is which. No lane is named, lit or tinted from it, and the lane plan, the card, its words and the close views read the route's own lanes only, as before. The car is still never drawn in a lane (39).
+  - **Beyond the window on screen.** The counts reach the map only with **Lanes on the map → Drawn by the app**, with the next drawing window: from 40 m past the window on screen on, and past a card window there, with the route's path built anew past that window and kept point for point up to its end, so nothing already drawn moves. A window whose counts change nothing goes alone. With the switch off nothing new is taken; what was sent stays until the next route.
+  - **No request.** The app sends no request for it, starts no trip session for it and uses no other billed service: the horizon runs inside the trip the driver started with Start, its options are set once as the navigator is set up, and Mapbox's enhanced road data along it stays off. The debug log gets counts, lengths and words only, never an edge's id, a shape or a road's name.
+- **Alternatives:**
+  - Not using it until Mapbox answers in writing: the design's proposal, overruled by the owner.
+  - The counts everywhere, without the check against the lane points: whether they count lanes kept for car pools, and one direction or both, is not verified, so they are taken only where they agree with the route's own lists.
+  - A longer horizon: more edges read at each update. 3.5 km covers the 3 km a drawing window reaches when it is sent.
+- **Why:** more of a freeway drawn with lane lines, and lane count changes placed where they happen rather than where a rule guesses.
+- **Cost:**
+  - The electronic horizon is a public beta: the Mapbox Product Terms allow it for internal evaluation only, and Mapbox may end its free use at any time, whatever the use. The switch's label and note say so.
+  - What its lane count counts is not verified; the check against the lane points keeps it out where it differs, and the `horizon_lanes` line logs every lane point against it ([DRIVES.md](DRIVES.md), checks 70 and 71).
+  - About once a second, the app's walk of the horizon to the route's edges on the main thread, in its observer; with **Measure the drawn lanes** the progress lines time it.
+  - Its data use is not known: the trip summary carries the switch's state and the horizon's counts, so drives with and without it compare their received bytes.
+  - Where the counts change the drawing, the next window goes with the route's whole path again.
+- **Revisit before any public release:** this is the owner's trial under the beta's terms for internal evaluation, not a release decision.
