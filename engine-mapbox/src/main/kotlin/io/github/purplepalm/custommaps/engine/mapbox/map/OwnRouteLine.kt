@@ -86,11 +86,12 @@ import kotlin.math.max
  * route line and the lit lane swap on the camera's state ([LaneSwap]): the pair over them is drawn whole or not at all,
  * written only when the state flips ([onLatched], [onCameraZoom]).
  *
- * The lane counts of Mapbox's electronic horizon between lane points ([HorizonEvidence], OL9) come with the next
- * window's send, never sooner and never into a window already sent: where the horizon has an update newer than the one
- * the drawing took and its counts change a lane of the drawing, the window that is due is built with a path and lanes
- * built anew on the worker, the lane counts taken only past the window on screen and past a card window there, the path
- * kept point for point up to the window's end ([PathPrefix]). The path and the window go to their sources together,
+ * The lane counts of Mapbox's electronic horizon between lane points ([HorizonEvidence], OL9), and its one-way flag for the
+ * route's streets, which a street's lanes need to be drawn at all (OL6), come with the next window's send, never sooner and
+ * never into a window already sent: where the horizon has an update newer than the one the drawing took and its counts or
+ * ways change the drawing, the window that is due is built with a path and lanes built anew on the worker, what it gives
+ * taken only past the window on screen and past a card window there, the path kept point for point up to the window's end
+ * ([PathPrefix]). The path and the window go to their sources together,
  * each with its data id, while the line drawn stays as it is (the SDK's line is not shown: the old path is right until
  * the new one has loaded); once both have loaded, the station table, the gradients and the trim switch to the new path
  * together. With the switch off the next send takes nothing new past the window on screen; what was sent stays until
@@ -926,7 +927,9 @@ internal class OwnRouteLine(
         if (!enabled || !lanes || !drawn || drawing !== this.drawing || windowSentId != null) return
         if (!own.windows.due(trimStation, (pendingWindow ?: window)?.window, changing = false)) return
         windowBuildNanos = took
-        if (built.features == 0 && (window?.features ?: 0) == 0) {
+        // An empty window after an empty one changes nothing on the map: it is not sent, unless it holds streets with lane data
+        // left to the map's own road, whose count only its line gives.
+        if (built.features == 0 && (window?.features ?: 0) == 0 && built.streets.noOneWay == 0 && built.streets.mixed == 0) {
             window = built
             hiddenTints = 0
             return
@@ -954,8 +957,10 @@ internal class OwnRouteLine(
         val ahead = source.aheadOf(drawing.routeId)?.takeIf { it.routeId == drawing.routeId }
         if (ahead != null && ahead === horizonTaken) return false
         val windowEnd = shown.window.to
-        // With nothing from the horizon now (the switch off), only a drawing that took counts past the window is built again.
-        if (ahead == null && held.lanes.from(HorizonEvidence.startFor(windowEnd, own.windows.cards)).between.isEmpty()) return false
+        // With nothing from the horizon now (the switch off), only a drawing that took counts or streets' ways past the window
+        // is built again.
+        val start = HorizonEvidence.startFor(windowEnd, own.windows.cards)
+        if (ahead == null && held.lanes.from(start).between.isEmpty() && !held.streetsFrom(start)) return false
         val version = ++versions
         val prefix = PathPrefix(drawing.points, drawing.stations, windowEnd)
         val traffic = traffic
@@ -1071,6 +1076,12 @@ internal class OwnRouteLine(
                 // What the electronic horizon's counts drew in it: metres of its bridges and zones, and its zones.
                 "horizonM" to Math.round(loaded.horizonMeters),
                 "horizonZones" to loaded.horizonZones,
+                // Its streets: metres drawn, and the stretches with lane data left to the map's own road for want of a source
+                // that tells whether they are one-way, or for sources that disagree.
+                "streetM" to Math.round(loaded.streets.drawnMeters),
+                "streetNoOneWay" to loaded.streets.noOneWay,
+                "streetNoOneWayM" to Math.round(loaded.streets.noOneWayMeters),
+                "streetMixed" to loaded.streets.mixed,
             ),
         )
         onWindowLoad?.invoke(loadMs, loaded.bytes)

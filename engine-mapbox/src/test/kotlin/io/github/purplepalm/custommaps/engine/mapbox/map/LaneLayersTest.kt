@@ -17,7 +17,7 @@ class LaneLayersTest {
 
     private val under = listOf(
         LaneLayers.ASPHALT, LaneLayers.TINT, LaneLayers.LIT, LaneLayers.LIT_EDGES, LaneLayers.ERASER,
-        LaneLayers.PAINT, LaneLayers.PAINT_WIDE, LaneLayers.SHAPES,
+        LaneLayers.PAINT, LaneLayers.PAINT_WIDE, LaneLayers.SHAPES, LaneLayers.STOP,
     )
     private val over = listOf(LaneLayers.ARROWS, LaneLayers.ARROW_EDGES)
     private val ownLine = OwnRouteLine.LAYERS.map { it.id }
@@ -43,6 +43,9 @@ class LaneLayersTest {
         assertEquals(LaneLayers.LIT_EDGES, LaneLayers.LAYERS.single { !it.fill && LaneDrawing.Kind.LIT_EDGE in it.kinds }.id)
         assertEquals(LaneLayers.SHAPES, LaneLayers.LAYERS.single { !it.fill && LaneDrawing.Kind.DIAMOND in it.kinds }.id)
         assertEquals(LaneLayers.ARROW_EDGES, LaneLayers.LAYERS.single { !it.fill && LaneDrawing.Kind.ARROW in it.kinds }.id)
+        // A street's stop line by one line layer of its own width, in white paint as the lines are.
+        assertEquals(LaneLayers.STOP, LaneLayers.LAYERS.single { !it.fill && LaneDrawing.Kind.STOP_LINE in it.kinds }.id)
+        assertEquals(listOf(LaneDrawing.Kind.STOP_LINE), LaneLayers.LAYERS.single { it.id == LaneLayers.STOP }.kinds)
     }
 
     @Test
@@ -52,6 +55,7 @@ class LaneLayersTest {
         assertEquals(LaneDrawing.Width.WIDE, byId.getValue(LaneLayers.PAINT_WIDE).width)
         assertEquals(LaneDrawing.Width.EDGE, byId.getValue(LaneLayers.LIT_EDGES).width)
         assertEquals(LaneDrawing.Width.NORMAL, byId.getValue(LaneLayers.SHAPES).width)
+        assertEquals(LaneDrawing.Width.STOP, byId.getValue(LaneLayers.STOP).width)
         assertEquals(1.0, byId.getValue(LaneLayers.ARROW_EDGES).fixedDp)
         for (spec in LaneLayers.LAYERS) {
             assertEquals(1.0, spec.emissiveStrength, spec.id)
@@ -63,7 +67,7 @@ class LaneLayersTest {
     fun `asphalt and paint from 15_5, symbols from 16_5, the lit layers from 16_85, at latitude 0`() {
         val byId = LaneLayers.LAYERS.associateBy { it.id }
         for (id in listOf(LaneLayers.ASPHALT, LaneLayers.PAINT, LaneLayers.PAINT_WIDE)) assertEquals(LaneDrawing.ASPHALT_MIN_ZOOM, byId.getValue(id).minZoom, id)
-        for (id in listOf(LaneLayers.SHAPES, LaneLayers.ARROWS, LaneLayers.ARROW_EDGES)) assertEquals(LaneDrawing.SYMBOL_MIN_ZOOM, byId.getValue(id).minZoom, id)
+        for (id in listOf(LaneLayers.SHAPES, LaneLayers.STOP, LaneLayers.ARROWS, LaneLayers.ARROW_EDGES)) assertEquals(LaneDrawing.SYMBOL_MIN_ZOOM, byId.getValue(id).minZoom, id)
         for (id in listOf(LaneLayers.TINT, LaneLayers.LIT, LaneLayers.LIT_EDGES, LaneLayers.ERASER)) assertEquals(LaneDrawing.LIT_MIN_ZOOM, byId.getValue(id).minZoom, id)
     }
 

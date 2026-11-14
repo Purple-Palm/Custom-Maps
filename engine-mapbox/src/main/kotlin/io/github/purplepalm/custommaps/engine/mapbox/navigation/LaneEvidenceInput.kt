@@ -31,7 +31,8 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
  * - its roads, the ones that may be entered, and the ones the route comes in and leaves on;
  * - whether the road that leaves it is a freeway ([isFreeway]) or a ramp ([RoadKind.isRamp]);
  * - the maneuver its step begins with, for the first intersection of each step;
- * - the posted speed of the road that leaves it, from the leg's maxspeed annotation.
+ * - the posted speed of the road that leaves it, from the leg's maxspeed annotation;
+ * - whether the route's flags give a traffic signal or a stop sign there, where a stop line of the app's own may stand.
  *
  * A shape or an intersection with a coordinate that is none is no route to read: it throws, and the
  * caller loses the line, never the drive.
@@ -91,6 +92,8 @@ internal fun laneRouteInput(routeId: String, legs: List<RouteLeg>, shapes: List<
                         null
                     },
                     postedMps = intersection.geometryIndex()?.let { maxSpeeds?.getOrNull(it) }?.metersPerSecond(),
+                    trafficSignal = intersection.trafficSignal() == true,
+                    stopSign = intersection.stopSign() == true,
                 )
                 if (node.isLanePoint) {
                     nodesByKey["$routeId/$l/$k/$raw"] = nodes.size

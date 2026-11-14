@@ -61,8 +61,10 @@ internal class PathPrefix(val points: List<GeoPoint>, val stations: DoubleArray,
  * the route's own line. With [lanes] and a plan, the app's own lanes along the path too ([OwnLanes]). The route's own
  * line is every point of every step, leg after leg, as the navigation SDK draws the route, and its stations are
  * measured along it as the plan's are. With [horizon], the lanes take the electronic horizon's counts between lane points
- * ([HorizonEvidence]); with [prefix], the path keeps the one the map draws up to its end, point for point. For the route
- * lines' worker or the map's own: it reads every step's shape. Throws where the route has no line to draw.
+ * and its one-way flag for the route's streets ([HorizonEvidence]); before a window's send has taken any, a street's lanes
+ * are drawn only where the route's own access field tells how it sits. With [prefix], the path keeps the one the map draws
+ * up to its end, point for point. For the route lines' worker or the map's own: it reads every step's shape. Throws where
+ * the route has no line to draw.
  */
 internal fun ownLineDrawing(
     routeId: String,
@@ -102,10 +104,13 @@ internal fun ownLineDrawing(
     }
     val stations = lineStations.toDoubleArray()
     check(horizon == null || horizon.plan === plan?.plan) { "The horizon is another plan's" }
+    // What the lanes are drawn with: what a send took from the horizon, or the route's own before any did.
+    val held = if (lanes && plan != null) horizon ?: HorizonEvidence.of(plan.plan, plan.evidence) else null
     // The evidence the lanes are drawn from: the plan's, or with the horizon's counts between lane points.
-    val evidence = if (lanes && horizon != null) horizon.evidence else plan?.evidence
-    // One cross-section for the path and the lanes, so the two agree by construction.
-    val section = plan?.let { CrossSection.of(it.plan, requireNotNull(evidence)) }
+    val evidence = held?.evidence ?: plan?.evidence
+    // One cross-section for the path and the lanes, so the two agree by construction; a street's lanes only where a source
+    // tells how it sits ([StreetWays]), and none without the lanes.
+    val section = plan?.let { CrossSection.of(it.plan, requireNotNull(evidence), held?.streets) }
     val path = plan?.let { RoutePath.of(it.plan, line, version, requireNotNull(evidence), requireNotNull(section)) }
     check(path == null || path.routeId == routeId) { "The plan is another route's" }
     // The path the map draws stays as it is up to the end of the window on screen; the new one takes over past it.
@@ -137,7 +142,7 @@ internal fun ownLineDrawing(
         legStations = legStations,
         lanes = ownLanes,
         stations = pathStations,
-        horizon = if (ownLanes != null) horizon ?: HorizonEvidence.of(requireNotNull(plan).plan) else null,
+        horizon = if (ownLanes != null) held else null,
     )
 }
 

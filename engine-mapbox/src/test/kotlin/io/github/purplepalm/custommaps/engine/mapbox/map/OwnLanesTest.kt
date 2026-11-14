@@ -195,6 +195,19 @@ class OwnLanesTest {
         assertEquals(setOf(OwnLanes.StepAt(1, 2)), OwnLanes.arrowsOf(own.drawing.gores(), listOf(doubleArrayOf(0.0), doubleArrayOf(0.0, 1.0, gore)), routePath()).keys)
     }
 
+    @Test
+    fun `a step that begins at a street junction the path crosses on its own curve gets its arrow from 4 m before the stop line`() {
+        val at = 2_000.0
+        val arrow = OwnLanes.arrowsOf(emptyList(), listOf(doubleArrayOf(0.0, at)), routePath(), turns = listOf(at)).getValue(OwnLanes.StepAt(0, 1))
+        assertEquals(at - LaneTopology.STOP_LINE_METERS - GoreArrow.STOP_LINE_BEFORE_METERS, north(arrow.first()), 0.01)
+        assertEquals(at + GoreArrow.AFTER_METERS, north(arrow.last()), 0.01)
+        // A junction the step does not begin at gives none; a gore at the step's start is the gore's arrow.
+        assertTrue(OwnLanes.arrowsOf(emptyList(), listOf(doubleArrayOf(0.0, at + 2.0 * GoreArrow.SAME_PLACE_METERS)), routePath(), turns = listOf(at)).isEmpty())
+        val gore = own.drawing.gores().first()
+        val both = OwnLanes.arrowsOf(listOf(gore), listOf(doubleArrayOf(0.0, gore)), routePath(), turns = listOf(gore)).getValue(OwnLanes.StepAt(0, 1))
+        assertEquals(gore - GoreArrow.BEFORE_METERS, north(both.first()), 0.01)
+    }
+
     /** The path of the made-up exit, as the own line builds it. */
     private fun routePath(): RoutePath {
         val line = shapes.flatten().flatten().map { GeoPoint(it.latitude(), it.longitude()) }

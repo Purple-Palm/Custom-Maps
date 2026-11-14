@@ -89,12 +89,19 @@ class OwnRouteLineLanesTest {
         assertEquals(setOf(OwnRouteLine.CASING, OwnRouteLine.LINE, OwnRouteLine.LIT_CASING, OwnRouteLine.LIT_LINE), style.gradients.keys)
         val logged = laneLines().single()
         assertEquals(
-            setOf("route", "window", "reason", "lengthM", "features", "coordinates", "bytes", "buildMs", "loadMs", "budget", "horizonM", "horizonZones"),
+            setOf(
+                "route", "window", "reason", "lengthM", "features", "coordinates", "bytes", "buildMs", "loadMs", "budget", "horizonM", "horizonZones",
+                "streetM", "streetNoOneWay", "streetNoOneWayM", "streetMixed",
+            ),
             logged.keys,
         )
-        // Without the electronic horizon's counts, nothing of them in it.
+        // Without the electronic horizon's counts, nothing of them in it; a freeway has no street to count.
         assertEquals(0L, logged["horizonM"])
         assertEquals(0, logged["horizonZones"])
+        assertEquals(0L, logged["streetM"])
+        assertEquals(0, logged["streetNoOneWay"])
+        assertEquals(0L, logged["streetNoOneWayM"])
+        assertEquals(0, logged["streetMixed"])
         assertEquals(1, logged["route"])
         assertEquals(1, logged["window"])
         assertEquals(OwnRouteLine.REASON_ROUTE, logged["reason"])

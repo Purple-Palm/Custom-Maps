@@ -26,9 +26,11 @@ import io.github.purplepalm.custommaps.nav.model.GeoPoint
 /**
  * The app's own lanes along one path of a route, as the map draws them ([LaneLayers]): the drawing ([LaneDrawing]), the
  * windows of it the map holds around the car ([DrawingWindows]), where along the path a lane is lit ([lit]), so the
- * route line lies in two pairs of layers, one over the lit stretches and one over the rest, and the maneuver arrows laid
- * along the path at its gores ([arrows]). Built once with the path, off the main thread, and kept in memory with it,
- * never stored; [window] makes a window's features off the main thread too.
+ * route line lies in two pairs of layers, one over the lit stretches and one over the rest, the maneuver arrows laid
+ * along the path at its gores and at the street junctions it crosses on its own curve ([arrows]), and which streets are
+ * drawn and which are left to the map's own road for want of a source that tells how they sit ([drawnStreets],
+ * [undrawnStreets]). Built once with the path, off the main thread, and kept in memory with it, never stored; [window]
+ * makes a window's features off the main thread too.
  */
 internal class OwnLanes(
     /** The features in metres. */
@@ -41,9 +43,14 @@ internal class OwnLanes(
     val lit: List<ClosedFloatingPointRange<Double>>,
     /**
      * The arrow of each maneuver that lies at a gore of the drawing, by its leg and the step it begins ([StepAt]): the
-     * path's points around the gore ([GoreArrow]), for the navigation SDK's arrow API in place of its own arrow.
+     * path's points around the gore ([GoreArrow]), for the navigation SDK's arrow API in place of its own arrow; and so of
+     * each maneuver at a street junction the path crosses on its own curve ([LaneDrawing.turns]).
      */
     val arrows: Map<StepAt, List<GeoPoint>> = emptyMap(),
+    /** The streets whose lanes are drawn, in route order ([CrossSection.drawnStreets]). */
+    val drawnStreets: List<ClosedFloatingPointRange<Double>> = emptyList(),
+    /** The streets with lane data left to the map's own road, for want of a source or for one that disagrees ([CrossSection.undrawnStreets]). */
+    val undrawnStreets: List<CrossSection.UndrawnStreet> = emptyList(),
 ) {
 
     /** The step [step] of the leg [leg] of a route, both counted from 0 as the navigation SDK counts them. */
@@ -92,6 +99,21 @@ internal class OwnLanes(
             carBar = CarBar.of(drawing, window.from, window.to),
             horizonMeters = horizon?.drawnMeters(window.from, window.to) ?: 0.0,
             horizonZones = horizon?.zones(window.from, window.to) ?: 0,
+            streets = streetsIn(window),
+        )
+    }
+
+    /** How the streets of [window] are drawn, for the "lane_drawing" line: metres drawn, and the stretches left undrawn. */
+    fun streetsIn(window: DrawingWindows.Window): LaneWindow.Streets {
+        var drawn = 0.0
+        for (s in drawnStreets) drawn += overlap(s.start, s.endInclusive, window.from, window.to)
+        val undrawn = undrawnStreets.filter { overlap(it.from, it.to, window.from, window.to) > 0.0 }
+        val unknown = undrawn.filter { !it.mixed }
+        return LaneWindow.Streets(
+            drawnMeters = drawn,
+            noOneWay = unknown.size,
+            noOneWayMeters = unknown.sumOf { overlap(it.from, it.to, window.from, window.to) },
+            mixed = undrawn.count { it.mixed },
         )
     }
 
@@ -132,21 +154,29 @@ internal class OwnLanes(
                 windows = DrawingWindows(plan.windows.map { it.from..it.to }, path.routeStations.last()),
                 litStations = litStations,
                 lit = litStations.map { table.pathFraction(it.start)..table.pathFraction(it.endInclusive) },
-                arrows = arrowsOf(drawing.gores(), steps, path),
+                arrows = arrowsOf(drawing.gores(), steps, path, drawing.turns()),
+                drawnStreets = section.drawnStreets,
+                undrawnStreets = section.undrawnStreets,
             )
         }
 
         /**
-         * The arrows along [path] of the steps that begin at one of [gores], where the steps of each leg begin at the route
-         * stations of [steps]; a leg's first step begins no maneuver an arrow shows.
+         * The arrows along [path] of the steps that begin at one of [gores], or at one of the street junctions [turns] the path
+         * crosses on its own curve, from 4 m before the stop line's place ([GoreArrow.alongTurn]); where the steps of each leg
+         * begin at the route stations of [steps]. A leg's first step begins no maneuver an arrow shows.
          */
-        fun arrowsOf(gores: List<Double>, steps: List<DoubleArray>, path: RoutePath): Map<StepAt, List<GeoPoint>> {
-            if (gores.isEmpty()) return emptyMap()
+        fun arrowsOf(gores: List<Double>, steps: List<DoubleArray>, path: RoutePath, turns: List<Double> = emptyList()): Map<StepAt, List<GeoPoint>> {
+            if (gores.isEmpty() && turns.isEmpty()) return emptyMap()
             val out = HashMap<StepAt, List<GeoPoint>>()
             for ((leg, starts) in steps.withIndex()) {
                 for (step in 1 until starts.size) {
-                    val gore = GoreArrow.goreAt(gores, starts[step]) ?: continue
-                    val points = GoreArrow.along(path.points, path.stations, gore)
+                    val gore = GoreArrow.goreAt(gores, starts[step])
+                    val points = if (gore != null) {
+                        GoreArrow.along(path.points, path.stations, gore)
+                    } else {
+                        val turn = GoreArrow.goreAt(turns, starts[step]) ?: continue
+                        GoreArrow.alongTurn(path.points, path.stations, turn)
+                    }
                     if (points.size >= 2) out[StepAt(leg, step)] = points
                 }
             }
@@ -214,6 +244,9 @@ internal class OwnLanes(
         }
 
         private fun pointOf(p: GeoPoint): Point = Point.fromLngLat(p.longitude, p.latitude)
+
+        /** How far [a0] to [a1] and [b0] to [b1] overlap; 0 where they do not. */
+        private fun overlap(a0: Double, a1: Double, b0: Double, b1: Double): Double = maxOf(0.0, minOf(a1, b1) - maxOf(a0, b0))
     }
 }
 
@@ -221,9 +254,9 @@ internal class OwnLanes(
  * One window of the app's own lanes as the drawing's source takes it: [window], its [collection] of features, how many
  * [features], [coordinates] and [bytes] of GeoJSON text it has, the [tints]' pieces the map hides once the car is past
  * them, and each lit piece's traffic where it has some ([levels]), by feature state; the [latitude] it lies at (not a
- * number without features), for the layers' widths; the car's bar along it ([carBar]), null where none was made; and the
+ * number without features), for the layers' widths; the car's bar along it ([carBar]), null where none was made; the
  * metres the electronic horizon's counts drew in it ([horizonMeters]: its bridges and zones) and how many of its zones
- * ([horizonZones]), for the "lane_drawing" line.
+ * ([horizonZones]); and how its streets are drawn ([streets]), for the "lane_drawing" line.
  */
 internal class LaneWindow(
     val window: DrawingWindows.Window,
@@ -237,9 +270,18 @@ internal class LaneWindow(
     val carBar: CarBar? = null,
     val horizonMeters: Double = 0.0,
     val horizonZones: Int = 0,
+    val streets: Streets = Streets(),
 ) {
     /** A piece of a tint: its feature's [id], and the route station where it ends. */
     data class Piece(val id: String, val to: Double)
+
+    /**
+     * How a window's streets are drawn: the metres of streets whose lanes are drawn ([drawnMeters]); how many stretches of
+     * streets with lane data are left to the map's own road for want of a source that tells whether they are one-way
+     * ([noOneWay]), and their metres in the window ([noOneWayMeters]); and how many are left so because a source tells
+     * otherwise of them than of their road's first told street ([mixed]) ([CrossSection.UndrawnStreet]).
+     */
+    data class Streets(val drawnMeters: Double = 0.0, val noOneWay: Int = 0, val noOneWayMeters: Double = 0.0, val mixed: Int = 0)
 
     /** Whether the window is within the budget of one update ([OwnLanes.BUDGET_BYTES], [OwnLanes.BUDGET_COORDINATES]). */
     val withinBudget: Boolean get() = bytes <= OwnLanes.BUDGET_BYTES && coordinates <= OwnLanes.BUDGET_COORDINATES

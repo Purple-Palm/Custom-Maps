@@ -29,7 +29,8 @@ import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
  * Their order inside the style's middle slot, from the bottom (design 7): Standard's roads, which lie below the slot;
  * the [Group.UNDER_ROUTE] layers, below the navigation SDK's route line ([LayerOrder.ROUTE_LINE_BOTTOM]): the asphalt
  * with lanes kept for buses and the like darker on it, the tints, the lit lane and its edges, the eraser that covers
- * the lit lane behind the car ([ERASER]), the paint lines of two widths and the paint's shapes (the car-pool diamonds); the SDK's other routes (its primary line hidden while the app
+ * the lit lane behind the car ([ERASER]), the paint lines of two widths, the paint's shapes (the car-pool diamonds) and the
+ * stop lines of the streets ([STOP]); the SDK's other routes (its primary line hidden while the app
  * draws its own); the app's own route line; the [Group.OVER_ROUTE] layers above it, the lane arrows and their edge;
  * the SDK's maneuver arrow; and in the top slot the 3D buildings and the labels.
  *
@@ -59,6 +60,7 @@ internal object LaneLayers {
     const val PAINT = "custommaps-lanes-paint"
     const val PAINT_WIDE = "custommaps-lanes-paint-wide"
     const val SHAPES = "custommaps-lanes-shapes"
+    const val STOP = "custommaps-lanes-stop"
     const val ARROWS = "custommaps-lanes-arrows"
     const val ARROW_EDGES = "custommaps-lanes-arrow-edges"
 
@@ -95,7 +97,7 @@ internal object LaneLayers {
         const val WIDTH_WIDE = "wide"
         const val WIDTH_EDGE = "edge"
 
-        /** A stop line's ([LaneDrawing.Kind.STOP_LINE]); no layer draws it yet: the app draws no street's lanes so far. */
+        /** A stop line's ([LaneDrawing.Kind.STOP_LINE]), which the [STOP] layer draws. */
         const val WIDTH_STOP = "stop"
 
         /** The feature state of a tint's piece the car has passed: true, and the piece is not drawn. */
@@ -153,6 +155,8 @@ internal object LaneLayers {
         Spec(PAINT, false, PAINT_KINDS, LaneDrawing.Width.NORMAL, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
         Spec(PAINT_WIDE, false, PAINT_KINDS, LaneDrawing.Width.WIDE, Group.UNDER_ROUTE, LaneDrawing.ASPHALT_MIN_ZOOM),
         Spec(SHAPES, false, listOf(LaneDrawing.Kind.DIAMOND), LaneDrawing.Width.NORMAL, Group.UNDER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM),
+        // A street's stop line, where the route's flags give a signal or a stop sign: paint at its own ground width.
+        Spec(STOP, false, listOf(LaneDrawing.Kind.STOP_LINE), LaneDrawing.Width.STOP, Group.UNDER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM),
         Spec(ARROWS, true, listOf(LaneDrawing.Kind.ARROW), null, Group.OVER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM),
         Spec(ARROW_EDGES, false, listOf(LaneDrawing.Kind.ARROW), null, Group.OVER_ROUTE, LaneDrawing.SYMBOL_MIN_ZOOM, fixedDp = ARROW_EDGE_DP),
     )
@@ -480,7 +484,7 @@ internal object LaneLayers {
             color(colours.lit)
         }
         LIT_EDGES -> Expression.color(colours.litEdge)
-        PAINT, PAINT_WIDE -> Expression.match(
+        PAINT, PAINT_WIDE, STOP -> Expression.match(
             Expression.get(Key.PAINT),
             Expression.literal(Key.PAINT_YELLOW),
             Expression.color(colours.yellow),

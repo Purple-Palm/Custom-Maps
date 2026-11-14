@@ -56,6 +56,8 @@ class LaneEvidenceInputTest {
         streetsClass: String? = null,
         others: List<Pair<Int, Boolean>> = emptyList(),
         first: Boolean = false,
+        signal: Boolean? = null,
+        stop: Boolean? = null,
     ): StepIntersection {
         val bearings = if (first) listOf(0) else listOf(180, 0)
         val entry = if (first) listOf(true) else listOf(false, true)
@@ -68,6 +70,8 @@ class LaneEvidenceInputTest {
             .classes(if (motorway) listOf("motorway") else null)
             .mapboxStreetsV8(streetsClass?.let { MapboxStreetsV8.builder().roadClass(it).build() })
             .lanes(lanes)
+            .trafficSignal(signal)
+            .stopSign(stop)
             .geometryIndex(at)
             .build()
     }
@@ -99,7 +103,7 @@ class LaneEvidenceInputTest {
 
     /** Depart on a street; an on ramp at 3; merge onto a freeway at 5; lanes at 8; an exit road at 12; off at 15; a turn at 17; arrive at 19. */
     private val steps = listOf(
-        step("depart", null, 0, listOf(intersection(0, first = true), intersection(2))),
+        step("depart", null, 0, listOf(intersection(0, first = true), intersection(2, signal = true))),
         step("on ramp", "slight right", 3, listOf(intersection(3, streetsClass = "motorway_link"))),
         step(
             "merge",
@@ -112,7 +116,7 @@ class LaneEvidenceInputTest {
             ),
         ),
         step("off ramp", "slight right", 15, listOf(intersection(15, goreLanes, motorway = true))),
-        step("turn", "right", 17, listOf(intersection(17))),
+        step("turn", "right", 17, listOf(intersection(17, stop = true, signal = false))),
         step("arrive", "right", 19, listOf(intersection(19))),
     )
     private val shapes = listOf(listOf(points.subList(0, 4), points.subList(3, 6), points.subList(5, 16), points.subList(15, 18), points.subList(17, 20), listOf(points[19], points[19])))
@@ -142,6 +146,13 @@ class LaneEvidenceInputTest {
         assertTrue(offRamp.viewStaysUp, "the camera stays up for an off ramp")
         assertFalse(nodes[7].maneuver!!.viewStaysUp, "and frames a turn")
         assertTrue(nodes[3].maneuver!!.viewStaysUp)
+    }
+
+    @Test
+    fun `a traffic signal and a stop sign come from the route's flags, and none where it gives none`() {
+        val nodes = route().nodes
+        assertEquals(listOf(false, true, false, false, false, false, false, false, false), nodes.map { it.trafficSignal })
+        assertEquals(listOf(false, false, false, false, false, false, false, true, false), nodes.map { it.stopSign })
     }
 
     @Test
