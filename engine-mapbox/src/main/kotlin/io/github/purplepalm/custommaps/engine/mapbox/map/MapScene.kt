@@ -20,12 +20,14 @@ import com.mapbox.maps.PerformanceSamplerOptions
 import com.mapbox.maps.PerformanceStatisticsOptions
 import com.mapbox.maps.Style
 import com.mapbox.maps.StyleDataLoadedType
+import com.mapbox.maps.plugin.Plugin
 import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
 import com.mapbox.maps.plugin.animation.MapAnimationOwnerRegistry
 import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.delegates.MapPluginProviderDelegate
+import com.mapbox.maps.plugin.gestures.GesturesPlugin
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorBearingChangedListener
 import com.mapbox.maps.plugin.locationcomponent.OnIndicatorPositionChangedListener
 import com.mapbox.maps.plugin.locationcomponent.createDefault2DPuck
@@ -682,6 +684,14 @@ internal class MapScene(
         // what the screen allowed ("focus"). Numbers, kinds and words only.
         override fun onFocusLatched(fields: Map<String, Any?>) {
             debugLog.log("focus", fields)
+        }
+
+        // A Mapbox style's move that ended cancelled with nothing newer asked: asked once more, by the camera itself.
+        override fun onRequestRecovered(mode: CameraMode, serial: Long) {
+            debugLog.log(
+                "camera_request",
+                mapOf("mode" to mode.name, "from" to camera.state, "guidance" to guidanceState, "by" to BY_RECOVER, "why" to WHY_CANCELLED, "serial" to serial),
+            )
         }
     }
 
@@ -1829,7 +1839,8 @@ internal class MapScene(
 
     /**
      * The "camera_request" line: the mode asked for, what the camera did, the drive's state, who asked
-     * ([by]) and on which call ([why]); during a drive also how far the plan's point is and the speed.
+     * ([by]) and on which call ([why]); during a drive also how far the plan's point is and the speed;
+     * with a Mapbox style the request serial the request takes ([GuidanceCamera.requestSerial]).
      */
     private fun logRequest(mode: String, by: String, why: String) {
         val drive = if (guidanceState == GuidanceState.ACTIVE) driveCamera.driveViewFields() else emptyMap()
@@ -1843,6 +1854,7 @@ internal class MapScene(
                 "why" to why,
                 "pointM" to drive["pointM"],
                 "speed" to drive["speed"],
+                "serial" to camera.requestSerial?.plus(1),
             ).filterValues { it != null },
         )
     }
@@ -1945,6 +1957,8 @@ internal class MapScene(
                     tuning,
                     cameraListener,
                     junctionPoints,
+                    // A surface without the gestures plugin, as the car's, has no tap to guard against.
+                    plugins.getPlugin<GesturesPlugin>(Plugin.MAPBOX_GESTURES_PLUGIN_ID),
                 )
             CameraStyle.SMOOTH_FOLLOW ->
                 SmoothNavigationCamera(
@@ -2270,6 +2284,7 @@ internal class MapScene(
         private const val BY_TIMER = "timer"
         private const val BY_START = "start"
         private const val BY_STYLE = "style"
+        private const val BY_RECOVER = "recover"
 
         // On which call, by its name in the "camera_request" and "drive_view" lines ("why").
         private const val WHY_START = "start"
@@ -2286,6 +2301,7 @@ internal class MapScene(
         private const val WHY_BROWSE = "browse"
         private const val WHY_MY_LOCATION = "my_location"
         private const val WHY_ROUTES = "routes"
+        private const val WHY_CANCELLED = "cancelled"
 
         /** The zoom buttons, as a kind of the driver's moves, and the length of their ease. */
         const val ZOOM_KIND = "zoom"

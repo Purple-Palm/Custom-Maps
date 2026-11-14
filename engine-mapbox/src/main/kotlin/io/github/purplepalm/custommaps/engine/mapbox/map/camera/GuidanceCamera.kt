@@ -43,6 +43,12 @@ internal interface GuidanceCamera {
      */
     val swapLatched: Boolean get() = false
 
+    /**
+     * The serial of the camera's latest request, or of the map taken from it; the next request takes one more. For the
+     * "camera_request" line; null for a camera that keeps none.
+     */
+    val requestSerial: Long? get() = null
+
     /** Follows the car. Asking for what the camera already does changes nothing. */
     fun requestFollowing()
 
@@ -165,5 +171,11 @@ internal interface GuidanceCamera {
          * for the "focus" line of the debug log ([fields]: numbers, kinds and words only).
          */
         fun onFocusLatched(fields: Map<String, Any?>) = Unit
+
+        /**
+         * A move to [mode] ended cancelled with nothing newer asked, and the camera asks for it once more, with request
+         * serial [serial]: for the "camera_request" line, by "recover".
+         */
+        fun onRequestRecovered(mode: CameraMode, serial: Long) = Unit
     }
 }

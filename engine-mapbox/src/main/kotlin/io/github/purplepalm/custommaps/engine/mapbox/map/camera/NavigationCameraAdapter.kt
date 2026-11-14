@@ -1,6 +1,8 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map.camera
 
 import android.animation.ValueAnimator
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.animation.LinearInterpolator
 import com.mapbox.common.Cancelable
@@ -13,6 +15,7 @@ import com.mapbox.maps.plugin.animation.CameraAnimationsLifecycleListener
 import com.mapbox.maps.plugin.animation.CameraAnimationsPlugin
 import com.mapbox.maps.plugin.animation.CameraAnimatorType
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
+import com.mapbox.maps.plugin.gestures.GesturesPlugin
 import com.mapbox.navigation.base.trip.model.RouteProgress
 import com.mapbox.navigation.base.trip.model.RouteProgressState
 import com.mapbox.navigation.ui.maps.camera.NavigationCamera
@@ -23,6 +26,7 @@ import com.mapbox.navigation.ui.maps.camera.data.ViewportDataSourceUpdateObserve
 import com.mapbox.navigation.ui.maps.camera.lifecycle.NavigationBasicGesturesHandler
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraState
 import com.mapbox.navigation.ui.maps.camera.state.NavigationCameraStateChangedObserver
+import com.mapbox.navigation.ui.maps.camera.transition.TransitionEndListener
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.CloseView
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
@@ -32,6 +36,7 @@ import io.github.purplepalm.custommaps.nav.camera.LaneFocus
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
 import io.github.purplepalm.custommaps.nav.camera.PeakSpeed
+import io.github.purplepalm.custommaps.nav.camera.RecoverRule
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.model.CameraMode
 import io.github.purplepalm.custommaps.nav.model.LaneZoom
@@ -61,6 +66,15 @@ import io.github.purplepalm.custommaps.nav.model.LaneZoom
  * In both, after a seek of a simulated drive ([onJump]) the camera goes at once to the frame of the
  * car's new place, computed with that place's own progress, as the drawn car does.
  *
+ * A plain tap on the map no longer stops a move of this camera halfway: its animators' owner is one
+ * the gestures plugin leaves alone ([GesturesPlugin.addProtectedAnimationOwner]), so a tap, which
+ * starts no animation of its own, cancels none of them, while a drag or a pinch starts its own and
+ * still takes the map. A move that ends cancelled all the same, with nothing newer asked and the SDK
+ * camera still on its way there, computes no frames: it is asked for once more. Never from inside
+ * the SDK's own cancel, where a replaced request hears of its end and a move started there could
+ * never be stopped, but from one check posted to the main thread, which asks only when the request
+ * serial is the move's own ([RecoverRule]): every request and every map taken raises it.
+ *
  * On the browsing map, before guidance, [NavigationCamera] has nothing to follow the car with. Both
  * styles then move the map with plain eases of the camera plugin: one to the car, and one with every
  * new position of the puck, as long and as steady as the puck's own glide, so the two stay together.
@@ -75,6 +89,8 @@ internal class NavigationCameraAdapter(
     private val listener: GuidanceCamera.Listener,
     /** The road past a maneuver point that the data source frames with Large; the map owns it. */
     private val junction: JunctionPoints,
+    /** The map's gestures, whose tap leaves this camera's moves alone; none on a surface without them, as the car's. */
+    private val gestures: GesturesPlugin?,
 ) : GuidanceCamera {
 
     private val source = DetachableSource(dataSource)
@@ -127,6 +143,14 @@ internal class NavigationCameraAdapter(
     /** True while the phone's map is put away for the list ([setAway]): the camera hears nothing of its data source. */
     private var away = false
 
+    /** Raised by every request and every map taken from the camera: a check of a cancelled move asks again only with its own. */
+    private var serial = 0L
+
+    /** Where the check of a cancelled move is posted: the main thread, after the SDK's own call has returned. */
+    private val checks = Handler(Looper.getMainLooper())
+
+    private var destroyed = false
+
     /**
      * Counts the camera's frame updates, each one a new animation, and the ones cancelled before
      * they finished because the next update or a gesture came first. Also reports who takes the map
@@ -140,11 +164,15 @@ internal class NavigationCameraAdapter(
                 // This camera's own eases on the browsing map.
                 owner == IDLE_FOLLOW_OWNER -> Unit
                 idleFollowing -> {
+                    serial += 1
                     listener.onCameraTaken(owner, type.name, state)
                     stopIdleFollow()
                     listener.onCameraState(CameraMode.IDLE, state, moving = false)
                 }
-                navigationCamera.state != NavigationCameraState.IDLE -> listener.onCameraTaken(owner, type.name, state)
+                navigationCamera.state != NavigationCameraState.IDLE -> {
+                    serial += 1
+                    listener.onCameraTaken(owner, type.name, state)
+                }
             }
         }
 
@@ -171,6 +199,8 @@ internal class NavigationCameraAdapter(
     init {
         cameraPlugin.addCameraAnimationsLifecycleListener(animations)
         cameraPlugin.addCameraAnimationsLifecycleListener(gesturesHandler)
+        // A tap cancels no move of this camera; a drag or a pinch still takes the map through the gestures handler.
+        gestures?.addProtectedAnimationOwner(NavigationCamera.NAVIGATION_CAMERA_OWNER)
         // Reports the state it starts in, idle, at once.
         navigationCamera.registerNavigationCameraStateChangeObserver(stateObserver)
     }
@@ -192,22 +222,48 @@ internal class NavigationCameraAdapter(
     // opaque, in the named lane (CloseView.mapboxTunedLatched).
     override val swapLatched: Boolean get() = tuned && CloseView.mapboxTunedLatched()
 
-    override fun requestFollowing() {
+    override val requestSerial: Long get() = serial
+
+    override fun requestFollowing() = follow(recovered = false)
+
+    override fun requestOverview() = overview(recovered = false)
+
+    /** Following the car; [recovered] for a move asked once more after it ended cancelled. */
+    private fun follow(recovered: Boolean) {
         stopIdleFollow()
+        val ended = endOf(NavigationCameraState.TRANSITION_TO_FOLLOWING, ++serial, recovered)
         if (tuned) {
             // Start and Recenter both come through here, so both get the tuned frames.
-            navigationCamera.requestNavigationCameraToFollowing(frameTransitionOptions = FollowingTransition.FRAME_OPTIONS)
+            navigationCamera.requestNavigationCameraToFollowing(frameTransitionOptions = FollowingTransition.FRAME_OPTIONS, transitionEndListener = ended)
         } else {
-            navigationCamera.requestNavigationCameraToFollowing()
+            navigationCamera.requestNavigationCameraToFollowing(transitionEndListener = ended)
         }
     }
 
-    override fun requestOverview() {
+    /** The overview; [recovered] for a move asked once more after it ended cancelled. */
+    private fun overview(recovered: Boolean) {
         stopIdleFollow()
-        navigationCamera.requestNavigationCameraToOverview()
+        navigationCamera.requestNavigationCameraToOverview(transitionEndListener = endOf(NavigationCameraState.TRANSITION_TO_OVERVIEW, ++serial, recovered))
+    }
+
+    /**
+     * The end of the move to [state] asked for with request serial [asked]. It never calls the camera: the SDK calls it from
+     * inside the request that replaces the move and from a request to go idle. Ended cancelled, it posts one check, which asks
+     * for the move once more only when nothing came since and the SDK camera is still on its way there ([RecoverRule]).
+     */
+    private fun endOf(state: NavigationCameraState, asked: Long, recovered: Boolean) = TransitionEndListener { isCanceled ->
+        if (isCanceled && !destroyed) checks.post { recoverIfStalled(state, asked, recovered) }
+    }
+
+    private fun recoverIfStalled(state: NavigationCameraState, asked: Long, recovered: Boolean) {
+        if (destroyed || !RecoverRule.shouldAsk(asked, serial, navigationCamera.state == state, recovered)) return
+        val mode = state.toCameraMode()
+        listener.onRequestRecovered(mode, serial + 1)
+        if (mode == CameraMode.OVERVIEW) overview(recovered = true) else follow(recovered = true)
     }
 
     override fun requestIdleFollow(puck: Point) {
+        serial += 1
         if (!idleFollowing) {
             // The navigation camera lets go of the map; what is reported is the following, not that.
             quiet = true
@@ -222,6 +278,7 @@ internal class NavigationCameraAdapter(
     }
 
     override fun requestIdle() {
+        serial += 1
         if (idleFollowing) {
             stopIdleFollow()
             listener.onCameraState(CameraMode.IDLE, state, moving = false)
@@ -372,6 +429,10 @@ internal class NavigationCameraAdapter(
     }
 
     override fun destroy() {
+        // A check still posted asks nothing of a camera that has gone.
+        destroyed = true
+        checks.removeCallbacksAndMessages(null)
+        gestures?.removeProtectedAnimationOwner(NavigationCamera.NAVIGATION_CAMERA_OWNER)
         // First, so that going idle below is not reported.
         navigationCamera.unregisterNavigationCameraStateChangeObserver(stateObserver)
         cameraPlugin.removeCameraAnimationsLifecycleListener(gesturesHandler)
