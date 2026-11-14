@@ -1316,6 +1316,15 @@ internal class MapboxNavigationEngine(
         tripTally.onLaneView(view)
     }
 
+    /**
+     * A map drew a window of the app's own lanes with lane counts from the electronic horizon in it, its send having taken
+     * [taken] of the horizon's stretches: the trip summary's horizon counts it. Main thread.
+     */
+    internal fun onHorizonWindow(taken: Int) {
+        tripTally.horizon.onStretchesUsed(taken)
+        tripTally.horizon.onWindow()
+    }
+
     /** Called right before a trip's summary is added up, on the main thread: a map closes what it measured of the trip. */
     private val tripEndListeners = CopyOnWriteArrayList<() -> Unit>()
 

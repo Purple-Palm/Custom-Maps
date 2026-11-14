@@ -5,6 +5,7 @@ import com.mapbox.geojson.Point
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.RouteLanePlan
 import io.github.purplepalm.custommaps.engine.mapbox.navigation.toGeoPoint
 import io.github.purplepalm.custommaps.nav.geo.Geo
+import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LegTraffic
 import io.github.purplepalm.custommaps.nav.lanes.geometry.PuckProjection
@@ -35,18 +36,33 @@ internal class OwnLineDrawing(
     val legStations: List<DoubleArray>,
     /** The app's own lanes along the path, where they were asked for and the route has a lane plan; null otherwise. */
     val lanes: OwnLanes? = null,
+    /** The route station of each of [points]; empty where the drawing was not built from a route's steps. */
+    val stations: DoubleArray = DoubleArray(0),
+    /**
+     * The electronic horizon's lane counts the lanes were drawn with ([HorizonEvidence]), for the next window's send to take
+     * the newest from; null without the lanes.
+     */
+    val horizon: HorizonEvidence? = null,
 ) {
     /** The same path with the traffic of a refresh. */
-    fun withRuns(runs: List<TrafficRun>): OwnLineDrawing = OwnLineDrawing(routeId, version, points, table, runs, projection, legStations, lanes)
+    fun withRuns(runs: List<TrafficRun>): OwnLineDrawing =
+        OwnLineDrawing(routeId, version, points, table, runs, projection, legStations, lanes, stations, horizon)
 }
+
+/**
+ * The path the map draws, as its points and their route stations, which a path built anew keeps point for point up to
+ * and at [at], the end of the drawing window on screen (OL9: [RoutePath.spliced]).
+ */
+internal class PathPrefix(val points: List<GeoPoint>, val stations: DoubleArray, val at: Double)
 
 /**
  * The drawing of the route [routeId], whose [legs] and steps' points [shapes] (as the steps' geometry decodes to) the
  * navigator holds, as path [version], through the lanes of its lane [plan] where one was made; without one the path is
  * the route's own line. With [lanes] and a plan, the app's own lanes along the path too ([OwnLanes]). The route's own
  * line is every point of every step, leg after leg, as the navigation SDK draws the route, and its stations are
- * measured along it as the plan's are. For the route lines' worker or the map's own: it reads every step's shape.
- * Throws where the route has no line to draw.
+ * measured along it as the plan's are. With [horizon], the lanes take the electronic horizon's counts between lane points
+ * ([HorizonEvidence]); with [prefix], the path keeps the one the map draws up to its end, point for point. For the route
+ * lines' worker or the map's own: it reads every step's shape. Throws where the route has no line to draw.
  */
 internal fun ownLineDrawing(
     routeId: String,
@@ -55,6 +71,8 @@ internal fun ownLineDrawing(
     plan: RouteLanePlan?,
     version: Int,
     lanes: Boolean = false,
+    horizon: HorizonEvidence? = null,
+    prefix: PathPrefix? = null,
 ): OwnLineDrawing {
     val line = ArrayList<GeoPoint>()
     val lineStations = ArrayList<Double>()
@@ -83,28 +101,43 @@ internal fun ownLineDrawing(
         pointStations.add(steps)
     }
     val stations = lineStations.toDoubleArray()
+    check(horizon == null || horizon.plan === plan?.plan) { "The horizon is another plan's" }
+    // The evidence the lanes are drawn from: the plan's, or with the horizon's counts between lane points.
+    val evidence = if (lanes && horizon != null) horizon.evidence else plan?.evidence
     // One cross-section for the path and the lanes, so the two agree by construction.
-    val section = plan?.let { CrossSection.of(it.plan, it.evidence) }
-    val path = plan?.let { RoutePath.of(it.plan, line, version, it.evidence, requireNotNull(section)) }
+    val section = plan?.let { CrossSection.of(it.plan, requireNotNull(evidence)) }
+    val path = plan?.let { RoutePath.of(it.plan, line, version, requireNotNull(evidence), requireNotNull(section)) }
     check(path == null || path.routeId == routeId) { "The plan is another route's" }
-    val table = if (path != null) StationTable.of(path) else StationTable.of(routeId, version, line, stations, line, stations)
+    // The path the map draws stays as it is up to the end of the window on screen; the new one takes over past it.
+    val (pathPoints, pathStations) = when {
+        path == null -> line to stations
+        prefix != null -> RoutePath.spliced(prefix.points, prefix.stations, path.points, path.stations, prefix.at)
+        else -> path.points to path.stations
+    }
+    val table = if (path != null) {
+        StationTable.of(routeId, version, path.route, path.routeStations, pathPoints, pathStations)
+    } else {
+        StationTable.of(routeId, version, line, stations, line, stations)
+    }
     val legStations = pointStations.map(::legPointStations)
     val ownLanes = if (lanes && plan != null && path != null && section != null) {
         // Where each step begins, as the plan measures its stations: a maneuver at a gore gets its arrow along the path.
         val steps = legs.mapIndexed { l, leg -> DoubleArray(leg.steps().orEmpty().size) { k -> plan.station(l, k, 0.0) ?: Double.NaN } }
-        OwnLanes.of(plan.plan, path, plan.evidence, section, table, steps)
+        OwnLanes.of(plan.plan, path, requireNotNull(evidence), section, table, steps)
     } else {
         null
     }
     return OwnLineDrawing(
         routeId = routeId,
         version = version,
-        points = path?.points ?: line,
+        points = pathPoints,
         table = table,
         runs = TrafficRuns.of(table, legTraffic(legs, legStations)),
         projection = PuckProjection.of(line, stations),
         legStations = legStations,
         lanes = ownLanes,
+        stations = pathStations,
+        horizon = if (ownLanes != null) horizon ?: HorizonEvidence.of(requireNotNull(plan).plan) else null,
     )
 }
 

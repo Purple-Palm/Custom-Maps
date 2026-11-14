@@ -15,8 +15,10 @@ import org.junit.jupiter.api.Assertions.assertTrue
  * The app's own route line on a fake style, for its tests: a fake style with the navigation SDK's primary line in it, a
  * worker that runs its jobs when a test says, a debug log that keeps its lines, and made-up routes due north from 0, 0
  * (a point every 100 m) with invented route ids. One scene for each test.
+ *
+ * With [horizon], the electronic horizon's updates the line asks for.
  */
-internal class OwnLineScene {
+internal class OwnLineScene(horizon: OwnRouteLine.HorizonSource? = null) {
 
     /** A style with room for the own line, and the navigation SDK's primary line in it; every call recorded. */
     class Style : OwnRouteLine.Layers, OwnRouteLine.Primary {
@@ -339,7 +341,7 @@ internal class OwnLineScene {
     /** The test's clock, in nanoseconds. */
     var now = 0L
 
-    val line = OwnRouteLine(style, style, jobs, log, lanes) { now }
+    val line = OwnRouteLine(style, style, jobs, log, lanes, horizon) { now }
 
     /** What a style load does to the fake style: none of the own layers, the lanes' neither, and the SDK's line shown. */
     fun reload() {

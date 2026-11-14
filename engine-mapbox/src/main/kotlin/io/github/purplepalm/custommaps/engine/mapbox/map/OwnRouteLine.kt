@@ -19,6 +19,8 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.Motion
 import io.github.purplepalm.custommaps.nav.debug.error
+import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
+import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
@@ -82,7 +84,17 @@ import kotlin.math.max
  * it was. A tint's piece the car has passed is hidden, and a lit piece takes its stretch's traffic colour, by feature
  * state, set again after each window's load. At guidance end the drawing's source is cleared. Over the lit stretches the
  * route line and the lit lane swap on the camera's state ([LaneSwap]): the pair over them is drawn whole or not at all,
- * written only when the state flips ([onLatched], [onCameraZoom]). Main thread only.
+ * written only when the state flips ([onLatched], [onCameraZoom]).
+ *
+ * The lane counts of Mapbox's electronic horizon between lane points ([HorizonEvidence], OL9) come with the next window's
+ * send, never sooner and never into a window already sent: where the horizon has an update newer than the one the drawing
+ * took, the window that is due is built with a path and lanes built anew on the worker, the lane counts taken only past
+ * the window on screen and past a card window there, the path kept point for point up to the window's end
+ * ([PathPrefix]). The path and the window go to their sources together, each with its data id, while the line drawn
+ * stays as it is (the SDK's line is not shown: the old path is right until the new one has loaded); once both have
+ * loaded, the station table, the gradients and the trim switch to the new path together. With the switch off the next
+ * send takes nothing new past the window on screen; what was sent stays until the next route. A failure costs the
+ * horizon's counts for the route and one error line, never the own line. Main thread only.
  */
 internal class OwnRouteLine(
     private val layers: Layers,
@@ -91,6 +103,8 @@ internal class OwnRouteLine(
     private val debugLog: DebugLog,
     /** The layers of the app's own lanes ([LaneLayers]), in the style with the own line's while [lanes] is on; null for none. */
     private val lanePort: LaneLayers.Port? = null,
+    /** The electronic horizon's newest update along the drive's route, for the lanes' next window; null for none. */
+    private val horizon: HorizonSource? = null,
     /** The clock, in nanoseconds, for how long a path has waited to load. */
     private val nanos: () -> Long = System::nanoTime,
 ) {
@@ -164,6 +178,17 @@ internal class OwnRouteLine(
      */
     fun interface Build {
         fun drawing(version: Int, lanes: Boolean): OwnLineDrawing
+
+        /**
+         * The same with the lanes drawn with the electronic horizon's counts of [horizon], the path kept as [prefix] up to its
+         * end; where a build cannot take them, as without.
+         */
+        fun drawing(version: Int, lanes: Boolean, horizon: HorizonEvidence, prefix: PathPrefix): OwnLineDrawing = drawing(version, lanes)
+    }
+
+    /** The electronic horizon's newest update along the route [routeId], as the engine holds it; null for none. */
+    fun interface HorizonSource {
+        fun aheadOf(routeId: String): HorizonAhead?
     }
 
     /** Gives the traffic of a route along a drawing's path, off the main thread, for a refresh. */
@@ -226,6 +251,12 @@ internal class OwnRouteLine(
     /** Hears each window of the lanes that loaded: from set to loaded, in milliseconds, and its size in bytes. */
     var onWindowLoad: ((loadMs: Long, bytes: Int) -> Unit)? = null
 
+    /**
+     * Hears each window that loaded with lane counts from the electronic horizon in it, with how many of the horizon's
+     * stretches its send took (0 for a later window of the same path), for the trip summary.
+     */
+    var onHorizonWindow: ((taken: Int) -> Unit)? = null
+
     private var styleReady = false
     private var released = false
     private var look = Look.NIGHT
@@ -268,6 +299,21 @@ internal class OwnRouteLine(
 
     /** The window being built on the worker while the car drives. */
     private var windowTask: Task? = null
+
+    /**
+     * The path built anew with the electronic horizon's newest counts, sent with its window: drawn once both have loaded;
+     * null while none waits.
+     */
+    private var nextDrawing: OwnLineDrawing? = null
+
+    /** The horizon's update the drawing last took its counts from: a send takes only a newer one. */
+    private var horizonTaken: HorizonAhead? = null
+
+    /** Building with the horizon's counts failed for the drive's route: its windows are built without them from now on. */
+    private var horizonFailed = false
+
+    /** How many of the horizon's stretches the window on its way took, for the trip summary. */
+    private var windowTaken = 0
 
     /** How many of the held window's tint pieces, in the order they end, are hidden behind the car. */
     private var hiddenTints = 0
@@ -387,8 +433,11 @@ internal class OwnRouteLine(
         // state across a style load is not known (the design's JE 1), so it is shown at every one.
         drawn = false
         sentId = null
-        // The new style's source is empty: the lanes' window the map held, or the one on its way, goes again.
+        // The new style's source is empty: the lanes' window the map held, or the one on its way, goes again, with the path
+        // it was built with: one built with the horizon's counts that had not loaded yet too.
         val keep = pendingWindow ?: window
+        nextDrawing?.let { drawing = it }
+        nextDrawing = null
         windowTask?.cancel()
         windowTask = null
         windowSentId = null
@@ -494,6 +543,11 @@ internal class OwnRouteLine(
             }
             else -> return
         }
+        // A path built with the horizon's counts and its window switch together, once both have loaded.
+        if (nextDrawing != null) {
+            if (sentId == null && windowSentId == null) swapToNext()
+            return
+        }
         val drawing = drawing ?: return
         val path = pathLoadedAt ?: return
         if (!enabled || !ready() || drawn) return
@@ -587,12 +641,13 @@ internal class OwnRouteLine(
         val own = drawing.lanes ?: return
         val car = trimStation
         hideTintsBehind(car)
-        if (windowTask != null || windowSentId != null) return
+        if (windowTask != null || windowSentId != null || nextDrawing != null) return
         if (!own.windows.due(car, (pendingWindow ?: window)?.window, changing = false)) return
+        if (withHorizon(drawing, own, car)) return
         val wanted = own.windows.windowAt(car)
         windowTask = worker.run({
             val from = nanos()
-            own.window(wanted, drawing.table, drawing.runs) to nanos() - from
+            own.window(wanted, drawing.table, drawing.runs, drawing.horizon) to nanos() - from
         }) { result ->
             windowTask = null
             result.fold(
@@ -792,6 +847,11 @@ internal class OwnRouteLine(
             refreshPending = task != null
             return
         }
+        // A path built with the horizon's counts waits to load: the refresh comes once it is drawn.
+        if (nextDrawing != null) {
+            refreshPending = true
+            return
+        }
         val held = window
         task?.cancel()
         task = worker.run({
@@ -835,14 +895,18 @@ internal class OwnRouteLine(
         }
     }
 
-    /** Sends [window] to the drawing's source as data of its own, the layers' widths first where its latitude asks. */
-    private fun sendWindow(window: LaneWindow, reason: String) {
+    /**
+     * Sends [window] to the drawing's source as data of its own, the layers' widths first where its latitude asks; [taken]
+     * of the horizon's stretches went into it, for the trip summary.
+     */
+    private fun sendWindow(window: LaneWindow, reason: String, taken: Int = 0) {
         val port = lanePort ?: return
         val dataId = "$WINDOW_ID${++windowIds}"
         pendingWindow = window
         windowSentId = dataId
         windowSentAt = nanos()
         windowReason = reason
+        windowTaken = taken
         if (!window.latitude.isNaN() && LaneDrawing.stopsStale(laneLatitude, window.latitude)) {
             laneLatitude = window.latitude
             port.setLatitude(window.latitude)
@@ -865,6 +929,97 @@ internal class OwnRouteLine(
             return
         }
         attempt { sendWindow(built, REASON_AHEAD) }
+    }
+
+    /**
+     * Where the electronic horizon has an update newer than the one [drawing] took, or the switch went off after it took
+     * some, builds the window that is due with a path and lanes built anew on the worker (with [car] the car's station),
+     * and returns true; false where the window is built as before. The lane counts are taken only past the window on
+     * screen ([HorizonEvidence.next]), and the path is kept up to its end ([PathPrefix]). Nothing is built while nothing is
+     * drawn at the car, nor after a failure on this route.
+     */
+    private fun withHorizon(drawing: OwnLineDrawing, own: OwnLanes, car: Double): Boolean {
+        val held = drawing.horizon ?: return false
+        val source = horizon ?: return false
+        val shown = window ?: return false
+        val build = build ?: return false
+        if (horizonFailed || drawing.stations.size != drawing.points.size) return false
+        val ahead = source.aheadOf(drawing.routeId)?.takeIf { it.routeId == drawing.routeId }
+        if (ahead != null && ahead === horizonTaken) return false
+        val windowEnd = shown.window.to
+        // With nothing from the horizon now (the switch off), only a drawing that took counts past the window is built again.
+        if (ahead == null && held.lanes.from(HorizonEvidence.startFor(windowEnd, own.windows.cards)).between.isEmpty()) return false
+        val version = ++versions
+        val prefix = PathPrefix(drawing.points, drawing.stations, windowEnd)
+        val traffic = traffic
+        windowTask = worker.run({
+            val from = nanos()
+            val next = held.next(ahead, windowEnd, own.windows.cards)
+            val built = build.drawing(version, true, next, prefix)
+            // The traffic of the route as it is now, a refresh's too.
+            val rebuilt = traffic?.let { built.withRuns(it.runs(built)) } ?: built
+            val lanes = checkNotNull(rebuilt.lanes) { "No lanes" }
+            Triple(rebuilt, lanes.window(lanes.windows.windowAt(car), rebuilt.table, rebuilt.runs, rebuilt.horizon), nanos() - from)
+        }) { result ->
+            windowTask = null
+            result.fold(
+                onSuccess = { (rebuilt, built, took) -> takeHorizon(drawing, rebuilt, built, took, ahead) },
+                // The horizon's counts cost only themselves: one error line, and the route's windows are built without them.
+                onFailure = { error ->
+                    debugLog.error(WHERE, error)
+                    if (drawing === this.drawing) horizonFailed = true
+                },
+            )
+        }
+        return true
+    }
+
+    /**
+     * The path [rebuilt] with the horizon's counts of [ahead] and its window [built], made off the main thread in [took] for
+     * [old]: sent together while [old] is still the path drawn and the window still due, so never inside a card window
+     * and never during a route change; the line stays as it is until both have loaded ([swapToNext]).
+     */
+    private fun takeHorizon(old: OwnLineDrawing, rebuilt: OwnLineDrawing, built: LaneWindow, took: Long, ahead: HorizonAhead?) {
+        if (!enabled || !lanes || !drawn || old !== drawing || windowSentId != null || sentId != null || nextDrawing != null) return
+        val own = old.lanes ?: return
+        if (!own.windows.due(trimStation, window?.window, changing = false)) return
+        horizonTaken = ahead
+        windowBuildNanos = took
+        nextDrawing = rebuilt
+        val dataId = "$DATA_ID${++sent}"
+        sentId = dataId
+        sentAt = nanos()
+        pathLoadedAt = null
+        attempt {
+            layers.watchLoads(true)
+            layers.setPath(rebuilt.points, dataId)
+            sendWindow(built, REASON_HORIZON, rebuilt.horizon?.taken ?: 0)
+        }
+    }
+
+    /**
+     * The path built with the horizon's counts and its window have both loaded: it is the path drawn from now on, its
+     * station table, gradients and trim taken up together. Up to the end of the window it replaced it is the same, point
+     * for point, so the line does not move where the driver sees it.
+     */
+    private fun swapToNext() {
+        val next = nextDrawing ?: return
+        nextDrawing = null
+        pathLoadedAt = null
+        if (!enabled || !ready() || !drawn) return
+        drawing = next
+        attempt {
+            setColours(next)
+            val station = trimStation(next, accepted = sdkRouteId == next.routeId) ?: trimStation
+            trimStation = station
+            trim = next.table.pathFraction(station)
+            layers.setTrim(trim)
+            if (lanes) lanePort?.setEraserTrim(trim)
+        }
+        if (refreshPending) {
+            refreshPending = false
+            refreshTraffic()
+        }
     }
 
     /** The window sent last has loaded: the source holds it from now on, its line is written and its states set. */
@@ -890,9 +1045,14 @@ internal class OwnRouteLine(
                 "buildMs" to Math.round(windowBuildNanos / NANOS_PER_MILLI),
                 "loadMs" to loadMs,
                 "budget" to loaded.withinBudget,
+                // What the electronic horizon's counts drew in it: metres of its bridges and zones, and its zones.
+                "horizonM" to Math.round(loaded.horizonMeters),
+                "horizonZones" to loaded.horizonZones,
             ),
         )
         onWindowLoad?.invoke(loadMs, loaded.bytes)
+        if (loaded.horizonMeters > 0.0) onHorizonWindow?.invoke(windowTaken)
+        windowTaken = 0
         // Whether feature states outlive a new window's data is not known: they are set again for every window.
         if (drawn) applyStates(loaded)
     }
@@ -918,10 +1078,17 @@ internal class OwnRouteLine(
         attempt { lanePort?.setStates(passed, emptyList()) }
     }
 
-    /** No window waits or is built any more, and none is held: a new route's, or none at all, comes next. */
+    /**
+     * No window waits or is built any more, and none is held: a new route's, or none at all, comes next; nor does a path
+     * built with the horizon's counts, nor anything the route took from the horizon.
+     */
     private fun forgetWindow() {
         windowTask?.cancel()
         windowTask = null
+        nextDrawing = null
+        horizonTaken = null
+        horizonFailed = false
+        windowTaken = 0
         val waited = windowSentId != null
         windowSentId = null
         pendingWindow = null
@@ -1133,6 +1300,9 @@ internal class OwnRouteLine(
 
         /** The next window, while the car drives. */
         const val REASON_AHEAD = "ahead"
+
+        /** The next window, with a path built anew with the electronic horizon's newest lane counts past the window on screen. */
+        const val REASON_HORIZON = "horizon"
 
         /** A colour that draws nothing: a layer's gradient is this where the other pair of layers draws. */
         const val TRANSPARENT = 0

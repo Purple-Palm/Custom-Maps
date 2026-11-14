@@ -27,11 +27,18 @@ internal object FreewayExit {
     private fun lane(valid: Boolean, arrows: List<String> = listOf("straight")): IntersectionLanes =
         IntersectionLanes.builder().valid(valid).active(valid).indications(arrows).build()
 
-    private fun intersection(at: Int, lanes: List<IntersectionLanes>? = null, motorway: Boolean = false, first: Boolean = false): StepIntersection =
+    private fun intersection(
+        at: Int,
+        lanes: List<IntersectionLanes>? = null,
+        motorway: Boolean = false,
+        first: Boolean = false,
+        leftRoad: Boolean = false,
+    ): StepIntersection =
         StepIntersection.builder()
             .rawLocation(doubleArrayOf(0.0, at * STEP))
-            .bearings(if (first) listOf(0) else listOf(180, 0))
-            .entry(if (first) listOf(true) else listOf(false, true))
+            // A road on the left that may be entered: no rule bridges lane points across it toward a right exit.
+            .bearings(if (first) listOf(0) else if (leftRoad) listOf(180, 0, 330) else listOf(180, 0))
+            .entry(if (first) listOf(true) else if (leftRoad) listOf(false, true, true) else listOf(false, true))
             .`in`(if (first) null else 0)
             .out(if (first) 0 else 1)
             .classes(if (motorway) listOf("motorway") else null)
@@ -48,14 +55,25 @@ internal object FreewayExit {
         .intersections(intersections)
         .build()
 
-    /** The route's legs and its steps' points: lane points at [points] with [lanes] lanes, the gore at [gore]. */
-    fun route(gore: Int, points: List<Int>, lanes: Int = 3): Pair<List<RouteLeg>, List<List<List<Point>>>> {
+    /**
+     * The route's legs and its steps' points: lane points at [points] with [lanes] lanes, the gore at [gore]; at [leftRoad],
+     * where given, an intersection without lane data where a road that may be entered leaves on the left.
+     */
+    fun route(gore: Int, points: List<Int>, lanes: Int = 3, leftRoad: Int? = null): Pair<List<RouteLeg>, List<List<List<Point>>>> {
         val three = List(lanes) { lane(true) }
         val exit = List(lanes - 1) { lane(false) } + lane(true, listOf("slight right"))
         val turn = gore + 2
         val end = gore + 4
         val steps = listOf(
-            legStep("depart", null, 0, listOf(intersection(0, motorway = true, first = true)) + points.map { intersection(it, three, motorway = true) }),
+            legStep(
+                "depart",
+                null,
+                0,
+                listOf(intersection(0, motorway = true, first = true)) +
+                    (points.map { it to false } + listOfNotNull(leftRoad?.let { it to true })).sortedBy { it.first }.map { (at, road) ->
+                        if (road) intersection(at, motorway = true, leftRoad = true) else intersection(at, three, motorway = true)
+                    },
+            ),
             legStep("off ramp", "slight right", gore, listOf(intersection(gore, exit, motorway = true))),
             legStep("turn", "right", turn, listOf(intersection(turn))),
             legStep("arrive", "right", end, listOf(intersection(end))),

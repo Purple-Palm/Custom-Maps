@@ -88,6 +88,7 @@ import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.geo.LocalMeters
 import io.github.purplepalm.custommaps.nav.guidance.UTurnArrow
+import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneMeasure
 import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
@@ -328,6 +329,8 @@ internal class MapScene(
         debugLog = debugLog,
         // The app's own lanes' layers, while the app draws the lanes, and the map's word that a window of them loaded.
         lanePort = LaneLayers.on(mapboxMap) { dataId -> ownLine.onSourceLoaded(dataId) },
+        // The electronic horizon's newest stretches along the route, as the engine holds them, for the lanes' next window.
+        horizon = { routeId -> engine.routeHorizon.aheadOf(routeId) },
     )
 
     // What the own route line follows: its own Debug switch, and Lanes on the map's Drawn by the app, which draws it too.
@@ -717,6 +720,8 @@ internal class MapScene(
         engine.addTripEndListener(tripEnd)
         // The lanes' windows that load while a view is measured.
         ownLine.onWindowLoad = { loadMs, bytes -> measure { onWindowLoaded(loadMs, bytes) } }
+        // A window drawn with lane counts from the horizon goes into the trip summary.
+        ownLine.onHorizonWindow = { taken -> engine.onHorizonWindow(taken) }
         // The style this map shows is kept ahead of the car during guidance from now on. The style
         // may still be loading: it is taken when it has loaded, and again each time it loads.
         offlineData?.attachMap(mapboxMap)
@@ -1379,11 +1384,18 @@ internal class MapScene(
 
     /**
      * Builds the own line's path of [route] through the lanes of its lane [plan], or along its own line without one;
-     * with the lanes, their drawing along it too.
+     * with the lanes, their drawing along it too, with the electronic horizon's counts where a window's send asks.
      */
-    private fun ownLineBuild(route: NavigationRoute, plan: RouteLanePlan?) = OwnRouteLine.Build { version, lanes ->
-        val directions = route.directionsRoute
-        ownLineDrawing(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints(), plan, version, lanes)
+    private fun ownLineBuild(route: NavigationRoute, plan: RouteLanePlan?) = object : OwnRouteLine.Build {
+        override fun drawing(version: Int, lanes: Boolean): OwnLineDrawing {
+            val directions = route.directionsRoute
+            return ownLineDrawing(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints(), plan, version, lanes)
+        }
+
+        override fun drawing(version: Int, lanes: Boolean, horizon: HorizonEvidence, prefix: PathPrefix): OwnLineDrawing {
+            val directions = route.directionsRoute
+            return ownLineDrawing(route.id, directions.legs().orEmpty(), directions.stepsGeometryToPoints(), plan, version, lanes, horizon, prefix)
+        }
     }
 
     /** Gives the data source the route to frame; a route it has already changes nothing. */

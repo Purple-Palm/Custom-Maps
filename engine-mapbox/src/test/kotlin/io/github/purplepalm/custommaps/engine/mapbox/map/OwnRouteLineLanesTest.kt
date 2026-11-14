@@ -88,7 +88,13 @@ class OwnRouteLineLanesTest {
         // Both pairs of the route line coloured, and one line about the window: numbers and words only.
         assertEquals(setOf(OwnRouteLine.CASING, OwnRouteLine.LINE, OwnRouteLine.LIT_CASING, OwnRouteLine.LIT_LINE), style.gradients.keys)
         val logged = laneLines().single()
-        assertEquals(setOf("route", "window", "reason", "lengthM", "features", "coordinates", "bytes", "buildMs", "loadMs", "budget"), logged.keys)
+        assertEquals(
+            setOf("route", "window", "reason", "lengthM", "features", "coordinates", "bytes", "buildMs", "loadMs", "budget", "horizonM", "horizonZones"),
+            logged.keys,
+        )
+        // Without the electronic horizon's counts, nothing of them in it.
+        assertEquals(0L, logged["horizonM"])
+        assertEquals(0, logged["horizonZones"])
         assertEquals(1, logged["route"])
         assertEquals(1, logged["window"])
         assertEquals(OwnRouteLine.REASON_ROUTE, logged["reason"])
