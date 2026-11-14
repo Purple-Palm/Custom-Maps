@@ -75,6 +75,24 @@ class OwnRouteLineHorizonTest {
         listOf(edge(p - car, count), edge(road - p, count), edge(q - road, count), edge(gore - q, 3), HorizonEdge(200.0, 1, false, true, true, HorizonRoadClass.MOTORWAY)),
     )
 
+    /**
+     * A horizon from a car at [car] that agrees with the lane lists only from the second point to the gore, where it counts
+     * a fourth lane for the first [extra] metres: the rule's bridge after that point becomes a zone of the horizon's.
+     */
+    private fun horizonBeyond(car: Double, extra: Double = 640.0) = HorizonAhead.of(
+        id,
+        car,
+        0.0,
+        listOf(
+            edge(p - car, 4),
+            edge(road - p, 3),
+            edge(q - road, 3),
+            edge(extra, 4),
+            edge(gore - q - extra, 3),
+            HorizonEdge(200.0, 1, false, true, true, HorizonRoadClass.MOTORWAY),
+        ),
+    )
+
     private fun edge(length: Double, lanes: Int) = HorizonEdge(length, lanes, true, false, true, HorizonRoadClass.MOTORWAY)
 
     private fun puck(station: Double) {
@@ -308,5 +326,39 @@ class OwnRouteLineHorizonTest {
         scene.loadWindow()
         assertEquals(OwnRouteLine.REASON_AHEAD, laneLines().last()["reason"])
         assertNull(scene.log.lines.firstOrNull { it.first == OwnRouteLine.ROUTE_LINE && it.second["reason"] == OwnRouteLine.REASON_FALLBACK })
+    }
+
+    @Test
+    fun `with nothing drawn at the car, as after a seek, the window there goes as before, and the next takes the horizon past it`() {
+        drawn()
+        val windowEnd = built.single().lanes!!.windows.windowAt(0.0).to
+        // A seek of the simulated drive past the window on screen, the horizon there.
+        val seek = windowEnd + 200.0
+        ahead = horizonBeyond(seek)
+        puck(seek)
+        line.onProgress()
+        scene.jobs.runAll()
+        // The window at the car goes as before: no path anew under the car, the horizon not even asked for.
+        assertEquals(0, asked)
+        assertTrue(style.sent.isEmpty())
+        assertEquals(1, lanes.sent.size)
+        assertTrue(horizonBuilds.isEmpty())
+        scene.loadWindow()
+        assertEquals(OwnRouteLine.REASON_AHEAD, laneLines().last()["reason"])
+        assertEquals(0L, laneLines().last()["horizonM"])
+        // With a window drawn at the car, the next send takes the horizon past that window, the path kept to its end.
+        val seekEnd = built.single().lanes!!.windows.windowAt(seek).to
+        requireNotNull(driveUntilSent(seek + 20.0, seekEnd))
+        assertEquals(1, style.sent.size)
+        assertEquals(seekEnd, prefixes.single().at)
+        scene.load()
+        scene.loadWindow()
+        assertEquals(OwnRouteLine.REASON_HORIZON, laneLines().last()["reason"])
+        assertTrue((laneLines().last()["horizonM"] as Long) > 0L, "${laneLines().last()}")
+        // The zone the horizon made of the rule's bridge after the second point, past the window the car was in.
+        val zone = requireNotNull(built.last().horizon).evidence.stretches.single { it.horizon }
+        assertEquals(LaneEvidence.Kind.ZONE, zone.kind)
+        assertEquals(q, zone.from, 1e-6)
+        assertTrue(zone.from >= seekEnd)
     }
 }

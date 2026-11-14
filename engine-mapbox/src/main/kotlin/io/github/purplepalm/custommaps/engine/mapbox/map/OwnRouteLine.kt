@@ -942,6 +942,9 @@ internal class OwnRouteLine(
         val held = drawing.horizon ?: return false
         val source = horizon ?: return false
         val shown = window ?: return false
+        // Nothing drawn at the car, as after a seek of a simulated drive: the window there goes as before, without a path
+        // anew, which would change the line where the car is; the horizon's counts come with the next window, past it.
+        if (!shown.window.holds(car)) return false
         val build = build ?: return false
         if (horizonFailed || drawing.stations.size != drawing.points.size) return false
         val ahead = source.aheadOf(drawing.routeId)?.takeIf { it.routeId == drawing.routeId }
