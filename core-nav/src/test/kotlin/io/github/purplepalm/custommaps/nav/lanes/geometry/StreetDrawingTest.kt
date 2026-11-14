@@ -493,6 +493,31 @@ class StreetDrawingTest {
     }
 
     @Test
+    fun `a two-way street that goes on onto a freeway without a turn leaves the freeway one-way, with its edge lines`() {
+        // The street's lanes up to 800 m before the gore, the freeway's on to 300 m before it.
+        val d = draw(LaneScenes.streetOntoFreeway(), oneWay = false)
+        val freeway = gore - 800.0..gore - 300.0
+        val drawing = d.path.drawings.single()
+        assertEquals(freeway.start, drawing.from, MM)
+        assertEquals(freeway.endInclusive, drawing.to, MM)
+        // About the road's line, the path on it between the two lanes, an edge line on each side all along.
+        var x = freeway.start + 1.0
+        while (x < freeway.endInclusive - 1.0) {
+            assertEquals(CrossSection.Carriageway.ONE_WAY, d.drawing.carriagewayAt(x))
+            assertBounds(listOf(lane, 0.0, -lane), d.drawing.lanesAt(x))
+            assertAsphalt(lane + apron, -lane - apron, d.drawing.asphaltAt(x), "at $x")
+            assertEquals(0.0, d.path.offsetAt(x), PATH_METERS, "the path at $x")
+            for (side in listOf(LaneEdge.LEFT, LaneEdge.RIGHT)) {
+                assertTrue(d.of(Kind.EDGE_LINE).any { it.side == side && it.from <= x && it.to >= x }, "no $side edge line at $x")
+            }
+            x += 10.0
+        }
+        // The street before it is left to the map, and counted as told otherwise than its road.
+        assertTrue(d.features.none { it.from < freeway.start - RoutePath.ASPHALT_TAPER_METERS - MM })
+        assertEquals(listOf(CrossSection.UndrawnStreet(gore - 1_250.0, freeway.start, mixed = true)), d.section.undrawnStreets)
+    }
+
+    @Test
     fun `without a source nothing of a street is drawn and the path is the route's own line`() {
         val d = draw(LaneScenes.streetTurn(), oneWay = null)
         assertTrue(d.path.drawings.isEmpty())

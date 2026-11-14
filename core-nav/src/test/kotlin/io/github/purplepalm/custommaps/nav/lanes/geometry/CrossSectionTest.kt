@@ -442,6 +442,52 @@ class CrossSectionTest {
     }
 
     @Test
+    fun `a road that goes on from a street onto a freeway, or from one onto a street, without a turn sits one-way all along`() {
+        val street = LaneTopology.STREET_LANE_METERS
+        // The street from 1,250 m before the gore (the street's reach back from its lane point) to the freeway 800 m before it,
+        // the freeway on to 300 m before it; and the other way round, the freeway to 500 m before the gore, the street to 300 m.
+        val cases = listOf(
+            Triple(LaneScenes.streetOntoFreeway(), gore - 1_250.0..gore - 800.0, gore - 800.0..gore - 300.0),
+            Triple(LaneScenes.freewayOntoStreet(), gore - 500.0..gore - 300.0, gore - 2_000.0..gore - 500.0),
+        )
+        for ((route, onStreet, onFreeway) in cases) {
+            val name = route.routeId
+            val width = if (onStreet.start < onFreeway.start) street else w
+            val freeway = (onFreeway.start + onFreeway.endInclusive) / 2.0
+            val middle = (onStreet.start + onStreet.endInclusive) / 2.0
+            // Told two-way: the road one-way all along, its freeway about its line and drawn; the street not, listed as told
+            // otherwise than its road; the freeway never listed.
+            val twoWay = section(route, CrossSection.Carriageway.TWO_WAY)
+            for (x in listOf(middle, freeway)) {
+                assertEquals(CrossSection.Carriageway.ONE_WAY, twoWay.carriagewayAt(x), "$name at $x")
+                assertBounds(listOf(width, 0.0, -width), twoWay.lanes(x))
+                assertNull(twoWay.oncomingEdge(x), "$name at $x")
+            }
+            assertTrue(twoWay.drawsAt(freeway), name)
+            assertFalse(twoWay.drawsAt(middle), name)
+            assertEquals(listOf(CrossSection.UndrawnStreet(onStreet.start, onStreet.endInclusive, mixed = true)), twoWay.undrawnStreets, name)
+            assertTrue(twoWay.drawnStreets.isEmpty(), name)
+            // Told one-way: all of it drawn, about the road's line; the street's metres alone counted as a street's.
+            val oneWay = section(route, CrossSection.Carriageway.ONE_WAY)
+            for (x in listOf(middle, freeway)) {
+                assertTrue(oneWay.drawsAt(x), "$name at $x")
+                assertBounds(listOf(width, 0.0, -width), oneWay.lanes(x))
+            }
+            assertTrue(oneWay.undrawnStreets.isEmpty(), name)
+            assertEquals(listOf(onStreet), oneWay.drawnStreets, name)
+            // Told by none: the freeway drawn, the street not, listed as told by none.
+            val none = CrossSection.of(SceneLines.planOf(route))
+            assertTrue(none.drawsAt(freeway) && !none.drawsAt(middle), name)
+            assertEquals(listOf(CrossSection.UndrawnStreet(onStreet.start, onStreet.endInclusive, mixed = false)), none.undrawnStreets, name)
+            // The stretches a source tells of are the street's, all of it.
+            val told = CrossSection.streetStretches(SceneLines.planOf(route)).filter { it.nodes.isNotEmpty() }
+            assertEquals(onStreet.start, told.first().from, 1e-9, name)
+            assertEquals(onStreet.endInclusive, told.last().to, 1e-9, name)
+            assertTrue(told.all { it.from >= onStreet.start - 1e-9 && it.to <= onStreet.endInclusive + 1e-9 }, name)
+        }
+    }
+
+    @Test
     fun `each street is drawn where a source tells of it, and a card window's approach all or none`() {
         val route = LaneScenes.streetTurn()
         val plan = SceneLines.planOf(route)

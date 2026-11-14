@@ -721,6 +721,36 @@ internal object LaneScenes {
         id = "street-u-turn",
     )
 
+    /** The planning speed of the freeway the streets below go on onto, or come from, without a turn. */
+    const val ONTO_FREEWAY_MPS = 27.0
+
+    /**
+     * A street that goes on without a turn onto a freeway: two lanes at a lane point 1,000 m before [GORE], where the street
+     * leaves it; the freeway from 800 m before [GORE], two lanes at its lane points there and 300 m before [GORE]; the arrival
+     * 500 m past [GORE].
+     */
+    fun streetOntoFreeway(): LaneRoute = route(
+        street(0.0, maneuver = DEPART),
+        street(GORE - 1_000.0, s(), s()),
+        node(GORE - 800.0, s(), s(), planMps = ONTO_FREEWAY_MPS),
+        node(GORE - 300.0, s(), s(), planMps = ONTO_FREEWAY_MPS),
+        node(GORE + 500.0, maneuver = ARRIVE, planMps = ONTO_FREEWAY_MPS),
+        id = "street-onto-freeway",
+    )
+
+    /**
+     * A freeway that goes on without a turn onto a street: two lanes at a lane point 1,000 m before [GORE]; the street from
+     * 500 m before [GORE], two lanes at its lane points there and 300 m before [GORE]; the arrival 500 m past [GORE].
+     */
+    fun freewayOntoStreet(): LaneRoute = route(
+        node(0.0, maneuver = DEPART, planMps = ONTO_FREEWAY_MPS),
+        node(GORE - 1_000.0, s(), s(), planMps = ONTO_FREEWAY_MPS),
+        street(GORE - 500.0, s(), s()),
+        street(GORE - 300.0, s(), s()),
+        street(GORE + 500.0, maneuver = ARRIVE),
+        id = "freeway-onto-street",
+    )
+
     /** Every scene of the planner's tests, by name. */
     fun all(): Map<String, LaneRoute> = linkedMapOf(
         "ia" to ia(),

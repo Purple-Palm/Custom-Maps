@@ -40,7 +40,9 @@ import kotlin.math.sign
  *   one-way; a street is one-way or two-way as [StreetWays] tells, street by street from intersection to intersection,
  *   and where no source tells, its lanes are laid out but not drawn ([drawsAt], [undrawnStreets]): where they lie across
  *   the road is not known. One road of a run sits as the first of its streets so told does; a later one told otherwise is
- *   not drawn. The streets over a card window's approach are drawn all or none ([StreetStretch]).
+ *   not drawn. A road of a run that the route follows from a street onto a freeway or a ramp, or from one onto a street,
+ *   without a turn sits one-way all along: its freeway or ramp stretch about its line, and a street of it told two-way not
+ *   drawn. The streets over a card window's approach are drawn all or none ([StreetStretch]).
  * - **Street junctions** are no ramp starts: where the route turns at a junction it reaches on a street, the lanes it
  *   reached it in do not go on straight across the junction, and the road after it is laid out from the turn on (the
  *   drawing leaves the junction's inside to the map's own road, [RoutePath]).
@@ -81,7 +83,7 @@ class CrossSection private constructor(
 
     /** The stretches of streets whose lanes are drawn, where a source tells how they sit ([drawsAt]), in route order. */
     val drawnStreets: List<ClosedFloatingPointRange<Double>> by lazy {
-        layouts.flatMap { it.streetDrawn.orEmpty() }.sortedBy { it.start }
+        layouts.flatMap { it.streets }.sortedBy { it.start }
     }
 
     /**
@@ -97,7 +99,8 @@ class CrossSection private constructor(
     /**
      * Streets from [from] to [to] metres along the route where the evidence has lanes to draw, left undrawn: no source tells
      * whether they are one-way or two-way ([StreetWays]), or of a card window's approach where one does not; or [mixed]: told
-     * otherwise than the first street of their road that a source tells of, or of a card window's approach where one is.
+     * otherwise than their road sits (as the first of its streets a source tells of, or one-way where the road goes on onto a
+     * freeway or a ramp, or from one, without a turn), or of a card window's approach where one is.
      */
     data class UndrawnStreet(val from: Double, val to: Double, val mixed: Boolean) {
         val meters: Double get() = to - from
@@ -206,10 +209,13 @@ class CrossSection private constructor(
         /** From, to and how far the left edge moves over each zone. */
         val zones: List<Triple<Double, Double, Double>>,
         /**
-         * On a street, the stretches of the road whose lanes are drawn: where a source tells how it sits ([StreetWays]);
-         * null on a freeway or a ramp, drawn wherever the evidence has lanes.
+         * On a road with streets, the stretches of it whose lanes are drawn: its streets where a source tells how they sit
+         * ([StreetWays]) and its freeway or ramp stretches; null on a road without streets, drawn wherever the evidence has
+         * lanes.
          */
         val streetDrawn: List<ClosedFloatingPointRange<Double>>? = null,
+        /** Of [streetDrawn], the stretches on streets. */
+        val streets: List<ClosedFloatingPointRange<Double>> = emptyList(),
     ) {
         /** How far the whole carriageway moves to the left where no lane is named ([Shift]); null where it stays. */
         var shift: Shift? = null
@@ -631,15 +637,22 @@ class CrossSection private constructor(
                         d.to > from && d.from < to && !(turn != null && d.from < from && d.lane.closes <= from + LaneTopology.LEAVE_PAST_POINT_METERS + 1e-9)
                     }
                     val road = nodeAt(from)?.road ?: RoadKind.FREEWAY
-                    // A street sits as its sources tell and is drawn where they do; a freeway or a ramp is one-way.
-                    val (kind, streetDrawn) = if (road == RoadKind.STREET) streetWay(from, to, undrawn) else Carriageway.ONE_WAY to null
+                    // A street sits as its sources tell and is drawn where they do; a freeway or a ramp is one-way, and so is
+                    // a road that goes on from a street onto one or from one onto a street without a turn, all along.
+                    val kinds = kindsOf(from, to)
+                    val ways = if (RoadKind.STREET in kinds) {
+                        streetWay(from, to, undrawn, forced = if (kinds.size > 1) Carriageway.ONE_WAY else null)
+                    } else {
+                        null
+                    }
+                    val kind = ways?.kind ?: Carriageway.ONE_WAY
                     val there = lanes.filter { it.from <= from && it.to > from }
                     val width = there.sumOf { it.widthAt(from) }
                     val left = if (kind == Carriageway.TWO_WAY) 0.0 else width / 2.0
                     val opening = lanes.filter { it.from > from && it.from < to && leftSide(it, lanes, it.from, opens = true) }
                     val closing = lanes.filter { it.closeFrom >= from && it.closeFrom < to && leftSide(it, lanes, it.closeFrom, opens = false) }
                     val zones = if (kind == Carriageway.TWO_WAY) emptyList() else zonesOf(run.index, from, to, road)
-                    val layout = Layout(run.index, from, to, road, kind, lanes, left, opening, closing, zones, streetDrawn)
+                    val layout = Layout(run.index, from, to, road, kind, lanes, left, opening, closing, zones, ways?.drawn, ways?.streets.orEmpty())
                     // A junction the route reaches on a street is no ramp's start: its lanes do not go on straight across it.
                     if (turn != null && previous != null && route.approachRoad(turn.node) != RoadKind.STREET) ramps.add(Triple(turn, previous, layout))
                     layouts.add(layout)
@@ -670,30 +683,47 @@ class CrossSection private constructor(
         }
 
         /**
-         * How the street from [from] to [to], one road of a run, sits ([StreetWays]), and the stretches of it whose lanes are
+         * How a road of a run with streets sits, [kind], with the stretches of it whose lanes are drawn ([drawn]) and, of them,
+         * those on streets ([streets]).
+         */
+        private class StreetLayout(
+            val kind: Carriageway,
+            val drawn: List<ClosedFloatingPointRange<Double>>,
+            val streets: List<ClosedFloatingPointRange<Double>>,
+        )
+
+        /**
+         * How the road from [from] to [to] of a run, with streets, sits ([StreetWays]), and the stretches of it whose lanes are
          * drawn. Over each stretch the evidence draws lanes on (known, bridged or a zone, merged where they touch) every street
          * the route takes, from intersection to intersection, is drawn where a source tells how it sits, alike with the first
          * street of the road a source tells of: the road sits as that one does, and a later one told otherwise is not drawn,
-         * since one road of a run lays its lanes out one way. The streets over a card window's approach are drawn all or none
-         * ([unitsOf]). So what the streets past a station are told never changes whether one before it is drawn, which lets a
-         * drawing take the electronic horizon's answers window by window
+         * since one road of a run lays its lanes out one way. A road that also has a freeway or a ramp stretch, which the route
+         * reaches or leaves without a turn, sits one-way all along ([forced]), so a street of it told two-way is not drawn;
+         * its freeway and ramp stretches are drawn wherever the evidence has lanes. The streets over a card window's approach
+         * are drawn all or none ([unitsOf]). So what the streets past a station are told never changes whether one before it
+         * is drawn, which lets a drawing take the electronic horizon's answers window by window
          * ([io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence]). The streets left undrawn go to [undrawn], those that
          * touch for the same cause as one.
          */
-        private fun streetWay(from: Double, to: Double, undrawn: MutableList<UndrawnStreet>): Pair<Carriageway, List<ClosedFloatingPointRange<Double>>> {
+        private fun streetWay(from: Double, to: Double, undrawn: MutableList<UndrawnStreet>, forced: Carriageway?): StreetLayout {
             val units = groupsOf(from, to).flatMap { unitsOf(it) }
-            val first = units.firstNotNullOfOrNull { unit -> unit.firstNotNullOfOrNull { wayOf(it) } }
+            val first = forced ?: units.firstNotNullOfOrNull { unit -> unit.firstNotNullOfOrNull { wayOf(it) } }
             val drawn = ArrayList<ClosedFloatingPointRange<Double>>()
+            val streetsDrawn = ArrayList<ClosedFloatingPointRange<Double>>()
             val left = ArrayList<UndrawnStreet>()
             for (unit in units) {
-                val ways = unit.map { wayOf(it) }
+                // Only a unit's streets tell whether it is drawn: a freeway's or a ramp's stretch is one-way.
+                val ways = unit.filter { onStreet(it) }.map { wayOf(it) }
                 val unknown = ways.any { it == null }
-                if (!unknown && ways.all { it == first }) {
-                    for (street in unit) join(drawn, street.from, street.to)
-                    continue
-                }
-                // Told otherwise than its road, a street is mixed; one taken with a street no source tells is as none told.
-                for ((street, way) in unit.zip(ways)) {
+                val drawsUnit = !unknown && ways.all { it == first }
+                for (street in unit) {
+                    if (!onStreet(street) || drawsUnit) {
+                        join(drawn, street.from, street.to)
+                        if (onStreet(street)) join(streetsDrawn, street.from, street.to)
+                        continue
+                    }
+                    // Told otherwise than its road, a street is mixed; one taken with a street no source tells is as none told.
+                    val way = wayOf(street)
                     val mixed = way != null && (way != first || !unknown)
                     val last = left.lastOrNull()
                     if (last != null && last.mixed == mixed && street.from <= last.to + SAME_STATION) {
@@ -704,15 +734,33 @@ class CrossSection private constructor(
                 }
             }
             undrawn.addAll(left)
-            return (first ?: Carriageway.ONE_WAY) to drawn
+            return StreetLayout(first ?: Carriageway.ONE_WAY, drawn, streetsDrawn)
+        }
+
+        /**
+         * The kinds of road a road of a run from [from] to [to] is made of: the one that leaves the intersection at or before
+         * [from], and each that leaves an intersection between.
+         */
+        private fun kindsOf(from: Double, to: Double): Set<RoadKind> {
+            val out = HashSet<RoadKind>()
+            out.add(nodeAt(from)?.road ?: RoadKind.FREEWAY)
+            var k = nodeIndex(from)
+            while (k < nodes.size && nodes[k].station < to - SAME_STATION) {
+                if (nodes[k].station > from + SAME_STATION) out.add(nodes[k].road)
+                k++
+            }
+            return out
         }
 
         /** The street that leaves intersection [node] where it lies over a stretch the evidence draws lanes on: from [from] to [to]. */
         private data class Street(val from: Double, val to: Double, val node: Int)
 
+        /** Whether [street] is one: the road that leaves its intersection is no freeway or ramp. */
+        private fun onStreet(street: Street): Boolean = nodes[street.node].road == RoadKind.STREET
+
         /** How [street] sits as a source tells ([StreetWays]); one-way where the road that leaves its intersection is a freeway or a ramp. */
         private fun wayOf(street: Street): Carriageway? =
-            if (nodes[street.node].road == RoadKind.STREET) streets.at(street.node)?.carriageway else Carriageway.ONE_WAY
+            if (onStreet(street)) streets.at(street.node)?.carriageway else Carriageway.ONE_WAY
 
         /** The streets over [group], each from the intersection it leaves to the next, cut to the group, in route order. */
         private fun streetsOf(group: ClosedFloatingPointRange<Double>): List<Street> {
@@ -782,7 +830,7 @@ class CrossSection private constructor(
             val out = ArrayList<StreetStretch>()
             for (run in topology.runs) {
                 for (road in roadsOf(run)) {
-                    if ((nodeAt(road.from)?.road ?: RoadKind.FREEWAY) != RoadKind.STREET) continue
+                    if (RoadKind.STREET !in kindsOf(road.from, road.to)) continue
                     for (group in groupsOf(road.from, road.to)) {
                         for (unit in unitsOf(group)) {
                             val told = unit.map { it.node }.filter { nodes[it].road == RoadKind.STREET }

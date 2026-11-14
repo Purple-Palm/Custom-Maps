@@ -906,7 +906,7 @@ class LaneDrawing private constructor(
             return when {
                 s < from -> {
                     val e = carriageway(d, end, from) ?: return null
-                    val half = bandOf(roadAt(from)) / 2.0
+                    val half = bandAt(from - RoutePath.ASPHALT_TAPER_METERS) / 2.0
                     val f = CrossSection.ramp(s, from - RoutePath.ASPHALT_TAPER_METERS, from)
                     Pair(half + (e.first - half) * f, -half + (e.second + half) * f)
                 }
@@ -914,7 +914,7 @@ class LaneDrawing private constructor(
                 else -> {
                     val held = carriageway(d, null, d.to - SAME_STATION) ?: return null
                     if (s <= d.back) return held
-                    val half = bandOf(roadAt(d.to - SAME_STATION)) / 2.0
+                    val half = bandAt(d.asphaltTo - SAME_STATION) / 2.0
                     val f = CrossSection.ramp(s, d.back, d.asphaltTo)
                     Pair(held.first + (half - held.first) * f, held.second + (-half - held.second) * f)
                 }
@@ -2060,6 +2060,13 @@ class LaneDrawing private constructor(
 
         /** The kind of road at [s]: the cross-section's, else the road that leaves the last intersection before it. */
         private fun roadAt(s: Double): RoadKind = section.roadAt(s) ?: nodes.lastOrNull { it.station <= s + SAME_STATION }?.road ?: RoadKind.FREEWAY
+
+        /**
+         * The width of the map's own band at [s], where a drawing's asphalt begins or ends in it: the band of the road that leaves
+         * the last intersection before it, which the map draws by its own class, also on a road of a run the cross-section lays
+         * out as another kind ([CrossSection.roadAt]).
+         */
+        private fun bandAt(s: Double): Double = bandOf(nodes.lastOrNull { it.station <= s + SAME_STATION }?.road ?: roadAt(s))
 
         private fun bandOf(road: RoadKind): Double = when (road) {
             RoadKind.FREEWAY -> STANDARD_FREEWAY_BAND_METERS

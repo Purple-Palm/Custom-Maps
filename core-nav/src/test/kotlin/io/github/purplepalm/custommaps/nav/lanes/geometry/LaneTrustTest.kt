@@ -1469,6 +1469,8 @@ class LaneTrustTest {
         "left-beside-bicycles" to LaneScenes.leftBesideBicycles(),
         "street-u-turn" to LaneScenes.streetUTurn(),
         "street-roundabout" to LaneScenes.roundabout(),
+        "street-onto-freeway" to LaneScenes.streetOntoFreeway(),
+        "freeway-onto-street" to LaneScenes.freewayOntoStreet(),
     )
 
     /**
