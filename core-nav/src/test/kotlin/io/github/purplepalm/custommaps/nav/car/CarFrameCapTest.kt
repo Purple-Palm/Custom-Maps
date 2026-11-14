@@ -27,13 +27,13 @@ class CarFrameCapTest {
     }
 
     @Test
-    fun `with the phone's screen off at 60 Hz the cap holds 30 through a hundred windows of 60 to 80 ticks`() {
+    fun `with the phone's screen off at 60 Hz the cap holds 30 through a hundred windows of late calls`() {
         val cap = displayCap(60.0)
         assertEquals(30, cap.maxFps)
         val random = Random(SEED)
         repeat(100) {
-            // 31 to 41 calls, 30 of them drawn, and display frames counted as missed that were not:
-            // 60 to 80 ticks, which the cap of old took for the render thread's rate.
+            // Calls of which 30 drew, and display frames counted as missed that were not: ticks well
+            // over the display's frames, which the cap of old took for the render thread's rate.
             val calls = 31 + random.nextInt(11)
             val ticks = 60L + random.nextInt(21)
             assertTrue(ticks >= calls)
@@ -101,9 +101,9 @@ class CarFrameCapTest {
         val run = drive(realHz = 60.0, frameMillis = { 40.0 }, seconds = 8)
         assertTrue(run.drawn.takeLast(4).all { it in 19..21 }, "${run.drawn}")
         assertEquals(listOf(30), run.caps.distinct())
-        // Windows made by hand: 24 drawn at 30 with a 95th percentile over 33 ms, as while the phone is hot.
+        // Windows made by hand: 24 drawn at 30 with a 95th percentile over 33 ms.
         val cap = displayCap(60.0)
-        repeat(10) { assertFalse(cap.onRenderWindow(ticks = 60, drawn = 24, p95Ms = 42.0, windowMillis = 1_000, displayHz = 60.0, onDisplay = true)) }
+        repeat(10) { assertFalse(cap.onRenderWindow(ticks = 60, drawn = 24, p95Ms = 36.0, windowMillis = 1_000, displayHz = 60.0, onDisplay = true)) }
         assertEquals(30, cap.maxFps)
         // The same windows with quick frames raise it after two: round(30 x 30 / 24).
         assertFalse(cap.onRenderWindow(ticks = 60, drawn = 24, p95Ms = 30.0, windowMillis = 1_000, displayHz = 60.0, onDisplay = true))
