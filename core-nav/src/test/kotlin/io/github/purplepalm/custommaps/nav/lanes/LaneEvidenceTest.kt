@@ -394,6 +394,29 @@ class LaneEvidenceTest {
     }
 
     @Test
+    fun `on a street a lane kept for buses or bicycles goes on past a road on its side, on a freeway it leaves`() {
+        val bike = kept(false, DesignatedKind.BICYCLE)
+        val bus = kept(false, DesignatedKind.BUS)
+        val street = node(1_000.0, bus, s(), s(), bike, roads = bothSides, road = RoadKind.STREET)
+        assertEquals(listOf(bus, s(), s(), bike), LaneEvidence.goingOn(street))
+        // A lane open to every car there that the route cannot be followed from still leaves.
+        val turnLane = node(1_000.0, sl(false), bus, s(), s(), roads = bothSides, road = RoadKind.STREET)
+        assertEquals(listOf(bus, s(), s()), LaneEvidence.goingOn(turnLane))
+        // On a freeway the rule stands for every lane: a lane kept for car pools at the edge leaves by the road on its side.
+        val freeway = node(1_000.0, hov(), s(), s(), roads = bothSides)
+        assertEquals(listOf(s(), s()), LaneEvidence.goingOn(freeway))
+        // So the street's lanes are one carriageway with the next point's: the 50 m the two points' own stretches leave between
+        // them are bridged, not a gap.
+        val route = route(
+            start(RoadKind.STREET),
+            node(1_000.0, bus, s(), s(), bike, roads = bothSides, road = RoadKind.STREET),
+            node(1_300.0, bus, s(), s(), bike, road = RoadKind.STREET),
+            node(1_600.0, road = RoadKind.STREET, maneuver = arrive),
+        )
+        assertEquals(1_300.0 - EvidenceTuning().reachStreetM - 1_000.0, evidence(route).meters(BRIDGED), 1e-9)
+    }
+
+    @Test
     fun `a point that marks no lane says nothing of where its lanes go`() {
         val point = node(1_000.0, s(false), s(false), s(false), roads = bothSides)
         assertEquals(3, LaneEvidence.goingOn(point).size)

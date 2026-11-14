@@ -667,8 +667,9 @@ class LaneEvidence private constructor(
         /**
          * The lanes of a lane point the route goes straight through that go on past it (rule 6): the
          * lanes at an edge that the route cannot be followed from leave only where a road that may be
-         * entered leaves on that side. A point that marks no lane at all says nothing of where its
-         * lanes go: they all go on.
+         * entered leaves on that side. On a street a lane kept for buses or bicycles goes on all the same:
+         * it runs along the street, it does not turn off by a side road. A point that marks no lane at all
+         * says nothing of where its lanes go: they all go on.
          */
         fun goingOn(node: RouteNode): List<RouteLane> {
             val lanes = node.lanes
@@ -677,7 +678,8 @@ class LaneEvidence private constructor(
             val afterLast = lanes.indexOfLast { it.marked } + 1
             val from = if (first > 0 && branchesOff(node, LaneEdge.LEFT)) first else 0
             val to = if (afterLast < lanes.size && branchesOff(node, LaneEdge.RIGHT)) afterLast else lanes.size
-            return lanes.subList(from, to)
+            if (node.road != RoadKind.STREET) return lanes.subList(from, to)
+            return lanes.filterIndexed { i, lane -> i in from until to || lane.designated }
         }
 
         /**

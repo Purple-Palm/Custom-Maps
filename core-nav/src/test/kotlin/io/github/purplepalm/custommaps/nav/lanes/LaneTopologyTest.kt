@@ -242,6 +242,46 @@ class LaneTopologyTest {
     }
 
     @Test
+    fun `on a street a lane kept for buses or bicycles at the far edge goes on past a crossing, on a freeway it leaves`() {
+        val bike = LaneScenes.bike()
+        // A left turn ahead: the right edge is the far one, where the lane only for bicycles lies and a road crosses.
+        val left = topology(
+            route(
+                LaneScenes.street(0.0, maneuver = LaneScenes.DEPART),
+                LaneScenes.street(GORE - 400.0, s(), s(), bike, roads = LaneScenes.CROSSING),
+                LaneScenes.street(GORE - 200.0, s(), s(), bike),
+                LaneScenes.street(GORE, left(), s(false), bike, roads = LaneScenes.CROSSING, maneuver = LaneScenes.TURN_LEFT),
+                LaneScenes.street(GORE + 300.0, maneuver = LaneScenes.ARRIVE),
+            ),
+        )
+        val strip = left.idsAt(GORE - 400.0).last()
+        assertEquals(strip, left.idsAt(GORE - 200.0).last(), "the same lane at the next point")
+        assertEquals(strip, left.idsAt(GORE).last())
+        // A right turn ahead: the left edge is the far one, with a lane kept for buses.
+        val bus = LaneScenes.bus()
+        val right = topology(
+            route(
+                LaneScenes.street(0.0, maneuver = LaneScenes.DEPART),
+                LaneScenes.street(GORE - 400.0, bus, s(), s(), roads = LaneScenes.CROSSING),
+                LaneScenes.street(GORE - 200.0, bus, s(), s()),
+                LaneScenes.street(GORE, bus, s(false), LaneScenes.right(), roads = LaneScenes.CROSSING, maneuver = LaneScenes.TURN_RIGHT),
+                LaneScenes.street(GORE + 300.0, maneuver = LaneScenes.ARRIVE),
+            ),
+        )
+        val kept = right.idsAt(GORE - 400.0).first()
+        assertEquals(listOf(kept, kept), listOf(right.idsAt(GORE - 200.0).first(), right.idsAt(GORE).first()))
+        assertTrue(right.lanes[kept].closes > GORE)
+        // On a freeway a lane kept for car pools at the far edge leaves by the road on its side, as every unmarked lane there.
+        val freeway = topology(approach(listOf(at(1_500.0, hov(), s(), s(), roads = EXIT_LEFT), at(800.0, hov(), s(), s())), listOf(s(false), s(false), sr())))
+        assertEquals(GORE - 1_500.0 + LaneTopology.LEAVE_PAST_POINT_METERS, freeway.lanes[0].closes)
+        // The rule itself: lanes kept for other vehicles at the far edge stay on a street only.
+        val lanes = listOf(bus, s(false), s(), s(), bike)
+        val usable = BooleanArray(lanes.size) { lanes[it].usable }
+        assertEquals(listOf(0, 2, 3, 4), LaneTopology.goingOn(lanes, usable, null, branchLeft = true, branchRight = true, street = true))
+        assertEquals(listOf(2, 3), LaneTopology.goingOn(lanes, usable, null, branchLeft = true, branchRight = true, street = false))
+    }
+
+    @Test
     fun `a lane kept for car pools at the exit's edge stays while the open lanes beside it leave`() {
         val lanes = RunUpRuleLanes.keptAtEdge()
         val kept = LaneTopology.goingOn(lanes, BooleanArray(lanes.size) { lanes[it].usable }, LaneEdge.RIGHT, branchLeft = false, branchRight = false)

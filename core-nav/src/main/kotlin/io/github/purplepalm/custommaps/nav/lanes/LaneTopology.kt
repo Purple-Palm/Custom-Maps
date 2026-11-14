@@ -24,7 +24,8 @@ import kotlin.math.min
  *   to every car before the first one it can be followed from leave there, as the card's careful
  *   reading takes them ([RunUpRule.compose]); at the far edge unmarked lanes leave only where a road
  *   that may be entered leaves on their side, else they go on and the point only says where to drive
- *   ([LaneEvidence.goingOn], the evidence's rule 6); in the middle they go on. Past a point where the
+ *   ([LaneEvidence.goingOn], the evidence's rule 6), and on a street a lane kept for buses or bicycles
+ *   goes on all the same; in the middle they go on. Past a point where the
  *   route turns, the lanes it can be followed from go on.
  * - **Alignments.** Where the next point lists more or fewer lanes than go on, the side of the change
  *   is read, first that holds: the lanes kept for car pools at the same places on both ([Alignment.Reason.ANCHOR]);
@@ -293,17 +294,28 @@ class LaneTopology private constructor(
          * at [edge], the exit's side, the lanes open to every car before the first the route can be followed
          * from ([usableAll] for each lane: usable at every point of the junction) leave; at the far edge the
          * unmarked lanes leave where a road that may be entered leaves on their side ([branchLeft],
-         * [branchRight]); the rest go on. A point that lets no lane be used says nothing: all go on.
+         * [branchRight]), but for lanes kept for buses or bicycles on a [street], which run along it; the rest
+         * go on. A point that lets no lane be used says nothing: all go on.
          */
-        fun goingOn(lanes: List<RouteLane>, usableAll: BooleanArray, edge: LaneEdge?, branchLeft: Boolean, branchRight: Boolean): List<Int> {
+        fun goingOn(
+            lanes: List<RouteLane>,
+            usableAll: BooleanArray,
+            edge: LaneEdge?,
+            branchLeft: Boolean,
+            branchRight: Boolean,
+            street: Boolean = false,
+        ): List<Int> {
             val n = lanes.size
             if ((0 until n).none { usableAll[it] }) return (0 until n).toList()
             val keep = BooleanArray(n) { true }
             // The far edge, or both where the exit's side is not known: the evidence's rule 6.
             val first = lanes.indexOfFirst { it.marked }
             val last = lanes.indexOfLast { it.marked }
-            if (edge != LaneEdge.LEFT && first > 0 && branchLeft) for (i in 0 until first) keep[i] = false
-            if (edge != LaneEdge.RIGHT && last in 0 until n - 1 && branchRight) for (i in last + 1 until n) keep[i] = false
+            fun leaves(i: Int) {
+                if (!(street && lanes[i].designated)) keep[i] = false
+            }
+            if (edge != LaneEdge.LEFT && first > 0 && branchLeft) for (i in 0 until first) leaves(i)
+            if (edge != LaneEdge.RIGHT && last in 0 until n - 1 && branchRight) for (i in last + 1 until n) leaves(i)
             // The exit's edge: the card's careful reading.
             if (edge != null) {
                 for (i in if (edge == LaneEdge.RIGHT) (n - 1 downTo 0) else (0 until n)) {
@@ -452,7 +464,7 @@ class LaneTopology private constructor(
                 val usableAll = BooleanArray(node.lanes.size) { i -> members.all { m -> m.lanes.getOrNull(i)?.usable == true } }
                 val branchLeft = members.any { LaneEvidence.branchesOff(it, LaneEdge.LEFT) }
                 val branchRight = members.any { LaneEvidence.branchesOff(it, LaneEdge.RIGHT) }
-                goingOn(node.lanes, usableAll, edges[a], branchLeft, branchRight)
+                goingOn(node.lanes, usableAll, edges[a], branchLeft, branchRight, street = node.road == RoadKind.STREET)
             }
             val cont = ArrayList<Building>(goOn.size)
             for ((i, lane) in current.withIndex()) if (i in goOn) cont.add(lane) else lane.closes = min(lane.closes, leaveAt)
