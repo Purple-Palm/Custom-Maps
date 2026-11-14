@@ -492,6 +492,39 @@ class DriveViewPlanTest {
     }
 
     @Test
+    fun `the Overview turned on while the silent plan is out waits where the overview could not stand 10 s`() {
+        // In Normal the silent plan is out on the open road; the next approach opens 1, 5, 9 or 9.9 s of overview
+        // away: the button fills, the car stays followed through that turn, and the overview comes after it.
+        for (seconds in listOf(1.0, 5.0, 9.0, 9.9)) {
+            val (d, next) = shortOfApproach(seconds, afterTurn = false, view = DriveView.NORMAL, fromPreview = false)
+            assertEquals(CameraMode.OVERVIEW, d.planner.plan, "$seconds s: the silent plan is out")
+            assertEquals(seconds, DriveViewRule.overviewSeconds(d.planner.point!!, 13.0, camera, tuning), 1e-6)
+            assertNull(d.planner.setDriveView(DriveView.OVERVIEW, d.t), "$seconds s")
+            assertEquals(Reason.BUTTON_TOO_CLOSE, d.planner.reason)
+            assertEquals(CameraMode.FOLLOWING, d.planner.wanted)
+            val before = d.asks.size
+            d.driveAt(13.0, next + 100.0)
+            val after = d.asks.drop(before)
+            assertTrue(after.none { it.mode == CameraMode.OVERVIEW && it.x < next }, "$seconds s: $after")
+            assertEquals(CameraMode.OVERVIEW, after.single().mode, "$seconds s: $after")
+            assertEquals(Reason.BUTTON, after.single().reason)
+        }
+        // 10.1 or 11 s: the overview at once, with the silent plan's own reason.
+        for (seconds in listOf(10.1, 11.0)) {
+            val (d, _) = shortOfApproach(seconds, afterTurn = false, view = DriveView.NORMAL, fromPreview = false)
+            assertEquals(CameraMode.OVERVIEW, d.planner.setDriveView(DriveView.OVERVIEW, d.t), "$seconds s")
+            assertEquals(Reason.OPEN_ROAD, d.planner.reason)
+        }
+        // Back to Normal before the turn: the car, and the waiting tap is forgotten.
+        val (back, next) = shortOfApproach(5.0, afterTurn = false, view = DriveView.NORMAL, fromPreview = false)
+        assertNull(back.planner.setDriveView(DriveView.OVERVIEW, back.t))
+        assertNull(back.planner.setDriveView(DriveView.NORMAL, back.t))
+        back.driveAt(13.0, next + 100.0)
+        assertEquals(Reason.NORMAL_VIEW, back.planner.reason)
+        assertEquals(Reason.OPEN_ROAD, back.planner.planReason)
+    }
+
+    @Test
     fun `a route the driver picked is judged as a tap on the Overview, with no wait for reroutes`() {
         val d = Drive(listOf(turn(3_000.0), turn(30_000.0)))
         d.driveAt(13.0, 1_000.0)

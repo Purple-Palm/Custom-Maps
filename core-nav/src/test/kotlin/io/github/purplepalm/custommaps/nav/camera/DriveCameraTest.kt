@@ -210,6 +210,16 @@ class DriveCameraTest {
         assertEquals(ToggleResult(DriveView.NORMAL, CameraWish.FOLLOW, endedHold = true), o.camera.toggle(o.t))
         // Without a hold the toggle switches only: back to the Overview, far from a turn, the overview.
         assertEquals(ToggleResult(DriveView.OVERVIEW, CameraWish.OVERVIEW, endedHold = false), o.camera.toggle(o.t))
+        // Normal on the open road, the next approach opening 5 s of overview away: the car through that turn, the
+        // overview after it, as near a turn.
+        val v = 13.0
+        val approach = DriveViewRule.approachMeters(ViewPoint("k", ApproachKind.TURN, FocusKind.TURN, false, 9_000.0), v, CameraTuning.PHONE, DriveViewTuning.PHONE)
+        val soon = CameraDrive(listOf(3_000.0, 40_000.0), normal, fromPreview = false)
+        soon.drive(v, untilX = 3_000.0 - approach - (5.0 + CameraTuning.PHONE.longTransitionSeconds) * v)
+        assertEquals(ToggleResult(DriveView.OVERVIEW, null, endedHold = false), soon.camera.toggle(soon.t))
+        soon.drive(v, untilX = 3_100.0)
+        assertEquals(listOf(CameraWish.FOLLOW, CameraWish.OVERVIEW), soon.wishes.map { it.second })
+        assertTrue(soon.wishes.last().first > 3_000.0 / v, "the overview after the turn")
     }
 
     @Test

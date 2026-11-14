@@ -390,7 +390,11 @@ class DriveViewPlanner(
         return !inApproach(next) && DriveViewRule.overviewSeconds(next, speed, camera, tuning) >= tuning.buttonOverviewSeconds
     }
 
-    /** The driver chose a drive view. Turned to the Overview, it shows at once unless a point is near ([Reason.BUTTON_TOO_CLOSE]). */
+    /**
+     * The driver chose a drive view. Turned to the Overview, it shows at once unless a point is near or the
+     * overview could not stand [DriveViewTuning.buttonOverviewSeconds] before the next approach
+     * ([Reason.BUTTON_TOO_CLOSE]: at the first moment it can).
+     */
     fun setDriveView(view: DriveView, nowSeconds: Double): CameraMode? {
         if (view == this.view) return null
         val before = wanted
@@ -666,16 +670,19 @@ class DriveViewPlanner(
     }
 
     /**
-     * A tap into the Overview, or a route the driver picked: the overview at once unless a point is near,
-     * the car is off the route or the overview could not stand [DriveViewTuning.buttonOverviewSeconds];
-     * then it waits for the first moment it can.
+     * A tap into the Overview: the overview at once unless a point is near, the car is off the route or
+     * the overview could not stand [DriveViewTuning.buttonOverviewSeconds]; then it waits for the first
+     * moment it can. Where the plan was out already (the silent plan in Normal) it stays out, with its
+     * own reason, only where the overview can stand that long; otherwise the plan comes down for the
+     * next point, as at a hold's end there, and the tap waits too.
      */
     private fun tap(why: Reason) {
-        if (!guiding || phase == Phase.OUT) return
+        if (!guiding) return
         if (phase != Phase.OFF_ROUTE && overviewHasTime()) {
-            goOut(why)
+            if (phase != Phase.OUT) goOut(why)
             return
         }
+        if (phase == Phase.OUT) stay(points.firstOrNull() ?: return, why)
         tapped = true
         tapReason = why
         if (phase != Phase.OFF_ROUTE) planReason = if (why == Reason.BUTTON) Reason.BUTTON_TOO_CLOSE else why
