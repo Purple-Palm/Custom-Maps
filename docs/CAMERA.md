@@ -2046,23 +2046,26 @@ views rest is in the swap below.
   run-up's start to the gore and on onto the ramp where the ramp has lanes. It is drawn only where
   it is the lane the plan names: where the line lies within half a lane of that lane's middle, or
   moves into it, and the lit lane lies on the lanes drawn there. Where the line waits on the road's
-  line beside a lane that is still opening, or keeps to the road's line around a corner too sharp for
-  the lanes, the route line shows there instead; through a gentler bend the line keeps its lane and
-  the lit lane goes on with it. A line of the road's colour on the route line's own path, trimmed
-  with the route line's own trim, covers it behind the car, so the amber ends at the car. The tint
-  pieces the car has passed are hidden one station at a time by feature state; a lit piece takes its
-  stretch's traffic colour the same way.
+  line beside a lane that is still opening, or keeps to the road's line around a corner too sharp
+  for the lanes, the route line shows there instead; through a gentler bend the line keeps its lane
+  and the lit lane goes on with it. A line of the road's colour on the route line's own path,
+  trimmed with the route line's own trim, covers it behind the car, so the amber ends at the car; it
+  lies only over the drawing's own asphalt, never inside a street junction. There, where the map's
+  own road shows, the lit lane and its edges come in pieces of 2 m, each hidden by feature state as
+  soon as the car is past it. The tint pieces the car has passed are hidden one station at a time by
+  feature state; a lit piece takes its stretch's traffic colour the same way.
 - **The swap** (`LaneSwap`): over the lit stretches the route line is drawn whole or not at all.
   While the camera's close view for the lanes or its junction view holds (`CloseView`'s latched
   rules: Smooth follow once the view has reached its goal and no longer moves; never Mapbox tuned,
-  whose close views are the navigation SDK's frames) and a drawn lane is at least 10.4 dp wide, the
-  pair over the lit stretches gets opacity 0 and the amber lane is the route there; it gets 1 again
-  when the view lets go or the lane is under 9.6 dp. Between the two widths nothing changes, and the
-  opacity is written only when that state flips, as a step with no transition. At the swap the amber
-  is 9.8 dp against the held line's 10.38, and wider at every closer zoom. With Large in Smooth
-  follow the swap comes at peak speeds up to about 33 m/s; above, in Mapbox tuned, whose frames may
-  hold lanes wider than the swap's at a low peak speed and at a maneuver, and with Default (about
-  4 dp) the line stays, opaque, in the named lane.
+  whose close views are the navigation SDK's frames) and the drawn lane at the car is at least 10.4
+  dp wide (a street's 3.35 m lane 10.45 dp), the pair over the lit stretches gets opacity 0 and the
+  amber lane is the route there; it gets 1 again when the view lets go or the lane is under 9.6 dp.
+  Between the two widths nothing changes, and the opacity is written only when that state flips, as
+  a step with no transition. At the swap the amber is 9.8 dp on a freeway lane and 9.76 dp on a
+  street lane against the held line's 10.38 (at least 0.94 of it), and wider at every closer zoom.
+  With Large in Smooth follow the swap comes at peak speeds up to about 33 m/s; above, in Mapbox
+  tuned, whose frames may hold lanes wider than the swap's at a low peak speed and at a maneuver,
+  and with Default (about 4 dp) the line stays, opaque, in the named lane.
 - **The maneuver arrow** (`GoreArrow`): where the next maneuver leaves at a gore of the drawing, the
   SDK's arrow is given the path's points from 12 m before the gore to 30 m past it, as the U-turn
   arrow is, so it runs along the lit lane onto the ramp rather than across the lanes. It is set
@@ -2151,27 +2154,33 @@ views rest is in the swap below.
   counts do, with the next window's send, from 40 m past the window on screen on and past a card
   window there, so a route's first window, built before the horizon's first update, draws no street.
   One road sits as the first of its streets a source tells of; a later street told otherwise is not
-  drawn. The streets over a card window's approach, from 60 m before it, are drawn all or none. On a
-  two-way street the route's lanes lie from the road's line to the right and the oncoming half is
-  plain asphalt, with no line of ours on the road's line or across that half; on a one-way street
-  the lanes lie about the road's line. A turn pocket is drawn from where it may begin, a possible
-  lane until it is known. A stop line, white and 0.6 m wide, stands 10 m before a junction only where
-  the route's flags give a traffic signal or a stop sign there (its own layer,
-  `custommaps-lanes-stop`, from zoom 16.5). Inside a junction the map's own road shows, with only the
-  lit lane crossing on the route's path; inside a roundabout nothing of ours is drawn, and after a
-  U-turn no receiving lane is lit. A lane only for bicycles is a 1.8 m strip beside a solid line,
-  never lit, tinted or counted.
+  drawn. A road the route follows from a street onto a freeway or a ramp, or from one onto a street,
+  without a turn sits one-way all along: its freeway about its line with both edge lines, and a
+  street of it told two-way left to the map. The streets over a card window's approach, from 60 m
+  before it, are drawn all or none. On a two-way street the route's lanes lie from the road's line
+  to the right and the oncoming half is plain asphalt, with no line of ours on the road's line or
+  across that half; on a one-way street the lanes lie about the road's line. A turn pocket is drawn
+  from where it may begin, a possible lane until it is known. A stop line, white and 0.6 m wide,
+  stands 10 m before a junction only where the route's flags give a traffic signal or a stop sign
+  there (its own layer, `custommaps-lanes-stop`, from zoom 16.5). Inside a junction the map's own
+  road shows, with only the lit lane crossing on the route's path, and the eraser stays off the
+  map's road there. Nothing of ours lies on a roundabout from the near side of its way in to the far
+  side of its way out, whatever lanes the route lists on the way round and whatever road leads in;
+  the road out begins square at that far side. At a U-turn the app's line goes from its lane onto
+  the route's own line at the junction's node and follows it back, turning where the route and
+  Mapbox's U-turn arrow do; no receiving lane is lit. A lane only for bicycles is a 1.8 m strip
+  beside a solid line, never lit, tinted or counted.
   - **The junction view with the drawing.** A street maneuver's card window is the junction view's,
     from 180 m before the maneuver: the plan names the lane to take there, the map lights it and the
     card's own row lights the same lanes (`CardStreetRow`). Where the route turns, the lit lane goes
     on across the junction along the path's curve into the receiving road's lane, and the maneuver
     arrow is the app's along it, from 4 m before the stop line to 30 m past the junction; at a U-turn
     and a roundabout the arrow stays the SDK's. The swap is the camera's, as on freeways: with Large
-    in Smooth follow, once the junction view has reached its frame and a drawn lane is 10.4 dp wide,
-    in the design's figures about 100 to 130 m before the turn. The swap's widths read a freeway
-    lane, so on a street lane of 3.35 m the amber shows about 8.9 dp at the swap, against the held
-    line's 10.38. On a two-way street the car's bar spans the route's own lanes, its tick on the
-    outer side alone.
+    in Smooth follow, once the junction view has reached its frame and the drawn lane at the car is
+    10.45 dp wide (a street's 3.35 m lane), in the design's figures about 100 to 130 m before the
+    turn, a few metres later than a freeway lane's 10.4 dp would; the amber then shows 9.76 dp
+    against the held line's 10.38. On a two-way street the car's bar spans the route's own lanes,
+    its tick on the outer side alone.
   - **Logged:** each window's `lane_drawing` line says how many metres of street it drew (`streetM`)
     and how many stretches with lane data it left to the map for want of a source (`streetNoOneWay`,
     with their metres in `streetNoOneWayM`) or because a source told otherwise of them than of their
@@ -2185,7 +2194,7 @@ views rest is in the swap below.
   both, and how well its edge ends meet the route's lane points ([DRIVES.md](DRIVES.md), checks 70
   and 71); whether the horizon's one-way flag holds for the streets driven, whether a stop sign's
   flag stands on the route's own approach, and how a street's drawing reads in the junction view
-  ([DRIVES.md](DRIVES.md), checks 87 to 95).
+  ([DRIVES.md](DRIVES.md), checks 87 to 96).
 
 #### Measuring the drawn lanes
 

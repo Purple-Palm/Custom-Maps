@@ -1410,7 +1410,7 @@ through streets of ten minutes or more, with one reroute:
     asked for them may still ask: the app never takes a field away). Turned on during a drive, the
     switch reaches the next reroute.
 
-The answers decide whether the app's own lanes on streets (checks 87 to 95) may take one-way and
+The answers decide whether the app's own lanes on streets (checks 87 to 96) may take one-way and
 two-way from these fields; until then they take it from the electronic horizon's one-way flag alone,
 while its switch is on.
 
@@ -1423,14 +1423,17 @@ app's own lanes). Screenshots from a passenger or a simulated drive, never from 
 87. **A two-way street.** Past the route's first 3 km, at a street with lane data: the route's lanes
     to the right of the road's line, plain asphalt over the oncoming half, no centre line, no line of
     the oncoming lanes, no double line, no crosswalk. Closing on a turn with Large in Smooth follow:
-    the junction view, the lane to take lit, the swap at about 100 to 130 m before the turn, the car a
-    bar across the route's lanes only with its tick on the outer side, and the card's row lighting
-    the same lane as the map. By day and at night. That window's `lane_drawing` line: `streetM` above
-    0; the turn's `lane_agree` line: `source` `maneuver`, `agree` true.
-88. **A one-way street.** The lanes about the road's line with an edge line on each side, and the bar
-    with a tick on each side. Note whether the street is one-way where the drawing has it so. Where
-    the horizon tells one street of a road otherwise than the road's first, that street is left to
-    the map (`streetMixed` above 0): note where.
+    the junction view, the lane to take lit, the swap at about 100 to 130 m before the turn (on the
+    street's own lane width: the amber about as wide as the line it takes over, not visibly
+    thinner), the car a bar across the route's lanes only with its tick on the outer side, and the
+    card's row lighting the same lane as the map. By day and at night. That window's `lane_drawing`
+    line: `streetM` above 0; the turn's `lane_agree` line: `source` `maneuver`, `agree` true.
+88. **A one-way street.** The lanes about the road's line with an edge line on each side, and the
+    bar with a tick on each side. Note whether the street is one-way where the drawing has it so.
+    Where the horizon tells one street of a road otherwise than the road's first, that street is
+    left to the map (`streetMixed` above 0): note where. Where a street goes on onto a freeway
+    without a turn, the freeway's lanes about its line with both edge lines, and a two-way street
+    before it left to the map.
 89. **A turn pocket.** Before a turn whose lane list adds a pocket: the pocket drawn from where it
     may begin, with no line beside it until it is known, at full width before the stop line, and the
     lit lane moving into it along its taper, never back.
@@ -1440,17 +1443,20 @@ app's own lanes). Screenshots from a passenger or a simulated drive, never from 
     approach it is for is not checked.
 91. **A lane for bicycles.** A narrow strip at the edge beside a solid line, never lit or tinted; in
     the card's row dim, never lit.
-92. **A U-turn.** The lit lane up to the junction, Mapbox's maneuver arrow at it, and no lane lit on
-    the road back.
-93. **A roundabout.** Nothing of the app's inside it, the approach asphalt without lane lines, and the
-    card's row the navigation SDK's.
-94. **A street without a one-way source.** In the route's first 3 km, or with **Lane counts between
+92. **A U-turn.** The lit lane up to the junction, the app's line on into the junction and back where
+    Mapbox's maneuver arrow turns, not short of it, and no lane lit on the road back.
+93. **A roundabout.** Nothing of the app's inside it, also where the route lists lanes on the way
+    round or a ramp leads in, the approach asphalt without lane lines, the road out drawn from past
+    the way out, and the card's row the navigation SDK's.
+94. **A junction behind the car.** By day, past a junction the lit lane crossed or turned through: no
+    dark band left on the map's road there, and no amber left behind the car for more than a moment.
+95. **A street without a one-way source.** In the route's first 3 km, or with **Lane counts between
     lane points** off before the route is planned: nothing of the app's on streets, Mapbox's road and
     the usual line, the card's row as before. Each `lane_drawing` line: `streetM` 0, and where the
     window holds streets with lane data, `streetNoOneWay` above 0 with their metres in
     `streetNoOneWayM`. On a drive through streets with the switch on, how those counts fall after the
     first window says how much of the streets the horizon lets the app draw.
-95. **The horizon switched off mid-drive,** parked or by a passenger. The streets drawn stay to the
+96. **The horizon switched off mid-drive,** parked or by a passenger. The streets drawn stay to the
     end of the window on screen; the next window draws no street past it (`streetM` falls,
     `streetNoOneWay` rises), and nothing moves on the screen as it loads.
 
