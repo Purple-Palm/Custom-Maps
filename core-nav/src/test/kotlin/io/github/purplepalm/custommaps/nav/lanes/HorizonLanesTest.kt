@@ -7,6 +7,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.at
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.bare
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.hov
 import io.github.purplepalm.custommaps.nav.lanes.LaneScenes.s
+import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.SceneLines
 import io.github.purplepalm.custommaps.nav.model.LaneEdge
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
@@ -161,6 +162,56 @@ class HorizonLanesTest {
             ),
             drawn.between(p, q),
         )
+    }
+
+    @Test
+    fun `under the general reading a gain that adds a car-pool lane is not placed, every lane of it opening as the plan has it`() {
+        // Three lanes at the first point; at the second a car-pool lane and four open lanes: the plan adds two lanes on the
+        // far side, one of them kept for car pools, opening late before the second point.
+        val route = gapScene(List(3) { s() }, listOf(hov(), s(), s(), s(), s()), exit = listOf(hov(), s(false), s(false), s(false), LaneScenes.option(), LaneScenes.sr()), id = "carpool-gain")
+        val plan = SceneLines.planOf(route)
+        val gain = plan.topology.alignments.single { it.after == 1 }
+        assertEquals(2, gain.change)
+        assertEquals(LaneTopology.Alignment.Reason.CAREFUL, gain.by)
+        assertEquals(LaneEdge.LEFT, gain.side)
+        val added = HorizonLanes.addedLanes(plan.topology, 0)
+        assertEquals(listOf(false, true), added.map { it.designated }.sorted())
+        val rise = p + 1_000.0
+        // The horizon counts the open lanes only: three to the first point and for 1,000 m past it, four from there on.
+        val general = HorizonLanes.of(plan, horizon(route.routeId, edge(1_100.0, 3), edge(1_000.0, 3), edge(1_400.0, 4), edge(1_050.0, 5), edge(400.0, 2, ramp = true)))
+        val pair = general.between.first()
+        assertEquals(HorizonConvention.GENERAL, pair.convention)
+        assertEquals(listOf(HorizonLanes.Count(p, rise, 3), HorizonLanes.Count(rise, q, 4)), pair.counts)
+        assertNull(pair.placed)
+        assertTrue(general.placedGains.isEmpty())
+        assertTrue(pair.pieces.none { it.kind == HorizonLanes.Piece.Kind.PLACED })
+        // Nothing of the drawing names the car-pool lane from the count: every added lane opens where the plan opens it, and
+        // the road between the rise and that opening has the plan's three lanes.
+        val base = CrossSection.of(plan, plan.evidence())
+        val drawn = CrossSection.of(plan, plan.evidence(general))
+        for (lane in added) assertEquals(base.drawnFrom(lane.id), drawn.drawnFrom(lane.id), "lane ${lane.id}")
+        for (station in listOf(rise + 130.0, q - 130.0)) {
+            assertEquals(base.lanes(station).map { it.lane }, drawn.lanes(station).map { it.lane }, "at $station")
+            assertEquals(3, drawn.lanes(station).size)
+        }
+        // Under every lane's reading the count rises by both lanes at once: the gain is placed, both lanes with it.
+        val all = HorizonLanes.of(plan, horizon(route.routeId, edge(1_100.0, 3), edge(1_000.0, 3), edge(1_400.0, 5), edge(1_050.0, 6), edge(400.0, 2, ramp = true)))
+        assertEquals(HorizonConvention.ALL, all.between.first().convention)
+        assertEquals(rise, all.between.first().placed)
+        // Under the general reading a gain of open lanes alone is placed: an exit on the left, a car-pool lane at the left of
+        // both points, one open lane added on the far side, the right.
+        val open = LaneScenes.approach(
+            listOf(LaneScenes.At(3_450.0, listOf(hov(), s(), s(), s())), bare(2_250.0, LaneScenes.EXIT_RIGHT), LaneScenes.At(1_050.0, listOf(hov(), s(), s(), s(), s()))),
+            exit = listOf(LaneScenes.sl(), LaneScenes.sl(), s(false), s(false), s(false), s(false)),
+            maneuver = LaneScenes.OFF_LEFT,
+            id = "open-gain",
+        )
+        val openPlan = SceneLines.planOf(open)
+        assertEquals(LaneEdge.RIGHT, openPlan.topology.alignments.single { it.after == 1 }.side)
+        assertTrue(HorizonLanes.addedLanes(openPlan.topology, 0).none { it.designated })
+        val openPair = HorizonLanes.of(openPlan, horizon(open.routeId, edge(1_100.0, 3), edge(1_000.0, 3), edge(1_400.0, 4), edge(1_050.0, 5), edge(400.0, 2, ramp = true))).between.first()
+        assertEquals(HorizonConvention.GENERAL, openPair.convention)
+        assertEquals(rise, openPair.placed)
     }
 
     @Test

@@ -23,6 +23,8 @@ import kotlin.math.min
  * - a gain the plan puts on the far side from the exit's edge, which it opens late because nothing says where it begins,
  *   opens where the horizon's count rises by as many lanes instead, inside its zone ending at that edge end, in place of
  *   the zone placed late ([placed], [Piece.Kind.PLACED]): a lane on the far side counts for no lane from the exit's edge.
+ *   Under the reading of the lanes open to every car, not a gain that adds a lane kept for car pools, which that count
+ *   does not count.
  *
  * Nothing here names, lights or tints a lane, and the plan's counts never change: a lane the plan adds on the exit's
  * side, one that may already be there (2a), the lanes of a lane point's own reach, the approaches where no lane is named
@@ -304,10 +306,12 @@ class HorizonLanes private constructor(
 
         /**
          * Where the horizon places the gain between the points [k] and k + 1 that the plan puts on the far side from the
-         * exit's edge: the plan's own alignment there gains lanes on that side, the horizon's count rises by as many lanes
-         * (as the convention counts them) at one edge end between the points and nowhere else, from the lanes the plan draws
-         * past the first to those it draws before the second, and that edge end lies no later than where the plan opens them,
-         * with room for their taper after the first point. Null otherwise: the plan's late opening stays.
+         * exit's edge: the plan's own alignment there gains lanes on that side, the horizon's count rises by as many lanes at
+         * one edge end between the points and nowhere else, from the lanes the plan draws past the first to those it draws
+         * before the second, and that edge end lies no later than where the plan opens them, with room for their taper after
+         * the first point. Under the reading of the lanes open to every car ([general]) the count says nothing of a lane
+         * kept for car pools, so a gain with one among its lanes is never placed: every lane of it would open where the count
+         * rose. Null otherwise: the plan's late opening stays.
          */
         private fun placedGain(plan: LanePlan, k: Int, counts: List<Count>, changes: List<Double>, general: Boolean, tolerance: Double): Double? {
             val topology = plan.topology
@@ -318,11 +322,11 @@ class HorizonLanes private constructor(
             if (changes.size != 1) return null
             val added = addedLanes(topology, k)
             if (added.size != alignment.change) return null
-            val gained = added.count { !general || !it.designated }
+            if (general && added.any { it.designated }) return null
             val x = changes.single()
             val before = lanesAt(counts, x - SAME)
             val after = lanesAt(counts, x + SAME)
-            if (gained == 0 || after - before != gained) return null
+            if (after - before != added.size) return null
             val a = topology.points[k]
             val lanes = topology.lanesOf(a.run)
             val plain = drawnProfile(plan, lanes, a.station, b.station, general, emptyMap())
