@@ -1,10 +1,19 @@
 package io.github.purplepalm.custommaps.nav.sound
 
+import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.Maneuver
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import io.github.purplepalm.custommaps.nav.model.RouteProgressSnapshot
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
 import kotlin.math.max
+
+/**
+ * A maneuver of the leg after the next one, for the tones' look past a maneuver that makes no sound ([ToneMoment.of]):
+ * the maneuver with its distance and time after the next one, summed along the way as [RouteProgressSnapshot.upcoming]
+ * has them, and the key of the step that ends with it, as the snapshot keys steps: the key the snapshot has once the car
+ * is on that step.
+ */
+data class ManeuverAhead(val stepKey: String, val following: FollowingManeuver)
 
 /**
  * One navigator update, as the tone rule needs it: where the drive is, how fast the car goes, and the
@@ -13,8 +22,9 @@ import kotlin.math.max
 data class ToneMoment(
     /** The route's id: a new one is a new route. */
     val routeKey: String,
-    /** Route, leg and step, as the progress snapshot keys them. */
+    /** Route, leg and step, as the progress snapshot keys them: the step that ends with [maneuver]. */
     val stepKey: String,
+    /** The maneuver the tones are for: the next one, or the first after it that sounds where the next one is passed over. */
     val maneuver: Maneuver,
     val metersToManeuver: Double,
     /** At the route's speeds; 0 when unknown. */
@@ -36,6 +46,11 @@ data class ToneMoment(
     val runUpFromExitWindow: Boolean = false,
     /** The card waits for the new route's first instruction: the route's step gave its maneuver. */
     val pending: Boolean = false,
+    /**
+     * The kind of the next maneuver where the tones passed over it ([ToneRule.passes]) and this moment is about the first
+     * one after it that sounds; null where it is about the next maneuver itself. For the log.
+     */
+    val lookedPast: ManeuverType? = null,
 ) {
     companion object {
         /** The lane choices' key of a step's own maneuver point: the step's key with this after it. */
@@ -46,6 +61,14 @@ data class ToneMoment(
          * the snapshot carries ([RouteProgressSnapshot.speedMps], the navigator's latest matched one).
          * [laneChoiceKey] is the point whose lanes the card shows ahead of the maneuver and [laneChoiceMeters]
          * how far ahead it is; [runUpFromExitWindow] whether the run-up on now began at the exit's own window.
+         *
+         * Where the next maneuver is one the tones pass over ([ToneRule.passes]: straight on under a new name, a
+         * merge, a roundabout's way out), the moment is about the first maneuver of [ahead], the leg's maneuvers
+         * after the next one, that sounds: at its own distance and time, the next one's and its own after it, and
+         * with the key of its own step, so its tones come at their moments across the silent one, and nothing
+         * changes for the rule when the car reaches that step. The look stops at a maneuver of an unknown kind,
+         * which may be one to act at. The lane row stays the card's: a row's key holds its own step's key, so the
+         * row of the passed maneuver itself is a row ahead of the one that sounds.
          */
         fun of(
             progress: RouteProgressSnapshot,
@@ -53,30 +76,58 @@ data class ToneMoment(
             laneChoiceKey: String?,
             laneChoiceMeters: Double? = null,
             runUpFromExitWindow: Boolean = false,
+            ahead: List<ManeuverAhead> = emptyList(),
         ): ToneMoment {
             val meters = progress.distanceToNextManeuver.meters
+            val seconds = progress.durationToNextManeuver.inWholeMilliseconds / MILLIS_PER_SECOND
+            val past = soundingAfter(progress.nextManeuver, ahead)
+            val stepKey = past?.stepKey ?: progress.stepKey
+            val toManeuver = if (past == null) meters else meters + past.following.distanceAfterNext.meters
+            val after = past?.following?.durationAfterNext
+            val toManeuverSeconds = when {
+                after == null -> seconds
+                // A time not known on the way makes the whole time unknown.
+                seconds > 0.0 && after.isPositive() -> seconds + after.inWholeMilliseconds / MILLIS_PER_SECOND
+                else -> 0.0
+            }
             // A pending card shows no lane row: a key from before is no row of the new route's.
             val key = laneChoiceKey.takeIf { !progress.pending }
-            val ownRow = key != null && key == progress.stepKey + MANEUVER_POINT_KEY
+            // The row of the maneuver the tones are for; the row of one passed over is a row ahead of it.
+            val ownRow = key != null && key == stepKey + MANEUVER_POINT_KEY
             return ToneMoment(
                 routeKey = routeKey,
-                stepKey = progress.stepKey,
-                maneuver = progress.nextManeuver,
-                metersToManeuver = meters,
-                secondsToManeuver = progress.durationToNextManeuver.inWholeMilliseconds / MILLIS_PER_SECOND,
+                stepKey = stepKey,
+                maneuver = past?.following?.maneuver ?: progress.nextManeuver,
+                metersToManeuver = toManeuver,
+                secondsToManeuver = toManeuverSeconds,
                 speedMps = progress.speedMps,
                 offRoute = progress.offRoute,
                 laneChoiceKey = key,
                 laneChoiceMeters = when {
                     key == null -> Double.NaN
-                    ownRow -> meters
+                    ownRow -> toManeuver
                     laneChoiceMeters != null -> laneChoiceMeters
                     else -> progress.laneChoiceAhead?.distance?.meters ?: meters
                 },
                 laneRowIsManeuver = ownRow,
                 runUpFromExitWindow = ownRow && runUpFromExitWindow,
                 pending = progress.pending,
+                lookedPast = if (past == null) null else progress.nextManeuver.type,
             )
+        }
+
+        /**
+         * The first maneuver of [ahead] that sounds, where [next] and every one before it are passed over; null where [next]
+         * is not passed over, and where the look stops before one that sounds.
+         */
+        private fun soundingAfter(next: Maneuver, ahead: List<ManeuverAhead>): ManeuverAhead? {
+            if (!ToneRule.passes(next)) return null
+            for (i in ahead.indices) {
+                val maneuver = ahead[i].following.maneuver
+                if (ToneRule.sounds(maneuver)) return ahead[i]
+                if (!ToneRule.passes(maneuver)) return null
+            }
+            return null
         }
 
         private const val MILLIS_PER_SECOND = 1_000.0
@@ -155,10 +206,13 @@ data class ToneCue(
  * - A lane row the card starts to show ahead of the maneuver gets one tone, by the same room and quiet:
  *   a straight-on lane choice, a run-up as it begins and each change of its row. A run-up that began at the
  *   exit's own window with the exit's own row gets none: the exit's one tone is that moment.
+ * - A maneuver that asks nothing of the driver ([passes]) is passed over: the moment is about the first one after
+ *   it that sounds ([ToneMoment.of]), whose tones keep their distances across it.
  * - Off the route nothing sounds, and nothing changes.
  * - A new route (a reroute, a route switch, the drive's start or a new start after a seek) sounds nothing at
  *   its first update for what is already inside a tone's distance: neither the one tone nor the pair, nor a
- *   lane row it shows as it comes. Such a tone would sound at once, with no warning in it.
+ *   lane row it shows as it comes. Such a tone would sound at once, with no warning in it. Until the route's
+ *   first card with an instruction a step change is part of that start: the pending card warned of nothing.
  */
 object ToneRule {
 
@@ -206,7 +260,8 @@ object ToneRule {
         val skipped = ArrayList<ToneSkipped>(0)
         var s = state
         if (moment.stepKey != s.stepKey) {
-            val newRoute = moment.routeKey != s.routeKey
+            // A step reached before the route's first card with an instruction is part of the route's start.
+            val newRoute = moment.routeKey != s.routeKey || s.routeStarting
             // A new route's maneuver already inside a tone's distance gets that tone no more: it would sound at once.
             val insideAhead = newRoute && moment.metersToManeuver <= ahead
             val insideFinal = newRoute && moment.metersToManeuver <= final
@@ -310,6 +365,13 @@ object ToneRule {
         ManeuverType.MERGE -> false
         ManeuverType.DEPART, ManeuverType.NOTIFICATION, ManeuverType.UNKNOWN -> false
     }
+
+    /**
+     * Whether the tones look past [maneuver] to the maneuvers after it ([ToneMoment.of]): one that makes no sound and asks
+     * nothing of the driver, as straight on under a new name, a merge or the way out of a roundabout. Not one of an
+     * unknown kind, which may be a turn the route could not name.
+     */
+    fun passes(maneuver: Maneuver): Boolean = !sounds(maneuver) && maneuver.type != ManeuverType.UNKNOWN
 
     /** The car's speed; when unknown, the metres left over the seconds left of the step at the route's speeds; else standing. */
     fun speedOf(moment: ToneMoment): Double {

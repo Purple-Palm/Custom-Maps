@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.sound
 
 import io.github.purplepalm.custommaps.nav.model.Distance
+import io.github.purplepalm.custommaps.nav.model.FollowingManeuver
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.LanesAhead
@@ -91,6 +92,45 @@ class ToneRuleTest {
                     ),
                 )
                 position += speed(second - start)
+            }
+        }
+
+        /**
+         * Feeds the rule once a second as the engine does: a snapshot of the step the car is on, its moment made by
+         * [ToneMoment.of] with the leg's maneuvers after the next one, each with the key of its own step ([withAhead]).
+         * [points] are the maneuvers that end the steps, metres along the route; [row] the lane row the card shows on a
+         * step at a position, if any, with whether its run-up began at the exit's own window.
+         */
+        fun bySteps(
+            points: List<Point>,
+            speed: Double,
+            withAhead: Boolean = true,
+            row: (step: Int, position: Double) -> Pair<String, Boolean>? = { _, _ -> null },
+        ) {
+            var position = 0.0
+            while (true) {
+                val index = points.indexOfFirst { it.at > position }
+                if (index < 0) return
+                val next = points[index]
+                val ahead = points.withIndex().drop(index + 1).map { (i, point) ->
+                    val meters = point.at - next.at
+                    ManeuverAhead("$route/0/$i", FollowingManeuver(point.maneuver, Distance.meters(meters), (meters / speed).seconds))
+                }
+                val left = next.at - position
+                val snapshot = RouteProgressSnapshot(
+                    nextManeuver = next.maneuver,
+                    distanceToNextManeuver = Distance.meters(left),
+                    lanes = null,
+                    distanceRemaining = Distance.meters(points.last().at - position),
+                    durationRemaining = ((points.last().at - position) / speed).seconds,
+                    durationToNextManeuver = (left / speed).seconds,
+                    stepKey = "$route/0/$index",
+                    upcoming = ahead.map { it.following },
+                    speedMps = speed,
+                )
+                val shown = row(index, position)
+                update(ToneMoment.of(snapshot, route, shown?.first, runUpFromExitWindow = shown?.second == true, ahead = if (withAhead) ahead else emptyList()))
+                position += speed
             }
         }
     }
@@ -211,12 +251,130 @@ class ToneRuleTest {
                     -> false
                 }
                 assertEquals(expected, ToneRule.sounds(Maneuver(type, modifier, "Pine Road")), "$type $modifier")
+                // Passed over: what makes no sound, but not a maneuver of an unknown kind, which may be a turn.
+                assertEquals(!expected && type != ManeuverType.UNKNOWN, ToneRule.passes(Maneuver(type, modifier, "Pine Road")), "$type $modifier")
             }
         }
         // A maneuver that does not sound gets nothing, all the way to it.
         val drive = Drive()
         drive.along(listOf(Point(800.0, Maneuver(ManeuverType.CONTINUE, TurnModifier.STRAIGHT, "Pine Road"))), steady(13.41))
         assertEquals(emptyList<Heard>(), drive.heard)
+    }
+
+    @Test
+    fun `a turn 200 m after a road's new name straight on keeps its single, and nothing is left out at the step change`() {
+        val v = 13.41
+        val points = listOf(Point(1_000.0, Maneuver(ManeuverType.NEW_NAME, TurnModifier.STRAIGHT, "Main Street")), Point(1_200.0, turn))
+        val drive = Drive()
+        drive.bySteps(points, v)
+        assertEquals(listOf(ToneKind.AHEAD to "r1/0/1", ToneKind.AT_TURN to "r1/0/1"), drive.heard.map { it.kind to it.step })
+        val (single, pair) = drive.heard
+        // At their own distances from the turn, near 335 m and 94 m: the single while the new name is still ahead.
+        assertTrue(single.meters <= ToneRule.aheadMeters(v) && single.meters > ToneRule.aheadMeters(v) - v, "single at ${single.meters}")
+        assertTrue(single.meters > 200.0)
+        assertTrue(pair.meters <= ToneRule.finalMeters(v) && pair.meters > ToneRule.finalMeters(v) - v, "pair at ${pair.meters}")
+        assertTrue(pair.second - single.second in 17..19)
+        assertEquals(emptyList<Pair<Int, ToneSkipped>>(), drive.skipped)
+
+        // Without the maneuvers after the next one the rule met the turn at the step change, 200 m before it: no single.
+        val blind = Drive()
+        blind.bySteps(points, v, withAhead = false)
+        assertEquals(listOf(ToneKind.AT_TURN), blind.heard.map { it.kind })
+        assertEquals(ToneSkipped(ToneSkip.TOO_CLOSE, ToneReason.AHEAD), blind.skipped.single().second)
+    }
+
+    @Test
+    fun `an exit 450 m after a new name or a merge keeps its single, and its run-up from the exit's window adds no tone`() {
+        val v = 29.06
+        val exit = Maneuver(ManeuverType.OFF_RAMP, TurnModifier.RIGHT, "Exit 12")
+        val before = listOf(Maneuver(ManeuverType.NEW_NAME, TurnModifier.STRAIGHT, "Pine Road"), Maneuver(ManeuverType.MERGE, TurnModifier.SLIGHT_LEFT, "Pine Road"))
+        for (passed in before) {
+            val drive = Drive()
+            // The exit's run-up begins at the step change, at its own window, with its own row.
+            drive.bySteps(listOf(Point(5_000.0, passed), Point(5_450.0, exit)), v) { step, _ ->
+                if (step == 1) "r1/0/1${ToneMoment.MANEUVER_POINT_KEY}" to true else null
+            }
+            assertEquals(listOf(ToneReason.AHEAD to "r1/0/1", ToneReason.AT_TURN to "r1/0/1"), drive.heard.map { it.reason to it.step }, "${passed.type}")
+            val (single, pair) = drive.heard
+            // Near 727 m and 203 m before the exit.
+            assertTrue(single.meters <= ToneRule.aheadMeters(v) && single.meters > ToneRule.aheadMeters(v) - v, "single at ${single.meters}")
+            assertTrue(pair.meters <= ToneRule.finalMeters(v) && pair.meters > ToneRule.finalMeters(v) - v, "pair at ${pair.meters}")
+            assertEquals(listOf(ToneSkipped(ToneSkip.EXIT_ROW, ToneReason.LANE_CHOICE)), drive.skipped.map { it.second }, "${passed.type}")
+        }
+    }
+
+    @Test
+    fun `the moment looks past maneuvers that ask nothing to the first after them that sounds, and no further than an unknown one`() {
+        val newName = Maneuver(ManeuverType.NEW_NAME, TurnModifier.STRAIGHT, "Main Street")
+        val merge = Maneuver(ManeuverType.MERGE, TurnModifier.SLIGHT_LEFT, "Pine Road")
+        val unknown = Maneuver(ManeuverType.UNKNOWN, null, "")
+        val left = turn.copy(modifier = TurnModifier.LEFT)
+        val snapshot = RouteProgressSnapshot(
+            nextManeuver = newName,
+            distanceToNextManeuver = Distance.meters(120.0),
+            lanes = null,
+            distanceRemaining = Distance.meters(5_000.0),
+            durationRemaining = 300.seconds,
+            durationToNextManeuver = 9.seconds,
+            stepKey = "r1/0/4",
+            speedMps = 13.0,
+        )
+
+        /** The maneuvers after the next one, the steps after the snapshot's, at 10 m/s. */
+        fun ahead(vararg items: Pair<Maneuver, Double>) = items.mapIndexed { i, (maneuver, meters) ->
+            ManeuverAhead("r1/0/${5 + i}", FollowingManeuver(maneuver, Distance.meters(meters), (meters / 10.0).seconds))
+        }
+        val after = ahead(merge to 80.0, turn to 230.0, left to 900.0)
+        // Past the new name and the merge to the right turn: its distance and time, its own step's key.
+        assertEquals(
+            ToneMoment("r1", "r1/0/6", turn, 350.0, 32.0, 13.0, offRoute = false, lookedPast = ManeuverType.NEW_NAME),
+            ToneMoment.of(snapshot, "r1", laneChoiceKey = null, ahead = after),
+        )
+        // A time not known on the way: the time is not known.
+        val noTime = after.map { it.copy(following = it.following.copy(durationAfterNext = 0.seconds)) }
+        assertEquals(0.0, ToneMoment.of(snapshot, "r1", null, ahead = noTime).secondsToManeuver)
+        assertEquals(0.0, ToneMoment.of(snapshot.copy(durationToNextManeuver = 0.seconds), "r1", null, ahead = after).secondsToManeuver)
+
+        // No look where the next one sounds, where it is of an unknown kind, where the look meets an unknown one first,
+        // and where nothing after it sounds: the moment of the next maneuver, as without the list.
+        val own = ToneMoment("r1", "r1/0/4", newName, 120.0, 9.0, 13.0, offRoute = false)
+        assertEquals(own.copy(maneuver = turn), ToneMoment.of(snapshot.copy(nextManeuver = turn), "r1", null, ahead = after))
+        assertEquals(own.copy(maneuver = unknown), ToneMoment.of(snapshot.copy(nextManeuver = unknown), "r1", null, ahead = after))
+        assertEquals(own, ToneMoment.of(snapshot, "r1", null, ahead = ahead(merge to 80.0, unknown to 150.0, turn to 230.0)))
+        assertEquals(own, ToneMoment.of(snapshot, "r1", null, ahead = ahead(merge to 80.0)))
+        assertEquals(own, ToneMoment.of(snapshot, "r1", null))
+
+        // The lane row stays the card's: the passed maneuver's own row is a row ahead of the turn, at its own distance.
+        val passedRow = ToneMoment.of(snapshot, "r1", "r1/0/4${ToneMoment.MANEUVER_POINT_KEY}", runUpFromExitWindow = true, ahead = after)
+        assertEquals("r1/0/4/end", passedRow.laneChoiceKey)
+        assertEquals(120.0, passedRow.laneChoiceMeters)
+        assertFalse(passedRow.laneRowIsManeuver)
+        assertFalse(passedRow.runUpFromExitWindow)
+        assertEquals(60.0, ToneMoment.of(snapshot, "r1", "r1/0/4/2", laneChoiceMeters = 60.0, ahead = after).laneChoiceMeters)
+        // A pending card looks past it too, and shows no row.
+        val pending = ToneMoment.of(snapshot.copy(pending = true), "r2", "r1/0/4/2", ahead = after)
+        assertEquals("r1/0/6" to null, pending.stepKey to pending.laneChoiceKey)
+        assertTrue(pending.pending)
+    }
+
+    @Test
+    fun `a step reached before the new route's first instruction is part of its start`() {
+        val v = 13.41
+        val drive = Drive()
+        drive.along(listOf(Point(5_000.0, turn)), steady(v), seconds = 5)
+        // A pending card of a step the route gives no banner for, then the first instruction a step on, inside the single's distance.
+        drive.update(moment(route = "r2", step = "r2/0/0", meters = 30.0, maneuver = Maneuver(ManeuverType.UNKNOWN, null, ""), pending = true))
+        drive.update(moment(route = "r2", step = "r2/0/1", meters = 250.0))
+        assertEquals(emptyList<Heard>(), drive.heard)
+        assertEquals(ToneSkipped(ToneSkip.NEW_ROUTE, ToneReason.AHEAD), drive.skipped.single().second)
+        // Its pair at its distance; the step after it is a step like any other.
+        var meters = 250.0
+        while (meters > v) {
+            meters -= v
+            drive.update(moment(route = "r2", step = "r2/0/1", meters = meters))
+        }
+        repeat(66) { drive.update(moment(route = "r2", step = "r2/0/2", meters = 900.0 - it * v)) }
+        assertEquals(listOf("r2/0/1" to ToneKind.AT_TURN, "r2/0/2" to ToneKind.AHEAD, "r2/0/2" to ToneKind.AT_TURN), drive.heard.map { it.step to it.kind })
     }
 
     @Test
