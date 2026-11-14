@@ -856,13 +856,15 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   is out of the window, which stops it, and its camera draws nothing (`MapScene.setAway`): Smooth
   follow asks for no frames, and the two Mapbox styles start no animation, as their data source's
   frames do not reach the navigation camera then. The data source goes on taking the positions and
-  the progress, so when the map comes back the camera follows the car from the frame of now: Smooth
-  follow snaps to it on its first frame, the Mapbox styles go to it at once; a camera that was in the
-  overview or left to the driver before follows the car again. A phone screen that starts on the
-  list, as one made again mid-drive, makes its map only when the map is to show: Mapbox stops a map's
-  view with the activity only once the view has been in the window, so a map made for the list would
-  keep its render thread and its puck's animators going, unseen. The new map then starts as at the
-  app's start, style load and all.
+  the progress, so when the map comes back its camera shows what the drive views want from the frame
+  of now, decided afresh on the latest update as after a seek ([Drive view](#drive-view)) before
+  anything is asked of it: the car in Normal and where a point is near, the overview in the Overview
+  on the open road, also for a camera that was left to the driver before (the hold ended as the map
+  went away). Smooth follow snaps to it on its first frame, the Mapbox styles go to it at once. A
+  phone screen that starts on the list, as one made again mid-drive, makes its map only when the map
+  is to show: Mapbox stops a map's view with the activity only once the view has been in the window,
+  so a map made for the list would keep its render thread and its puck's animators going, unseen.
+  The new map then starts as at the app's start, style load and all.
 
 ### Logging
 
@@ -1386,7 +1388,9 @@ In a town with a turn every half mile the Overview mostly looks like the normal 
 owner's own rule. Off the route (two updates in a row; one alone moves nothing) the view comes down,
 and back on a route the same rules decide, with the gap measured from the car; so do a new route, a
 seek of the simulated drive and a map that comes back from being put away. While the overview stands
-only an approach, a run-up or the car leaving the route bring it down.
+only an approach, a run-up or the car leaving the route bring it down, and the end of a hold of the
+map where the overview could not stand 10 s more
+([The map the driver holds](#the-map-the-driver-holds)).
 
 ### Other moments
 
@@ -1406,7 +1410,9 @@ only an approach, a run-up or the car leaving the route bring it down.
   lines (`silent` true) say what the Overview would have done, so a drive in Normal tunes it; so
   does a drive in the plain Overview.
 - **The map put away** for the list of the maneuvers ahead (stage 2's step 1c): it asks its camera
-  for nothing, and a hold ends (`away`); back on screen it decides afresh.
+  for nothing, and a hold ends (`away`); back on screen it decides afresh, on the latest update,
+  before its camera is asked for anything: near a turn it comes back in the normal view, with no
+  overview first.
 - **The camera style changed during a drive:** the new camera gets what the drive view wants; a map
   the driver holds stays his.
 - **The look of a later step** (`DriveCamera.onLook`, for the routes badge): the overview for 10 s as

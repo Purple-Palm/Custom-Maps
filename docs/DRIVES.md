@@ -89,7 +89,9 @@ another navigation app guides on the car's screen.
     has: `ui_end`, one trip, and `phone_screen` `map`, `end`.
 15. **Map and List.** **Map** on the list: the phone's map is back within a second, in the app's
     look of the moment, with the car where it is, the route as driven and the camera following the
-    car; `phone_screen` `map`, `button`, and the camera lines without `away` and with frames again.
+    car (in the Overview drive view the overview on the open road, and near a turn the car, with no
+    overview first: one `camera_request` with `by` `start` and `why` `back`, none at the next
+    update); `phone_screen` `map`, `button`, and the camera lines without `away` and with frames again.
     The guidance bar has **List** then: it goes back to the list, `phone_screen` `list`, `button`.
     Note how long the map takes to show the car and whether a frame of the old place shows first.
     Then, on the list, swipe Custom Maps away from the recent apps and open it again from the trip
@@ -1538,7 +1540,8 @@ hold's `holdS` every second:
 113. **The Overview switch at a stop.** Tap **Overview**: the overview at once (`camera_request` with
     `by` `driver` and `why` `toggle`, a `drive_view` line with `wish` `OVERVIEW`); tap again: the car.
     A `settings` line `drive_view` for each tap, and the next drive starts in the view chosen. Near a
-    turn the button fills at once and the overview comes after the turn (`BUTTON_TOO_CLOSE`).
+    turn, or where the overview could not stand 10 s before the turn's approach, the button fills at
+    once and the overview comes after the turn (`BUTTON_TOO_CLOSE`).
 114. **The way out by the gap.** A drive in the Overview with turns about 1, 1.3 and 2 miles apart:
     after a turn 1 mile before the next one the view stays normal (`GAP_TOO_SHORT`); 1.3 miles: out
     at town speeds (`OPEN_ROAD`), normal at freeway speeds where the overview could not stand 30 s
@@ -1560,7 +1563,8 @@ hold's `holdS` every second:
     while the finger rests, counting down from the lift or from the end of a fling, then one glide
     back (`camera_request` with `by` `timer`, a `camera_hold` line with `ended` `timer`, `heldMs` and
     `restarts`). A tap of Recenter instead: `by` `driver`, `ended` `recenter`. In the Overview between
-    turns Recenter brings the overview; a few seconds before a turn, the normal view. With
+    turns Recenter brings the overview; a few seconds before a turn's approach, also from a standing
+    overview, the normal view (`RECENTER_TOO_CLOSE`), and no flight out and back down. With
     **Recenter by itself** Off: "Recenter" alone, and the map stays until a tap.
 120. **Move the map close to a turn.** Inside a turn's approach the count starts at 3 at most
     (`holdS`), and the view is back before the turn.

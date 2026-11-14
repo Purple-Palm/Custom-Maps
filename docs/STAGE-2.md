@@ -369,7 +369,9 @@ the owner compare 30 and 60 frames a second on the car's screen.
 - **Back as of now.** The same map comes back into the window within a second: the app's current
   look (the first look shown on it is the one decided meanwhile), the puck where the car is now (the
   guidance puck gives a returning map its newest position at once), the route line as driven, and the
-  camera following the car, whatever it did before the map went away.
+  camera showing what the drive views want there, decided afresh on the latest update as after a seek
+  before the camera is asked: the car in Normal or near a turn, else in the Overview the overview,
+  whatever it did before the map went away.
 - **The camera line** goes on once a second while the phone's screen is on, with `away` true and
   `render.frames` 0, which shows that the map drew nothing. A screen that started on the list has no
   map yet, and so no phone camera line, until the map shows.
