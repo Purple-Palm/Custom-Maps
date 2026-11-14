@@ -193,6 +193,9 @@ internal class SmoothNavigationCamera(
     private val offset = DoubleArray(VALUES)
     private var arcZoom = 0.0
 
+    /** The change of mode under way, if any, is a move into following from another mode: the tilt down for a junction is folded into it. */
+    private var intoFollowing = false
+
     // The overview the camera shows, kept while a new fit of the data source still lies inside it
     // (OverviewHold): the map stands while the car drives up the route it shows. None after a change
     // of mode, so its first fit is taken. Counted for the camera line.
@@ -435,6 +438,7 @@ internal class SmoothNavigationCamera(
             this.facts = facts
             frameCap = frameCapMeters(facts)
             val metersToManeuver = step.distanceRemaining.toDouble()
+            val goalBefore = maneuverFocus.goal
             maneuverFocus.onProgress(
                 now = now,
                 stepKey = stepKey,
@@ -444,6 +448,9 @@ internal class SmoothNavigationCamera(
                 capMeters = frameCap,
                 speedMps = speedMps,
             )
+            // The view latched down for a junction while a move into following runs: the tilt goes
+            // down with the move, not in a second motion of its own against it.
+            if (goalBefore < 1.0 && maneuverFocus.goal == 1.0) foldTiltIntoMove(now)
             if (maneuverFocus.latches != latchesTold) {
                 latchesTold = maneuverFocus.latches
                 listener.onFocusLatched(focusFields(facts, metersToManeuver))
@@ -507,6 +514,24 @@ internal class SmoothNavigationCamera(
         )
         // The tilt may have begun to move, also when the frame of the data source is the same.
         requestFrame()
+    }
+
+    /**
+     * Folds the tilt down for a junction into the move into following that runs now ([intoFollowing]),
+     * as a Start or the way in from the overview near a turn makes it. The focus is put at its goal at
+     * once ([ManeuverFocus.settle]), and the change of the tilt that makes goes into the move's own
+     * offset, spread over the share of the move still left: the tilt goes on from where it is and falls
+     * with the move, with no rise and fall of its own. Without a move under way it is left to its eased
+     * descent.
+     */
+    private fun foldTiltIntoMove(now: Double) {
+        if (!intoFollowing || mode != Mode.FOLLOWING || transitionSeconds <= 0.0) return
+        val left = 1.0 - easeInOut((now - transitionStart) / transitionSeconds)
+        if (left < MIN_SHARE_LEFT) return
+        val laneShare = LaneZoomFrames.laneShare(laneZoom, following = true) { laneFocus.focusAt(now) }
+        val before = guidancePitch(tuning, laneShare, maneuverFocus.focusAt(now))
+        maneuverFocus.settle(now)
+        offset[PITCH] += (before - guidancePitch(tuning, laneShare, maneuverFocus.focusAt(now))) / left
     }
 
     /**
@@ -1001,6 +1026,10 @@ internal class SmoothNavigationCamera(
         }
         val changed = target != mode
         mode = target
+        intoFollowing = changed && target == Mode.FOLLOWING
+        // Into following with the view already latched down for a junction: the tilt comes with the
+        // move, which then is the only motion of the pitch, instead of easing down against it.
+        if (intoFollowing && maneuverFocus.goal == 1.0) maneuverFocus.settle(now)
         for (ramp in ramps) ramp.forget()
         // A change of mode, a map back on screen, a jump: the newest fit is taken.
         keptOverview = null
@@ -1227,6 +1256,9 @@ internal class SmoothNavigationCamera(
 
         /** Below this zoom the map shows continents: the view of a map that was never moved. */
         const val WORLD_ZOOM = 3.0
+
+        /** A move with less than this share left to go takes no tilt into it: the tilt eases down by itself. */
+        const val MIN_SHARE_LEFT = 0.05
 
         /** The width of one point of the map at zoom 0 on the equator, with 512-point tiles. */
         const val METERS_PER_POINT_AT_ZOOM_0 = 78_271.517
