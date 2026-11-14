@@ -252,10 +252,11 @@ internal class OwnRouteLine(
     var onWindowLoad: ((loadMs: Long, bytes: Int) -> Unit)? = null
 
     /**
-     * Hears each window that loaded with lane counts from the electronic horizon in it, with how many of the horizon's
-     * stretches its send took (0 for a later window of the same path), for the trip summary.
+     * Hears each window that loaded with lane counts from the electronic horizon in it, or sent with a path that took some,
+     * for the trip summary: how many of the horizon's stretches that path took for the first time ([HorizonEvidence.taken],
+     * 0 for a later window of the same path), and whether the window [drawn] draws any of the horizon's counts.
      */
-    var onHorizonWindow: ((taken: Int) -> Unit)? = null
+    var onHorizonWindow: ((taken: Int, drawn: Boolean) -> Unit)? = null
 
     private var styleReady = false
     private var released = false
@@ -436,6 +437,7 @@ internal class OwnRouteLine(
         // The new style's source is empty: the lanes' window the map held, or the one on its way, goes again, with the path
         // it was built with: one built with the horizon's counts that had not loaded yet too.
         val keep = pendingWindow ?: window
+        val taken = if (pendingWindow != null) windowTaken else 0
         nextDrawing?.let { drawing = it }
         nextDrawing = null
         windowTask?.cancel()
@@ -451,7 +453,7 @@ internal class OwnRouteLine(
         }
         attempt { primary.show() }
         attempt { addLayers() }
-        drawing?.let { send(it, keep, REASON_STYLE_LOAD) }
+        drawing?.let { send(it, keep, REASON_STYLE_LOAD, taken) }
     }
 
     /**
@@ -882,7 +884,7 @@ internal class OwnRouteLine(
      * drawn once the map says both have loaded ([onSourceLoaded]). Until they have, the own layers stay hidden and the
      * SDK's line shown.
      */
-    private fun send(drawing: OwnLineDrawing, first: LaneWindow?, reason: String) {
+    private fun send(drawing: OwnLineDrawing, first: LaneWindow?, reason: String, taken: Int = 0) {
         if (!ready() || failed()) return
         val dataId = "$DATA_ID${++sent}"
         sentId = dataId
@@ -891,7 +893,7 @@ internal class OwnRouteLine(
         attempt {
             layers.watchLoads(true)
             layers.setPath(drawing.points, dataId)
-            if (lanes && drawing.lanes != null && first != null) sendWindow(first, reason)
+            if (lanes && drawing.lanes != null && first != null) sendWindow(first, reason, taken)
         }
     }
 
@@ -1054,7 +1056,8 @@ internal class OwnRouteLine(
             ),
         )
         onWindowLoad?.invoke(loadMs, loaded.bytes)
-        if (loaded.horizonMeters > 0.0) onHorizonWindow?.invoke(windowTaken)
+        // The stretches a path took are counted with its window, wherever in the path they lie.
+        if (loaded.horizonMeters > 0.0 || windowTaken > 0) onHorizonWindow?.invoke(windowTaken, loaded.horizonMeters > 0.0)
         windowTaken = 0
         // Whether feature states outlive a new window's data is not known: they are set again for every window.
         if (drawn) applyStates(loaded)

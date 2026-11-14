@@ -23,7 +23,10 @@ class HorizonEvidence private constructor(
     val lanes: HorizonLanes,
     /** Where the pairs of the last send's update begin ([startFor]); before every station for none. */
     val start: Double = Double.NEGATIVE_INFINITY,
-    /** How many of the horizon's stretches the last send took: those of its pairs that agree with the route's lists. */
+    /**
+     * How many of the horizon's stretches the last send took for the first time: those of its pairs that agree with the
+     * route's lists and that no earlier send of the route took agreeing, so the trip summary counts each pair once.
+     */
     val taken: Int = 0,
 ) {
 
@@ -43,7 +46,9 @@ class HorizonEvidence private constructor(
         val start = startFor(windowEnd, cards)
         val routeId = plan.topology.evidence.route.routeId
         val newest = if (ahead != null && ahead.routeId == routeId) HorizonLanes.of(plan, ahead).from(start) else HorizonLanes.none(routeId)
-        return HorizonEvidence(plan, lanes.before(start) + newest, start, newest.stretchesUsed)
+        val agreed = lanes.between.filter { it.convention != HorizonConvention.NONE }.map { it.before }.toSet()
+        val fresh = newest.between.filter { it.convention != HorizonConvention.NONE && it.before !in agreed }.sumOf { it.stretches }
+        return HorizonEvidence(plan, lanes.before(start) + newest, start, fresh)
     }
 
     /**

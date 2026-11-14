@@ -721,7 +721,7 @@ internal class MapScene(
         // The lanes' windows that load while a view is measured.
         ownLine.onWindowLoad = { loadMs, bytes -> measure { onWindowLoaded(loadMs, bytes) } }
         // A window drawn with lane counts from the horizon goes into the trip summary.
-        ownLine.onHorizonWindow = { taken -> engine.onHorizonWindow(taken) }
+        ownLine.onHorizonWindow = { taken, drawn -> engine.onHorizonWindow(taken, drawn) }
         // The style this map shows is kept ahead of the car during guidance from now on. The style
         // may still be loading: it is taken when it has loaded, and again each time it loads.
         offlineData?.attachMap(mapboxMap)

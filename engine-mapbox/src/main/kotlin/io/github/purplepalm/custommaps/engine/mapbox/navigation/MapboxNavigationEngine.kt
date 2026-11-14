@@ -1317,12 +1317,13 @@ internal class MapboxNavigationEngine(
     }
 
     /**
-     * A map drew a window of the app's own lanes with lane counts from the electronic horizon in it, its send having taken
-     * [taken] of the horizon's stretches: the trip summary's horizon counts it. Main thread.
+     * A map loaded a window of the app's own lanes sent with a path that took [taken] of the electronic horizon's stretches
+     * for the first time, or one that draws the horizon's counts ([drawn]): the trip summary's horizon counts them. Main
+     * thread.
      */
-    internal fun onHorizonWindow(taken: Int) {
+    internal fun onHorizonWindow(taken: Int, drawn: Boolean) {
         tripTally.horizon.onStretchesUsed(taken)
-        tripTally.horizon.onWindow()
+        if (drawn) tripTally.horizon.onWindow()
     }
 
     /** Called right before a trip's summary is added up, on the main thread: a map closes what it measured of the trip. */

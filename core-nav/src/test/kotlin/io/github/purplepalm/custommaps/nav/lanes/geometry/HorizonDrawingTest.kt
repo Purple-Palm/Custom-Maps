@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.nav.lanes.geometry
 
 import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
+import io.github.purplepalm.custommaps.nav.lanes.HorizonConvention
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEdge
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.HorizonLanes
@@ -92,6 +93,15 @@ class HorizonDrawingTest {
         assertEquals(listOf(p), later.lanes.between.map { it.from })
         assertEquals(0, later.taken)
         assertEquals(first.evidence.stretches.filter { it.to <= q - 1_000.0 }, later.evidence.stretches.filter { it.to <= q - 1_000.0 })
+        // The same update at that send: the second pair is taken again, its stretches counted once, by the first send.
+        val again = first.next(ahead, p + 500.0, cards)
+        assertEquals(listOf(p, q), again.lanes.between.map { it.from })
+        assertEquals(0, again.taken)
+        // A pair is counted once it agrees: the first pair under neither reading at one send, under all at the next.
+        val none = empty.next(horizon(route, 4), p - 130.0, cards)
+        assertEquals(HorizonConvention.NONE, none.lanes.between.first().convention)
+        assertEquals(none.lanes.stretchesUsed, none.taken)
+        assertEquals(first.lanes.between.first().stretches, none.next(ahead, p - 130.0, cards).taken)
         // Switched off: nothing from the horizon past the window, what was taken before it stays.
         val off = first.next(null, p + 500.0, cards)
         assertEquals(listOf(p), off.lanes.between.map { it.from })

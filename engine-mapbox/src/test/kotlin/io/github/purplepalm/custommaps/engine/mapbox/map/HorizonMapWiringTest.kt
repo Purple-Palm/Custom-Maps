@@ -23,10 +23,10 @@ class HorizonMapWiringTest {
     fun `a map's own line asks the engine's holder for the route's newest update, and counts its windows into the summary`() {
         val code = lines(scene)
         assertTrue("horizon = { routeId -> engine.routeHorizon.aheadOf(routeId) }," in code)
-        assertTrue("ownLine.onHorizonWindow = { taken -> engine.onHorizonWindow(taken) }" in code)
-        val counted = SourceText.body(engine, "internal fun onHorizonWindow(taken: Int)").map { it.trim() }
+        assertTrue("ownLine.onHorizonWindow = { taken, drawn -> engine.onHorizonWindow(taken, drawn) }" in code)
+        val counted = SourceText.body(engine, "internal fun onHorizonWindow(taken: Int, drawn: Boolean)").map { it.trim() }
         assertTrue("tripTally.horizon.onStretchesUsed(taken)" in counted)
-        assertTrue("tripTally.horizon.onWindow()" in counted)
+        assertTrue("if (drawn) tripTally.horizon.onWindow()" in counted)
     }
 
     @Test

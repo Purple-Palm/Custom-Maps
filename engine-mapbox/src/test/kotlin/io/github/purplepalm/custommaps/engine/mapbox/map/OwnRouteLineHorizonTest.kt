@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.engine.mapbox.map
 
 import io.github.purplepalm.custommaps.nav.lanes.HorizonAhead
+import io.github.purplepalm.custommaps.nav.lanes.HorizonConvention
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEdge
 import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.HorizonRoadClass
@@ -65,7 +66,8 @@ class OwnRouteLineHorizonTest {
     }
 
     private val traffic = OwnRouteLine.Traffic { it.runs }
-    private val windows = ArrayList<Int>()
+    /** What the trip summary was told: the stretches a path took, and whether the window drew the horizon's counts. */
+    private val told = ArrayList<Pair<Int, Boolean>>()
 
     /** A horizon from a car at [car]: three lanes on every edge, an edge end at each intersection to the gore, the ramp after it. */
     private fun horizonFrom(car: Double, count: Int = 3) = HorizonAhead.of(
@@ -102,7 +104,7 @@ class OwnRouteLineHorizonTest {
 
     /** The lanes on, the style loaded, the route given, its path and first window built and loaded. */
     private fun drawn() {
-        line.onHorizonWindow = { taken -> windows += taken }
+        line.onHorizonWindow = { taken, drawn -> told += taken to drawn }
         line.setLanes(true)
         line.setEnabled(true)
         line.onStyleLoaded(Look.NIGHT)
@@ -182,8 +184,8 @@ class OwnRouteLineHorizonTest {
         assertTrue((logged["horizonM"] as Long) > 0L, "$logged")
         assertEquals(0, logged["horizonZones"])
         // The trip summary hears of it, with the stretches its send took: both pairs past the window.
-        assertEquals(listOf(requireNotNull(next.horizon).taken), windows)
-        assertEquals(3, windows.single())
+        assertEquals(listOf(requireNotNull(next.horizon).taken to true), told)
+        assertEquals(3, told.single().first)
         // The first window's line had none.
         assertEquals(0L, laneLines().first()["horizonM"])
     }
@@ -286,7 +288,7 @@ class OwnRouteLineHorizonTest {
         assertEquals(scene.built.last().points, sentLast)
         scene.load()
         assertTrue(line.drawn)
-        assertTrue(windows.isEmpty())
+        assertTrue(told.isEmpty())
     }
 
     @Test
@@ -305,6 +307,8 @@ class OwnRouteLineHorizonTest {
         scene.loadWindow()
         assertTrue(line.drawn)
         assertEquals(next.table.pathFraction(windowEnd - 1_000.0), requireNotNull(style.trim), 23.0 / next.table.pathLength / 40_075_016.686)
+        // The window sent again carries what its path took: the summary hears of it once, with its stretches.
+        assertEquals(listOf(3 to true), told)
     }
 
     @Test
@@ -326,6 +330,31 @@ class OwnRouteLineHorizonTest {
         scene.loadWindow()
         assertEquals(OwnRouteLine.REASON_AHEAD, laneLines().last()["reason"])
         assertNull(scene.log.lines.firstOrNull { it.first == OwnRouteLine.ROUTE_LINE && it.second["reason"] == OwnRouteLine.REASON_FALLBACK })
+    }
+
+    @Test
+    fun `the summary counts the stretches a path took with its window, also where that window draws none of them`() {
+        drawn()
+        val windowEnd = built.single().lanes!!.windows.windowAt(0.0).to
+        // Agreeing only from the second point on: what that changes lies past the window that goes with the path.
+        ahead = horizonBeyond(windowEnd - 1_200.0)
+        requireNotNull(driveUntilSent(0.0, windowEnd))
+        scene.load()
+        scene.loadWindow()
+        val next = built.last()
+        assertEquals(OwnRouteLine.REASON_HORIZON, laneLines().last()["reason"])
+        assertEquals(0L, laneLines().last()["horizonM"])
+        val pair = requireNotNull(next.horizon).lanes.between.single { it.convention != HorizonConvention.NONE }
+        assertEquals(q, pair.from)
+        assertEquals(listOf(pair.stretches to false), told)
+        // The window after it draws the horizon's zone: a window with its counts, their stretches counted already.
+        val nextEnd = next.lanes!!.windows.windowAt(windowEnd - 1_000.0).to
+        requireNotNull(driveUntilSent(windowEnd - 980.0, nextEnd))
+        scene.loadWindow()
+        assertEquals(OwnRouteLine.REASON_AHEAD, laneLines().last()["reason"])
+        assertTrue((laneLines().last()["horizonM"] as Long) > 0L, "${laneLines().last()}")
+        assertEquals(1, laneLines().last()["horizonZones"])
+        assertEquals(listOf(pair.stretches to false, 0 to true), told)
     }
 
     @Test
