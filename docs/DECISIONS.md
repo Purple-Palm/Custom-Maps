@@ -621,7 +621,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Closing the phone's map and making it again: a style load and a blank map each time it comes back.
   - The phone's screen off during a drive with the car: the phone's own setting, not the app's; the screen may still lock by itself, which is the best case for the car.
 - **Why:** the car's screen is where the driver looks; on the phone the next turns read at a glance cost a fraction of what a second map costs, and the map is there with one tap.
-- **Cost:** the phone's map is not on its screen during a drive with the car unless asked for; the list's rows do not show lanes or the turn's shape on the map, which the card above them and the car's map do. The heat saved is not measured yet (DRIVES, the car screen after step 1c).
+- **Cost:** the phone's map is not on its screen during a drive with the car unless asked for; the list's rows do not show lanes or the turn's shape on the map, which the card above them and the car's map do. The heat saved is not measured yet (DRIVES, the car screen after step 1d, check 17).
 
 ## 52. The app draws the lanes itself
 
@@ -693,3 +693,22 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
   - Its data use is not known: the trip summary carries the switch's state and the horizon's counts, so drives with and without it compare their received bytes.
   - Where the counts change the drawing, the next window goes with the route's whole path again.
 - **Revisit before any public release:** this is the owner's trial under the beta's terms for internal evaluation, not a release decision.
+
+## 55. The car's frames from what it draws, a lighter car map when hot, the card's lanes within two miles
+
+- **Chosen** (stage 2's step 1d, after the owner's drives with the car screen):
+  - **The car's frame cap from the frames drawn.** The cap on the car's surface starts from the display's own cap, the one for the rate of the display's frames (30 at 60 Hz and 15 at 120 Hz at the target 30), and moves only by the frames the map drew in the render thread's windows during guidance: up when two windows in a row drew under 0.9 × the target with frames quicker than one frame of the target, down when two drew over 1.25 × the target, never below the display's cap. The render thread's ticks, which step 1b's rule read as its rate, stay in the lines and set nothing: with the phone's screen off a call that comes a little late counts a display frame as missed that was not, and the cap fell and rose several times a minute.
+  - **A lighter car map while the phone is hot.** From the phone's thermal status MODERATE on, the car's map leaves out the 3D objects of Mapbox Standard, its buildings, landmarks and trees, and takes them back after two minutes in a row of LIGHT or better; the light state wins over the look's own at every look change and style load. The phone's map keeps them. **Settings → Debug → Lighter car map when hot**, on unless turned off, turns it off.
+  - **The card's lanes within two miles.** The card, on the phone and in the car's lanes image alike, shows the next maneuver's own lanes only while it is at most two miles ahead (3,219 m); a run-up's row and a lane choice's row as before.
+- **Alternatives:**
+  - The cap from the ticks with a wider band, or over more windows: the ticks are no measure of the render thread's rate either way, inflated by late calls at 60 Hz and deflated by slow frames at 120 Hz, so a band only makes the changes rarer.
+  - A fixed cap for the display's rate: at 120 Hz the cap 15 draws well under 30 frames a second where frames take longer than one display frame.
+  - A lower frame target while hot: the frames were the limit already; fewer 3D objects make each frame cheaper.
+  - The car's map without 3D objects always: it would differ from the phone's when it need not.
+  - The maneuver's own lanes from the step's start, as before: they showed an exit's lanes while the car was still on other roads, whose lanes can differ.
+- **Why:** the car's map should draw its target with the phone locked, as it usually is in a car; a hot phone draws fewer frames whatever the cap says, and the 3D objects are what the car's map can give up then; the card's lanes should belong to the road ahead of the car.
+- **Cost:**
+  - While the phone is hot the car's map has no 3D buildings or trees, whatever made it hot, and gets them back only after two minutes of a cooler phone.
+  - A cap the frames drawn moved is kept while the display's rate holds, also into the next drive, until two windows ask otherwise.
+  - Farther than two miles from a maneuver the card shows none of its lanes, also where they would be right.
+  - None of it has run in a car yet: whether the frames hold with the phone locked, and whether the lighter map draws more of them while hot, are the next drives' checks (DRIVES, checks 77 to 82).

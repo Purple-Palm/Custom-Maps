@@ -10,7 +10,7 @@ Drive logs never go into this repository. These notes leave out addresses, stree
 coordinates and times of day. Places are described ("a big-box store"), positions are distances,
 and times are durations from Start or End.
 
-## Next: the car screen after step 1c (stage 2)
+## Next: the car screen after step 1d (stage 2)
 
 What the next drives with the car screen check, on the Desktop Head Unit with the debug APK or in
 the car with the build from Google Play's internal testing ([README](../README.md), On the car
@@ -18,6 +18,9 @@ screen). Screenshots in the car come from a passenger or a parked car, never fro
 lines named are in the debug log; every car line has `screen` `car`. Checks 1 to 6 are step 1's,
 with day and night now following the phone; 7 to 13 are step 1b's
 ([STAGE-2.md](STAGE-2.md), Step 1b); 14 to 18 are step 1c's ([STAGE-2.md](STAGE-2.md), Step 1c).
+Step 1d's are checks 77 to 82 of the next drive's list below
+([What the next drive tests](#what-the-next-drive-tests)): the car's frames with the phone locked, a
+hot phone, the card's lanes two miles before an exit and the measuring's whole views.
 Since step 1c the phone shows the list in place of its map during a drive with the car: for checks
 7 to 13, which look at the phone's map too, press **Map** on the list first.
 
@@ -54,9 +57,10 @@ Since step 1c the phone shows the list in place of its map during a drive with t
    back, `navigationStarted` with `cause` `intent` or `start`. Note whether the other app stopped.
 7. **Frames with the phone app in front.** A simulated drive with the car connected and the phone
    app in front, for a minute: the car's map moves smoothly. The car's camera lines, a few seconds
-   into the drive: `render.drawnFps` about 30 (27 to 33), `maxFps` 15 to 20 on a phone at 120 Hz with
-   `capFrom` `render`, `clock.vsyncTicks` about 60; the phone's: `capped` true and `renderFps` about
-   60; `car_surface` lines with `event` `fps` as the cap settles.
+   into the drive: `render.drawnFps` about 30 (27 to 33), `maxFps` 30 with `capFrom` `display` on a
+   phone at 60 Hz, 15 (`display`) or about 19 (`drawn`) on one at 120 Hz, `clock.vsyncTicks` about
+   60; the phone's: `capped` true and `renderFps` about 60; a `car_surface` line with `event` `fps`
+   only where the frames drawn moved the cap, with `drawnFps`.
 8. **The phone locked during a drive.** Lock the phone for a few minutes, then unlock it: the car's
    map and its car icon keep moving. The `display_state` lines (OFF or DOZE while locked?), every
    `frame_clock` line (`source` `timer`, then `vsync` again, with `quietMs` and `timerTicks`), and
@@ -1331,6 +1335,46 @@ points** on, as it is unless turned off, on a drive with freeways and Drawn by t
     most. A failure: one `error` line with `where` `horizon`, `failed` true in the summary, and the
     drive goes on without the horizon.
 
+Stage 2's step 1d ([STAGE-2.md](STAGE-2.md), Step 1d (built)): the car's frames and its lighter map
+while the phone is hot, with the car screen (every car line has `screen` `car`); the card's lanes two
+miles before an exit and the measuring's whole views, on the phone too.
+
+77. **The car's frames with the phone locked.** A drive with the car, real or simulated, and the
+    phone locked, its screen off, for ten minutes or more: while the car moves, the car's camera
+    lines draw the target, `render.drawnFps` about 30 at the target 30, with `maxFps` 30 and
+    `capFrom` `display` on a phone at 60 Hz, and `car_surface` lines with `event` `fps` are rare:
+    none after the first seconds of a plain drive, and any that comes has `drawnFps`, the frames
+    drawn that moved the cap. Then a few minutes with the phone's screen on: the same. Share the
+    car's camera lines and every `car_surface` line.
+78. **A phone at 120 Hz,** if there is one: `maxFps` 15 with `capFrom` `display` before the drive;
+    within a few seconds of guidance about 19 with `capFrom` `drawn` and one `car_surface` `fps` line
+    with `drawnFps` under nine tenths of the target; the camera lines' `render.drawnFps` about 30 from
+    then on.
+79. **A hot phone.** On the charger in the sun, or a long drive with the car: when a `thermal` line
+    says `MODERATE` or worse, one `car_light` line with `on` true and that `thermal`, the car's map
+    without its 3D buildings and trees, and the car's camera lines with `light` true; the phone's own
+    map keeps them. Once the phone has cooled (a `thermal` line `LIGHT` or `NONE`), two minutes later
+    a `car_light` line with `on` false and the 3D objects back on the car. Say whether the car's
+    `render.drawnFps` and `render.p95Ms` were better while light. While light, Day or Night chosen by
+    hand before the drive, or Auto at dusk: the car's map stays without its 3D objects.
+80. **Lighter car map when hot.** **Settings → Debug** shows the switch on; off and on again write
+    `settings` lines with `car_light_when_hot`. Turned off while the car's map is light, the full map
+    at once and a `car_light` line with `on` false; while off, a hot phone writes no `car_light` line
+    with `on` true. A drive without the car: no `car_light` line and no `light` in the phone's camera
+    line.
+81. **The card's lanes two miles before an exit.** A drive whose freeway exit comes more than two
+    miles after the maneuver before it (a simulated drive will do): while the exit is farther than two
+    miles, the phone's card and the car's routing card show no lanes, and one `lane_row` line says
+    `source` `none` with `far` true and `metersAhead`; at 2.0 mi on the card the exit's own lanes come
+    on both screens at once, with a `lane_row` line `source` `maneuver` and `metersAhead` about 3219.
+    A lane choice's row on the way and the run-up's row show as before. The same at a turn more than
+    two miles after the maneuver before it.
+82. **Only whole views count.** On the measuring drive (checks 67 to 69): every `lane_measure` line
+    has `ms`; a view that ended `let_go` after 3 s or more, with frames and begun 5 s or more after
+    the drawing was shown or hidden, says `counts` true; a shorter one, and one that the drive's end,
+    Settings, the background or the list cut short, says `counts` false. The trip summary's `laneGate`
+    `counted` is the number of lines with `counts` true.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -1362,7 +1406,7 @@ Then share the debug log. What to read in it:
 | `lane_choice`, with and without `skipped` | Which exits and splits the rule counted and which it passed over, with their lane counts, to tune its two thresholds |
 | Camera: `runUp`, `laneChoice.key`, `laneCapZoom`, `capSpeed`, `aheadM` | Which run-up held the close view and from where to where; the closest zoom the floor of 12 s allowed and the speed it was worked out for; the road the camera showed above the car, to check the 12 s and the model behind them against a screenshot |
 | `lane_choice`: `key`, `fromLeft`, `edgeLeaves` | Every lane of each point as the route has it, from the left: which lanes the route marked where, which side's lanes left at each point on the way to an exit, and so which row the card should have shown |
-| `lane_row` | What the card's lane row drew and when it changed: `source`, the lanes (`row`, `lit`, `des`; `~` in `row` for a lane drawn as an outline, never lit), `words`, `need`, the run-up (`runUp`, `start`, which is `seam` where the lane plan's seam began it) and, where a run-up's row had no words, why (`odd`: `composed`, `pieces`, `unknown_branch`, `opens_ahead`, `unknown_ahead`, `not_named` or `no_fit`), or that a row lit only lanes for car pools or buses (`odd` `designated_only`). On a ramp the run-up holds through, `runUp` is the exit whose gore was passed and `key` the split's row. One to four lines for each run-up; a distance alone writes none |
+| `lane_row` | What the card's lane row drew and when it changed: `source` (with `far` true on a row of `none` while the next maneuver's own lanes are held back, more than two miles ahead, and `metersAhead` its distance), the lanes (`row`, `lit`, `des`; `~` in `row` for a lane drawn as an outline, never lit), `words`, `need`, the run-up (`runUp`, `start`, which is `seam` where the lane plan's seam began it) and, where a run-up's row had no words, why (`odd`: `composed`, `pieces`, `unknown_branch`, `opens_ahead`, `unknown_ahead`, `not_named` or `no_fit`), or that a row lit only lanes for car pools or buses (`odd` `designated_only`). On a ramp the run-up holds through, `runUp` is the exit whose gore was passed and `key` the split's row. One to four lines for each run-up; a distance alone writes none |
 | `missed_maneuver`, `diverge_taken` | One line for each place the road divided: the step change past an exit, fork or on ramp, or a point passed on the way (`kind`); missed when the navigator found the car off the route within 30 s or 1,000 m. How sure the navigator was (`probAt`, `probMin`, `probMax`, `probLast`, `uncertainS`), how far the phone's positions lay to the side (`sideAt`, `sideMin`, `sideMax`) and what the card showed on the way (`card`, `words`, `runUp`): whether a rule could find a missed exit sooner than the navigator without false alarms |
 | `progress`, `off_route`: `match.raw` | Where the phone's own position lay against the matched one: `sideM` to the side (right positive), `aheadM` along the way (about minus the speed, since the navigator puts the car a second ahead), `accM`, `ageMs`, `bearingDiff` |
 | `route_response`, `routes_updated`: a step's `lanes` | The lanes of each step's last banner that has them, the one shown near its maneuver |
@@ -1398,6 +1442,7 @@ Then share the debug log. What to read in it:
 | `progress`: `motion.ehLanes`, `horizon` | `ehLanes` in the motion object, on freeways while the app listens to the electronic horizon: its count of lanes on the edge the car is on, null where none is known; nothing on the screen uses it. With **Measure the drawn lanes** on, `horizon`: the app's observer of the horizon on the main thread since the line before, `updates`, `ms` in all and `maxMs` the longest |
 | `error` with `where` `horizon` | Reading the electronic horizon failed: the kind of error and its stack, never its message, and the rest of the drive goes on without it. Where a drawing with its counts could not be made, an `error` line with `where` `ownRouteLine`, and the route's windows go on without them |
 | `car_layer` | Only with **Lanes on the map** at **Drawn by the app**: one at each change of who draws the car. `drawer`, `own` (the app's own layer: the bar over drawn lanes in a close view, else the dot) or `sdk` (Mapbox's puck); `reason`: `start` (guidance began on a map that was there before it), `scene` (a map made during a drive, as the car's surface or the phone's map made again), `switch` (Lanes on the map changed during a drive), `guidance_end` or `fallback`; with `fallback` also `carLayerFallback`: `no_position` (a fix the puck was given had no position after it for a second while the watchdog counted) or `exception` (the style refused a call; with an `error` line, `where` `carLayer`). After a fallback the drive goes on with Mapbox's puck; the next drive tries again. Words only, about 100 bytes, a few a drive |
+| `car_light` | Only with the car screen, `screen` `car`: one at each change of the car's lighter map, `on` (whether it draws without its 3D objects) and `thermal` (the phone's thermal status by Android's name, null while none was read). From `MODERATE` on it is light, after two minutes in a row of `LIGHT` or better full again; the car's camera line has `light` beside it. With **Settings → Debug → Lighter car map when hot** off (`settings` `car_light_when_hot` false) it is never light. Words only, a few a drive at most |
 | `lane_measure` | Only with **Settings → Debug → Measure the drawn lanes** on and Drawn by the app, from the phone's map: one as the measuring begins, `check` `details_under_drawing` with `on` true (Mapbox's lane details under the drawing for the drive), then one at the end of each close view. `view`, counted from 1 in the drive; `drawn`, whether the drawing showed (the odd views); `kind`, `run_up` or `junction`; `look`, `DAY` or `NIGHT`; `seconds` and `frames`; `ms`, how long the view lasted, from the update it began on to its end; `p95Ms` and `maxMs`, over every frame time of the view; `missedVsync` and `missedPerS`; `uploadMaxMs`, the longest upload of a frame in Mapbox's statistics; `programsMs` and `programs`, the time spent making graphics programs and how many there are, as Mapbox's statistics give them (whether a sample counts since its own start or the map's is not verified); `windows`, `windowLoadMaxMs` and `windowBytesMax`, the drawing windows that loaded in the view; `carPositions`, the positions handed to the car's layer; `hdRoads`, what the style said of Mapbox's lane details as the view began; `end`: `let_go`, `guidance_end`, `switch`, `setting`, `background`, `covered`, `away`, `camera_style` or `released`; `counts`, true only for a whole view, one with frames, begun 5 s or more after the drawing was shown or hidden, that lasted 3 s or more and ended `let_go`, and false for every other. Numbers and words only, about 390 bytes, one a close view |
 | `motion_sensors` | One each time the sensors are asked to start, as a drive comes onto a freeway: whether the phone has a gyroscope (`gyroscope`), a gravity sensor (`gravity`) and a linear acceleration sensor (`linearAcceleration`), the period asked for (`periodUs`, 40000: 25 samples a second, each delivered at once) and whether listening `started`. They stop at the first update off the freeway and when the drive ends. Without a gyroscope or a gravity sensor nothing is registered: one line a drive with `started` false, and no `motion`. Without linear acceleration, `fwd` and `side` stay null |
 

@@ -95,7 +95,7 @@ zoom setting and the trip history with prediction.
   No End or Cancel within the first minute counts as a successful prediction. Each automatic start
   is a billed trip, so daily limits apply.
 
-## Stage 2: Android Auto (steps 1, 1b and 1c built)
+## Stage 2: Android Auto (steps 1, 1b, 1c and 1d built)
 
 The full design is in [STAGE-2.md](STAGE-2.md). It is built in steps ([DECISIONS.md](DECISIONS.md),
 49). **Step 1 is built**: Android Auto lists the app; the car shows the app's map, the same scene as
@@ -109,10 +109,14 @@ of its own, with its puck on it), draws a real 30 frames a second while the phon
 most 60, and shows the phone's look ([Step 1b (built)](STAGE-2.md#step-1b-built)). **Step 1c**, the
 owner's request: during a drive while the car shows the map, the phone shows the turns ahead as a
 list in place of its own map, which is put away and one tap away; and a Debug switch for 30 or 60
-frames a second on the car ([Step 1c (built)](STAGE-2.md#step-1c-built)).
+frames a second on the car ([Step 1c (built)](STAGE-2.md#step-1c-built)). **Step 1d**, after the
+owner's drives with the car: the car's map holds its frames by what it really draws, also with the
+phone locked, and draws without its 3D objects while the phone is hot, with a Debug switch; and the
+card shows a maneuver's own lanes only within two miles of it
+([Step 1d (built)](STAGE-2.md#step-1d-built)).
 
-Owner checks for steps 1, 1b and 1c, on the DHU or in the car with the internal testing build:
-[DRIVES.md](DRIVES.md), The car screen after step 1c.
+Owner checks for steps 1 to 1d, on the DHU or in the car with the internal testing build:
+[DRIVES.md](DRIVES.md), The car screen after step 1d.
 
 The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
 

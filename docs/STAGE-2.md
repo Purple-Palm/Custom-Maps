@@ -11,8 +11,10 @@ and where it settled or changed what follows. Step 1b, the fixes after the owner
 the car screen, is built too: the car map's own frame clock, its puck on that clock, real frame
 rates, and the phone's look on the car ([Step 1b (built)](#step-1b-built)). Step 1c is built as well:
 during a drive while the car shows the map, the phone shows the turns ahead as a list in place of its
-own map, with the map one tap away ([Step 1c (built)](#step-1c-built)). The rest is the design as
-decided so far.
+own map, with the map one tap away ([Step 1c (built)](#step-1c-built)). Step 1d is built too: the
+car map's frame cap held by the frames it really draws, a lighter car map while the phone is hot, and
+the card's lanes of a maneuver only within two miles of it ([Step 1d (built)](#step-1d-built)). The
+rest is the design as decided so far.
 **Unverified** marks behaviour that no document or library source settles; it is checked on the
 Desktop Head Unit (DHU) or on the phone before code depends on it.
 
@@ -257,7 +259,8 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
   asked for one right after the other), after it the last render thread's rate while the display's
   rate stays within a tenth of the one it was counted at, and 60 while the clock is on its timer.
   While a car surface shows the map, the phone's map draws at most 60 frames a second, and as
-  before once the surface goes.
+  before once the surface goes. Step 1d replaced this rule of the ticks with one of the frames the
+  map draws ([Step 1d (built)](#step-1d-built)).
 - **The phone's look on the car** (DECISIONS 50; [Day and night](#day-and-night)): the app's one
   look, which `LookController` decides for the process. The car's session (its part in the look,
   `CarLookSession`) starts it if no screen has (the car's host may have started the process), keeps
@@ -274,8 +277,9 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
     `vsync`), `quietMs`, and on the way back `timerTicks`;
   - the camera line's `render` adds `drawn` and `drawnFps`, the frames the render thread drew
     beside the calls it got (`frames`, `fps`), on both maps; the car's camera line adds `clock`
-    (`vsyncTicks`, `timerTicks` of the second), `maxFps`, `capFrom` (`render`, `display` or `timer`)
-    and `measuredHz`, the phone's `capped` while it draws at most 60;
+    (`vsyncTicks`, `timerTicks` of the second), `maxFps`, `capFrom` (`render`, `display` or `timer`;
+    since step 1d `drawn` in place of `render`) and `measuredHz`, the phone's `capped` while it draws
+    at most 60;
   - `car_surface` has `maxFps` (the cap set), `measuredHz` (the rate it was worked out for) and
     `capFrom`, and an `event` `fps` line at each new cap;
   - `car_error` from the clock's callbacks has `failures`: the first at once, then at most one each
@@ -297,7 +301,7 @@ both, from what the drive's debug log showed and from the Maps SDK 11.34.1 sourc
   animation list until the next display frame, since an animator of no duration still registers
   there. After an hour without display frames that is a few MB and a few percent of a core, gone
   at the first frame. The app's own puck layer of a later step ends it.
-- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1c.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1d.
 
 ## Step 1c (built)
 
@@ -405,7 +409,109 @@ the owner compare 30 and 60 frames a second on the car's screen.
   drive (step 1b's open question): the list follows the surface (`carMapShown`), so if the host keeps
   it, the phone stays on the list then, with **Map** one tap away; if it lets the surface go, the
   phone shows its map until the car shows the map again (`car_surface` and `phone_screen` lines).
-- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1c.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), The car screen after step 1d.
+
+## Step 1d (built)
+
+The owner's drives with the car screen, on the builds before 0.1.38 and on 0.1.38, showed the car's
+map drawing fewer frames than its target with the phone's screen off, and fewer still while the
+phone was hot; a simulated drive showed the card's lanes of an exit long before it. Step 1d holds
+the car's frames by what the map really draws, draws the car's map lighter while the phone is hot,
+and shows a maneuver's own lanes only within two miles of it (DECISIONS 55).
+
+### What the drives showed
+
+- **With the phone's screen on** the car's map drew its target, steady, and its cap seldom changed.
+- **With the phone's screen off or dozing,** the usual case in a car, it drew less and its cap
+  changed several times a minute. The render thread's windows counted more ticks a second than the
+  display has frames, as Mapbox counts a call that comes a little late as a missed display frame;
+  step 1b's rule took those ticks for the render thread's rate and lowered the cap, and the map then
+  drew exactly the lower cap. The main thread's frame clock stayed on the display's frames all along.
+- **While the phone was hot,** its thermal status MODERATE or SEVERE on the charger, the car's frames
+  took longer and it drew less whatever the cap.
+- **In a simulated drive** the card showed an exit's lanes long before the exit, while the car was
+  still on other roads.
+- **The one close view measured** on 0.1.38 was cut short by the drive's end and counted all the
+  same.
+
+### What it has
+
+- **The car's cap from the frames drawn** (`CarFrameCap`, `:core-nav` `nav/car`). In Mapbox's
+  `FpsManager` (Maps 11.34.1) a cap of `c` draws on `c` of every 60 of the render thread's ticks, a
+  tick being a call plus the display frames Mapbox counts as missed. At 60 Hz the ticks follow the
+  display's frames, and a late call adds a missed frame that was not; at 120 Hz a frame longer than
+  one display frame makes two display frames one tick. The ticks are no measure of the render
+  thread's rate either way, so the cap now:
+  - starts from the display's own cap, `round(target × 60 / rate)` within 1 and 60 for the rate of
+    the display's frames (`CarFrameRate.maxFps`): 30 at 60 Hz and 15 at 120 Hz for the target 30, 60
+    and 30 for the target 60; 60 Hz while the frame clock runs on its timer;
+  - moves only by the frames the map drew, the render thread's calls less those its pacing skipped,
+    in the camera line's windows of its statistics during guidance, about a second each: up when two
+    counted windows in a row drew under 0.9 × the target with a 95th percentile of their frame times
+    under one frame of the target (33 ms at 30), since slower frames are the limit themselves; down
+    when two in a row drew over 1.25 × the target; to `round(cap × target / drawn)` within 1 and 60,
+    for the smaller of the two steps, and never below the display's cap;
+  - counts a window, as before, only while the frame clock stayed on the display's frames, the cap
+    did not change in it and the render thread was called on at least half of the display's frames;
+  - keeps a moved cap while the display's rate stays within a tenth of the one it was moved at,
+    across the timer and into the next drive; a new frame target starts from its own display cap;
+  - comes to 30 at 60 Hz, the phone's screen on or off, and to 15 at 120 Hz, or about 19 once two
+    windows of frames that take 9 to 16 ms said so. The ticks stay in the lines and set no cap.
+- **A lighter car map while the phone is hot** (`CarLightRule`, `:core-nav` `nav/car`). From the
+  moment the phone's thermal status is MODERATE or worse, the car's map draws without the 3D objects
+  of Mapbox Standard, its buildings, landmarks and trees (the style's `show3dObjects` off), a heavy
+  part of each frame; once the status has been LIGHT or better for 120 s in a row it draws them
+  again. A status that comes and goes inside those two minutes changes nothing, and every hot status
+  starts the count again. The light state wins over the look's own value at every look change and
+  every style load, so a switch between day and night never brings the 3D objects back while light,
+  and a new surface never shows them while light. The phone's own map keeps its look's value. The
+  status comes from the app's one listener of the phone's thermal status, the one that writes the
+  `thermal` lines (`DeviceLog`), through `AppGraph` and `CarMapSettings` to the car's map; the rule
+  acts on a change of the status or the switch and once at the end of the two minutes, never per
+  frame. **Settings → Debug → Lighter car map when hot**, on unless turned off: off, the full map
+  always.
+- **The card's lanes within two miles** (`CardLanes`, `:core-nav`): the next maneuver's own lanes, an
+  exit's or a turn's, show on the card only while it is at most two miles ahead (3,219 m); farther,
+  the card shows no lane row. The phone's card and the car's lanes image both take `CardLanes`, so
+  both follow, and so does the phone with no car. A run-up's row and a lane choice's row show as
+  before, however far the maneuver is, and a pending card shows none.
+- **Whole measured views** (Measure the drawn lanes, the phone's map alone): a close view counts for
+  the frame gate only when it had frames, began 5 s or more after the drawing was shown or hidden,
+  lasted 3 s or more and ended as its close view let go; every other is logged with `counts` false
+  ([CAMERA.md](CAMERA.md), Measuring the drawn lanes).
+- **Lines**, numbers and states only:
+  - `car_surface` lines with `event` `fps` add `drawnFps`, the frames a second drawn that moved the
+    cap; `capFrom` is `display`, `drawn` (moved by the frames drawn; `render` before) or `timer`, on
+    them and on the car's camera line; their `measuredHz` is the display's rate for the display's cap,
+    and the render thread's ticks a second of the last counted window for a cap the frames drawn
+    moved;
+  - `car_light`, with `screen` `car`, at each change: `on`, whether the car's map is the lighter one,
+    and `thermal`, the phone's thermal status by Android's name (null while none was read);
+  - the car's camera line adds `light`, true or false;
+  - `lane_row` says `source` `none` with `far` true, and `metersAhead` the maneuver's distance, while
+    a maneuver's own lanes are held back;
+  - `lane_measure` adds `ms`, how long the view lasted;
+  - the `settings` line has the key `car_light_when_hot`.
+
+### Not in this step
+
+- Keeping the phone's screen on during a drive; any change of the phone's own frame cap; the car's
+  camera styles; the lane plan's own rules; the default of Lanes on the map.
+
+### Unverified
+
+- Whether the frames drawn hold the target on the owner's phone with its screen off, as the replay
+  of Mapbox's pacing says: the car's camera lines' `render.drawnFps` at the target, and `car_surface`
+  lines with `event` `fps` rare.
+- Whether a car map without its 3D objects draws more frames while the phone is hot, or the same
+  frames for less heat (the car's camera lines' `render.drawnFps` and `p95Ms` with `light` true
+  against false, and the `thermal` lines), and what `show3dObjects` off leaves out on Standard
+  11.34.1, read off the car's screen.
+- Whether the car's host shows the frames the lighter map gains.
+- How the card's lanes appearing two miles before an exit read where the road gains or loses lanes
+  on the way, before the run-up's row takes over.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), checks 77 to 82, with the car screen's
+  section, The car screen after step 1d.
 
 ## Modules and dependencies
 
@@ -820,11 +926,12 @@ Other notes:
   test both maps drew far more frames than they needed and the phone grew hot quickly. The phone map
   stops drawing when its activity stops.
 - Built in step 1b ([Step 1b](#step-1b-built)): the car's surface draws a real 30 frames a second,
-  its cap held from the rate its render thread really ticks at (during guidance its own count, else
-  the display's rate), since Mapbox paces it against 60 Hz while its render thread is called at the
-  phone's rate; and while a car surface shows the map, the phone's map draws at most 60 frames a
-  second (`capped` in its camera line), a cap its own pacing knows the phone's real rate for. The
-  DHU streams 30 fps.
+  since Mapbox paces it against 60 Hz while its render thread is called at the phone's rate; and
+  while a car surface shows the map, the phone's map draws at most 60 frames a second (`capped` in
+  its camera line), a cap its own pacing knows the phone's real rate for. The DHU streams 30 fps.
+- Built in step 1d ([Step 1d](#step-1d-built)): the car's cap starts from the display's own and
+  moves only by the frames the map really draws, so it holds with the phone's screen off; and while
+  the phone is hot the car's map draws without its 3D objects.
 - Built in step 1c ([Step 1c](#step-1c-built)): during a drive while a car's surface shows the map,
   the phone shows the list of the maneuvers ahead and its map is put away and draws nothing, unless
   the driver chose the map. The car's frame target can be set to 60 under Debug, to compare.
@@ -1868,7 +1975,7 @@ and puck of 6 a frame clock of their own ([Step 1b](#step-1b-built)).
 | `setStyleImportConfigProperties` resets other style settings | Keys set one by one |
 | A car that stays in day mode | The car's map follows the phone's look since step 1b (DECISIONS 50); the host's mode, logged, colours only the card's images |
 | Google's quality guidelines expect a dark map when the car says night (MR-1), and the car's map follows the phone | Internal testing is not reviewed; looked at again before any closed or open testing (DECISIONS 50) |
-| Two maps double the GPU work and the heat | Step 1b: a real 30 frames a second on the car's surface, the phone's map at most 60 while the car shows the map; the `thermal` lines over ten minutes with the car (DRIVES.md); stage 5 measures heat too |
+| Two maps double the GPU work and the heat | Step 1b: a real 30 frames a second on the car's surface, the phone's map at most 60 while the car shows the map; step 1c: the list in place of the phone's map; step 1d: the car's map without its 3D objects while the phone is hot; the `thermal` lines over ten minutes with the car (DRIVES.md); stage 5 measures heat too |
 | Main-thread frames may stop with the phone locked or the app in the background (as in the first car test) | Step 1b: the car's frame clock with its timer, Smooth follow, the zoom buttons and the puck on it; the two Mapbox camera styles and the double tap still wait for display frames |
 | The notification interceptor runs on a background thread and has one slot | The engine owns the slot; the extender's state is behind a lock |
 | Notifications refused: no rail and no heads-up in the car | Asked for during setup; both screens say so |

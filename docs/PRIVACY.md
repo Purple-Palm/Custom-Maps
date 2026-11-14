@@ -35,7 +35,8 @@ Last updated: 2026-11-14. It describes the app as it is today; see [Changes](#ch
 - **Settings:** day and night, camera style, lane zoom, lanes on the map (off, Mapbox's lane details
   or drawn by the app), lane counts between lane points (whether the app takes them from Mapbox's
   electronic horizon), and the switches for the simulated drive, for the app's own route line, for
-  measuring the drawn lanes and for how many frames a second the car's map draws under Debug.
+  measuring the drawn lanes, for how many frames a second the car's map draws and for a lighter car
+  map while the phone is hot, under Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
@@ -199,7 +200,8 @@ whether the phone showed its map or the list during a drive with the car, in the
 on the map in place of the lane details switch, and the switch for measuring the drawn lanes, among
 the settings; who drew the car, and the measured frames of the drawn lanes, in the debug log.
 2026-11-14: lane counts between lane points from Mapbox's electronic horizon among the settings, and
-the counts it gave, against the route's own, in the debug log.
+the counts it gave, against the route's own, in the debug log; the switch for a lighter car map while
+the phone is hot among the settings, and whether the car's map was the lighter one, in the debug log.
 
 ## Contact
 

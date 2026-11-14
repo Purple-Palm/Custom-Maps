@@ -680,40 +680,69 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
 - **Smooth follow on the car.** Only Smooth follow keeps moving while the main thread gets no display
   frames. The two Mapbox styles keep Mapbox's own animators, and so does the double tap's zoom: they
   stand still then, as the whole car map did before step 1b.
-- **Frame rate (step 1b).** The car's surface draws a real 30 frames a second (`CarFrameCap`):
-  `setMaximumFps(round(30 × 60 / rate))`, within 1 and 60, for the rate at which Mapbox's render
-  thread ticks as Mapbox counts it. Mapbox paces the car's surface against 60 Hz, the rate of
-  car-app's own virtual display by Android's sources and Mapbox's own fallback, while its render
-  thread is called at the phone's rate, so the former `setMaximumFps(30)` drew 60 frames a second at
-  120 Hz. It draws on `cap` of every 60 ticks, a tick being a call of its render thread plus the
-  display frames it counts as missed when a call comes more than 1/60 s and a millisecond after the
-  one before. At 120 Hz a frame that takes longer than one display frame makes the next call wait
-  for the display frame after next, which counts as one tick: the ticks then come slower than the
-  display's frames, and the cap for the display's rate alone, 15, drew about 24 frames a second
-  with frames of 9 to 16 ms. So during guidance 30 is held from the render thread's own ticks: each
-  second the camera line's window of its statistics gives `render.frames` plus `render.missedVsync`.
-  A window counts when the frame clock stayed on the display, the cap did not change in it and the
-  render thread was called on at least half of the display's frames (a map that draws now and then,
-  standing at a light, says nothing); the cap goes down at once when the map would draw more than a
-  tenth over 30 at the cap set now, and up only when two windows in a row say it would draw more
-  than a tenth under, for the faster of the two. Without windows (before the first guidance) the
-  rate is that of the display's frames, measured from display callbacks asked for one right after
-  the other (the lower quartile of the last 16 intervals); after a guidance the last render
-  thread's rate, while the display's rate stays within a tenth of the one it was counted at; 60
-  while the clock runs on its timer. At 120 Hz the cap is 15 to 20. While a car surface shows the
-  map, the phone's map draws at most 60 frames a second (`setMaximumFps(60)`, which its pacing knows
-  the phone's real rate for), and as before once the surface goes.
+- **Frame rate (step 1b, its rule since step 1d).** The car's surface draws a real 30 frames a second
+  (`CarFrameCap`). Mapbox paces the car's surface against 60 Hz, the rate of car-app's own virtual
+  display by Android's sources and Mapbox's own fallback, while its render thread is called at the
+  phone's rate, so the former `setMaximumFps(30)` drew 60 frames a second at 120 Hz. Under a cap of
+  `c` it draws on `c` of every 60 ticks, a tick being a call of its render thread plus the display
+  frames it counts as missed when a call comes more than 1/60 s and a millisecond after the one
+  before (`FpsManager`, Maps 11.34.1). At 60 Hz the ticks follow the display's frames, but a call
+  that comes a little late counts a frame as missed that was not, as with the phone's screen off; at
+  120 Hz a frame that takes longer than one display frame makes the next call wait for the display
+  frame after next, which counts as one tick, so the cap for the display's rate alone, 15, drew
+  about 24 frames a second with frames of 9 to 16 ms. The ticks are no measure of the render
+  thread's rate either way; step 1b held the cap from them, and with the phone's screen off it fell
+  and rose several times a minute. Since step 1d:
+  - **The base** is the display's own cap, `round(target × 60 / rate)` within 1 and 60
+    (`CarFrameRate.maxFps`), for the rate of the display's frames, measured from display callbacks
+    asked for one right after the other (the lower quartile of the last 16 intervals); 60 while the
+    clock runs on its timer, and the believed 60 before there is a rate: 30 at 60 Hz and 15 at
+    120 Hz. It is worked out once a second, and again only when the base would draw more than a tenth
+    off the target at the display's new rate.
+  - **Only the frames drawn move it.** Each second during guidance the camera line's window of the
+    render thread's statistics gives the frames it drew (`render.drawn`: the calls less those the
+    pacing skipped), its ticks and the 95th percentile of its frame times. A window counts when the
+    frame clock stayed on the display, the cap did not change in it and the render thread was called
+    on at least half of the display's frames (a map that draws now and then, standing at a light,
+    says nothing). Two counted windows in a row that drew under 0.9 × the target with a 95th
+    percentile under one frame of the target (33 ms at 30) raise the cap; two that drew over 1.25 ×
+    the target lower it; to `round(cap × target / drawn)` within 1 and 60, for the smaller of the two
+    steps, and never below the base, whatever the ticks say. Frames slower than one frame of the
+    target are the limit themselves, and no cap draws more of them.
+  - **A moved cap** stays while the display's rate is within a tenth of the one it was moved at: on
+    the timer the cap is the timer's base, back on the display the moved cap again, and the next
+    drive starts with it.
+  - **What it comes to:** at 60 Hz the cap is 30 and stays there, the phone's screen on or off; at
+    120 Hz it is 15, and about 19 once two windows of frames that take 9 to 16 ms said so.
+  - **The phone's map** draws at most 60 frames a second while a car surface shows the map
+    (`setMaximumFps(60)`, which its pacing knows the phone's real rate for), and as before once the
+    surface goes.
 - **Frame target (step 1c).** **Settings → Debug → Car map frames** sets what the car's map aims
   at: 30 frames a second, the default, or 60, at once on the surface there is, and on every later
   one. Settings opens before Start and after the arrival, so a drive keeps the target it started
-  with. The cap is then `round(target × 60 / rate)`, within 1 and 60, and the band that holds a cap is
-  a tenth of the target either way (54 to 66 at 60): at 60 the cap is 30 at 120 Hz, 40 at 90 Hz and
-  60 at 60 Hz and on the timer. Every `car_surface` line and the car's camera line carry `targetFps`,
-  and a new target writes a `car_surface` line with `event` `fps` while a surface is there. The car's
-  host may show fewer frames than the map draws: it shows the app's surface on the car's screen at a
-  rate of its own, which the app cannot read, so 60 drawn may look no smoother there than 30. The
-  switch is there to compare the two on the car's screen; the car's camera line says what the map
-  drew (`render.drawnFps`), and the `thermal` lines what it cost.
+  with. The base is then `round(target × 60 / rate)`, within 1 and 60, and the frames drawn move it by
+  the same shares of the target (two windows under 54 with frames under 16.7 ms, or over 75, at 60):
+  at 60 the base is 30 at 120 Hz, 40 at 90 Hz and 60 at 60 Hz and on the timer, and a new target
+  starts from its own base, a cap moved for the other dropped. Every `car_surface` line and the car's
+  camera line carry `targetFps`, and a new target writes a `car_surface` line with `event` `fps`
+  while a surface is there; such a line for a cap the frames drawn moved has `drawnFps`, the frames a
+  second that moved it. The car's host may show fewer frames than the map draws: it shows the app's
+  surface on the car's screen at a rate of its own, which the app cannot read, so 60 drawn may look
+  no smoother there than 30. The switch is there to compare the two on the car's screen; the car's
+  camera line says what the map drew (`render.drawnFps`), and the `thermal` lines what it cost.
+- **Lighter while the phone is hot (step 1d).** From the moment the phone's thermal status is
+  MODERATE or worse, the car's map draws without the 3D objects of Mapbox Standard, its buildings,
+  landmarks and trees (`show3dObjects` off), a heavy part of each frame; once the status has been
+  LIGHT or better for 120 s in a row it draws them again (`CarLightRule`). A status that comes and
+  goes inside those two minutes changes nothing, and every hot status starts the count again; no
+  status read yet counts as cool. The light state wins over the look's own `show3dObjects` at every
+  look change and every style load, so a switch between day and night keeps them off while light, and
+  a new surface takes it before its style's data. Only the car's map: the phone's keeps its look's
+  value. The status comes from the app's one thermal listener (`DeviceLog.thermal`, the one of the
+  `thermal` lines) through `AppGraph` and `CarMapSettings`; the rule acts on a change of the status
+  or the switch and once at the end of the two minutes, never per frame. **Settings → Debug →
+  Lighter car map when hot**, on unless turned off: off, the full map always. A `car_light` line at
+  each change, and the car's camera line's `light`.
 - **The phone's map while the car shows one (step 1c).** During a drive while a car's surface shows
   the map, the phone shows the list of the maneuvers ahead in place of its map, unless the driver
   chose the map ([STAGE-2.md](STAGE-2.md), Step 1c). The phone's map is put away meanwhile: its view
@@ -760,7 +789,8 @@ has no map, and so no line, until the map shows. The car's map writes its own, w
 | `capped` | the phone's map only: true while it draws at most 60 frames a second because a car's surface shows the map too; left out otherwise | |
 | `away` | the phone's map only: true while it is put away, the phone showing the list of the maneuvers ahead in its place; its view is out of the window and stopped, so `render.frames` is 0, and the camera's and the puck's fields are those it was left with; left out otherwise | `render.frames` 0 |
 | `clock` | the car's map only: the ticks of its frame clock that second, `vsyncTicks` from the display's frames and `timerTicks` from the timer | about 60 together while moving; `timerTicks` 0 while the display sends frames |
-| `maxFps`, `targetFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; the frames a second it is worked out for, 30 or 60 (**Settings → Debug → Car map frames**); where the rate it was worked out for came from, `render` (the render thread's own ticks), `display` or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | 15 to 20 at a target of 30 (30 to 40 at 60), `render` and about 120 on a phone at 120 Hz during a drive |
+| `maxFps`, `targetFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; the frames a second it is worked out for, 30 or 60 (**Settings → Debug → Car map frames**); where the cap comes from, `display` (the display's own cap, for the rate of its frames), `drawn` (moved by the frames the map drew; `render` before step 1d) or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | at a target of 30: 30 and `display` at 60 Hz, the screen on or off; 15 (`display`) or about 19 (`drawn`) at 120 Hz |
+| `light` | the car's map only: true while it draws without its 3D objects because the phone is hot (**Settings → Debug → Lighter car map when hot**), false otherwise | false but while the phone is hot |
 | `laneDetails` | whether Mapbox's lane details are wanted on this map: Lanes on the map at Mapbox's lane details, or the measuring drive's check under the app's drawing | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
@@ -810,6 +840,10 @@ Other lines:
   `timer` when the timer takes over, with `quietMs`, how long the display's frames had been awaited;
   `source` `vsync` when the display's frames are back, with `quietMs`, how long the display was quiet
   from the start of that wait, and `timerTicks`, the ticks the timer gave meanwhile.
+- A **car_light** line, with `screen` `car`, at each change of the car's lighter map (stage 2's step
+  1d): `on`, whether it draws without its 3D objects now, and `thermal`, the phone's thermal status by
+  Android's name (`NONE`, `LIGHT`, `MODERATE`, `SEVERE`, `CRITICAL`, `EMERGENCY` or `SHUTDOWN`; null
+  while none was read). No position and no time of day.
 - A **display_state** line, from the app (not an activity), at its start and at every change of the
   phone's own display, also while the car's screen shows the app: `state` (`ON`, `OFF`, `DOZE`,
   `DOZE_SUSPEND`, `VR`, `ON_SUSPEND` or `UNKNOWN`) and `hz`, its refresh rate to a tenth. No position
@@ -839,10 +873,10 @@ Other lines:
   `from` and `guidance`.
 - A **settings** line on every change of a setting: `key`, `value` as stored, and `guidance`. A
   change of `camera_style`, `lane_zoom` (`default` or `large`) or `lanes_on_map` (`off`, `mapbox` or
-  `app`) during a drive shows there, and so do `day_night` (`auto`, `day` or `night`),
-  `car_map_fps` (30 or 60), `own_route_line` and `measure_own_lanes` (true or false). The carry-over
-  of the earlier switch Lane details on the map writes one `lanes_on_map` line with the choice it
-  wrote.
+  `app`) during a drive shows there, and so do `day_night` (`auto`, `day` or `night`), `car_map_fps`
+  (30 or 60), `own_route_line`, `measure_own_lanes` and `car_light_when_hot` (true or false). The
+  carry-over of the earlier switch Lane details on the map writes one `lanes_on_map` line with the
+  choice it wrote.
 - A **look** line for each change between the day and the night look
   ([Day and night during guidance](#day-and-night-during-guidance)): `look` and `was` (`DAY`,
   `NIGHT`), `cause` (`START`, the first look of the app's process; `RESUME`, back on screen;
@@ -885,27 +919,30 @@ Other lines:
   (`validInd`), each null where the route says nothing, and `des`, the vehicles a lane is kept for,
   only where it has any.
 - A **lane_row** line whenever what the maneuver card's lane row draws changes, with every camera
-  style and either lane zoom: where the row comes from, its lanes, which are lit, or the words beside
-  them; never for a distance alone. `source` (`maneuver`, `choice`, `run_up` or `none`), `key` (the
-  point the row shows), `row` (one token a lane from the left: its arrows `s`, `sl`, `l`, `shl`,
-  `sr`, `r`, `shr`, `u` joined by `+`, `-` for none, `*` when lit, and `>` with the arrow lit on it
-  where that is not the lane's only arrow; `~` instead for a lane drawn as an outline, a lane still
-  to come, which is never lit: `sr~`), `lit` and `des` (indices; an outline is never among `lit`),
-  `label` (a lane choice's distance), `words` (`R1`, `R2`, `R3`, `R1+1` and `R1+2` for Right lane,
-  2 right, 3 right, 2nd and 3rd from right, and `L...` for the left), `need` (the composed lane,
-  counted from the exit's edge), `metersAhead`, `runUp` and `start` (the run-up's exit, and what
-  began it: a point's key, `edge`, `resume` or `seam`, the lane plan's seam; on a ramp the run-up
-  holds through after its gore, `runUp` is still the exit whose gore was passed and `key` is the
-  split's row), `odd` (why a run-up's row has no words: `composed`, `pieces`, `unknown_branch` (the
-  rule's own reading, where no lane plan reads the row), `opens_ahead` (by the plan, a lane on the
-  exit's side opens or may begin between the car and the row's point, or the lit lane counts
-  otherwise from the exit's edge at the car), `unknown_ahead` (by the plan, a road without lane data
-  leaves on the exit's side ahead on the step), `not_named` (the plan names no lane at the row's
-  point or at the car, as before an exit beyond a lane for car pools, or the route's plan is still
-  on its way), or `no_fit` when the card left words out that did not fit; and `designated_only` on
-  any row, the maneuver's and a lane choice's too, whose only lit lanes are kept for car pools or
-  buses), `pending` and `offRoute`. Words that do not fit are found when the card lays the row out,
-  so such a row has a second line a moment after its first. Keys, indices and tokens only.
+  style and either lane zoom: where the row comes from, its lanes, which are lit, or the words
+  beside them, and when it shows none because the next maneuver is too far for its lanes; never for
+  a distance alone. `source` (`maneuver`, `choice`, `run_up` or `none`), `far` (on a row of `none`
+  only: true while the next maneuver's own lanes are held back, as it is more than two miles ahead;
+  `metersAhead` then says how far), `key` (the point the row shows), `row` (one token a lane from
+  the left: its arrows `s`, `sl`, `l`, `shl`, `sr`, `r`, `shr`, `u` joined by `+`, `-` for none, `*`
+  when lit, and `>` with the arrow lit on it where that is not the lane's only arrow; `~` instead
+  for a lane drawn as an outline, a lane still to come, which is never lit: `sr~`), `lit` and `des`
+  (indices; an outline is never among `lit`), `label` (a lane choice's distance), `words` (`R1`,
+  `R2`, `R3`, `R1+1` and `R1+2` for Right lane, 2 right, 3 right, 2nd and 3rd from right, and `L...`
+  for the left), `need` (the composed lane, counted from the exit's edge), `metersAhead`, `runUp`
+  and `start` (the run-up's exit, and what began it: a point's key, `edge`, `resume` or `seam`, the
+  lane plan's seam; on a ramp the run-up holds through after its gore, `runUp` is still the exit
+  whose gore was passed and `key` is the split's row), `odd` (why a run-up's row has no words:
+  `composed`, `pieces`, `unknown_branch` (the rule's own reading, where no lane plan reads the row),
+  `opens_ahead` (by the plan, a lane on the exit's side opens or may begin between the car and the
+  row's point, or the lit lane counts otherwise from the exit's edge at the car), `unknown_ahead`
+  (by the plan, a road without lane data leaves on the exit's side ahead on the step), `not_named`
+  (the plan names no lane at the row's point or at the car, as before an exit beyond a lane for car
+  pools, or the route's plan is still on its way), or `no_fit` when the card left words out that did
+  not fit; and `designated_only` on any row, the maneuver's and a lane choice's too, whose only lit
+  lanes are kept for car pools or buses), `pending` and `offRoute`. Words that do not fit are found
+  when the card lays the row out, so such a row has a second line a moment after its first. Keys,
+  indices and tokens only.
 - A **missed_maneuver** or **diverge_taken** line for each place the road divides, to tell later
   whether a rule could find a car that stayed on the freeway sooner than the navigator does. A
   watch starts when the step changes past an exit, a fork or an on ramp (`kind` `maneuver`), and
@@ -1386,11 +1423,12 @@ at 14.2): the zoom starts in 675 m before a split where 2 of 5 lanes leave, a la
 back about 300 m past it. A point where one of four lanes leaves does not move the zoom. The 4
 zoom levels take about 7 s, not 6, because of the limit of 1 level a second.
 
-**The maneuver card shows the same point.** From where the close view would start until the car
-has passed it, the card's lane row shows the lanes of a straight-on lane choice with its distance,
-in every camera style and with either lane zoom (`RouteProgressSnapshot.laneChoiceAhead`, filled
-by the engine from the same `LaneChoices`). On a run-up the card shows the run-up's one row instead
-([The card's row on a run-up](#the-cards-row-on-a-run-up)).
+**The maneuver card shows the same point.** From where the close view would start until the car has
+passed it, the card's lane row shows the lanes of a straight-on lane choice with its distance, in
+every camera style and with either lane zoom (`RouteProgressSnapshot.laneChoiceAhead`, filled by the
+engine from the same `LaneChoices`). Past it the row is the next maneuver's own again, within two
+miles of it, else none. On a run-up the card shows the run-up's one row instead ([The card's row on
+a run-up](#the-cards-row-on-a-run-up)).
 
 **Limits.** Lane choices are read for the current step only, so one that follows right after a
 maneuver gets a shorter start. What kind the next maneuver is comes from the route's banner; while
@@ -1510,12 +1548,16 @@ on a ramp come with every camera style, either lane zoom and every choice of
 
 #### The card's row on a run-up
 
-`CardLanes` decides in one place which lane row the card draws; the card, the `lane_row` line of the
-debug log and every later reader take it from there.
+`CardLanes` decides in one place which lane row the card draws; the card, the car's lanes image, the
+`lane_row` line of the debug log and every later reader take it from there. The next maneuver's own
+lanes, an exit's or a turn's, show only within two miles of it (`CardLanes.MANEUVER_LANES_METERS`,
+3,219 m): farther they are the lanes of a road the car is not on yet, which can leave or gain lanes
+on the way. A run-up's row and a lane choice's row show however far the maneuver is.
 
 | Stretch of the step | Row | Lit | Beside the lanes |
 |---|---|---|---|
-| Up to the run-up's start | the exit's own lanes, as the navigation SDK reads them | the active lanes; a lane for car pools or buses only where no other lane is active | nothing |
+| More than two miles before the exit, outside a lane choice's window | no row (`lane_row` `far`) | | |
+| From two miles before the exit to the run-up's start | the exit's own lanes, as the navigation SDK reads them | the active lanes; a lane for car pools or buses only where no other lane is active | nothing |
 | Outside a run-up: a lane choice where the route goes straight on, from its window until passed | its lanes | every lane the route can be followed from | its distance |
 | From the run-up's start to the last edge point | the next edge point's lanes, every lane, car pool lanes dim, a lane still to come as an outline | one lane: the lane the lane plan names at that point, which is the composed lane (below) where the data leaves no doubt | its words where the counts leave no doubt and the plan lets them show (below) |
 | From there to the gore | the exit's own lanes, every lane, car pool lanes dim, a lane without arrows drawn straight on, a lane still to come as an outline | the lanes of the plan that still work there, which are those the route can be followed from, narrowed to those it prefers where it prefers any | their words where they have some and the plan lets them show |

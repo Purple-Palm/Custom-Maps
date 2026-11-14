@@ -90,12 +90,12 @@ The same builds also reach the phone through Google Play, where they update by t
    traffic is slow and red, or coral and pink at night, where it is heavy; the alternatives in grey.
    Tap a route, on the map or in the list, to choose it.
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
-   notification. The maneuver card shows the next turn, its distance and the lanes; the bottom bar
-   shows the arrival time, what is left, **Overview**/**Recenter** and **End**. With the largest font
-   sizes on a narrow phone, the arrival time and what is left take a row of their own above the two
-   buttons, for the whole drive, so that no number is cut off. Right after a new route, as after
-   leaving the route, the card can dim for a moment and show no distance, until the new route's
-   first instruction arrives.
+   notification. The maneuver card shows the next turn, its distance and, from two miles before it,
+   its lanes; the bottom bar shows the arrival time, what is left, **Overview**/**Recenter** and
+   **End**. With the largest font sizes on a narrow phone, the arrival time and what is left take a
+   row of their own above the two buttons, for the whole drive, so that no number is cut off. Right
+   after a new route, as after leaving the route, the card can dim for a moment and show no
+   distance, until the new route's first instruction arrives.
 5. Guidance stops at the destination (**Done**) or with **End**. Both stop the trip session, and so
    does **End Navigation** in the trip notification.
 
@@ -162,6 +162,12 @@ car connects again during a drive is not known yet; open it from the launcher if
 **Settings → Debug → Car map frames** chooses how many frames a second the car's map draws: 30, the
 default, or 60, to compare the two on the car's screen. The car may show fewer frames than the map
 draws, as it shows the app's screen at a rate of its own, and 60 costs the phone more power and heat.
+The car's map paces itself by the frames it really draws, also while the phone is locked.
+
+**Settings → Debug → Lighter car map when hot**, on unless turned off, draws the car's map without
+its 3D buildings and trees while the phone is hot (from Android's thermal status Moderate on) and
+with them again two minutes after it has cooled, to spare the phone frames and heat; the phone's own
+map keeps them. Off, the car's map is drawn in full always.
 
 ### Simulated drive
 
