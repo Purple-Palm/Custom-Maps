@@ -76,6 +76,7 @@ import io.github.purplepalm.custommaps.nav.lanes.LaneMeasureGate
 import io.github.purplepalm.custommaps.nav.lanes.PlanSegment
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
 import io.github.purplepalm.custommaps.nav.lanes.RouteHorizon
+import io.github.purplepalm.custommaps.nav.lanes.SideRoadsLine
 import io.github.purplepalm.custommaps.nav.model.Distance
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.GuidanceState
@@ -663,6 +664,8 @@ internal class MapboxNavigationEngine(
             }
             is RouteResponse.Routes -> {
                 logRouteResponse(response.routes, options, response.routerOrigin, inTrip = false)
+                // With Debug's switch for the side roads' fields, what came of them on each route of the answer.
+                for (route in response.routes) logSideRoads(route, SideRoadsLine.Reason.PREVIEW)
                 if (response.routes.isEmpty()) {
                     RouteRequestResult.NoRoute
                 } else {
@@ -996,6 +999,20 @@ internal class MapboxNavigationEngine(
     }
 
     /**
+     * Writes the "side_roads" line of [route] for [reason] while Debug's switch Side-road fields on routes is on, as the
+     * route comes: whether Mapbox sent the side roads' fields on it, how their values fall, and what they take of the
+     * route's size ([SideRoadsLine], [sideRoadsFields]). Read and measured once, on the route lines' worker after the lines
+     * before it, so a drive's route has it right after its "lane_evidence" line; nothing of it on the main thread. A size
+     * that cannot be measured costs one error line, a route that cannot be read its line, never the drive.
+     */
+    private fun logSideRoads(route: NavigationRoute, reason: SideRoadsLine.Reason) {
+        if (!sideRoadFields) return
+        logRoutes(SideRoadsLine.TYPE) {
+            sideRoadsFields(route.id, reason, route.directionsRoute, onSizeError = { debugLog.error(SideRoadsLine.TYPE, it) })
+        }
+    }
+
+    /**
      * Where the car is as the drive changes to a new route, for the hand-over of the lit lane from the plan
      * held (the design's D8, logged as the new plan's "replanMoves"): its latest matched place, in memory
      * only, and its station on the route of that plan at the last update there. Null at the start of a drive
@@ -1137,8 +1154,14 @@ internal class MapboxNavigationEngine(
                     val error = result.error
                     if (error == null) {
                         debugLog.log("routes_committed", mapOf("routeId" to routeId, "ignoredAlternatives" to result.value?.ignoredAlternatives?.keys))
-                        // Where the lane data of the route the drive starts on holds, and its lane plan, now that the navigator has it.
-                        if (primary != null) lanePlans.onCommitted(primary.id)?.let { planLanes(primary, it) }
+                        // Where the lane data of the route the drive starts on holds, and its lane plan, now that the navigator has it;
+                        // then, with Debug's switch for them, what came of the side roads' fields on it.
+                        if (primary != null) {
+                            lanePlans.onCommitted(primary.id)?.let {
+                                planLanes(primary, it)
+                                logSideRoads(primary, SideRoadsLine.Reason.START)
+                            }
+                        }
                         dispatch(GuidanceEvent.RoutesCommitted(command.simulated))
                     } else {
                         Log.e(TAG, "Navigator rejected the routes: ${error.message}")
@@ -1831,13 +1854,15 @@ internal class MapboxNavigationEngine(
                 "primary" to routes.firstOrNull()?.takeIf { reason != RoutesExtra.ROUTES_UPDATE_REASON_REFRESH }?.debugFields(),
             )
         }
-        // A new primary route of the drive, never a refresh of the same one: where its lane data holds, and its lane plan.
+        // A new primary route of the drive, never a refresh of the same one: where its lane data holds, and its lane plan;
+        // then, with Debug's switch for them, what came of the side roads' fields on it, a reroute's or another's.
         val primary = routes.firstOrNull()
         if (primary != null) {
             lanePlans.onRoutesChanged(primary.id, refresh = reason == RoutesExtra.ROUTES_UPDATE_REASON_REFRESH)?.let {
                 // The horizon laid along the route before is forgotten; the new route's is read from its plan on.
                 routeHorizon.clear()
                 planLanes(primary, it)
+                logSideRoads(primary, SideRoadsLine.Reason.ofRouteChange(reroute = reason == RoutesExtra.ROUTES_UPDATE_REASON_REROUTE))
             }
         }
     }

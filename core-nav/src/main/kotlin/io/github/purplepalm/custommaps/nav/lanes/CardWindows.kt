@@ -188,11 +188,14 @@ object CardWindows {
      * junction: one it does not stay up for, neither the departure nor the arrival, on an approach
      * that is no freeway.
      */
-    fun framesStreetManeuver(maneuver: NodeManeuver, approach: RouteNode): Boolean =
+    fun framesStreetManeuver(maneuver: NodeManeuver, approach: RouteNode): Boolean = framesStreetManeuver(maneuver, approach.road)
+
+    /** [framesStreetManeuver] for an approach on a road of the kind [approachRoad]. */
+    fun framesStreetManeuver(maneuver: NodeManeuver, approachRoad: RoadKind): Boolean =
         !maneuver.viewStaysUp &&
             maneuver.type != ManeuverType.DEPART &&
             maneuver.type != ManeuverType.ARRIVE &&
-            approach.road != RoadKind.FREEWAY
+            approachRoad != RoadKind.FREEWAY
 
     /** How many metres of the stretch from [from] to [to] lie inside [windows]; each metre counts once. */
     fun metersInside(windows: List<CardWindow>, from: Double, to: Double): Double {

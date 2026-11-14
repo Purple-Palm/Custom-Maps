@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.engine.mapbox.navigation
 
+import com.mapbox.api.directions.v5.models.LegStep
 import com.mapbox.api.directions.v5.models.MaxSpeed
 import com.mapbox.api.directions.v5.models.RouteLeg
 import com.mapbox.api.directions.v5.models.SpeedLimit
@@ -57,10 +58,7 @@ internal fun laneRouteInput(routeId: String, legs: List<RouteLeg>, shapes: List<
         val legSteps = leg.steps().orEmpty()
         val starts = DoubleArray(legSteps.size)
         val maxSpeeds = leg.annotation()?.maxspeed()
-        // A ramp step lies next to a freeway where the step before it ends on one, so a freeway leads
-        // to its maneuver, or the step after it begins on one, so a freeway leaves the ramp's end.
-        val endsOnFreeway = legSteps.map { it.intersections()?.lastOrNull()?.isFreeway() == true }
-        val beginsOnFreeway = legSteps.map { it.intersections()?.firstOrNull()?.isFreeway() == true }
+        val besideFreeway = stepsBesideFreeway(legSteps)
         for ((k, step) in legSteps.withIndex()) {
             steps++
             starts[k] = stepStart
@@ -73,7 +71,7 @@ internal fun laneRouteInput(routeId: String, legs: List<RouteLeg>, shapes: List<
             val meters = Polyline.distancesTo(shape, places)
             val type = step.maneuver().type()
             val stepType = ManeuverMapping.type(type)
-            val besideFreewayStep = endsOnFreeway.getOrNull(k - 1) == true || beginsOnFreeway.getOrNull(k + 1) == true
+            val besideFreewayStep = besideFreeway[k]
             var j = 0
             for ((raw, intersection) in listed.withIndex()) {
                 if (intersection == null) continue
@@ -117,6 +115,16 @@ internal fun laneRouteInput(routeId: String, legs: List<RouteLeg>, shapes: List<
         stepStarts.add(starts)
     }
     return LaneRouteInput(LaneRoute(routeId, steps, stepStart, nodes), stepStarts, nodesByKey, unknownExits)
+}
+
+/**
+ * For each step of a leg's [legSteps], whether it lies next to a freeway, as [RoadKind.isRamp] asks: the step before it
+ * ends on one, so a freeway leads to its maneuver, or the step after it begins on one, so a freeway leaves the ramp's end.
+ */
+internal fun stepsBesideFreeway(legSteps: List<LegStep>): BooleanArray {
+    val endsOnFreeway = legSteps.map { it.intersections()?.lastOrNull()?.isFreeway() == true }
+    val beginsOnFreeway = legSteps.map { it.intersections()?.firstOrNull()?.isFreeway() == true }
+    return BooleanArray(legSteps.size) { k -> endsOnFreeway.getOrNull(k - 1) == true || beginsOnFreeway.getOrNull(k + 1) == true }
 }
 
 /**
