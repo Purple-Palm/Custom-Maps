@@ -451,14 +451,15 @@ class DriveViewPlanner(
      * settle, and the plan is out from then on until the next approach; but the view behind the car
      * when a point is near, off the route, or when the overview would stand less than
      * [DriveViewTuning.buttonOverviewSeconds] before the next approach ([Reason.RECENTER_TOO_CLOSE],
-     * down until that point is passed).
+     * down until that point is passed). That holds where the plan was out too: an overview so short
+     * would be a flight out and straight back down.
      */
     fun onRecenter(nowSeconds: Double): CameraMode {
-        if (guiding && (phase == Phase.STAY || phase == Phase.DECIDE)) {
+        if (guiding && (phase == Phase.OUT || phase == Phase.STAY || phase == Phase.DECIDE)) {
             val next = points.firstOrNull()
             if (next != null && !overviewHasTime()) {
                 stay(next, Reason.RECENTER_TOO_CLOSE)
-            } else {
+            } else if (phase != Phase.OUT) {
                 goOut(Reason.RECENTERED)
             }
             bump()

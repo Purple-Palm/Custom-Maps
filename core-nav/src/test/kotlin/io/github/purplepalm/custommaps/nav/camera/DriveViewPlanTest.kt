@@ -657,6 +657,60 @@ class DriveViewPlanTest {
     }
 
     @Test
+    fun `a hold's end where the plan is out brings the car when the overview could not stand 10 s`() {
+        // Out from the preview with no point passed; the overview could stand 1, 5, 9 or 9.9 s more before the next
+        // approach: the car until that turn, as between close turns, and no flight out and straight back down.
+        for (seconds in listOf(1.0, 5.0, 9.0, 9.9)) {
+            val (d, next) = shortOfApproach(seconds, afterTurn = false)
+            assertEquals(CameraMode.OVERVIEW, d.planner.wanted, "$seconds s: out before the hold's end")
+            assertEquals(seconds, DriveViewRule.overviewSeconds(d.planner.point!!, 13.0, camera, tuning), 1e-6)
+            assertEquals(CameraMode.FOLLOWING, d.planner.onRecenter(d.t), "$seconds s")
+            assertEquals(Reason.RECENTER_TOO_CLOSE, d.planner.reason)
+            val before = d.asks.size
+            d.driveAt(13.0, next + 100.0)
+            assertTrue(d.asks.drop(before).none { it.mode == CameraMode.OVERVIEW && it.x < next }, "$seconds s: ${d.asks.drop(before)}")
+            // After that turn the mode's own rules: the next turn is far, out.
+            assertEquals(CameraMode.OVERVIEW, d.planner.wanted, "$seconds s: out after the turn")
+            assertEquals(Reason.OPEN_ROAD, d.planner.reason)
+        }
+        // 10.1 or 11 s: the overview stays, with the plan's own reason.
+        for (seconds in listOf(10.1, 11.0)) {
+            val (d, _) = shortOfApproach(seconds, afterTurn = false)
+            assertEquals(CameraMode.OVERVIEW, d.planner.onRecenter(d.t), "$seconds s")
+            assertEquals(Reason.START, d.planner.reason)
+        }
+        // The same out on the open road, past a turn far behind: a short overview brings the car, a long one stays.
+        val open = Drive(listOf(turn(1_000.0), turn(5_000.0), turn(40_000.0)))
+        open.driveAt(13.0, 4_550.0)
+        assertEquals(Reason.OPEN_ROAD, open.planner.reason)
+        assertTrue(DriveViewRule.overviewSeconds(open.planner.point!!, 13.0, camera, tuning) in 0.0..10.0)
+        assertEquals(CameraMode.FOLLOWING, open.planner.onRecenter(open.t))
+        assertEquals(Reason.RECENTER_TOO_CLOSE, open.planner.reason)
+        // In the Normal drive view the car either way, the silent plan as the Overview's would be.
+        val (normal, _) = shortOfApproach(5.0, afterTurn = false, view = DriveView.NORMAL)
+        assertEquals(CameraMode.FOLLOWING, normal.planner.onRecenter(normal.t))
+        assertEquals(Reason.RECENTER_TOO_CLOSE, normal.planner.planReason)
+        assertTrue(normal.planner.silent)
+    }
+
+    /**
+     * A drive at 13 m/s from 0 whose last update, at 2,990 m, leaves the overview [seconds] to stand before the next
+     * turn's approach opens: with no point passed ([afterTurn] false), or kept normal 400 m past a turn with the gap too
+     * short. Returns the drive and where that next turn lies.
+     */
+    private fun shortOfApproach(seconds: Double, afterTurn: Boolean, view: DriveView = DriveView.OVERVIEW, fromPreview: Boolean = true): Pair<Drive, Double> {
+        val v = 13.0
+        val approach = DriveViewRule.approachMeters(ViewPoint("k", ApproachKind.TURN, FocusKind.TURN, false, 9_000.0), v, camera, tuning)
+        // The update at 230 s, the phase of the updates 0.
+        val last = 230 * v
+        val next = last + approach + (seconds + camera.longTransitionSeconds) * v
+        val points = if (afterTurn) listOf(turn(last - 400.0), turn(next), turn(40_000.0)) else listOf(turn(next), turn(40_000.0))
+        val d = Drive(points, view = view, fromPreview = fromPreview)
+        d.driveAt(v, last + 1.0)
+        return d to next
+    }
+
+    @Test
     fun `a run-up is one approach, down from its start and never out before its end`() {
         // A freeway lane choice 2 km before an exit. Alone, the view goes out between them and back in for the exit.
         val points = listOf(lanes(7_000.0), exit(9_000.0), turn(40_000.0))

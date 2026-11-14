@@ -140,6 +140,37 @@ class DriveCameraTest {
     }
 
     @Test
+    fun `a hold that runs out where the standing overview could not stand 10 s brings the car until the turn`() {
+        // The overview stands from the preview; the next turn's approach opens 16 s after the lift at 13 m/s, so at the
+        // count's end the overview would stand about 4 s: the car, and the overview again only after that turn.
+        val v = 13.0
+        val approach = DriveViewRule.approachMeters(ViewPoint("k", ApproachKind.TURN, FocusKind.TURN, false, 9_000.0), v, CameraTuning.PHONE, DriveViewTuning.PHONE)
+        val lift = 2_000.0
+        val turn = lift + 10.0 * v + approach + (4.0 + CameraTuning.PHONE.longTransitionSeconds) * v
+        val d = CameraDrive(listOf(turn, 40_000.0), smart)
+        d.drive(v, untilX = lift)
+        assertEquals(CameraWish.OVERVIEW, d.camera.wish)
+        d.camera.onFinger(true, d.t)
+        d.camera.onMapTaken(d.t)
+        d.camera.onFinger(false, d.t)
+        val taken = d.t
+        d.drive(v, seconds = 10.5)
+        val ended = d.wishes.last()
+        assertEquals(CameraWish.FOLLOW, ended.second, "${d.wishes}")
+        assertTrue(ended.first - taken in 9.9..10.3, "ended ${ended.first - taken} s after the lift")
+        assertEquals(HoldEnd.TIMER, d.camera.takeHoldEnded()!!.ended)
+        // No overview before the turn, and after it the plan's own way out.
+        d.drive(v, untilX = turn + 100.0)
+        assertEquals(listOf(CameraWish.OVERVIEW, CameraWish.FOLLOW, CameraWish.OVERVIEW), d.wishes.map { it.second })
+        assertTrue(d.wishes.last().first > (turn - lift) / v + taken, "the overview after the turn")
+        // A tap of Recenter in the same place does the same.
+        val r = CameraDrive(listOf(turn, 40_000.0), smart)
+        r.drive(v, untilX = lift + 10.0 * v)
+        r.camera.onMapTaken(r.t)
+        assertEquals(CameraWish.FOLLOW, r.camera.onRecenter(r.t))
+    }
+
+    @Test
     fun `the count near a turn is 3 s after the last touch, also in the plain Overview`() {
         for (settings in listOf(smart, plain, normal)) {
             val d = CameraDrive(listOf(3_000.0, 30_000.0), settings)
