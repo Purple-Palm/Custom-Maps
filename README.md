@@ -121,9 +121,10 @@ the same look ([On the car screen](#on-the-car-screen)).
 During guidance the app plays soft tones of its own, made by the app itself: **one tone** about 25
 seconds before a turn, an exit, a fork, a roundabout, a freeway lane choice or the destination, and
 **two tones** about 7 seconds before it, never closer than about 30 m in slow traffic. Faster means
-earlier on the road. Two turns close together get only the two tones of the second. Off the route,
-during a call or while the phone rings there is no tone, and a new route makes no sound by itself.
-No voice speaks.
+earlier on the road. Two turns close together get only the two tones of the second. Straight on
+under a new name, a merge or a roundabout's way out make no sound, and a turn soon after one of them
+keeps both its tones. Off the route, during a call or while the phone rings there is no tone, and a
+new route makes no sound by itself. No voice speaks.
 
 The tones follow the media volume: the same keys and slider as music. **Settings → Sound** has
 **Tones**, which turns them all off, **Before a turn** and **Two tones at the turn**, **Lower the
