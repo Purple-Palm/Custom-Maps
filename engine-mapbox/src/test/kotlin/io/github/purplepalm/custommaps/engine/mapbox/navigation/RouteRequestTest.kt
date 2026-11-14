@@ -7,9 +7,11 @@ import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.geo.Geo
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.Place
+import java.net.URL
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /** Synthetic requests: an invented store in the sea near the point 0, 0. */
@@ -124,10 +126,194 @@ class RouteRequestTest {
     fun `the request line of a place without a stop point has none of them`() {
         val fields = routeRequestFields(plainPlace, routeOptions(origin, plainPlace))
 
-        assertEquals(setOf("stopPoint", "targets", "bearings"), fields.keys)
+        assertEquals(setOf("stopPoint", "targets", "bearings", "linkAccess", "linkFormOfWay"), fields.keys)
         assertNull(fields["stopPoint"])
         assertNull(fields["targets"])
         assertNull(fields["bearings"])
+    }
+
+    // ------------------------------------------------------------------ the side roads' fields (Debug switch)
+
+    /** The parameters of [options] as they are sent, each as name=value; the token in place of the real one. */
+    private fun sent(options: RouteOptions): List<String> = options.toUrl("token").query.split("&")
+
+    @Test
+    fun `with the switch off the request asks for no field of the side roads`() {
+        for (options in listOf(routeOptions(origin, placeWithStop, originBearing = 44.0), routeOptions(origin, plainPlace, sideRoadFields = false))) {
+            assertNull(options.intersectionLinkAccess())
+            assertNull(options.intersectionLinkFormOfWay())
+            assertNull(options.intersectionLinkGeometry())
+            assertNull(options.intersectionLinkElevated())
+            assertNull(options.intersectionLinkBridge())
+            assertTrue(sent(options).none { it.startsWith("intersection_link") }, "${sent(options)}")
+        }
+    }
+
+    @Test
+    fun `with the switch on the request asks for the access and the form of way, and for nothing else`() {
+        for (place in listOf(plainPlace, placeWithStop)) {
+            val off = routeOptions(origin, place, originBearing = 44.0)
+            val on = routeOptions(origin, place, originBearing = 44.0, sideRoadFields = true)
+
+            assertEquals(true, on.intersectionLinkAccess())
+            assertEquals(true, on.intersectionLinkFormOfWay())
+            // The roads' shapes can make the answer much larger and say nothing of the route's own road: never asked.
+            assertNull(on.intersectionLinkGeometry())
+            assertNull(on.intersectionLinkElevated())
+            assertNull(on.intersectionLinkBridge())
+            // The same request with two more parameters: every other one as it was, in its place.
+            assertEquals(sent(off), sent(on) - setOf("intersection_link_form_of_way=true", "intersection_link_access=true"))
+            assertEquals(sent(off).size + 2, sent(on).size)
+            assertEquals(off.coordinates(), on.coordinates())
+            assertEquals(off.waypointTargets(), on.waypointTargets())
+            assertEquals(off.bearings(), on.bearings())
+            assertEquals(off.alternatives(), on.alternatives())
+        }
+    }
+
+    @Test
+    fun `the request line names both fields, asked or not`() {
+        val off = routeRequestFields(placeWithStop, routeOptions(origin, placeWithStop))
+        assertEquals(false, off["linkAccess"])
+        assertEquals(false, off["linkFormOfWay"])
+
+        val on = routeRequestFields(placeWithStop, routeOptions(origin, placeWithStop, sideRoadFields = true))
+        assertEquals(true, on["linkAccess"])
+        assertEquals(true, on["linkFormOfWay"])
+        // The rest of the line is what it was.
+        assertEquals(off - setOf("linkAccess", "linkFormOfWay"), on - setOf("linkAccess", "linkFormOfWay"))
+    }
+
+    @Test
+    fun `a request with the fields comes through its address with them`() {
+        // What the navigator does with a reroute's request: read from its address and written again.
+        val options = routeOptions(origin, placeWithStop, originBearing = 44.0, sideRoadFields = true)
+        val read = RouteOptions.fromUrl(options.toUrl("token"))
+
+        assertEquals(true, read.intersectionLinkAccess())
+        assertEquals(true, read.intersectionLinkFormOfWay())
+        assertEquals(options.toUrl("token").toString(), read.toUrl("token").toString())
+    }
+
+    @Test
+    fun `with the switch off the watcher hands every reroute back as it came, fields or none`() {
+        val lines = RecordingLog()
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { false }
+        // As the navigator hands them over: read from the address of the request it made.
+        val without = RouteOptions.fromUrl(routeOptions(origin, placeWithStop).toUrl("token"))
+        val with = RouteOptions.fromUrl(routeOptions(origin, placeWithStop, sideRoadFields = true).toUrl("token"))
+
+        assertSame(without, watcher.onRouteOptions(without))
+        // A field is never taken away, the switch off or on.
+        assertSame(with, watcher.onRouteOptions(with))
+
+        assertEquals(listOf("reroute_options", "reroute_options"), lines.types)
+        assertEquals(listOf(false, true), lines.fields.map { it["linkAccess"] })
+        assertEquals(listOf(false, true), lines.fields.map { it["linkFormOfWay"] })
+        assertEquals(listOf(0, 0), lines.fields.map { it["linkAdded"] })
+    }
+
+    @Test
+    fun `with the switch on the watcher adds the fields a reroute lost, and nothing else`() {
+        val lines = RecordingLog()
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { true }
+        val lost = RouteOptions.fromUrl(routeOptions(origin, placeWithStop, originBearing = 44.0).toUrl("token"))
+
+        val adapted = watcher.onRouteOptions(lost)
+
+        assertEquals(true, adapted.intersectionLinkAccess())
+        assertEquals(true, adapted.intersectionLinkFormOfWay())
+        assertNull(adapted.intersectionLinkGeometry())
+        // The same reroute request with two more parameters, as the navigator writes it to its address again.
+        assertEquals(sent(lost), sent(adapted) - setOf("intersection_link_form_of_way=true", "intersection_link_access=true"))
+        assertEquals(sent(lost).size + 2, sent(adapted).size)
+        // The line says what the reroute came with, before anything was added.
+        val fields = lines.fields.single()
+        assertEquals(false, fields["linkAccess"])
+        assertEquals(false, fields["linkFormOfWay"])
+        assertEquals(2, fields["linkAdded"])
+        assertEquals(2, fields["targets"])
+        assertEquals(true, fields["lastTargetSet"])
+    }
+
+    @Test
+    fun `with the switch on a parameter the models do not know stays in the reroute as it came`() {
+        // The navigator's address may carry a parameter of its own; the watcher hands back every one of them.
+        val address = URL(routeOptions(origin, placeWithStop).toUrl("token").toString() + "&invented_parameter=7")
+        val lost = RouteOptions.fromUrl(address)
+        val watcher = RerouteOptionsLogger(RecordingLog(), { placeWithStop }) { true }
+
+        val adapted = watcher.onRouteOptions(lost)
+
+        assertTrue("invented_parameter=7" in sent(lost))
+        assertEquals(sent(lost), sent(adapted) - setOf("intersection_link_form_of_way=true", "intersection_link_access=true"))
+        assertEquals(sent(lost).size + 2, sent(adapted).size)
+    }
+
+    @Test
+    fun `with the switch on a reroute that kept the fields goes as it came`() {
+        val lines = RecordingLog()
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { true }
+        val kept = RouteOptions.fromUrl(routeOptions(origin, placeWithStop, sideRoadFields = true).toUrl("token"))
+
+        assertSame(kept, watcher.onRouteOptions(kept))
+
+        val fields = lines.fields.single()
+        assertEquals(true, fields["linkAccess"])
+        assertEquals(true, fields["linkFormOfWay"])
+        assertEquals(0, fields["linkAdded"])
+    }
+
+    @Test
+    fun `with the switch on a reroute that kept one field gets only the other`() {
+        val lines = RecordingLog()
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { true }
+        val accessOnly = routeOptions(origin, placeWithStop).toBuilder().intersectionLinkAccess(true).build()
+        val formOnly = routeOptions(origin, placeWithStop).toBuilder().intersectionLinkFormOfWay(true).build()
+
+        val fromAccess = watcher.onRouteOptions(accessOnly)
+        val fromForm = watcher.onRouteOptions(formOnly)
+
+        for (adapted in listOf(fromAccess, fromForm)) {
+            assertEquals(true, adapted.intersectionLinkAccess())
+            assertEquals(true, adapted.intersectionLinkFormOfWay())
+        }
+        // One more parameter each, every other one as it was, in its place.
+        assertEquals(sent(accessOnly), sent(fromAccess) - "intersection_link_form_of_way=true")
+        assertEquals(sent(accessOnly).size + 1, sent(fromAccess).size)
+        assertEquals(sent(formOnly), sent(fromForm) - "intersection_link_access=true")
+        assertEquals(sent(formOnly).size + 1, sent(fromForm).size)
+        assertEquals(listOf(1, 1), lines.fields.map { it["linkAdded"] })
+        assertEquals(listOf(true, false), lines.fields.map { it["linkAccess"] })
+        assertEquals(listOf(false, true), lines.fields.map { it["linkFormOfWay"] })
+    }
+
+    @Test
+    fun `the watcher reads the switch at each reroute`() {
+        val lines = RecordingLog()
+        var on = false
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { on }
+        val lost = routeOptions(origin, placeWithStop)
+
+        assertSame(lost, watcher.onRouteOptions(lost))
+        on = true
+        assertEquals(true, watcher.onRouteOptions(lost).intersectionLinkAccess())
+        on = false
+        assertSame(lost, watcher.onRouteOptions(lost))
+        assertEquals(listOf(0, 2, 0), lines.fields.map { it["linkAdded"] })
+    }
+
+    @Test
+    fun `a switch that cannot be read never fails the reroute`() {
+        val lines = RecordingLog()
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { error("no switch can be read") }
+        val request = routeOptions(origin, placeWithStop)
+
+        assertSame(request, watcher.onRouteOptions(request))
+
+        assertEquals(listOf("error", "reroute_options"), lines.types)
+        assertEquals("reroute_options", lines.fields.first()["where"])
+        assertEquals(0, lines.fields.last()["linkAdded"])
     }
 
     @Test
@@ -149,7 +335,7 @@ class RouteRequestTest {
     @Test
     fun `the watcher of reroutes hands the request back as it came`() {
         val lines = RecordingLog()
-        val watcher = RerouteOptionsLogger(lines) { placeWithStop }
+        val watcher = RerouteOptionsLogger(lines, { placeWithStop }) { false }
         val request = routeOptions(origin, placeWithStop)
 
         assertSame(request, watcher.onRouteOptions(request))
@@ -161,6 +347,10 @@ class RouteRequestTest {
         assertEquals(true, fields["lastTargetSet"])
         assertEquals(true, fields["targetWanted"])
         assertEquals(0.0, fields["endMeters"])
+        // Without the Debug switch nothing is asked of the side roads, and nothing is added.
+        assertEquals(false, fields["linkAccess"])
+        assertEquals(false, fields["linkFormOfWay"])
+        assertEquals(0, fields["linkAdded"])
     }
 
     @Test
@@ -234,7 +424,7 @@ class RouteRequestTest {
     @Test
     fun `a line that cannot be written never fails the reroute`() {
         val lines = RecordingLog()
-        val watcher = RerouteOptionsLogger(lines) { error("no place can be read") }
+        val watcher = RerouteOptionsLogger(lines, { error("no place can be read") }) { false }
         val request = routeOptions(origin, placeWithStop)
 
         assertSame(request, watcher.onRouteOptions(request))

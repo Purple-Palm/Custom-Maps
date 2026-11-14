@@ -118,6 +118,7 @@ fun SettingsScreen(
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
     onMeasureOwnLanesChange: (Boolean) -> Unit,
+    onSideRoadFieldsChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
     onCarLightWhenHotChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
@@ -169,6 +170,7 @@ fun SettingsScreen(
                 onSimulateDriveChange,
                 onOwnRouteLineChange,
                 onMeasureOwnLanesChange,
+                onSideRoadFieldsChange,
                 onCarMapFpsChange,
                 onCarLightWhenHotChange,
                 onShareLog,
@@ -487,6 +489,7 @@ private fun DebugSection(
     onSimulateDriveChange: (Boolean) -> Unit,
     onOwnRouteLineChange: (Boolean) -> Unit,
     onMeasureOwnLanesChange: (Boolean) -> Unit,
+    onSideRoadFieldsChange: (Boolean) -> Unit,
     onCarMapFpsChange: (Int) -> Unit,
     onCarLightWhenHotChange: (Boolean) -> Unit,
     onShareLog: () -> Unit,
@@ -603,6 +606,25 @@ private fun DebugSection(
         }
         Spacer(Modifier.width(16.dp))
         AppSwitch(checked = debug.measureOwnLanes, onCheckedChange = onMeasureOwnLanesChange)
+    }
+
+    // What Mapbox sends of the side roads at each intersection of a route, measured before the street lanes use it.
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.debug_side_road_fields),
+                style = MaterialTheme.typography.titleSmall,
+                color = LookTheme.tokens.onCard,
+            )
+            Text(
+                text = stringResource(R.string.debug_side_road_fields_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = LookTheme.tokens.onCardMuted,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        AppSwitch(checked = debug.sideRoadFields, onCheckedChange = onSideRoadFieldsChange)
     }
 
     // The car's map at 30 or 60 frames a second, to compare what the car shows of each.
@@ -888,6 +910,7 @@ private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: 
             onSimulateDriveChange = {},
             onOwnRouteLineChange = {},
             onMeasureOwnLanesChange = {},
+            onSideRoadFieldsChange = {},
             onCarMapFpsChange = {},
             onCarLightWhenHotChange = {},
             onShareLog = {},

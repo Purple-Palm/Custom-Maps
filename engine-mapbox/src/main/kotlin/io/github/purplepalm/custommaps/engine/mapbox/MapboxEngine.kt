@@ -130,6 +130,15 @@ class MapboxEngine private constructor(
         navigationEngine.setMeasureOwnLanes(on)
     }
 
+    /**
+     * Debug's switch Side-road fields on routes is [on]: the route requests the app makes anyway, and the reroutes inside a
+     * trip, then also ask for the access and the form of way of the roads at each intersection of the routes. Two more
+     * parameters on the same requests: no request of its own, and no trip session. Main thread.
+     */
+    fun setSideRoadFields(on: Boolean) {
+        navigationEngine.setSideRoadFields(on)
+    }
+
     companion object {
 
         /**

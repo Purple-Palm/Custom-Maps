@@ -57,7 +57,8 @@ data class RecentTrip(val start: TripSessionStart, val token: TripsOf)
 
 /**
  * The debug section: trip sessions started on this phone, the simulated drive, own route line and
- * measuring switches, the car map's frames and its lighter map when hot, and the debug log.
+ * measuring switches, the side roads' fields on routes, the car map's frames and its lighter map
+ * when hot, and the debug log.
  */
 data class DebugState(
     /** The month's trip sessions, and since when the count runs when that is after the month began. */
@@ -71,6 +72,8 @@ data class DebugState(
     val ownRouteLine: Boolean = false,
     /** Whether a drive with the lanes drawn by the app measures what they cost the map's frames. */
     val measureOwnLanes: Boolean = false,
+    /** Whether the routes ask for the side roads' access and form of way, to measure them. */
+    val sideRoadFields: Boolean = false,
     /** The frames a second the car's map draws: 30, or 60 ([CarFrameRate.TARGETS]). */
     val carMapFps: Int = CarFrameRate.TARGET_FPS,
     /** Whether the car's map gets lighter while the phone is hot. */
@@ -109,31 +112,41 @@ class SettingsViewModel(
         combine(settings.dayNight, shownLook) { choice, shown -> LookSettings(choice, nextLook(choice, shown)) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LookSettings())
 
+    /** The car map's two Debug settings, in one value. */
+    private data class CarSwitches(val carMapFps: Int, val carLight: Boolean)
+
     /** The Debug switches, in one value. */
-    private data class Switches(val simulate: Boolean, val ownLine: Boolean, val measureLanes: Boolean, val carMapFps: Int, val carLight: Boolean)
+    private data class Switches(
+        val simulate: Boolean,
+        val ownLine: Boolean,
+        val measureLanes: Boolean,
+        val sideRoads: Boolean,
+        val car: CarSwitches,
+    )
 
     private val switches = combine(
         settings.simulateDrive,
         settings.ownRouteLine,
         settings.measureOwnLanes,
-        settings.carMapFps,
-        settings.carLightWhenHot,
-    ) { simulate, ownLine, measure, fps, carLight ->
-        Switches(simulate, ownLine, measure, fps, carLight)
+        settings.sideRoadFields,
+        combine(settings.carMapFps, settings.carLightWhenHot, ::CarSwitches),
+    ) { simulate, ownLine, measure, sideRoads, car ->
+        Switches(simulate, ownLine, measure, sideRoads, car)
     }
 
     val debug: StateFlow<DebugState> =
-        combine(tripLog.entries, switches, logBytes, tokens) { entries, (simulate, ownLine, measureLanes, carMapFps, carLight), bytes, list ->
+        combine(tripLog.entries, switches, logBytes, tokens) { entries, switches, bytes, list ->
             val time = now()
             DebugState(
                 trips = TripLog.monthCount(entries, time, installedAt()),
                 tripsByToken = TokenTripCounts.rows(TripLog.countByToken(entries, time), list).takeIf { it.size > 1 }.orEmpty(),
                 recentTrips = entries.takeLast(RECENT_TRIPS).asReversed().map { RecentTrip(it, TokenTripCounts.of(it.tokenId, list)) },
-                simulateDrive = simulate,
-                ownRouteLine = ownLine,
-                measureOwnLanes = measureLanes,
-                carMapFps = carMapFps,
-                carLightWhenHot = carLight,
+                simulateDrive = switches.simulate,
+                ownRouteLine = switches.ownLine,
+                measureOwnLanes = switches.measureLanes,
+                sideRoadFields = switches.sideRoads,
+                carMapFps = switches.car.carMapFps,
+                carLightWhenHot = switches.car.carLight,
                 logBytes = bytes,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
@@ -184,6 +197,21 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value, which the map keeps too.
                 debugLog.error("settings.setMeasureOwnLanes", e)
+            }
+        }
+    }
+
+    /**
+     * Applies from the next route request on, also during a drive (the next reroute): the routes ask for the side roads'
+     * access and form of way, or no longer do. No request is sent for it.
+     */
+    fun setSideRoadFields(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setSideRoadFields(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the requests keep too.
+                debugLog.error("settings.setSideRoadFields", e)
             }
         }
     }

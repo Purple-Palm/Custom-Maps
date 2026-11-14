@@ -380,8 +380,20 @@ internal class MapboxNavigationEngine(
      */
     private val divergeWatch = DivergeWatch()
 
-    /** Writes the request of every reroute to the debug log, and changes none of them. */
-    private val rerouteOptionsLogger = RerouteOptionsLogger(debugLog) { _destination.value }
+    /**
+     * Debug's switch Side-road fields on routes ([setSideRoadFields]): whether the route requests the app sends, and the
+     * reroutes the navigator sends inside a trip, ask for the access and the form of way of the roads at each intersection
+     * of the routes. Each request reads it as it is made, so a change reaches the next request; nothing else changes. Off
+     * until the app has read the setting. The reroutes' watcher reads it on the navigator's thread.
+     */
+    @Volatile
+    private var sideRoadFields = false
+
+    /**
+     * Writes the request of every reroute to the debug log, and changes none of them but for the side roads' two fields
+     * while their switch is on.
+     */
+    private val rerouteOptionsLogger = RerouteOptionsLogger(debugLog, destination = { _destination.value }, sideRoadFields = { sideRoadFields })
 
     /**
      * When the routes of the preview arrived, on the clock that also runs while the phone sleeps,
@@ -479,7 +491,7 @@ internal class MapboxNavigationEngine(
             // position is no start for routes that replace the ones in use: no request then.
             val from = livePosition() ?: return null
             // The request of the preview again: to the same stop point, with the same arrival target.
-            val options = routeOptions(from.point, destination, from.originBearing())
+            val options = routeOptions(from.point, destination, from.originBearing(), sideRoadFields)
             logRouteRequest(from.point, "navigator", from, destination, options, inTrip = true)
             // One request inside the running trip, which Mapbox counts as part of the trip.
             return navigation.requestRoutes(
@@ -635,7 +647,7 @@ internal class MapboxNavigationEngine(
         }
         // To the place's stop point when it has one, with the place itself as the arrival target.
         // A car that is moving sends its direction along, so the routes start the way it drives.
-        val options = routeOptions(origin, destination, deviceFix?.originBearing())
+        val options = routeOptions(origin, destination, deviceFix?.originBearing(), sideRoadFields)
         logRouteRequest(origin, if (deviceFix != null) "device" else "map puck", deviceFix, destination, options, inTrip = false)
         val request = ++routeRequestCount
         // Billed per request (Directions API); no trip session is involved.
@@ -1388,6 +1400,16 @@ internal class MapboxNavigationEngine(
     /** Debug's switch Measure the drawn lanes is [on]: the horizon's observer is then timed on the main thread, for the progress lines. */
     internal fun setMeasureOwnLanes(on: Boolean) {
         horizon.measuring = on
+    }
+
+    /**
+     * Debug's switch Side-road fields on routes is [on]: from the next route request on, the app's own requests and the
+     * navigator's reroutes alike, the routes ask for the side roads' access and form of way, or no longer do
+     * ([routeOptions], [RerouteOptionsLogger]). No request is sent for it, and the drive under way goes on as it was.
+     * Main thread.
+     */
+    internal fun setSideRoadFields(on: Boolean) {
+        sideRoadFields = on
     }
 
     /**

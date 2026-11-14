@@ -93,6 +93,15 @@ interface AppSettings {
     val carLightWhenHot: Flow<Boolean>
 
     suspend fun setCarLightWhenHot(enabled: Boolean)
+
+    /**
+     * Debug: whether the route requests the app makes anyway, and the reroutes inside a trip, also ask Mapbox for the
+     * access (one-way or two-way) and the form of way of the roads at each intersection, to measure what comes back. Off
+     * when never chosen.
+     */
+    val sideRoadFields: Flow<Boolean>
+
+    suspend fun setSideRoadFields(enabled: Boolean)
 }
 
 /**
@@ -245,6 +254,13 @@ class DataStoreAppSettings(
         onChanged(CAR_LIGHT_WHEN_HOT.name, enabled)
     }
 
+    override val sideRoadFields: Flow<Boolean> = preferences.map { it[SIDE_ROAD_FIELDS] ?: false }.distinctUntilChanged()
+
+    override suspend fun setSideRoadFields(enabled: Boolean) {
+        dataStore.edit { it[SIDE_ROAD_FIELDS] = enabled }
+        onChanged(SIDE_ROAD_FIELDS.name, enabled)
+    }
+
     companion object {
         const val FILE_NAME = "app_settings"
 
@@ -260,6 +276,7 @@ class DataStoreAppSettings(
         private val MEASURE_OWN_LANES = booleanPreferencesKey("measure_own_lanes")
         private val CAR_MAP_FPS = intPreferencesKey("car_map_fps")
         private val CAR_LIGHT_WHEN_HOT = booleanPreferencesKey("car_light_when_hot")
+        private val SIDE_ROAD_FIELDS = booleanPreferencesKey("side_road_fields")
 
         /** The switch Lane details on the map of the versions before [LANES_ON_MAP]: read once, to carry it over. */
         private val LANE_DETAILS = booleanPreferencesKey("lane_details")

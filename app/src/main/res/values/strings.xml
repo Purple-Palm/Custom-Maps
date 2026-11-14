@@ -199,6 +199,8 @@
     <string name="debug_own_route_line">App\'s own route line</string>
     <string name="debug_measure_own_lanes">Measure the drawn lanes</string>
     <string name="debug_measure_own_lanes_note">With lanes drawn by the app, the drawing then shows at every other close view only, and each close view\'s frames go to the debug log, with Mapbox\'s lane details on under the drawing. The trip summary says whether the drawing kept the frames within budget.</string>
+    <string name="debug_side_road_fields">Side-road fields on routes</string>
+    <string name="debug_side_road_fields_note">Routes ask for the side roads\' access and form of way, to measure them. No request is added.</string>
     <string name="debug_own_route_line_note">During guidance the app draws the route line itself, as Mapbox would, to compare the two; Mapbox\'s line comes back if the app\'s fails. With lanes drawn by the app the route line is the app\'s anyway.</string>
     <string name="debug_car_map_fps">Car map frames</string>
     <string name="debug_car_map_fps_value">%1$d a second</string>

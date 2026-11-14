@@ -40,8 +40,19 @@ private const val FULL_CIRCLE = 360.0
  * @param originBearing the direction the car moves in, in degrees clockwise from north. Give it
  *   only for a car that is moving: the routes then start along the road in that direction, not
  *   with a U-turn. Null, or a value that is no number, sends no bearing.
+ * @param sideRoadFields Debug's switch Side-road fields on routes: the request then also asks, for
+ *   every road at each intersection of the routes, whether it is one-way and which way, and its form
+ *   of way (intersection_link_access and intersection_link_form_of_way), to measure what Mapbox sends
+ *   for them. Two more parameters on the same request, never a request of their own; the roads'
+ *   shapes are never asked (intersection_link_geometry can make the answer much larger and says
+ *   nothing of the route's own road). Off, the request is what it always was.
  */
-internal fun routeOptions(origin: Point, destination: Place, originBearing: Double? = null): RouteOptions {
+internal fun routeOptions(
+    origin: Point,
+    destination: Place,
+    originBearing: Double? = null,
+    sideRoadFields: Boolean = false,
+): RouteOptions {
     val builder = RouteOptions.builder()
         // Among them steps=true, which arrival targets need, and enableRefresh for traffic updates.
         .applyDefaultNavigationOptions()
@@ -51,6 +62,29 @@ internal fun routeOptions(origin: Point, destination: Place, originBearing: Doub
         .voiceUnits(DirectionsCriteria.IMPERIAL)
     if (destination.stopPoint != null) builder.waypointTargetsList(listOf(null, destination.point.toPoint()))
     originBearing(originBearing)?.let { builder.bearingsList(listOf(it, null)) }
+    if (sideRoadFields) builder.intersectionLinkAccess(true).intersectionLinkFormOfWay(true)
+    return builder.build()
+}
+
+/** Whether [options] ask for the access of every road at each intersection (intersection_link_access). */
+internal fun asksLinkAccess(options: RouteOptions): Boolean = options.intersectionLinkAccess() == true
+
+/** Whether [options] ask for the form of way of every road at each intersection (intersection_link_form_of_way). */
+internal fun asksLinkFormOfWay(options: RouteOptions): Boolean = options.intersectionLinkFormOfWay() == true
+
+/**
+ * [options] with the side roads' two fields of [routeOptions] asked for where they are not, while [sideRoadFields] is on:
+ * the same request with one or two more parameters, nothing else changed and nothing taken away. With the switch off, or
+ * with both fields asked already, [options] themselves.
+ */
+internal fun withSideRoadFields(options: RouteOptions, sideRoadFields: Boolean): RouteOptions {
+    if (!sideRoadFields) return options
+    val access = asksLinkAccess(options)
+    val formOfWay = asksLinkFormOfWay(options)
+    if (access && formOfWay) return options
+    val builder = options.toBuilder()
+    if (!access) builder.intersectionLinkAccess(true)
+    if (!formOfWay) builder.intersectionLinkFormOfWay(true)
     return builder.build()
 }
 
@@ -66,17 +100,21 @@ private fun originBearing(degrees: Double?): Bearing? {
  * "stopPoint", where the routes are asked to end when the place has a stop point; "targets", the
  * arrival targets as sent, one for each point of the request (null for the origin), or null when
  * none are sent; "bearings", the same for the directions of travel (angle, then the range to either
- * side), or null.
+ * side), or null. And whether it asks for the side roads' fields ([routeOptions]): "linkAccess" and
+ * "linkFormOfWay", each true or false.
  */
 internal fun routeRequestFields(destination: Place, options: RouteOptions): Map<String, Any?> = mapOf(
     "stopPoint" to destination.stopPoint?.let { listOf(it.latitude, it.longitude) },
     "targets" to options.waypointTargetsList()?.map { it?.debugFields() },
     "bearings" to options.bearingsList()?.map { bearing -> bearing?.let { listOf(it.angle(), it.degrees()) } },
+    "linkAccess" to asksLinkAccess(options),
+    "linkFormOfWay" to asksLinkFormOfWay(options),
 )
 
 /**
  * Looks at the request of every reroute, writes a "reroute_options" line about it, and hands it
- * back as it came. It changes nothing.
+ * back as it came, but for the side roads' two fields while Debug's switch Side-road fields on
+ * routes is on.
  *
  * A reroute is asked for by the navigator itself, from the request of the route it replaces. That
  * the new request ends at the same point is in the SDK's sources; whether it still carries the
@@ -86,32 +124,52 @@ internal fun routeRequestFields(destination: Place, options: RouteOptions): Map<
  * "targetWanted" whether the place of the drive has a stop point, so that the first request sent
  * a target; "endMeters" is how far the request's last point is from where routes to the place end.
  *
+ * Whether the navigator keeps the side roads' fields of [routeOptions] in a reroute is not in the
+ * SDK's sources either (it builds the reroute's address in its native part): "linkAccess" and
+ * "linkFormOfWay" say whether the request asks for each, as the navigator made it. While the switch
+ * is on, a field it does not ask for is asked for ([withSideRoadFields]), the same request with one or
+ * two more parameters, and "linkAdded" counts them; nothing else is changed, and a field is never
+ * taken away. With the switch off the request goes on exactly as it came.
+ *
  * The navigator may call it on a thread of its own. Nothing here may fail the reroute: whatever
- * goes wrong with the line is written to the log instead, and the request goes on unchanged.
+ * goes wrong with the line is written to the log instead, and the request goes on as it came.
  *
  * @param destination the place of the drive at this moment, or null
+ * @param sideRoadFields whether the switch Side-road fields on routes is on, read at each reroute
  */
 internal class RerouteOptionsLogger(
     private val debugLog: DebugLog,
     private val destination: () -> Place?,
+    private val sideRoadFields: () -> Boolean,
 ) : RerouteOptionsAdapter {
 
     override fun onRouteOptions(routeOptions: RouteOptions): RouteOptions {
+        val adapted = try {
+            withSideRoadFields(routeOptions, sideRoadFields())
+        } catch (e: RuntimeException) {
+            debugLog.error("reroute_options", e)
+            routeOptions
+        }
         try {
-            debugLog.log("reroute_options", rerouteOptionsFields(routeOptions, destination()))
+            debugLog.log("reroute_options", rerouteOptionsFields(routeOptions, destination(), adapted))
         } catch (e: RuntimeException) {
             debugLog.error("reroute_options", e)
         }
-        return routeOptions
+        return adapted
     }
 }
 
-/** The fields of a "reroute_options" line; see [RerouteOptionsLogger]. */
-internal fun rerouteOptionsFields(options: RouteOptions, destination: Place?): Map<String, Any?> {
+/**
+ * The fields of a "reroute_options" line for the reroute's request [options] as the navigator made it, and [sent], the
+ * request that goes, with the side roads' fields added while the switch is on; see [RerouteOptionsLogger].
+ */
+internal fun rerouteOptionsFields(options: RouteOptions, destination: Place?, sent: RouteOptions = options): Map<String, Any?> {
     val coordinates = options.coordinatesList()
     val targets = options.waypointTargetsList()
     val end = coordinates.lastOrNull()
     val routePoint = destination?.routePoint
+    val access = asksLinkAccess(options)
+    val formOfWay = asksLinkFormOfWay(options)
     return mapOf(
         "coordinates" to coordinates.size,
         "targets" to targets?.size,
@@ -122,5 +180,8 @@ internal fun rerouteOptionsFields(options: RouteOptions, destination: Place?): M
         } else {
             null
         },
+        "linkAccess" to access,
+        "linkFormOfWay" to formOfWay,
+        "linkAdded" to listOf(!access && asksLinkAccess(sent), !formOfWay && asksLinkFormOfWay(sent)).count { it },
     )
 }

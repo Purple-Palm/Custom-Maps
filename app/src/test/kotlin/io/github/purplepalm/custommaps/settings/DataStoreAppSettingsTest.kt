@@ -75,6 +75,7 @@ class DataStoreAppSettingsTest {
         assertFalse(settings.ownRouteLine.first(), "the SDK draws the route line unless the Debug switch says otherwise")
         assertTrue(settings.laneCountsHorizon.first(), "lane counts from the electronic horizon until switched off")
         assertTrue(settings.carLightWhenHot.first(), "a lighter car map while the phone is hot until switched off")
+        assertFalse(settings.sideRoadFields.first(), "the routes ask nothing of the side roads unless the Debug switch says so")
         // Read, never written: a later default reaches a phone that never chose.
         assertEquals(emptyMap<String, Any>(), raw())
         assertEquals(emptyList<Pair<String, Any>>(), changes)
@@ -279,6 +280,22 @@ class DataStoreAppSettingsTest {
         assertTrue(settings.carLightWhenHot.first())
         assertEquals(mapOf<String, Any>("car_light_when_hot" to true), raw())
         assertEquals(listOf<Pair<String, Any>>("car_light_when_hot" to false, "car_light_when_hot" to true), changes)
+    }
+
+    @Test
+    fun `the side-road fields switch is off until turned on, stored under its own key, each change reported`() = runBlocking {
+        assertFalse(settings.sideRoadFields.first())
+        assertEquals(emptyMap<String, Any>(), raw(), "off is read, never written")
+        settings.setSideRoadFields(true)
+        assertTrue(settings.sideRoadFields.first())
+        assertEquals(mapOf<String, Any>("side_road_fields" to true), raw())
+        assertFalse(settings.measureOwnLanes.first(), "the other Debug switches are their own")
+        assertFalse(settings.ownRouteLine.first())
+        assertEquals(LanesOnMap.OFF, settings.lanesOnMap.first(), "the switch chooses no lanes")
+        settings.setSideRoadFields(false)
+        assertFalse(settings.sideRoadFields.first())
+        assertEquals(mapOf<String, Any>("side_road_fields" to false), raw())
+        assertEquals(listOf<Pair<String, Any>>("side_road_fields" to true, "side_road_fields" to false), changes)
     }
 
     @Test

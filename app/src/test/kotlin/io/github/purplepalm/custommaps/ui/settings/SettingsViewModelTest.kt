@@ -418,6 +418,65 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `the side-road fields switch is off until switched on, and the switch is stored`() = runTest(dispatcher) {
+        val viewModel = viewModel()
+        runCurrent()
+        assertFalse(viewModel.debug.value.sideRoadFields)
+        viewModel.setSideRoadFields(true)
+        runCurrent()
+        assertTrue(settings.sideRoadFields.value)
+        assertTrue(viewModel.debug.value.sideRoadFields)
+        assertFalse(viewModel.debug.value.measureOwnLanes, "the other Debug switches are their own")
+        assertFalse(viewModel.debug.value.ownRouteLine)
+        assertEquals(30, viewModel.debug.value.carMapFps)
+        assertTrue(viewModel.debug.value.carLightWhenHot)
+        viewModel.setSideRoadFields(false)
+        runCurrent()
+        assertFalse(viewModel.debug.value.sideRoadFields)
+    }
+
+    @Test
+    fun `a side-road fields switch that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModel()
+        viewModel.setSideRoadFields(true)
+        runCurrent()
+        assertFalse(viewModel.debug.value.sideRoadFields)
+        assertFalse(settings.sideRoadFields.value)
+        assertEquals(listOf("error"), archive.logged)
+    }
+
+    @Test
+    fun `each Debug switch shows its own stored value`() = runTest(dispatcher) {
+        // Every switch the other way from the one before it, so a switch read in another's place shows.
+        settings.simulateDrive.value = true
+        settings.ownRouteLine.value = false
+        settings.measureOwnLanes.value = true
+        settings.sideRoadFields.value = false
+        settings.carMapFps.value = 60
+        settings.carLightWhenHot.value = false
+        val viewModel = viewModel()
+        runCurrent()
+        val debug = viewModel.debug.value
+        assertEquals(
+            listOf(true, false, true, false, 60, false),
+            listOf(debug.simulateDrive, debug.ownRouteLine, debug.measureOwnLanes, debug.sideRoadFields, debug.carMapFps, debug.carLightWhenHot),
+        )
+        settings.simulateDrive.value = false
+        settings.ownRouteLine.value = true
+        settings.measureOwnLanes.value = false
+        settings.sideRoadFields.value = true
+        settings.carMapFps.value = 30
+        settings.carLightWhenHot.value = true
+        runCurrent()
+        val after = viewModel.debug.value
+        assertEquals(
+            listOf(false, true, false, true, 30, true),
+            listOf(after.simulateDrive, after.ownRouteLine, after.measureOwnLanes, after.sideRoadFields, after.carMapFps, after.carLightWhenHot),
+        )
+    }
+
+    @Test
     fun `the car's map draws 30 frames a second until 60 is chosen, and the choice is stored`() = runTest(dispatcher) {
         val viewModel = viewModel()
         runCurrent()

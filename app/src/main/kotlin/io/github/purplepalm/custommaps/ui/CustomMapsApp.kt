@@ -121,6 +121,7 @@ fun CustomMapsApp(graph: AppGraph, onListShown: (Boolean) -> Unit = {}) {
                 onSimulateDriveChange = settingsViewModel::setSimulateDrive,
                 onOwnRouteLineChange = settingsViewModel::setOwnRouteLine,
                 onMeasureOwnLanesChange = settingsViewModel::setMeasureOwnLanes,
+                onSideRoadFieldsChange = settingsViewModel::setSideRoadFields,
                 onCarMapFpsChange = settingsViewModel::setCarMapFps,
                 onCarLightWhenHotChange = settingsViewModel::setCarLightWhenHot,
                 onShareLog = {
