@@ -1751,7 +1751,8 @@ internal class MapScene(
      * "laneGoal" (the lane choices' schedule: how far it is in for one, and where that is going;
      * it moves the zoom only with Large), "laneAheadM" (meters to the nearest lane choice that
      * counts), "laneChoice" (the one that holds the view) and "centerLeadS" (how many seconds ahead
-     * of the car the center aims).
+     * of the car the center aims); in the overview "overFits" and "overKept" (the data source's new
+     * fits it glided to and those the standing overview kept, since the last line).
      *
      * "laneDetails" is whether Lanes on the map wants Mapbox's lane markings on the map, "hdRoads"
      * what the style says about them, and "hdRoadsReapplied" how often they had to be set again since

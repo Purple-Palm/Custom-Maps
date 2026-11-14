@@ -35,6 +35,8 @@ import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFocus
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.camera.OncePerUpdate
+import io.github.purplepalm.custommaps.nav.camera.OverviewFit
+import io.github.purplepalm.custommaps.nav.camera.OverviewHold
 import io.github.purplepalm.custommaps.nav.camera.PeakSpeed
 import io.github.purplepalm.custommaps.nav.camera.SampleRamp
 import io.github.purplepalm.custommaps.nav.camera.Spring
@@ -84,6 +86,10 @@ import kotlin.math.sin
  * exit it stays close from the run-up's start to the gore. Close in, its center aims a little
  * ahead of the moving car, so the car stays near its usual place on the screen. On the open road
  * Large is the Default view, and with Default none of this runs.
+ *
+ * In the overview the map stands while the car drives up the route it shows: a new fit of the data
+ * source that the overview on screen still holds is left aside ([OverviewHold]), and the camera glides
+ * to one only when it is clearly closer, wider or off center, or after a change of mode.
  *
  * On the browsing map, before guidance, it follows the drawn puck in the same way, at a fixed zoom
  * and tilt and without the data source.
@@ -186,6 +192,13 @@ internal class SmoothNavigationCamera(
     private var transitionSeconds = 0.0
     private val offset = DoubleArray(VALUES)
     private var arcZoom = 0.0
+
+    // The overview the camera shows, kept while a new fit of the data source still lies inside it
+    // (OverviewHold): the map stands while the car drives up the route it shows. None after a change
+    // of mode, so its first fit is taken. Counted for the camera line.
+    private var keptOverview: OverviewFit? = null
+    private var overviewsKept = 0
+    private var overviewsTaken = 0
 
     // What the map was last given, to leave it alone while nothing moves, as at a red light.
     private val written = DoubleArray(VALUES) { Double.NaN }
@@ -626,11 +639,16 @@ internal class SmoothNavigationCamera(
             "laneCapZoom" to lanesCap.takeIf { it.isFinite() }?.let { Motion.round(it, 2) },
             "capSpeed" to capSpeed?.let { Motion.round(it, 1) },
             "centerLeadS" to Motion.round(centerLead, 2),
+            // In the overview: new fits taken and fits the standing overview kept since the last line.
+            "overFits" to overviewsTaken.takeIf { mode == Mode.OVERVIEW },
+            "overKept" to overviewsKept.takeIf { mode == Mode.OVERVIEW },
         )
         statsSince = now
         frames = 0
         writes = 0
         maxGapMs = 0.0
+        overviewsTaken = 0
+        overviewsKept = 0
         return fields
     }
 
@@ -742,6 +760,15 @@ internal class SmoothNavigationCamera(
 
     private fun applySample(data: ViewportData, now: Double) {
         val target = if (mode == Mode.FOLLOWING) data.cameraForFollowing else data.cameraForOverview
+        if (mode == Mode.OVERVIEW) {
+            // A new fit that the overview on screen still holds leaves the map standing.
+            if (keepsOverview(target)) {
+                overviewsKept += 1
+                return
+            }
+            overviewsTaken += 1
+            keptOverview = fitOf(target)
+        }
         target.bearing?.let { value ->
             // The short way round from where the bearing is.
             bearingRamp.push(Angles.nearest(value, if (bearingRamp.ready) bearingRamp.value(now) else bearing.value), now)
@@ -773,6 +800,22 @@ internal class SmoothNavigationCamera(
             // the next progress, at the limit itself. That one counts no closer than the road.
             zoomRamp.push(if (carOnFocalPoint && laneZoom == LaneZoom.LARGE) min(fitted, tuning.defaultMaxZoom) else fitted, now)
         }
+    }
+
+    /** Whether the overview the camera keeps still holds [target], a new fit ([OverviewHold.keeps]). North is up in both. */
+    private fun keepsOverview(target: CameraOptions): Boolean {
+        val kept = keptOverview ?: return false
+        val fit = fitOf(target) ?: return false
+        val size = mapboxMap.getSize()
+        return OverviewHold.keeps(kept, fit, size.width.toDouble(), size.height.toDouble(), mapboxMap.getMapOptions().pixelRatio.toDouble())
+    }
+
+    /** [target]'s center, zoom and padding in plain numbers; null when it lacks one of them. */
+    private fun fitOf(target: CameraOptions): OverviewFit? {
+        val center = target.center ?: return null
+        val fitted = target.zoom ?: return null
+        val padding = target.padding ?: return null
+        return OverviewFit(center.latitude(), center.longitude(), fitted, padding.top, padding.left, padding.bottom, padding.right)
     }
 
     private fun computeTargets(now: Double, dt: Double) {
@@ -959,6 +1002,8 @@ internal class SmoothNavigationCamera(
         val changed = target != mode
         mode = target
         for (ramp in ramps) ramp.forget()
+        // A change of mode, a map back on screen, a jump: the newest fit is taken.
+        keptOverview = null
         pendingData = null
         if (mode == Mode.IDLE_FOLLOW) {
             // The browsing view: on the car, in the middle of the map, turned as the map is.
