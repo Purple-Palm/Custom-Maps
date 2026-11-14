@@ -11,7 +11,8 @@ import io.github.purplepalm.custommaps.nav.debug.Motion
  * memory with it and is never stored.
  *
  * The access of a road, as the route gives it: 0 none, -1 forward, 1 backward, 2 both. Which way forward is, the Directions
- * models do not say; a road the route drives on can be driven its way, which a drive's counts of [Fields.OWN_ROAD] show.
+ * models do not say; whether the route's own road is one-way or two-way ([Fields.OWN_ROAD]) does not need it, as a route
+ * drives its one-way roads their way.
  */
 object SideRoadsLine {
 
