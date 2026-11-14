@@ -63,10 +63,14 @@ zoom setting and the trip history with prediction.
   very close view where the junction fills the screen and the lanes are clearly visible; Large also
   zooms in on freeways where lanes leave the route, also where it goes straight on. **Lanes on the
   map** in Settings: Mapbox's lane markings where Mapbox has them, or lanes the app draws itself on
-  freeways with lane data, with the route line in the lane the card names and that lane lit close in;
+  freeways with lane data and on streets where the route's data also says whether they are one-way,
+  with the route line in the lane the card names and that lane lit close in;
   Off is what a phone starts with until the owner has checked the app's drawing on a drive. The car
   shows where it is along the road, never in a lane: the phone cannot tell which lane it is in. Built;
   not yet on a drive ([CAMERA.md](CAMERA.md), Lane zoom and The app's own lanes).
+- **The app's own lanes, next:** crosswalks, signals and bridge decks from a Mapbox Streets source of
+  the app's own, online only at first, and then the other roads in the close view as plain asphalt
+  with edge lines, never lane lines.
 - **The lane the car is in, as research only.** The owner would like to see the lane the car is in and
   the car's lane changes. The phone's positions alone cannot tell lanes, so on freeways the debug log has
   kept the phone's own motion beside its position against the matched one since the lane data was

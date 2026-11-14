@@ -1781,11 +1781,11 @@ inside a lane window, stayed within 1 zoom level a second, and the centre never 
 
 - **Off:** no lane lines on the map.
 - **Mapbox's lane details:** Mapbox Standard's own, below, as the earlier switch had them.
-- **Drawn by the app:** on freeways with lane data, during guidance, the app's own lanes under its
-  own route line, the line in the lane the card names, that lane lit close in, and the car as a bar
-  across the road over drawn lanes in a close view
-  ([The app's own lanes](#the-apps-own-lanes)). Mapbox's lane details are off meanwhile, but for the
-  measuring drive's one check ([Measuring the drawn lanes](#measuring-the-drawn-lanes)).
+- **Drawn by the app:** on freeways with lane data, and on streets where the route's data allows,
+  during guidance, the app's own lanes under its own route line, the line in the lane the card
+  names, that lane lit close in, and the car as a bar across the road over drawn lanes in a close
+  view ([The app's own lanes](#the-apps-own-lanes)). Mapbox's lane details are off meanwhile, but
+  for the measuring drive's one check ([Measuring the drawn lanes](#measuring-the-drawn-lanes)).
 
 A change applies at once, also during a drive, and touches nothing of the drive itself: no new
 route and no trip session. The card's lane row and its words, the run-up with its seam and the ramp
@@ -1986,10 +1986,11 @@ says ([The app's own lanes](#the-apps-own-lanes)). Before Start, in the preview,
 ### The app's own lanes
 
 **Settings → Guidance → Lanes on the map → Drawn by the app** ([Lanes on the map](#lanes-on-the-map)).
-With any other choice nothing here runs. With it, during guidance, the app draws freeway lanes
-itself under the route line, from the route's lane plan, with the app's own route line, whatever
-that line's own Debug switch says, and draws the car. Before Start nothing changes, and streets
-wait for a later step. The reasons are in [DECISIONS.md](DECISIONS.md), 52 and 53.
+With any other choice nothing here runs. With it, during guidance, the app draws the lanes of
+freeways, and of streets where the route's data allows (Streets, below), itself under the route
+line, from the route's lane plan, with the app's own route line, whatever that line's own Debug
+switch says, and draws the car. Before Start nothing changes. The reasons are in
+[DECISIONS.md](DECISIONS.md), 52 and 53.
 
 - **What is drawn** (`LaneDrawing`, `LaneLayers`): asphalt with an apron, white broken and solid lane
   lines, edge lines (yellow on the left), dotted lines beside exit-only lanes, car-pool lanes with
@@ -2141,13 +2142,50 @@ views rest is in the swap below.
   what was sent stays until the next route. A build with the counts that fails costs them for the
   route and one `error` line, never the line. The `lane_drawing` line's `horizonM` and
   `horizonZones` say what they drew in each window ([DRIVES.md](DRIVES.md)).
+- **Streets** (`CrossSection`, `StreetWays`, `HorizonEvidence`). A street's lanes are drawn only where
+  the route has lane data and a source tells whether the street is one-way or two-way, street by
+  street from one intersection to the next: the route's own access field for the road (not read yet,
+  as the side roads' fields are still measured), else the electronic horizon's one-way flag for the
+  edges along the street, read 20 m in from each of its ends, while **Lane counts between lane
+  points** is on, else none ([DECISIONS.md](DECISIONS.md), 52). The horizon's answers come as its
+  counts do, with the next window's send, from 40 m past the window on screen on and past a card
+  window there, so a route's first window, built before the horizon's first update, draws no street.
+  One road sits as the first of its streets a source tells of; a later street told otherwise is not
+  drawn. The streets over a card window's approach, from 60 m before it, are drawn all or none. On a
+  two-way street the route's lanes lie from the road's line to the right and the oncoming half is
+  plain asphalt, with no line of ours on the road's line or across that half; on a one-way street
+  the lanes lie about the road's line. A turn pocket is drawn from where it may begin, a possible
+  lane until it is known. A stop line, white and 0.6 m wide, stands 10 m before a junction only where
+  the route's flags give a traffic signal or a stop sign there (its own layer,
+  `custommaps-lanes-stop`, from zoom 16.5). Inside a junction the map's own road shows, with only the
+  lit lane crossing on the route's path; inside a roundabout nothing of ours is drawn, and after a
+  U-turn no receiving lane is lit. A lane only for bicycles is a 1.8 m strip beside a solid line,
+  never lit, tinted or counted.
+  - **The junction view with the drawing.** A street maneuver's card window is the junction view's,
+    from 180 m before the maneuver: the plan names the lane to take there, the map lights it and the
+    card's own row lights the same lanes (`CardStreetRow`). Where the route turns, the lit lane goes
+    on across the junction along the path's curve into the receiving road's lane, and the maneuver
+    arrow is the app's along it, from 4 m before the stop line to 30 m past the junction; at a U-turn
+    and a roundabout the arrow stays the SDK's. The swap is the camera's, as on freeways: with Large
+    in Smooth follow, once the junction view has reached its frame and a drawn lane is 10.4 dp wide,
+    in the design's figures about 100 to 130 m before the turn. The swap's widths read a freeway
+    lane, so on a street lane of 3.35 m the amber shows about 8.9 dp at the swap, against the held
+    line's 10.38. On a two-way street the car's bar spans the route's own lanes, its tick on the
+    outer side alone.
+  - **Logged:** each window's `lane_drawing` line says how many metres of street it drew (`streetM`)
+    and how many stretches with lane data it left to the map for want of a source (`streetNoOneWay`,
+    with their metres in `streetNoOneWayM`) or because a source told otherwise of them than of their
+    road (`streetMixed`). An empty window after an empty one, which is otherwise never sent, is sent
+    where it holds such stretches, so their count reaches the log.
 - **Not checked on a device:** the frame cost (the measuring drive); whether the chained order holds
   on a phone (the `map_layers` line says); how the drawing reads at speed by day and at night;
   whether the puck's position still comes every frame while the puck is invisible (a `car_layer`
   fallback with `no_position` would say it does not), and how the bar lies on a map tilted 55°;
   what the electronic horizon's lane count counts, lanes kept for car pools and one direction or
   both, and how well its edge ends meet the route's lane points ([DRIVES.md](DRIVES.md), checks 70
-  and 71).
+  and 71); whether the horizon's one-way flag holds for the streets driven, whether a stop sign's
+  flag stands on the route's own approach, and how a street's drawing reads in the junction view
+  ([DRIVES.md](DRIVES.md), checks 87 to 95).
 
 #### Measuring the drawn lanes
 
