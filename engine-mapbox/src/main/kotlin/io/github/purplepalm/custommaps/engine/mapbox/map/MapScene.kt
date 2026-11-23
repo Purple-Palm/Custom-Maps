@@ -1969,7 +1969,8 @@ internal class MapScene(
                     plugins.camera,
                     viewportDataSource,
                     tuned = !standard,
-                    tuning,
+                    // The navigation SDK's camera as it comes, on the car too: the car's own camera is Smooth follow's.
+                    tuning.forMapboxStyles(),
                     cameraListener,
                     junctionPoints,
                     // A surface without the gestures plugin, as the car's, has no tap to guard against.
@@ -2098,6 +2099,12 @@ internal class MapScene(
      * ("trims"), how far at most its trimmed end lay from the SDK's vanishing point along the route
      * ("trimLagM", in meters) and how long its part of a puck update took at most on the main thread
      * ("trimMaxMs").
+     *
+     * The car's Smooth follow, anchored on the car ([CameraTuning.anchored]), adds "roadAheadM" and
+     * "roadSpeed" (the road its road view shows above the car, in meters, and the highest speed of
+     * the last few seconds it is for), "roadZoom" (that view's zoom, which takes the place of the data
+     * source's fit of the road, so "to" keeps the SDK's) and with Large "junctionZoom" (the zoom of
+     * the junction view the car is in or has just left; none outside one).
      *
      * "aheadM", while the camera follows the car, is how much road the camera as shown has clear
      * above the car, in meters, by the look-ahead model ([LookAhead]): from the car's row, the

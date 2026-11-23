@@ -124,6 +124,21 @@ class LaneZoomFramesTest {
     }
 
     @Test
+    fun `the car's camera has the sdk frame no maneuver, the phone's as it decided`() {
+        for (decided in listOf(false, true)) {
+            assertEquals(decided, LaneZoomFrames.sdkFramesManeuver(tuning, decided))
+            assertFalse(LaneZoomFrames.sdkFramesManeuver(CameraTuning.CAR, decided))
+            // So the car's frames keep the Default limit of the road with either lane zoom.
+            for (mode in listOf(LaneZoom.DEFAULT, LaneZoom.LARGE)) {
+                val maneuver = mode == LaneZoom.LARGE && LaneZoomFrames.sdkFramesManeuver(CameraTuning.CAR, decided)
+                assertEquals(CameraTuning.CAR.defaultMaxZoom, LaneZoomFrames.smoothMaxZoom(mode, CameraTuning.CAR, maneuver), 1e-12)
+            }
+        }
+        // The two Mapbox styles keep framing by the SDK's own rule: their numbers are not anchored.
+        assertFalse(CameraTuning.CAR.forMapboxStyles().anchored)
+    }
+
+    @Test
     fun `a maneuver is framed as the sdk frames it`() {
         // Its own rule: within the trigger distance, for every kind it does not leave out, and
         // only while that is switched on.

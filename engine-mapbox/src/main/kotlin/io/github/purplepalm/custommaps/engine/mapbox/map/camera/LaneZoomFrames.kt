@@ -23,6 +23,8 @@ import kotlin.math.min
  *   tells the SDK), and the upper limit is raised only while it is, before each frame of the drive
  *   is computed ([beforeSmoothEvaluate]). A frame of the road is fitted from the Default limit, as
  *   it always was ([smoothMaxZoom] says why). Near a lane choice the camera goes closer by itself.
+ *   Anchored on the car ([CameraTuning.anchored]) the SDK frames no maneuver at all, and the frames
+ *   keep the Default limit and no junction's points ([sdkFramesManeuver]).
  * - Mapbox tuned has no camera of its own that could hold the road back, so all its limits move
  *   with the drive, before each frame is computed ([beforeTunedEvaluate]).
  * - In both, while a maneuver is framed, the frame also holds the road to where it bends past the
@@ -84,7 +86,7 @@ internal object LaneZoomFrames {
         val large = mode == LaneZoom.LARGE
         val options = dataSource.options.followingFrameOptions
         val framed = progressOf(route, progress)
-        val maneuver = large && framesManeuver(framed, options)
+        val maneuver = large && sdkFramesManeuver(tuning, framesManeuver(framed, options))
         options.maxZoom = smoothMaxZoom(mode, tuning, framesManeuver = maneuver)
         options.minZoom = SDK_MIN_ZOOM
         options.bearingSmoothing.maxBearingAngleDiff = SDK_BEARING_LEAD
@@ -146,11 +148,18 @@ internal object LaneZoomFrames {
         val options = dataSource.options.followingFrameOptions
         // With Default nothing of the drive is asked: the limit is the same on every update,
         // nothing is written, and the junction frame gets none of the bend's points.
-        val maneuver = mode == LaneZoom.LARGE && framesManeuver
+        val maneuver = mode == LaneZoom.LARGE && sdkFramesManeuver(tuning, framesManeuver)
         val maxZoom = smoothMaxZoom(mode, tuning, framesManeuver = maneuver)
         if (options.maxZoom != maxZoom) options.maxZoom = maxZoom
         junction.update(progress, mode, maneuver, coalesceMeters(options), tuning)
     }
+
+    /**
+     * Whether Smooth follow has the SDK frame the maneuver: as the camera decided ([framesManeuver]), but never for a
+     * camera anchored on the car ([CameraTuning.anchored]), which frames its junctions itself with the car on its row.
+     * Its frames then keep the SDK's upper limit of the road and none of a junction's points.
+     */
+    fun sdkFramesManeuver(tuning: CameraTuning, framesManeuver: Boolean): Boolean = framesManeuver && !tuning.anchored
 
     /**
      * The upper limit of one following frame of Smooth follow: [CameraTuning.maxZoom] while Large
