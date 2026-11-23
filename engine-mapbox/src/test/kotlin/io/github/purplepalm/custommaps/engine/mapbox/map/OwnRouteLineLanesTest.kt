@@ -444,34 +444,6 @@ class OwnRouteLineLanesTest {
     }
 
     @Test
-    fun `the car's bar is the held window's while the line is drawn with its lanes, and the swap says when it shows`() {
-        start(car = own.windows.cards.first().start)
-        // Not drawn yet: no bar, no swap.
-        assertNull(line.carBar)
-        assertFalse(line.swapped)
-        scene.load()
-        scene.loadWindow()
-        val bar = requireNotNull(line.carBar)
-        assertTrue(bar.at(own.windows.cards.first().start + 80.0), "the bar is there over the lanes of the run-up")
-        assertFalse(line.swapped)
-        // The close view latched with lanes wide enough: the lit lane in the line's place, and the car a bar.
-        line.onCameraZoom(zoomOf(13.0), 0.0)
-        line.onLatched(true)
-        assertTrue(line.swapped)
-        line.onLatched(false)
-        assertFalse(line.swapped)
-        // A new route shows the SDK's line until its own is drawn: no bar meanwhile.
-        line.onLatched(true)
-        line.onRoute("route-b#0", refresh = false, null, traffic)
-        assertNull(line.carBar)
-        assertFalse(line.swapped)
-        // And with the lanes switched off, never.
-        line.setLanes(false)
-        assertNull(line.carBar)
-        assertFalse(line.swapped)
-    }
-
-    @Test
     fun `nothing is written before the line is drawn, and each drawing takes the swap's state, after a style load or a reroute too`() {
         start()
         line.onLatched(true)
@@ -510,24 +482,24 @@ class OwnRouteLineLanesTest {
     }
 
     @Test
-    fun `the measuring switch hides the lanes whole, keeps the route line whole over the lit stretches and the car a dot`() {
+    fun `the measuring switch hides the lanes whole and keeps the route line whole over the lit stretches`() {
         drawn()
         line.onCameraZoom(zoomOf(13.0), 0.0)
         line.onLatched(true)
-        assertTrue(line.swapped)
+        assertEquals(false, style.litPair, "the lit lane in the line's place")
         style.litPairWrites.clear()
         // Hidden: every layer of the lanes draws nothing, and the line takes the lit stretches back at once.
         line.setLanesShown(false)
         assertFalse(lanes.baseShown)
         assertFalse(lanes.litShown)
         assertEquals(listOf(true), style.litPairWrites)
-        assertFalse(line.swapped, "no bar while the lanes are hidden")
+        assertEquals(true, style.litPair)
         // The camera's word changes nothing while they are: no swap, no write.
         line.onLatched(false)
         line.onLatched(true)
         line.onCameraZoom(zoomOf(14.0), 0.0)
         assertEquals(listOf(true), style.litPairWrites)
-        assertFalse(line.swapped)
+        assertEquals(true, style.litPair)
         // The same word again writes nothing.
         val calls = style.calls.size
         line.setLanesShown(false)
@@ -550,7 +522,7 @@ class OwnRouteLineLanesTest {
         assertTrue(lanes.baseShown)
         assertTrue(lanes.litShown)
         assertEquals(listOf(true, false), style.litPairWrites)
-        assertTrue(line.swapped)
+        assertEquals(false, style.litPair)
     }
 
     @Test

@@ -689,7 +689,7 @@ class LaneTrustTest {
             assertEquals(!uTurn, nodes[j.node].station in b.drawing.turns(), "${b.name}: the arrow at the curve at ${j.from}")
         }
         // A roundabout: nothing of ours from its approach's near side to the far side of the way out of it, whatever lanes the
-        // route lists on the way round; no lane there for the car's bar to span.
+        // route lists on the way round; no lane laid out there either.
         for ((i, node) in nodes.withIndex()) {
             if (node.maneuver?.type !in ROUNDABOUTS || node.maneuver?.type in ROUNDABOUT_EXITS || i == 0) continue
             val exit = nodes.drop(i + 1).firstOrNull { it.maneuver?.type in ROUNDABOUT_EXITS }?.station ?: continue
@@ -699,7 +699,7 @@ class LaneTrustTest {
             assertTrue(b.drawing.turns().none { it == node.station })
             var x = node.station - LaneTopology.STOP_LINE_METERS + 0.5
             while (x < farSide) {
-                assertTrue(b.drawing.lanesAt(x).isEmpty(), "${b.name}: lanes for the car's bar inside the roundabout at $x")
+                assertTrue(b.drawing.lanesAt(x).isEmpty(), "${b.name}: lanes inside the roundabout at $x")
                 x += 1.0
             }
             if (nodes.subList(i + 1, nodes.indexOfFirst { it.station >= exit } + 1).any { it.lanes.isNotEmpty() }) saw("roundaboutLanes")

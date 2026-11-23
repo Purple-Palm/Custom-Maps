@@ -560,7 +560,7 @@ class StreetDrawingTest {
             for (oneWay in listOf(false, true)) {
                 val d = draw(route, oneWay)
                 val name = "${route.routeId} ${if (oneWay) "one-way" else "two-way"}"
-                // The evidence has lanes on the way round; the drawing none, nor lanes for the car's bar, nor a street counted.
+                // The evidence has lanes on the way round; the drawing none, no lane laid out there, nor a street counted.
                 assertTrue(d.evidence.stretches.any { it.lanes > 0 && it.from >= entry - MM && it.to <= exit + MM && it.to > it.from }, name)
                 assertTrue(d.features.none { it.to > entry - 10.0 + MM && it.from < farSide - MM }, "$name: ${d.features.filter { it.to > entry - 10.0 + MM && it.from < farSide - MM }.map { it.kind }}")
                 var x = entry - 9.5

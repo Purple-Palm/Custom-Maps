@@ -20,6 +20,7 @@ import io.github.purplepalm.custommaps.settings.SoundSettings
 import io.github.purplepalm.custommaps.sound.ToneResult
 import io.github.purplepalm.custommaps.token.TokenTrips
 import io.github.purplepalm.custommaps.token.TripsOf
+import java.io.File
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneOffset
@@ -215,6 +216,19 @@ class SettingsCatalogueTest {
         assertEquals(emptyList<RowNote>(), row<ChoiceRow>(SettingId.LANE_ZOOM, everything.copy(guidance = GuidanceSettings(cameraStyle = CameraStyle.SMOOTH_FOLLOW))).lines)
         // The beta is named one beside its title.
         assertEquals(RowText.Res(R.string.mapbox_beta_label), row<SwitchRow>(SettingId.LANE_COUNTS_HORIZON).badge)
+    }
+
+    @Test
+    fun `the words of Lanes on the map say nothing of a car bar, the car being the dot in every view`() {
+        // Unit tests run with the module directory as the working directory.
+        val strings = File("src/main/res/values/strings.xml").readText()
+        val words = Regex("""<string name="(lanes_on_map\w*)">(.*?)</string>""").findAll(strings).associate { it.groupValues[1] to it.groupValues[2] }
+        assertTrue("lanes_on_map_app_note" in words, "${words.keys}")
+        for ((name, text) in words) assertFalse(Regex("""\bbars?\b""", RegexOption.IGNORE_CASE).containsMatchIn(text), "$name: $text")
+        assertEquals(
+            "On freeways where the route has lane data, the app draws the lanes with the route line in the lane to take. Close to an exit that lane is lit. Mapbox\\'s lane details are off meanwhile.",
+            words["lanes_on_map_app_note"],
+        )
     }
 
     @Test

@@ -40,7 +40,8 @@ class CarImagesWiringTest {
         for (size in listOf("\"top-image-size\" to dotSize,", "\"bearing-image-size\" to dotSize,", "\"shadow-image-size\" to dotSize,")) {
             assertTrue(size in add, "$size: $add")
         }
-        assertTrue("set(\"top-image-size\", dotSize)" in SourceText.body(layer, "override fun showDot()").map { it.trim() })
+        // Shown, the dot keeps the images and sizes the layer was added with: its visibility is all that is set.
+        assertTrue("override fun showDot() = set(\"visibility\", Value.valueOf(\"visible\"))" in SourceText.code(layer).lines().map { it.trim() })
         assertTrue("private val dotSize = Value.valueOf(imageScale)" in SourceText.code(layer).lines().map { it.trim() })
     }
 

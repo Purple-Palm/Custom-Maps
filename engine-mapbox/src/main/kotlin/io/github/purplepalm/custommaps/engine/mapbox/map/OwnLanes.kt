@@ -13,7 +13,6 @@ import io.github.purplepalm.custommaps.nav.lanes.HorizonEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LaneEvidence
 import io.github.purplepalm.custommaps.nav.lanes.LanePlan
 import io.github.purplepalm.custommaps.nav.lanes.RoadKind
-import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
 import io.github.purplepalm.custommaps.nav.lanes.geometry.CrossSection
 import io.github.purplepalm.custommaps.nav.lanes.geometry.DrawingWindows
 import io.github.purplepalm.custommaps.nav.lanes.geometry.GoreArrow
@@ -73,9 +72,8 @@ internal class OwnLanes(
 
     /**
      * The features of [window] as the drawing's source takes them, with the traffic of each lit piece from [runs] along
-     * [table]'s path. The tint pieces of the lanes that end at one station are one feature ([mergeTints]). With them the car's
-     * bar along the window ([CarBar]), for the car drawn over the lanes in a close view, and what the electronic horizon's
-     * counts drew in it, where the lanes were drawn with them ([horizon]).
+     * [table]'s path. The tint pieces of the lanes that end at one station are one feature ([mergeTints]). With them what the
+     * electronic horizon's counts drew in it, where the lanes were drawn with them ([horizon]).
      */
     fun window(window: DrawingWindows.Window, table: StationTable, runs: List<TrafficRun>, horizon: HorizonEvidence? = null): LaneWindow {
         val features = mergeTints(drawing.features(window.from, window.to))
@@ -114,7 +112,6 @@ internal class OwnLanes(
             insides = insides.map { (id, to) -> LaneWindow.Piece(id, to) }.sortedBy { it.to },
             levels = levels,
             latitude = latitude,
-            carBar = CarBar.of(drawing, window.from, window.to),
             horizonMeters = horizon?.drawnMeters(window.from, window.to) ?: 0.0,
             horizonZones = horizon?.zones(window.from, window.to) ?: 0,
             streets = streetsIn(window),
@@ -274,9 +271,9 @@ internal class OwnLanes(
  * One window of the app's own lanes as the drawing's source takes it: [window], its [collection] of features, how many
  * [features], [coordinates] and [bytes] of GeoJSON text it has, the [tints]' pieces the map hides once the car is past
  * them, and each lit piece's traffic where it has some ([levels]), by feature state; the [latitude] it lies at (not a
- * number without features), for the layers' widths; the car's bar along it ([carBar]), null where none was made; the
- * metres the electronic horizon's counts drew in it ([horizonMeters]: its bridges and zones) and how many of its zones
- * ([horizonZones]); and how its streets are drawn ([streets]), for the "lane_drawing" line.
+ * number without features), for the layers' widths; the metres the electronic horizon's counts drew in it
+ * ([horizonMeters]: its bridges and zones) and how many of its zones ([horizonZones]); and how its streets are drawn
+ * ([streets]), for the "lane_drawing" line.
  */
 internal class LaneWindow(
     val window: DrawingWindows.Window,
@@ -287,7 +284,6 @@ internal class LaneWindow(
     val tints: List<Piece>,
     val levels: List<Pair<String, String>>,
     val latitude: Double,
-    val carBar: CarBar? = null,
     val horizonMeters: Double = 0.0,
     val horizonZones: Int = 0,
     val streets: Streets = Streets(),

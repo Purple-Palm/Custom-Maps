@@ -14,7 +14,6 @@ import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.GeoPoint
 import io.github.purplepalm.custommaps.nav.model.ManeuverType
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -26,8 +25,7 @@ import kotlin.math.log2
  * ([StreetJunction]) 6 km due north to a right turn at a traffic signal, with lane points of two lanes at signals from
  * 3,500 m on: a street's lanes are drawn only where a source tells whether it is one-way, here the electronic horizon's
  * one-way flag past the window on screen, else none of them, as the "lane_drawing" line counts; drawn, they come with
- * their stop lines, the car's bar across the route's own lanes and the turn's arrow along the lit lane. Invented route
- * ids and synthetic horizons.
+ * their stop lines and the turn's arrow along the lit lane. Invented route ids and synthetic horizons.
  */
 class OwnRouteLineStreetsTest {
 
@@ -140,7 +138,7 @@ class OwnRouteLineStreetsTest {
     }
 
     @Test
-    fun `the horizon's two-way flag draws the streets past the window on screen, stop lines and the bar on the route's lanes`() {
+    fun `the horizon's two-way flag draws the streets past the window on screen, with stop lines on the route's lanes`() {
         drawn()
         // The first window was built before any horizon: it draws nothing of a street.
         assertEquals(0L, laneLines().single()["streetM"])
@@ -156,11 +154,6 @@ class OwnRouteLineStreetsTest {
         val kinds = kinds()
         assertTrue("stop_line" in kinds && "lane_line" in kinds && "lit" in kinds, "$kinds")
         assertTrue("edge_line" !in kinds, "no edge line on a two-way street: $kinds")
-        // The car is a bar across the route's own lanes only, its tick on the outer side.
-        val bar = requireNotNull(line.carBar)
-        assertTrue(bar.at(turn - 100.0))
-        assertTrue(bar.twoWay)
-        assertEquals(2.0 * LaneTopology.STREET_LANE_METERS, bar.width, 1e-6)
         // The turn's arrow along the lit lane, the right one, from 4 m before the stop line's place.
         val arrow = requireNotNull(line.goreArrow(id, 0, 1))
         assertEquals(turn - LaneTopology.STOP_LINE_METERS - GoreArrow.STOP_LINE_BEFORE_METERS, north(arrow.first()), 0.05)
@@ -224,23 +217,19 @@ class OwnRouteLineStreetsTest {
         line.onLatched(true)
         line.onCameraZoom(zoomOf(10.42, LaneTopology.FREEWAY_LANE_METERS), 0.0)
         line.onLatched(true)
-        assertFalse(line.swapped)
+        assertEquals(true, scene.style.litPair, "the route line over the lit stretches")
         line.onCameraZoom(zoomOf(10.5, LaneTopology.STREET_LANE_METERS), 0.0)
-        assertTrue(line.swapped)
+        assertEquals(false, scene.style.litPair, "the lit lane in the line's place")
         assertTrue(LaneSwap.laneDp(zoomOf(10.5, LaneTopology.STREET_LANE_METERS), 0.0, LaneTopology.STREET_LANE_METERS) >= LaneSwap.SWAP_IN_STREET_DP)
     }
 
     @Test
-    fun `the horizon's one-way flag lays the lanes about the road's line, the bar with a tick on each side`() {
+    fun `the horizon's one-way flag lays the lanes about the road's line, with their edge lines`() {
         drawn()
         drive(0.0, turn - 400.0) { horizonCut(it, oneWay = true) }
         val own = requireNotNull(shown().lanes)
         assertTrue(own.drawnStreets.any { turn - 100.0 in it })
         assertTrue("edge_line" in kinds())
-        val bar = requireNotNull(line.carBar)
-        assertTrue(bar.at(turn - 100.0))
-        assertFalse(bar.twoWay)
-        assertEquals(2.0 * LaneTopology.STREET_LANE_METERS, bar.width, 1e-6)
         val arrow = requireNotNull(line.goreArrow(id, 0, 1))
         assertEquals(0.5 * LaneTopology.STREET_LANE_METERS, east(arrow.first()), 0.05)
     }

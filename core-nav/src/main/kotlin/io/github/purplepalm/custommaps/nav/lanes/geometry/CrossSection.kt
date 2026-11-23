@@ -19,8 +19,8 @@ import kotlin.math.sign
 /**
  * Where every lane of a route lies across its road (the design's 4.2 and 4.3): one cross-section gives every
  * lateral position of the app's own drawing, so the asphalt's edges, the lane lines, the lit lane, the tint, the
- * route's path, the arrow, the eraser and the car bar agree by construction, with the drawing if not with the
- * ground. Positions are offsets from the road's axis ([RoadAxis]), left positive, in metres.
+ * route's path, the arrow and the eraser agree by construction, with the drawing if not with the ground. Positions
+ * are offsets from the road's axis ([RoadAxis]), left positive, in metres.
  *
  * - **Widths** (4.2): a lane is [LaneTopology.FREEWAY_LANE_METERS] wide on freeways and ramps and
  *   [LaneTopology.STREET_LANE_METERS] on streets; a lane only for bicycles is [BICYCLE_LANE_METERS], never a

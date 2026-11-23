@@ -2,24 +2,17 @@ package io.github.purplepalm.custommaps.engine.mapbox.map
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toBitmap
 import com.mapbox.bindgen.Value
 import com.mapbox.maps.ImageHolder
 import com.mapbox.maps.MapboxMap
-import com.mapbox.maps.extension.style.expressions.generated.Expression
 import com.mapbox.maps.plugin.LocationPuck2D
 import com.mapbox.maps.plugin.locationcomponent.LocationComponentPlugin
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.CarLayerWatch
-import io.github.purplepalm.custommaps.nav.lanes.geometry.CarBar
-import io.github.purplepalm.custommaps.nav.lanes.geometry.LaneDrawing
-import kotlin.math.ceil
 
 /**
  * The car drawn by the app itself (the own lanes' design 5.4; T2, E4, R3, R20), with Lanes on the map's Drawn by the app;
@@ -32,11 +25,10 @@ import kotlin.math.ceil
  * anything else does: every change rebuilds the puck and cancels its glide. The camera still follows the SDK's puck, which
  * glides on unseen. The app draws the car on a location-indicator layer of its own, on top of everything ([Port.addLayer]),
  * moved every frame from the puck's animated position, which the map hands on ([onPosition]): two property sets a frame,
- * its place and its bearing ([Port.moveTo]), and nothing else. Over the drawn lanes, while the lit lane shows in the route
- * line's place, the car is a bar across the carriageway at the puck's station ([CarBar]), square to the lanes; elsewhere
- * the usual dot with the puck's own images and bearing. The bar's image is made again only where the carriageway's width
- * has changed by [CarBar.WIDTH_STEP_METERS] ([Port.showBar]); its size is a zoom expression of base 2 that keeps it at its
- * ground size.
+ * its place and its bearing ([Port.moveTo]), and nothing else. In every view, the close views over the drawn lanes too,
+ * the car is the usual dot with the puck's own images and bearing ([Port.showDot]), where the navigator puts it on the line
+ * of the road: never in a lane, and nothing moves it sideways. The layer is the one place where the app could later draw
+ * the car otherwise.
  *
  * While the map is not on screen, or put away for the list of the turns, nothing here changes a setting, adds a layer or
  * draws: what is due waits for the map to be back ([setShown]), when the puck's newest place comes with its first frame.
@@ -73,18 +65,12 @@ internal class CarLayer(
         /** Takes the own layer out of the style, if it is there. */
         fun removeLayer()
 
-        /** The dot: the puck's own images, as the location component draws them, and the layer shown. */
+        /** The layer shown: the dot, with the puck's own images as the layer was added with them. */
         fun showDot()
-
-        /** The bar [widthMeters] across ([twoWay]: its tick on the outer side alone), at its ground size at [latitude], and the layer shown. */
-        fun showBar(widthMeters: Double, twoWay: Boolean, latitude: Double)
 
         /** The layer's place and bearing, in degrees clockwise from north: the two property sets of a frame. */
         fun moveTo(latitude: Double, longitude: Double, bearing: Double)
     }
-
-    /** What the own layer shows. */
-    private enum class Mark { NONE, DOT, BAR }
 
     /** Why the own car was given back to the SDK's puck before the drive's end. */
     enum class Fallback(val logName: String) {
@@ -111,10 +97,9 @@ internal class CarLayer(
     // What is set now.
     private var puckHidden = false
     private var layerAdded = false
-    private var mark = Mark.NONE
-    private var barWidth = Double.NaN
-    private var barTwoWay = false
-    private var barLatitude = Double.NaN
+
+    /** The own layer, added hidden, is shown: from its first frame on. */
+    private var dotShown = false
 
     /** Why the next change of who draws the car is due, for its "car_layer" line. */
     private var reason = REASON_START
@@ -163,38 +148,24 @@ internal class CarLayer(
     fun onStyleLoaded() {
         styleReady = true
         layerAdded = false
-        mark = Mark.NONE
+        dotShown = false
         reconcile()
     }
 
     /**
-     * Every frame of the puck: its animated position at [latitude], [longitude] and the SDK's own bearing [puckBearing];
-     * [swapped], whether the lit lane shows in the route line's place on this map (its own camera's close view latched), and
-     * [bar], the car's bar along the lanes this map draws, or null. Moves the own layer there: the bar only while the lit lane
-     * is swapped in and the bar finds the puck over drawn lanes, else the dot. Allocates nothing of its own.
+     * Every frame of the puck: its animated position at [latitude], [longitude] and the SDK's own bearing [puckBearing]. Moves
+     * the dot there, the layer shown with its first frame. Allocates nothing of its own.
      */
-    fun onPosition(latitude: Double, longitude: Double, puckBearing: Double, swapped: Boolean, bar: CarBar?) {
+    fun onPosition(latitude: Double, longitude: Double, puckBearing: Double) {
         // With the switch off, or the car given back, nothing but these reads.
         if (!live || !shown) return
         watch.onPosition()
         try {
-            if (swapped && bar != null && bar.place(latitude, longitude)) {
-                if (mark != Mark.BAR || bar.twoWay != barTwoWay || CarBar.widthChanged(barWidth, bar.width) || LaneDrawing.stopsStale(barLatitude, bar.latitude)) {
-                    port.showBar(bar.width, bar.twoWay, bar.latitude)
-                    mark = Mark.BAR
-                    barWidth = bar.width
-                    barTwoWay = bar.twoWay
-                    barLatitude = bar.latitude
-                }
-                port.moveTo(bar.latitude, bar.longitude, bar.bearing)
-            } else {
-                if (mark != Mark.DOT) {
-                    port.showDot()
-                    mark = Mark.DOT
-                    barWidth = Double.NaN
-                }
-                port.moveTo(latitude, longitude, puckBearing)
+            if (!dotShown) {
+                port.showDot()
+                dotShown = true
             }
+            port.moveTo(latitude, longitude, puckBearing)
         } catch (e: RuntimeException) {
             debugLog.error(WHERE, e)
             // Nothing more is drawn; the puck comes back once this frame's callback has returned.
@@ -241,13 +212,13 @@ internal class CarLayer(
                 attempt {
                     port.addLayer()
                     layerAdded = true
-                    mark = Mark.NONE
+                    dotShown = false
                 }
             }
         } else {
             if (layerAdded) quietly { if (port.usable) port.removeLayer() }
             layerAdded = false
-            mark = Mark.NONE
+            dotShown = false
             if (puckHidden) {
                 quietly { port.showPuck() }
                 puckHidden = false
@@ -285,7 +256,7 @@ internal class CarLayer(
         failed = true
         if (layerAdded) quietly { if (port.usable) port.removeLayer() }
         layerAdded = false
-        mark = Mark.NONE
+        dotShown = false
         if (puckHidden) quietly { port.showPuck() }
         puckHidden = false
         if (had) logLine(DRAWER_SDK, REASON_FALLBACK, mapOf("carLayerFallback" to cause.logName))
@@ -319,24 +290,18 @@ internal class CarLayer(
         const val TOP_IMAGE = "custommaps-car-top"
         const val BEARING_IMAGE = "custommaps-car-bearing"
         const val SHADOW_IMAGE = "custommaps-car-shadow"
-        const val BAR_IMAGE = "custommaps-car-bar"
         const val NO_IMAGE = "custommaps-car-none"
 
         /** The dot as the location component draws its puck: its perspective compensation and its images' lift at a tilt. */
         const val DOT_PERSPECTIVE = 0.9
         const val DOT_PITCH_DISPLACEMENT = 4.0
 
-        /** The bar is scaled by the projection, as the map's own ground is ([CarBar.sizeStops]). */
-        const val BAR_PERSPECTIVE = 0.0
-
         /**
-         * The own layer and the puck of [location] on [mapboxMap], whose usual puck is [puck]: the bar in the puck's blue,
-         * taken from the puck's own top image, with a rim in the white of its own shadow image. The dot's three images
-         * are drawn at [imageScale], as the puck's are ([ImageScale]).
+         * The own layer and the puck of [location] on [mapboxMap], whose usual puck is [puck]: the dot with the puck's own
+         * three images, drawn at [imageScale] as the puck's are ([ImageScale]).
          */
         fun on(context: Context, mapboxMap: MapboxMap, location: LocationComponentPlugin, puck: LocationPuck2D, imageScale: Double = ImageScale.NONE): Port = object : Port {
             private val hidden = puck.copy(opacity = 0f)
-            private val pixelRatio = mapboxMap.pixelRatio.toDouble()
             private val dotSize = Value.valueOf(imageScale)
             private val top: Bitmap? by lazy { bitmapOf(context, puck.topImage) }
             private val bearing: Bitmap? by lazy { bitmapOf(context, puck.bearingImage) }
@@ -381,90 +346,12 @@ internal class CarLayer(
                 if (mapboxMap.styleLayerExists(LAYER)) mapboxMap.removeStyleLayer(LAYER)
             }
 
-            override fun showDot() {
-                set("top-image", Value.valueOf(TOP_IMAGE))
-                set("bearing-image", Value.valueOf(if (bearing != null) BEARING_IMAGE else NO_IMAGE))
-                set("shadow-image", Value.valueOf(if (shadow != null) SHADOW_IMAGE else NO_IMAGE))
-                set("top-image-size", dotSize)
-                set("perspective-compensation", Value.valueOf(DOT_PERSPECTIVE))
-                set("image-pitch-displacement", Value.valueOf(DOT_PITCH_DISPLACEMENT))
-                set("visibility", Value.valueOf("visible"))
-            }
-
-            override fun showBar(widthMeters: Double, twoWay: Boolean, latitude: Double) {
-                image(BAR_IMAGE, barBitmap(widthMeters, twoWay))
-                set("top-image", Value.valueOf(BAR_IMAGE))
-                set("bearing-image", Value.valueOf(NO_IMAGE))
-                set("shadow-image", Value.valueOf(NO_IMAGE))
-                set("top-image-size", sizeOf(latitude))
-                set("perspective-compensation", Value.valueOf(BAR_PERSPECTIVE))
-                set("image-pitch-displacement", zero)
-                set("visibility", Value.valueOf("visible"))
-            }
+            // The dot's images, sizes and lift are the layer's own from its addition on: showing it is all there is to do.
+            override fun showDot() = set("visibility", Value.valueOf("visible"))
 
             override fun moveTo(latitude: Double, longitude: Double, bearing: Double) {
                 set("location", Value.valueOf(listOf(Value.valueOf(latitude), Value.valueOf(longitude), zero)))
                 set("bearing", Value.valueOf(bearing))
-            }
-
-            /** The bar [widthMeters] across, as an image in the puck's blue with a white rim and a forward tick on each outer apron. */
-            private fun barBitmap(widthMeters: Double, twoWay: Boolean): Bitmap {
-                val blue = centreColour(checkNotNull(top) { "No top image" })
-                val white = centreColour(checkNotNull(shadow) { "No shadow image" })
-                val scale = (CarBar.IMAGE_DP_PER_METER * pixelRatio).toFloat()
-                val half = (widthMeters / 2.0).toFloat()
-                val beside = (CarBar.TICK_GAP_METERS + CarBar.TICK_WIDTH_METERS + IMAGE_MARGIN_METERS).toFloat()
-                val reach = (CarBar.TICK_REACH_METERS + IMAGE_MARGIN_METERS).toFloat()
-                val width = ceil((2f * (half + beside)) * scale).toInt().coerceAtLeast(1)
-                val height = ceil(2f * reach * scale).toInt().coerceAtLeast(1)
-                val bitmap = createBitmap(width, height)
-                val canvas = Canvas(bitmap)
-                val cx = width / 2f
-                val cy = height / 2f
-                // Metres across (right positive) and along (ahead positive) to the image's pixels: ahead is up.
-                fun x(m: Float) = cx + m * scale
-                fun y(m: Float) = cy - m * scale
-                val rim = (CarBar.RIM_METERS).toFloat()
-                val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.FILL
-                    color = blue
-                }
-                val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.STROKE
-                    strokeWidth = rim * scale
-                    strokeJoin = Paint.Join.ROUND
-                    color = white
-                }
-                // Each shape inset by half the rim, so the rim's outer edge is the shape's own.
-                val inset = rim / 2f
-                val depth = (CarBar.DEPTH_METERS / 2.0).toFloat()
-                val body = Path().apply {
-                    moveTo(x(-half + inset), y(depth - inset))
-                    lineTo(x(half - inset), y(depth - inset))
-                    lineTo(x(half - inset), y(-depth + inset))
-                    lineTo(x(-half + inset), y(-depth + inset))
-                    close()
-                }
-                canvas.drawPath(body, fill)
-                canvas.drawPath(body, edge)
-                val gap = CarBar.TICK_GAP_METERS.toFloat()
-                val tick = CarBar.TICK_WIDTH_METERS.toFloat()
-                val tip = CarBar.TICK_REACH_METERS.toFloat()
-                // On a two-way street the inner tick would stand on the oncoming half: the outer one alone.
-                val sides = if (twoWay) listOf(1f) else listOf(-1f, 1f)
-                for (side in sides) {
-                    val near = side * (half + gap)
-                    val far = side * (half + gap + tick)
-                    val path = Path().apply {
-                        moveTo(x(near), y(-depth + inset))
-                        lineTo(x(far), y(-depth + inset))
-                        lineTo(x((near + far) / 2f), y(tip - inset))
-                        close()
-                    }
-                    canvas.drawPath(path, fill)
-                    canvas.drawPath(path, edge)
-                }
-                return bitmap
             }
 
             private fun image(id: String, bitmap: Bitmap) {
@@ -482,24 +369,11 @@ internal class CarLayer(
         /** No transition: a property takes its value at once. */
         private val NO_TRANSITION: Value = Value.valueOf(hashMapOf("duration" to Value.valueOf(0L), "delay" to Value.valueOf(0L)))
 
-        /** Room around the bar's shapes in its image, so the rim is never cut. */
-        private const val IMAGE_MARGIN_METERS = 0.3
-
-        /** The bar's size as a zoom expression of base 2 at [latitude]: its image at its ground size at every zoom ([CarBar.sizeStops]). */
-        private fun sizeOf(latitude: Double): Expression = Expression.interpolate {
-            exponential { literal(2.0) }
-            zoom()
-            for ((zoom, size) in CarBar.sizeStops(latitude)) stop(zoom, size)
-        }
-
         /** An image of the puck as a bitmap at the screen's density; null for none. */
         private fun bitmapOf(context: Context, holder: ImageHolder?): Bitmap? {
             holder?.bitmap?.let { return it }
             val id = holder?.drawableId ?: return null
             return ContextCompat.getDrawable(context, id)?.toBitmap()
         }
-
-        /** The colour at the middle of [bitmap]: the puck's blue in its top image, the white of its disc in its shadow image. */
-        private fun centreColour(bitmap: Bitmap): Int = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
     }
 }

@@ -3,9 +3,9 @@ package io.github.purplepalm.custommaps.nav.lanes
 /**
  * Who draws the lanes on the map, as Settings' Lanes on the map says (the own lanes' design 7): nobody ([OFF]), Mapbox
  * ([MAPBOX], its lane details, as the old switch Lane details on the map drew them, the route line thin close in), or the
- * app ([APP]: during guidance its own drawing of the freeway lanes, its own route line in the lane the plan names, and
- * over the drawn lanes in a close view the car as a bar across the road). The card's lane row, the run-up and its close
- * view are the same with every choice: they read the lane plan whatever is drawn.
+ * app ([APP]: during guidance its own drawing of the freeway lanes, its own route line in the lane the plan names, and the
+ * car on a layer of its own, the usual dot). The card's lane row, the run-up and its close view are the same with every
+ * choice: they read the lane plan whatever is drawn.
  */
 enum class LanesOnMap {
     OFF,
@@ -16,7 +16,7 @@ enum class LanesOnMap {
     /** Whether Mapbox's lane details are on the map: with [MAPBOX], and with [APP] only where they are kept under the app's drawing ([DETAILS_UNDER_DRAWING]). */
     val mapboxDetails: Boolean get() = this == MAPBOX || (this == APP && DETAILS_UNDER_DRAWING)
 
-    /** Whether the app draws the lanes: its drawing, its own route line and the car's bar. */
+    /** Whether the app draws the lanes: its drawing, its own route line and the car on its own layer. */
     val appDraws: Boolean get() = this == APP
 
     /**

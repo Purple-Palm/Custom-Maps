@@ -85,10 +85,10 @@ interface MapRenderer {
      * Who draws the lanes on the map ([LanesOnMap]): Mapbox's lane markings, painted arrows and
      * crosswalks where the map data has them, with the route line thin close in; the app's own
      * drawing of the freeway lanes during guidance, with its own route line in the lane the lane
-     * plan names and, over the drawn lanes in a close view, the car as a bar across the road; or
-     * neither. A change applies at once, also during a drive, and touches no trip: the card's lane
-     * row, the run-up and its close view are the same with every choice. The car is drawn where it
-     * is along the road, never in a lane.
+     * plan names and the car, the usual dot, on a layer of its own; or neither. A change applies
+     * at once, also during a drive, and touches no trip: the card's lane row, the run-up and its
+     * close view are the same with every choice. The car is drawn where it is along the road,
+     * never in a lane.
      */
     fun setLanesOnMap(choice: LanesOnMap)
 

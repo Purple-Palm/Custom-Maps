@@ -155,10 +155,10 @@ import kotlinx.coroutines.withContext
  * the lane markings Mapbox Standard can draw are on ([LaneDetails]) and the route line stays thin
  * close in. With Drawn by the app the app draws the freeway lanes during guidance ([OwnLanes]) with
  * its own route line ([OwnRouteLine]), and the car itself, from the puck's place every frame, the
- * location component's puck invisible from Start to the drive's end ([CarLayer]): over the drawn
- * lanes in a close view a bar across them, elsewhere the usual dot. With Off neither. The puck stays
- * where the navigator puts the car, on the line of the road: nothing here moves it sideways into a
- * lane, since no position the phone has says which lane the car is in.
+ * location component's puck invisible from Start to the drive's end ([CarLayer]): the usual dot in
+ * every view. With Off neither. The puck stays where the navigator puts the car, on the line of the
+ * road: nothing here moves it sideways into a lane, since no position the phone has says which lane
+ * the car is in.
  *
  * Behind a Debug switch ([setOwnRouteLine]) the route line of a drive is the app's own, drawn along
  * the lanes of the route's lane plan in place of the navigation SDK's primary line, whatever Lanes on
@@ -1525,9 +1525,8 @@ internal class MapScene(
     }
 
     private fun onPuckMoved(point: Point) {
-        // The car drawn by the app, with the switch on: the bar while the lit lane shows in the route line's place on this map,
-        // else the dot.
-        carLayer.onPosition(point.latitude(), point.longitude(), lastBearing ?: 0.0, ownLine.swapped, ownLine.carBar)
+        // The car drawn by the app, with the switch on: the dot at the puck's place, with the SDK's own bearing.
+        carLayer.onPosition(point.latitude(), point.longitude(), lastBearing ?: 0.0)
         lastPuck = point
         engine.lastPuckPosition = point
         if (cameraSampling != null) puckCadence.tick(SystemClock.elapsedRealtimeNanos())

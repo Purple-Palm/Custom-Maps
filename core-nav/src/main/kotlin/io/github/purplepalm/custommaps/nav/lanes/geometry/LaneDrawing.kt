@@ -305,8 +305,7 @@ class LaneDrawing private constructor(
 
     /**
      * The lanes drawn on the route's carriageway at [station], from the left: none outside the drawn stretches; inside a street
-     * junction the drawing goes on through ([junctionInteriors]), the lanes as laid out, which the lit lane and the car's bar
-     * cross on.
+     * junction the drawing goes on through ([junctionInteriors]), the lanes as laid out, which the lit lane crosses on.
      */
     internal fun lanesAt(station: Double): List<CrossSection.Place> = builder.lanesAt(station)
 
@@ -316,17 +315,8 @@ class LaneDrawing private constructor(
      */
     internal fun asphaltAt(station: Double): Pair<Double, Double>? = builder.asphaltAt(station)
 
-    /**
-     * Where the route's carriageway at [station] has its two edge lines, as the drawing lays its lanes there ([lanesAt]): the
-     * points of the left and the right one across the road at [station]; null where no lane is drawn.
-     */
-    internal fun edgesAt(station: Double): Pair<GeoPoint, GeoPoint>? = builder.edgesAt(station)
-
     /** How the route's carriageway at [station] sits on its road ([CrossSection.carriagewayAt]); null off every run. */
     internal fun carriagewayAt(station: Double): CrossSection.Carriageway? = builder.section.carriagewayAt(station)
-
-    /** The path the drawing is laid along: its route's own line with its stations among it. */
-    internal val path: RoutePath get() = builder.path
 
     /** Where each gore's two channelizing lines end, along the stub and along the route: for the tests. */
     internal val noses: List<Pair<Double, Double>> get() = builder.noses()
@@ -935,19 +925,6 @@ class LaneDrawing private constructor(
             val k = drawings.indexOfFirst { station >= it.from && station <= it.carriagewayTo }
             if (k < 0) return emptyList()
             return placesAt(drawings[k], ends[k], station, axisAt(station))
-        }
-
-        fun edgesAt(station: Double): Pair<GeoPoint, GeoPoint>? {
-            val k = drawings.indexOfFirst { station >= it.from && station <= it.carriagewayTo }
-            if (k < 0) return null
-            val end = ends[k]
-            val places = placesAt(drawings[k], end, station, axisAt(station)).filter { it.width > NO_WIDTH }
-            if (places.isEmpty()) return null
-            // The offsets of a drawing's turning end are from the gore's axis, the lanes' straight lines past the arc's start.
-            val axis = if (end != null && station >= end.begin) end.axis else axisAt(station)
-            val left = axis.toGeo(axis.offset(station, places.maxOf { it.left }))
-            val right = axis.toGeo(axis.offset(station, places.minOf { it.right }))
-            return left to right
         }
 
         fun asphaltAt(station: Double): Pair<Double, Double>? {
