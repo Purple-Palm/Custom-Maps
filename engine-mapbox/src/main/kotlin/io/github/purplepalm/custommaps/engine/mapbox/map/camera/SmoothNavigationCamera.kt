@@ -286,8 +286,14 @@ internal class SmoothNavigationCamera(
     /** Anchored on the car: the highest speed of the last few seconds, which the road view is worked out for. */
     private val roadPeak = PeakSpeed(tuning.roadPeakSeconds)
 
-    /** That speed at the last progress update; null without one, which counts as standing. */
+    /** That speed at the last position; null without one, which counts as standing. */
     private var roadSpeed: Double? = null
+
+    /**
+     * Anchored on the car: whether the drive has given this camera a position. Until then it knows nothing of the
+     * speed, and a camera made anew during a drive, as on a new surface, stays at the zoom it starts from.
+     */
+    private var located = false
 
     /** Anchored on the car: the road view's zoom the latest frame of the data source was given; not a number before one. */
     private var roadZoom = Double.NaN
@@ -451,6 +457,11 @@ internal class SmoothNavigationCamera(
 
     override fun onLocation(location: Location, isTeleport: Boolean) {
         speedMps = location.speed ?: speedMps
+        // Anchored on the car: the speed the road view is worked out for, once per update, before its frame.
+        if (tuning.anchored) {
+            roadSpeed = roadPeak.onSpeed(now(), speedMps)
+            located = true
+        }
         if (isTeleport) teleportUntil = now() + TELEPORT_WATCH_SECONDS
         dataSource.onLocationChanged(location)
         // The route progress of this update comes right after the location and computes the frame.
@@ -510,9 +521,8 @@ internal class SmoothNavigationCamera(
             rampAhead = rampAhead,
         )
         updateLanesCap(now)
-        // Anchored on the car: the speed the road view is worked out for, and the junction the camera frames itself.
+        // Anchored on the car: the junction the camera frames itself.
         if (tuning.anchored) {
-            roadSpeed = roadPeak.onSpeed(now, speedMps)
             if (laneZoom == LaneZoom.LARGE) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()
         }
         // Near a lane choice, and while the view looks down onto a turn, Large turns the view
@@ -670,6 +680,7 @@ internal class SmoothNavigationCamera(
         capZoom = Double.NaN
         lastProgress = null
         roadZoom = Double.NaN
+        located = false
         carJunction.clear()
         forgetJunctionFit()
         dataSource.clearFollowingOverrides()
@@ -885,7 +896,9 @@ internal class SmoothNavigationCamera(
         // Anchored on the car, the frame keeps the car on its row and the camera works out the zoom itself: the road
         // view by speed, and with Large the fit of the junction the view is latched down for. The data source's fit of
         // the road is left aside.
+        // Before the drive's first position the zoom stays where it is, and comes when the position does.
         if (mode == Mode.FOLLOWING && tuning.anchored) {
+            if (!located) return
             val latitude = target.center?.latitude() ?: if (puckLat.isNaN()) lat.value else puckLat
             roadZoom = roadViewZoom(latitude)
             val sampleZoom = if (roadZoom.isNaN()) target.zoom else roadZoom

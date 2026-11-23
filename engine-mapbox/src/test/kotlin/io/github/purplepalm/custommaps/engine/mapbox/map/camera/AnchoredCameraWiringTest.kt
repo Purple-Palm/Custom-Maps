@@ -70,10 +70,16 @@ class AnchoredCameraWiringTest {
         assertTrue("roadZoom = roadViewZoom(latitude)" in branch)
         assertTrue("pushJunctionFit(target, carOnFocalPoint, now)" in branch)
         assertTrue("return" in branch)
-        // The road view at the car's tilt for the highest speed of the last few seconds, worked out per progress update.
+        // Before the drive's first position nothing is pushed: a camera made anew during a drive stays where it starts.
+        assertEquals("if (!located) return", branch[1])
+        // The road view at the car's tilt for the highest speed of the last few seconds, once per update, with its position.
         assertTrue("private val roadPeak = PeakSpeed(tuning.roadPeakSeconds)" in camera)
+        val located = body(camera, "override fun onLocation(location: Location, isTeleport: Boolean)")
+        val speed = located.indexOf("speedMps = location.speed ?: speedMps")
+        assertTrue(speed in 0 until located.indexOf("roadSpeed = roadPeak.onSpeed(now(), speedMps)"))
+        assertTrue("located = true" in located)
+        assertTrue("located = false" in body(camera, "override fun onGuidanceEnded()"))
         val progress = body(camera, "override fun onRouteProgress(")
-        assertTrue("roadSpeed = roadPeak.onSpeed(now, speedMps)" in progress)
         assertTrue("if (laneZoom == LaneZoom.LARGE) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()" in progress)
     }
 
