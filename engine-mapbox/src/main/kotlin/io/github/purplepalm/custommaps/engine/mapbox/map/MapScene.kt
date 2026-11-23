@@ -213,6 +213,12 @@ internal class MapScene(
     private val capWhileCarShows: Boolean = false,
     /** The numbers of the drive views on this map's screen ([DriveCamera]). */
     driveTuning: DriveViewTuning = DriveViewTuning.PHONE,
+    /**
+     * How much larger than their own pixels the map draws the images it takes as bitmaps ([ImageScale]): the car's map
+     * size on the car, whose map draws everything else larger by its pixel ratio; [ImageScale.NONE] on the phone. Set as
+     * the map is made, like the puck it scales: a new size makes a new map.
+     */
+    imageScale: Double = ImageScale.NONE,
 ) : MapRenderer {
 
     /** What the scene needs to know of the screen its map is on, and tells it. Main thread only. */
@@ -252,15 +258,19 @@ internal class MapScene(
     /**
      * Mapbox's own dot and bearing arrow on its white disc, with a graphite edge around the disc so it
      * shows on the light day map too; the same in both looks. The edge is the puck's shadow image,
-     * which with a bearing is the white disc alone.
+     * which with a bearing is the white disc alone. Its images grow with [imageScale], as the rest of
+     * the car's map does with its pixel ratio.
      */
-    private val puck = createDefault2DPuck(withBearing = true).copy(shadowImage = ImageHolder.from(R.drawable.puck_ring))
+    private val puck = createDefault2DPuck(withBearing = true).copy(
+        shadowImage = ImageHolder.from(R.drawable.puck_ring),
+        scaleExpression = ImageScale.puckScaleJson(imageScale),
+    )
 
     /**
      * The car drawn by the app itself during guidance, with Lanes on the map's Drawn by the app; with
      * any other choice it touches nothing. Its fallback runs on the main thread after the frame that failed.
      */
-    private val carLayer = CarLayer(CarLayer.on(context, mapboxMap, plugins.location, puck), debugLog, later = { block -> scope.launch { block() } })
+    private val carLayer = CarLayer(CarLayer.on(context, mapboxMap, plugins.location, puck, imageScale), debugLog, later = { block -> scope.launch { block() } })
 
     /** Whether Settings is open over the map ([setCovered]): the car layer's watchdog does not count while it is. */
     private var covered = false
@@ -294,10 +304,11 @@ internal class MapScene(
     private val routeLineApi = MapboxRouteLineApi(routeLineOptions)
     /**
      * Made once, with the first look's colours; a later look changes its options. A second view
-     * would add its layers again above the maneuver arrow.
+     * would add its layers again above the maneuver arrow. Its origin and destination icons are
+     * drawn from its context's resources, at the density times [imageScale].
      */
     private val routeLineView = MapboxRouteLineView(
-        MapboxRouteLineViewOptions.Builder(context)
+        MapboxRouteLineViewOptions.Builder(ImageScale.context(context, imageScale))
             .routeLineColorResources(MapPalette.routeLineColorResources(lookOnMap.look))
             .slotName(ROUTE_SLOT)
             .build(),

@@ -53,8 +53,9 @@ class CarMapSizeWiringTest {
         assertTrue("if (!resize.remaking) showsSurface(false)" in detach, "$detach")
         assertTrue("showsSurface(false)" !in detach, "never told false through a remake: $detach")
         val attach = body("private fun attach(surface: MapboxCarMapSurface)")
-        val size = attach.indexOf("surfaceSize = resize.size")
-        assertTrue(size >= 0 && size < attach.indexOfFirst { it.startsWith("val created = MapScene(") }, "$attach")
+        val size = attach.indexOf("val size = resize.size")
+        assertTrue(size >= 0 && attach[size + 1] == "surfaceSize = size", "$attach")
+        assertTrue(size < attach.indexOfFirst { it.startsWith("val created = MapScene(") }, "$attach")
         // The camera the new map starts from: the one the detach kept.
         assertTrue("(leftCamera ?: lastPositionCamera())?.let(mapSurface.mapboxMap::setCamera)" in attach)
     }

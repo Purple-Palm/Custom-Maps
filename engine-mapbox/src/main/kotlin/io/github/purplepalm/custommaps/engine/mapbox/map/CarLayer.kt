@@ -331,11 +331,13 @@ internal class CarLayer(
 
         /**
          * The own layer and the puck of [location] on [mapboxMap], whose usual puck is [puck]: the bar in the puck's blue,
-         * taken from the puck's own top image, with a rim in the white of its own shadow image.
+         * taken from the puck's own top image, with a rim in the white of its own shadow image. The dot's three images
+         * are drawn at [imageScale], as the puck's are ([ImageScale]).
          */
-        fun on(context: Context, mapboxMap: MapboxMap, location: LocationComponentPlugin, puck: LocationPuck2D): Port = object : Port {
+        fun on(context: Context, mapboxMap: MapboxMap, location: LocationComponentPlugin, puck: LocationPuck2D, imageScale: Double = ImageScale.NONE): Port = object : Port {
             private val hidden = puck.copy(opacity = 0f)
             private val pixelRatio = mapboxMap.pixelRatio.toDouble()
+            private val dotSize = Value.valueOf(imageScale)
             private val top: Bitmap? by lazy { bitmapOf(context, puck.topImage) }
             private val bearing: Bitmap? by lazy { bitmapOf(context, puck.bearingImage) }
             private val shadow: Bitmap? by lazy { bitmapOf(context, puck.shadowImage) }
@@ -363,6 +365,10 @@ internal class CarLayer(
                     "top-image" to Value.valueOf(TOP_IMAGE),
                     "bearing-image" to Value.valueOf(if (bearing != null) BEARING_IMAGE else NO_IMAGE),
                     "shadow-image" to Value.valueOf(if (shadow != null) SHADOW_IMAGE else NO_IMAGE),
+                    // The dot's size, as the puck's scale sets its own.
+                    "top-image-size" to dotSize,
+                    "bearing-image-size" to dotSize,
+                    "shadow-image-size" to dotSize,
                     "perspective-compensation" to Value.valueOf(DOT_PERSPECTIVE),
                     "image-pitch-displacement" to Value.valueOf(DOT_PITCH_DISPLACEMENT),
                     "visibility" to Value.valueOf("none"),
@@ -379,7 +385,7 @@ internal class CarLayer(
                 set("top-image", Value.valueOf(TOP_IMAGE))
                 set("bearing-image", Value.valueOf(if (bearing != null) BEARING_IMAGE else NO_IMAGE))
                 set("shadow-image", Value.valueOf(if (shadow != null) SHADOW_IMAGE else NO_IMAGE))
-                set("top-image-size", Value.valueOf(1.0))
+                set("top-image-size", dotSize)
                 set("perspective-compensation", Value.valueOf(DOT_PERSPECTIVE))
                 set("image-pitch-displacement", Value.valueOf(DOT_PITCH_DISPLACEMENT))
                 set("visibility", Value.valueOf("visible"))

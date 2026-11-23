@@ -548,7 +548,8 @@ internal class CarNavigationMap(
         attaches += 1
         carSurface = surface
         // The size the library's options had as it made this surface's map.
-        surfaceSize = resize.size
+        val size = resize.size
+        surfaceSize = size
         // Made again for a new size, the surface was shown all along: nothing changes for the engine.
         showsSurface(true)
         val mapSurface = surface.mapSurface
@@ -583,6 +584,8 @@ internal class CarNavigationMap(
             frames = frames,
             // And so does the puck, which the camera follows.
             puckRelay = CarPuck(frames, log),
+            // The images it takes as bitmaps at the size, as the rest of the map grows with its pixel ratio.
+            imageScale = size.factor,
         )
         scene = created
         // The drive views first: a drive under way starts on this map as the settings say.
