@@ -4,6 +4,7 @@ import kotlin.math.PI
 import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.log2
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.tan
 
@@ -88,12 +89,59 @@ object LookAhead {
 }
 
 /**
- * The highest speed of the last [CameraTuning.laneCapSpeedSeconds], which the lanes' look-ahead
- * floor is worked out for: the view goes out at once when the car speeds up, and back in only
- * after the speed has stayed lower that long, so a speed that swings in traffic does not swing the
- * zoom. Fed once per progress update.
+ * The road view of a camera anchored on the car ([CameraTuning.anchored]): the zoom at which
+ * [CameraTuning.roadAheadSeconds] of driving at the highest recent speed ([PeakSpeed] over
+ * [CameraTuning.roadPeakSeconds]) lies between the car and the top of the following box, in the
+ * model of [LookAhead] at the car's tilt ([CameraTuning.cruisePitch]) and on the map's own pixel
+ * ratio: close in town, farther out with speed. Never less road than
+ * [CameraTuning.roadMinAheadMeters], at a stop, a crawl or without a speed, and never more than
+ * [CameraTuning.roadMaxAheadMeters]. On the car it takes the place of the navigation SDK's fit of
+ * the road, which frames about a kilometre there. Plain numbers, once per progress update.
  */
-class PeakSpeed(private val tuning: CameraTuning) {
+object RoadView {
+
+    /**
+     * How much road the view shows above the car at [peakSpeedMps]: a speed that is missing, not
+     * more than 0 or not a finite number counts as standing.
+     */
+    fun aheadMeters(tuning: CameraTuning, peakSpeedMps: Double?): Double {
+        val speed = if (peakSpeedMps != null && peakSpeedMps > 0.0 && peakSpeedMps < Double.POSITIVE_INFINITY) peakSpeedMps else 0.0
+        return (speed * tuning.roadAheadSeconds).coerceIn(tuning.roadMinAheadMeters, tuning.roadMaxAheadMeters)
+    }
+
+    /**
+     * The road view's zoom at [peakSpeedMps] ([aheadMeters]), on a map [mapHeightPx] high whose
+     * following padding puts the car on the row [carRowPx] and the box's top on the row [rowPx],
+     * at [pixelRatio] pixels a dp; no closer than [CameraTuning.maxZoom]. Not a number where the
+     * screen is not known or leaves no map between the car and the row: the camera then keeps
+     * the zoom it has.
+     */
+    fun zoom(
+        tuning: CameraTuning,
+        peakSpeedMps: Double?,
+        mapHeightPx: Double,
+        carRowPx: Double,
+        rowPx: Double,
+        pixelRatio: Double,
+        latitude: Double,
+    ): Double {
+        val zoom = LookAhead.zoomFor(aheadMeters(tuning, peakSpeedMps), tuning.cruisePitch, mapHeightPx, carRowPx, rowPx, pixelRatio, latitude)
+        return if (zoom.isFinite()) min(zoom, tuning.maxZoom) else Double.NaN
+    }
+}
+
+/**
+ * The highest speed of the last [windowSeconds]: the lanes' look-ahead floor is worked out for it
+ * over [CameraTuning.laneCapSpeedSeconds], and the car's road view ([RoadView]) over
+ * [CameraTuning.roadPeakSeconds]. The view goes out at once when the car speeds up, and back in
+ * only after the speed has stayed lower that long, so a speed that swings in traffic does not
+ * swing the zoom. Fed once per progress update.
+ */
+class PeakSpeed(private val windowSeconds: Double) {
+
+    /** The lanes' look-ahead floor's: over [CameraTuning.laneCapSpeedSeconds]. */
+    constructor(tuning: CameraTuning) : this(tuning.laneCapSpeedSeconds)
+
     private var times = DoubleArray(INITIAL_CAPACITY)
     private var speeds = DoubleArray(INITIAL_CAPACITY)
     private var size = 0
@@ -101,14 +149,14 @@ class PeakSpeed(private val tuning: CameraTuning) {
     /**
      * @param speedMps the car's speed now; one that is missing, not more than 0 or not a number
      *   adds nothing
-     * @return the highest speed of the last [CameraTuning.laneCapSpeedSeconds], this one
-     *   included; null when there was none
+     * @return the highest speed of the last [windowSeconds], this one included; null when there
+     *   was none
      */
     fun onSpeed(nowSeconds: Double, speedMps: Double?): Double? {
         var kept = 0
         for (i in 0 until size) {
             val age = nowSeconds - times[i]
-            if (age >= 0.0 && age <= tuning.laneCapSpeedSeconds) {
+            if (age >= 0.0 && age <= windowSeconds) {
                 times[kept] = times[i]
                 speeds[kept] = speeds[i]
                 kept++

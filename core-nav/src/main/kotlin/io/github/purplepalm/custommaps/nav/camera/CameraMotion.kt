@@ -174,12 +174,68 @@ data class CameraTuning(
     val junctionMaxBearingLead: Double = 20.0,
     /** Close in, the camera aims ahead of the moving car so that its center trails the car by no more than this. */
     val maxPuckLagDp: Double = 12.0,
+    /**
+     * Whether Smooth follow works out its zoom itself, anchored on the car: the navigation SDK never frames a maneuver,
+     * so the car stays on its row at the bottom of the following box, and the zoom is the road view by speed
+     * ([RoadView]) with either lane zoom; Large adds a junction's own fit and the lanes' close view on top. False on the
+     * phone, whose road and junctions the SDK frames, as they always were.
+     */
+    val anchored: Boolean = false,
+    /** Anchored: the road view shows this much driving between the car and the top of the following box ([RoadView]). */
+    val roadAheadSeconds: Double = 12.0,
+    /**
+     * Anchored: the road view is worked out for the highest speed of the last this long ([PeakSpeed]): it goes out at
+     * once when the car speeds up, and back in only after the car has stayed slower this long.
+     */
+    val roadPeakSeconds: Double = 10.0,
+    /** Anchored: the road view shows no less road than this, at a stop or a crawl, and no more than [roadMaxAheadMeters]. */
+    val roadMinAheadMeters: Double = 150.0,
+    val roadMaxAheadMeters: Double = 600.0,
 ) {
+    /**
+     * The numbers the two Mapbox camera styles take on this screen. They are the navigation SDK's camera as it comes,
+     * the car's too: what the car's own camera changes ([anchored], its tilts and its lanes' look-ahead) stays the
+     * phone's for them, so they move on the car as they did before it had a camera of its own.
+     */
+    fun forMapboxStyles(): CameraTuning =
+        if (!anchored) {
+            this
+        } else {
+            copy(
+                anchored = false,
+                cruisePitch = PHONE.cruisePitch,
+                maneuverPitch = PHONE.maneuverPitch,
+                lanePitch = PHONE.lanePitch,
+                laneLookAheadSeconds = PHONE.laneLookAheadSeconds,
+            )
+        }
+
     companion object {
         val PHONE = CameraTuning()
 
-        /** A calmer center for the larger screen that is farther from the driver. */
-        val CAR = CameraTuning(centerTau = 0.25)
+        /** The car's own camera, for its wide, low screen seen from farther away than a phone's. */
+        val CAR = CameraTuning(
+            // A calmer center for the larger screen that is farther from the driver.
+            centerTau = 0.25,
+            // The car's view is the camera's own: the SDK's fit of the road frames about a kilometre on this screen.
+            anchored = true,
+            // Closer and tilted, as the owner asked: on the car's wide, low screen a flat view shows about 70 m ahead.
+            cruisePitch = 55.0,
+            // The same over junctions, so the view only comes closer there and never tilts back and forth.
+            maneuverPitch = 55.0,
+            // And at lane choices: one tilt for every view.
+            lanePitch = 55.0,
+            // The car's short box shows 8 s at a lane's zoom; 12 s would leave the lanes' view at the road's zoom.
+            laneLookAheadSeconds = 8.0,
+            // The road view: 12 s ahead, as a plain junction's frame begins 12 s before it.
+            roadAheadSeconds = 12.0,
+            // Out at once with speed, in only after 10 s slower, as the lanes' look-ahead floor.
+            roadPeakSeconds = 10.0,
+            // At a stop or a crawl still the block ahead.
+            roadMinAheadMeters = 150.0,
+            // Never farther out than about the car's view before it had a camera of its own (some 650 m).
+            roadMaxAheadMeters = 600.0,
+        )
     }
 }
 

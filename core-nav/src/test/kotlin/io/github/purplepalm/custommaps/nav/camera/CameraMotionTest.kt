@@ -766,9 +766,34 @@ class CameraMotionTest {
     }
 
     @Test
-    fun `the car screen follows the puck a little more calmly`() {
-        assertTrue(CameraTuning.CAR.centerTau > CameraTuning.PHONE.centerTau)
-        assertEquals(CameraTuning.PHONE.copy(centerTau = CameraTuning.CAR.centerTau), CameraTuning.CAR)
+    fun `the car's camera has numbers of its own and the phone keeps its own`() {
+        val car = CameraTuning.CAR
+        val phone = CameraTuning.PHONE
+        // A calmer center for the larger screen farther from the driver.
+        assertTrue(car.centerTau > phone.centerTau)
+        assertEquals(0.25, car.centerTau)
+        // Anchored on the car, with the road view by speed: 12 s ahead at the highest speed of the last 10 s, 150 m to 600 m.
+        assertTrue(car.anchored)
+        assertEquals(listOf(12.0, 10.0, 150.0, 600.0), listOf(car.roadAheadSeconds, car.roadPeakSeconds, car.roadMinAheadMeters, car.roadMaxAheadMeters))
+        // One tilt of 55 degrees on the road, over junctions and at lane choices.
+        assertEquals(listOf(55.0, 55.0, 55.0), listOf(car.cruisePitch, car.maneuverPitch, car.lanePitch))
+        for (lanes in listOf(0.0, 0.5, 1.0)) for (junction in listOf(0.0, 0.5, 1.0)) assertEquals(55.0, guidancePitch(car, lanes, junction), 1e-12)
+        // The lanes' look-ahead floor the car's short box can show.
+        assertEquals(8.0, car.laneLookAheadSeconds)
+        // Nothing else differs from the phone.
+        val own = phone.copy(centerTau = 0.25, anchored = true, cruisePitch = 55.0, maneuverPitch = 55.0, lanePitch = 55.0, laneLookAheadSeconds = 8.0)
+        assertEquals(own, car)
+        // The phone's numbers are the ones its camera had before the car had a camera of its own.
+        assertFalse(phone.anchored)
+        assertEquals(listOf(0.20, 45.0, 0.0, 55.0, 12.0), listOf(phone.centerTau, phone.cruisePitch, phone.maneuverPitch, phone.lanePitch, phone.laneLookAheadSeconds))
+        assertEquals(CameraTuning(), phone)
+    }
+
+    @Test
+    fun `the two Mapbox styles move on the car as before it had a camera of its own`() {
+        // The car's numbers before it had a camera of its own: the phone's with the calmer center.
+        assertEquals(CameraTuning.PHONE.copy(centerTau = 0.25), CameraTuning.CAR.forMapboxStyles())
+        assertTrue(CameraTuning.PHONE.forMapboxStyles() === CameraTuning.PHONE)
     }
 
     /** How the view went between two close turns: its moves after the first latch, and how the second step latched. */

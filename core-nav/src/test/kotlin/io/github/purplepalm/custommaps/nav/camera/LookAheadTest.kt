@@ -127,6 +127,28 @@ class LookAheadTest {
     }
 
     @Test
+    fun `a peak speed of its own keeps its own window`() {
+        // The car's road view keeps the highest speed of the last 10 s, as the lanes' floor does, in a window of its own.
+        assertEquals(10.0, CameraTuning.CAR.roadPeakSeconds)
+        val road = PeakSpeed(CameraTuning.CAR.roadPeakSeconds)
+        val short = PeakSpeed(3.0)
+        assertEquals(20.0, road.onSpeed(0.0, 20.0))
+        assertEquals(20.0, short.onSpeed(0.0, 20.0))
+        for (t in 1..3) {
+            assertEquals(20.0, road.onSpeed(t.toDouble(), 8.0), "at $t s")
+            assertEquals(20.0, short.onSpeed(t.toDouble(), 8.0), "at $t s")
+        }
+        assertEquals(20.0, road.onSpeed(4.0, 8.0))
+        assertEquals(8.0, short.onSpeed(4.0, 8.0))
+        for (t in 5..10) assertEquals(20.0, road.onSpeed(t.toDouble(), 8.0), "at $t s")
+        assertEquals(8.0, road.onSpeed(11.0, 8.0))
+        // The lanes' own, made from the tuning, is over laneCapSpeedSeconds.
+        val lanes = PeakSpeed(CameraTuning.PHONE.copy(laneCapSpeedSeconds = 3.0))
+        lanes.onSpeed(0.0, 20.0)
+        assertEquals(8.0, lanes.onSpeed(4.0, 8.0))
+    }
+
+    @Test
     fun `no speed adds nothing to the peak`() {
         val peak = PeakSpeed(tuning)
         assertNull(peak.onSpeed(0.0, null))
