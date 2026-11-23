@@ -39,7 +39,7 @@ Short records of non-obvious choices: what was chosen, the alternatives, and why
 - **Chosen:**
   - `-ndk27` artifacts.
   - Explicit modules added stage by stage: `navigation-ndk27` now, `ui-maps-ndk27` and `tripdata-ndk27` in stage 1. The umbrella `android-ndk27` is not used.
-  - Navigation 3.34.1 with Maps 11.34.1, and Search 2.34.1 when it is added. All three move together on the same minor version.
+  - Navigation 3.35.2 with Maps 11.35.2, and Search 2.35.2 when it is added. All three move together on the same minor version.
   - `com.mapbox.*` groups resolve only from the Mapbox repository (`exclusiveContent`).
   - Copilot (Mapbox trace collection) is never started.
 - **No download token:** the Mapbox Maven repository serves all artifacts without credentials, so no secret token exists anywhere. If Mapbox ever requires one again, it goes only into GitHub Secrets or `~/.gradle/gradle.properties`, is used by Gradle for downloads, and never reaches an APK.

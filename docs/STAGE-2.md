@@ -18,8 +18,8 @@ rest is the design as decided so far.
 **Unverified** marks behaviour that no document or library source settles; it is checked on the
 Desktop Head Unit (DHU) or on the phone before code depends on it.
 
-Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.34.1 with maps-androidauto 11.34.1, Navigation
-3.34.1 and Search 2.34.1; WorkManager 2.12.0.
+Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.35.2 with maps-androidauto 11.35.2, Navigation
+3.35.2 and Search 2.35.2; WorkManager 2.12.0.
 
 ## In short
 
@@ -550,7 +550,7 @@ the settings the car map follows and the debug log; the others come with their s
 | Artifact | Version | Where | For |
 |---|---|---|---|
 | `androidx.car.app:app` | 1.8.0-rc01 | `api` in `:car`; also in `:engine-mapbox` and `:app` | Templates, the surface, `NavigationManager`, `CarAppExtender` |
-| `com.mapbox.extension:maps-androidauto-ndk27` | 11.34.1 | `implementation` in `:engine-mapbox` only | `MapboxCarMap`: the map on the car surface |
+| `com.mapbox.extension:maps-androidauto-ndk27` | 11.35.2 | `implementation` in `:engine-mapbox` only | `MapboxCarMap`: the map on the car surface |
 | `androidx.work:work-runtime` | 2.12.0 | `implementation` in `:app` | Trip log uploads that survive network loss and process death |
 
 ```toml
@@ -561,7 +561,7 @@ androidx-work = "2.12.0"
 [libraries]
 androidx-car-app = { module = "androidx.car.app:app", version.ref = "androidx-car-app" }
 androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "androidx-work" }
-mapbox-maps-androidauto = { module = "com.mapbox.extension:maps-androidauto-ndk27", version = "11.34.1" }
+mapbox-maps-androidauto = { module = "com.mapbox.extension:maps-androidauto-ndk27", version = "11.35.2" }
 ```
 
 What they bring:
@@ -573,7 +573,7 @@ What they bring:
   `CarAppPermissionActivity`, `CarAppNotificationBroadcastReceiver` and a `<queries>` entry for the
   provider behind `CarConnection`. It needs minSdk 23, compileSdk 34 and AGP 8.1.1 or newer; the
   project has 26, 37 and 9.4.1.
-- **maps-androidauto 11.34.1:** Maps `android-ndk27` 11.34.1, which ui-maps already brings, and car-app
+- **maps-androidauto 11.35.2:** Maps `android-ndk27` 11.35.2, which ui-maps already brings, and car-app
   1.2.0, raised to 1.8.0-rc01; at runtime kotlin-stdlib-jdk8 1.7.20, core-ktx 1.9.0 and annotation
   1.1.0. No native code, so the 16 KB check is unaffected; no resources; its manifest adds only
   `ACCESS_SURFACE`. No Navigation, Search, Glide, WorkManager or voice code. It resolves from the
@@ -595,7 +595,7 @@ What they bring:
 | `androidx.car.app:app-automotive` | Android Automotive OS is out of scope. |
 | `androidx.car.app:app-testing` | Brings Robolectric 4.16.1 and a JUnit 4 runner; the project runs JUnit 6 (DECISIONS 10). |
 | `work-runtime-ktx`, `work-testing` | The first is empty since WorkManager 2.9.0; the upload logic is tested in `:core-nav`. |
-| An HTTP or JSON library | Few requests: at most two GETs per link (a short link and a Google place page) and, per trip, a repository check and one PUT. `HttpURLConnection`, `java.util.Base64` (API 26, the minSdk) and `GZIPOutputStream` are enough, and a reader for top-level JSON fields is about 80 lines. OkHttp 4.10.0 already ships in the APK as a runtime dependency of Mapbox's common-ndk27 24.34.1, but it is not declared: app code would be tied to Mapbox's copy, and declaring 5.5.1 would upgrade Mapbox's copy for the whole app. |
+| An HTTP or JSON library | Few requests: at most two GETs per link (a short link and a Google place page) and, per trip, a repository check and one PUT. `HttpURLConnection`, `java.util.Base64` (API 26, the minSdk) and `GZIPOutputStream` are enough, and a reader for top-level JSON fields is about 80 lines. OkHttp 4.10.0 already ships in the APK as a runtime dependency of Mapbox's common-ndk27 24.35.2, but it is not declared: app code would be tied to Mapbox's copy, and declaring 5.5.1 would upgrade Mapbox's copy for the whole app. |
 | `androidx.security:security-crypto` | Deprecated in 1.1.0. The GitHub token lives in DataStore, like the Mapbox token. |
 
 Why not android-auto-components:
@@ -616,8 +616,8 @@ Other notes:
 
 - `lifecycle-livedata` 2.11.0 is declared only if `CarConnection`'s LiveData is collected as a Flow
   (`asFlow`).
-- Mapbox's Android Auto guide quotes version 3.34.2, which Mapbox's repository does not serve. The
-  project stays on Navigation 3.34.1 with Maps 11.34.1 and Search 2.34.1.
+- The project is on Navigation 3.35.2 with Maps 11.35.2 and Search 2.35.2, which brings Common 24.35.2;
+  maps-androidauto moves with Maps to 11.35.2.
 - car-app adds Guava and kotlin-stdlib to the runtime. R8 shrinks them in release builds; debug APKs
   get larger.
 
