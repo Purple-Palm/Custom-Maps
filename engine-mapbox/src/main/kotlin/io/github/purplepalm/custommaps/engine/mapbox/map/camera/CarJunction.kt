@@ -41,19 +41,20 @@ internal class CarJunction {
         val leg = progress.currentLegProgress ?: return
         val step = leg.currentStepProgress ?: return
         val stepKey = "${progress.navigationRoute.id}/${leg.legIndex}/${step.stepIndex}"
-        val road: List<Point>
-        val bearingBefore: Double?
-        if (junctionKey == stepKey) {
-            road = progress.upcomingStepPoints.orEmpty()
-            bearingBefore = leg.upcomingStep?.maneuver()?.bearingBefore()
-        } else {
-            // Past a step the view stays up for: the road after the junction at the end of the next step.
-            val after = leg.routeLeg?.steps()?.getOrNull(step.stepIndex + 2)
-            val shape = after?.let { progress.navigationRoute.directionsRoute.stepGeometryToPoints(it) }.orEmpty()
-            road = shape.ifEmpty { progress.upcomingStepPoints?.lastOrNull()?.let { listOf(it) }.orEmpty() }
-            bearingBefore = after?.maneuver()?.bearingBefore()
+        try {
+            if (junctionKey == stepKey) {
+                hold(progress.upcomingStepPoints.orEmpty(), leg.upcomingStep?.maneuver()?.bearingBefore(), tuning)
+            } else {
+                // Past a step the view stays up for: the road after the junction at the end of the next step.
+                val after = leg.routeLeg?.steps()?.getOrNull(step.stepIndex + 2)
+                val shape = after?.let { progress.navigationRoute.directionsRoute.stepGeometryToPoints(it) }.orEmpty()
+                val road = shape.ifEmpty { progress.upcomingStepPoints?.lastOrNull()?.let { listOf(it) }.orEmpty() }
+                hold(road, after?.maneuver()?.bearingBefore(), tuning)
+            }
+        } catch (e: RuntimeException) {
+            // A shape that cannot be read costs this junction its own fit, never the drive: the road view stays.
+            hold(emptyList(), null, tuning)
         }
-        hold(road, bearingBefore, tuning)
     }
 
     /**
