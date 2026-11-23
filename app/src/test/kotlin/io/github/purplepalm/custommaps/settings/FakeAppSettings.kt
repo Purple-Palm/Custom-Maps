@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.settings
 
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -23,6 +24,7 @@ class FakeAppSettings(
     measureOwnLanes: Boolean = false,
     carMapFps: Int = 30,
     carLightWhenHot: Boolean = CAR_LIGHT_WHEN_HOT_DEFAULT,
+    carMapSize: CarMapSize = CarMapSize.DEFAULT,
     sideRoadFields: Boolean = false,
     sound: SoundSettings = SoundSettings(),
     driveCamera: DriveCameraSettings = DriveCameraSettings(),
@@ -70,6 +72,10 @@ class FakeAppSettings(
     override val carLightWhenHot = MutableStateFlow(carLightWhenHot)
 
     override suspend fun setCarLightWhenHot(enabled: Boolean) = store { carLightWhenHot.value = enabled }
+
+    override val carMapSize = MutableStateFlow(carMapSize)
+
+    override suspend fun setCarMapSize(size: CarMapSize) = store { carMapSize.value = size }
 
     override val sideRoadFields = MutableStateFlow(sideRoadFields)
 

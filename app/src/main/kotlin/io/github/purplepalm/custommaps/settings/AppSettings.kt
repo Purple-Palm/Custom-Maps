@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -113,6 +114,14 @@ interface AppSettings {
     val carLightWhenHot: Flow<Boolean>
 
     suspend fun setCarLightWhenHot(enabled: Boolean)
+
+    /**
+     * How large the map on the car's screen draws against the size the car asks for ([CarMapSize]): x1 to x2, x1.5
+     * when never chosen. The car's alone: the phone's map keeps the phone's size.
+     */
+    val carMapSize: Flow<CarMapSize>
+
+    suspend fun setCarMapSize(size: CarMapSize)
 
     /**
      * Debug: whether the route requests the app makes anyway, and the reroutes inside a trip, also ask Mapbox for the
@@ -289,6 +298,18 @@ class DataStoreAppSettings(
         onChanged(CAR_LIGHT_WHEN_HOT.name, enabled)
     }
 
+    /**
+     * Stored as its percent ([CarMapSize.stored]). An absent value reads as [CarMapSize.DEFAULT] and is never written; a
+     * number no size has reads as it too.
+     */
+    override val carMapSize: Flow<CarMapSize> = preferences.map { CarMapSize.of(it[CAR_MAP_SIZE]) }.distinctUntilChanged()
+
+    override suspend fun setCarMapSize(size: CarMapSize) {
+        val stored = size.stored
+        dataStore.edit { it[CAR_MAP_SIZE] = stored }
+        onChanged(CAR_MAP_SIZE.name, stored)
+    }
+
     override val sideRoadFields: Flow<Boolean> = preferences.map { it[SIDE_ROAD_FIELDS] ?: false }.distinctUntilChanged()
 
     override suspend fun setSideRoadFields(enabled: Boolean) {
@@ -321,6 +342,7 @@ class DataStoreAppSettings(
             linkedSetOf(
                 SIMULATE_DRIVE.name, CAMERA_STYLE.name, LANE_ZOOM.name, LANES_ON_MAP.name, LANE_COUNTS_HORIZON.name, DAY_NIGHT.name,
                 OWN_ROUTE_LINE.name, MEASURE_OWN_LANES.name, CAR_MAP_FPS.name, CAR_LIGHT_WHEN_HOT.name, SIDE_ROAD_FIELDS.name,
+                CAR_MAP_SIZE.name,
             ).apply {
                 addAll(SOUND.keyNames)
                 addAll(DRIVE_CAMERA.keyNames)
@@ -337,6 +359,7 @@ class DataStoreAppSettings(
         private val CAR_MAP_FPS = intPreferencesKey("car_map_fps")
         private val CAR_LIGHT_WHEN_HOT = booleanPreferencesKey("car_light_when_hot")
         private val SIDE_ROAD_FIELDS = booleanPreferencesKey("side_road_fields")
+        private val CAR_MAP_SIZE = intPreferencesKey("car_map_size")
 
         private val TONES = booleanPreferencesKey("tones")
         private val TONE_BEFORE_TURN = booleanPreferencesKey("tone_before_turn")

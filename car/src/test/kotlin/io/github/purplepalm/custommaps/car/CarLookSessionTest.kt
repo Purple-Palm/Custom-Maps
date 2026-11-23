@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.car
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.LookApplied
 import io.github.purplepalm.custommaps.nav.ViewportPadding
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.car.ThermalStatus
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
@@ -205,6 +206,7 @@ class CarLookSessionTest {
         override fun setFrameTarget(fps: Int) = Unit
         override fun setPhoneThermal(status: ThermalStatus?) = Unit
         override fun setLightWhenHot(enabled: Boolean) = Unit
+        override fun setMapSize(size: CarMapSize) = Unit
         override fun release() = Unit
     }
 }

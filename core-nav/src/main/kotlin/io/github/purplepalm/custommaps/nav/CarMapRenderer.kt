@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.nav
 
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.car.ThermalStatus
 
 /**
@@ -37,6 +38,12 @@ interface CarMapRenderer : MapRenderer {
 
     /** Debug: whether the map gets lighter while the phone is hot; off, the full map always. On until told otherwise. */
     fun setLightWhenHot(enabled: Boolean)
+
+    /**
+     * Settings > Car map size: how large the map draws against the size the car's host asks for ([CarMapSize]),
+     * x1.5 until told otherwise. The car's alone: the phone's map keeps the phone's size.
+     */
+    fun setMapSize(size: CarMapSize)
 
     /**
      * The car session ends: the map lets go of the surface, the navigator and everything it drew.

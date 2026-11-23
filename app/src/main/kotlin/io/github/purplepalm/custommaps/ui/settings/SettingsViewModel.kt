@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.debug.error
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -49,6 +51,12 @@ data class GuidanceSettings(
     val laneCountsHorizon: Boolean = LANE_COUNTS_HORIZON_DEFAULT,
     /** The drive view, Zoom in before turns and Recenter by itself. */
     val driveCamera: DriveCameraSettings = DriveCameraSettings(),
+)
+
+/** The car's screen, as the driver chose it on the phone: how large its map draws. */
+data class CarScreenSettings(
+    /** The size of the car's map against the size the car asks for; x1.5 when never chosen. */
+    val mapSize: CarMapSize = CarMapSize.DEFAULT,
 )
 
 /** The look section: Auto, Day or Night, and under Auto when the look changes next. */
@@ -122,6 +130,11 @@ class SettingsViewModel(
             GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, lanesOnMap = lanesOnMap, laneCountsHorizon = horizon, driveCamera = driveCamera)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
 
+    /** The car's screen: the size of its map. */
+    val carScreen: StateFlow<CarScreenSettings> =
+        settings.carMapSize.map { CarScreenSettings(mapSize = it) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CarScreenSettings())
+
     /**
      * The choice and its next change, worked out again whenever Settings opens, the choice changes
      * or the look on screen does. The time is shown on the screen only, never logged or stored.
@@ -169,13 +182,16 @@ class SettingsViewModel(
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DebugState())
 
+    /** What became of the last sound Settings played, with the car's screen: two parts of [values] in one. */
+    private val heardAndCar = combine(tonesHeard, carScreen) { heard, car -> heard to car }
+
     /**
-     * Everything Settings shows, in one value, for the catalogue ([SettingsCatalogue]): the guidance, the look
-     * and the debug section as above, the tones' settings and what became of the last sound Settings played.
+     * Everything Settings shows, in one value, for the catalogue ([SettingsCatalogue]): the guidance, the car's screen,
+     * the look and the debug section as above, the tones' settings and what became of the last sound Settings played.
      */
     val values: StateFlow<SettingsValues> =
-        combine(guidance, look, debug, settings.sound, tonesHeard) { guidance, look, debug, sound, heard ->
-            SettingsValues(guidance = guidance, look = look, debug = debug, sound = sound, heard = heard)
+        combine(guidance, look, debug, settings.sound, heardAndCar) { guidance, look, debug, sound, (heard, car) ->
+            SettingsValues(guidance = guidance, carScreen = car, look = look, debug = debug, sound = sound, heard = heard)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsValues())
 
     /**
@@ -192,6 +208,7 @@ class SettingsViewModel(
             SettingId.LANE_ZOOM -> event.chosen(SettingsCatalogue.laneZooms, ::setLaneZoom)
             SettingId.LANES_ON_MAP -> event.chosen(SettingsCatalogue.lanesOnMap, ::setLanesOnMap)
             SettingId.LANE_COUNTS_HORIZON -> event.switched(::setLaneCountsHorizon)
+            SettingId.CAR_MAP_SIZE -> event.chosen(SettingsCatalogue.carMapSizes, ::setCarMapSize)
             SettingId.TONES -> event.switched { on -> updateSound { it.copy(tones = on) } }
             SettingId.TONE_BEFORE_TURN -> event.switched { on -> updateSound { it.copy(beforeTurn = on) } }
             SettingId.TONE_AT_TURN -> event.switched { on -> updateSound { it.copy(atTurn = on) } }
@@ -345,6 +362,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the switch keeps showing the stored value, which the car's map keeps too.
                 debugLog.error("settings.setCarLightWhenHot", e)
+            }
+        }
+    }
+
+    /** Stored at once, also during a drive, for the car's map, which follows the stored size; the phone's map keeps its own. */
+    fun setCarMapSize(size: CarMapSize) {
+        viewModelScope.launch {
+            try {
+                settings.setCarMapSize(size)
+            } catch (e: IOException) {
+                // Not stored, so the choice keeps showing the stored value, which the car's map keeps too.
+                debugLog.error("settings.setCarMapSize", e)
             }
         }
     }

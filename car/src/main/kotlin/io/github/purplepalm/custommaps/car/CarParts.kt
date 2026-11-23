@@ -5,6 +5,7 @@ import androidx.lifecycle.LifecycleOwner
 import io.github.purplepalm.custommaps.nav.CarMapRenderer
 import io.github.purplepalm.custommaps.nav.MapsAccess
 import io.github.purplepalm.custommaps.nav.NavigationEngine
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.car.ThermalStatus
 import io.github.purplepalm.custommaps.nav.debug.DebugLog
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
@@ -66,4 +67,9 @@ class CarMapSettings(
      * (CarNavigationMap leaves it out).
      */
     val driveCamera: Flow<DriveCameraSettings>,
+    /**
+     * Settings > Car map size, the car's map alone, as stored: its value now as a map is made, so that the map is drawn
+     * at it from its first surface on, and every later change at once.
+     */
+    val mapSize: StateFlow<CarMapSize>,
 )

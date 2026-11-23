@@ -60,7 +60,8 @@ import kotlinx.coroutines.launch
  * - **The map** is made once the gate is ready and the app's first look is decided, again for a new
  *   token, and let go of when the session ends ([CarMapStep]). It takes the phone's camera style, lane
  *   zoom, Lanes on the map and Debug switches, and the phone's thermal status, by which it gets lighter
- *   while the phone is hot; it pins the destination of the preview or the drive, and
+ *   while the phone is hot; Settings' car map size, the car's alone, the stored one before its first
+ *   surface and every change at once; it pins the destination of the preview or the drive, and
  *   shows the app's one look, the phone's ([CarParts.look]): the session starts the look if no screen
  *   has yet (the host may have started the process with no activity), keeps it deciding while the
  *   session is started, as the phone's activity does, and hands the look to the map as the phone's
@@ -340,7 +341,11 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         map = created
         mapGeneration = generation
         val settings = parts.mapSettings
+        // The stored size before the map's first surface, which the host sends with a later call.
+        guard("setMapSize") { created.setMapSize(settings.mapSize.value) }
         mapJobs = scope.launch {
+            // The car's map alone: the size it draws at, a change at once on the surface there is.
+            follow(settings.mapSize, "setMapSize", created::setMapSize)
             follow(settings.cameraStyle, "setCameraStyle", created::setCameraStyle)
             follow(settings.laneZoom, "setLaneZoom", created::setLaneZoom)
             follow(settings.lanesOnMap, "setLanesOnMap", created::setLanesOnMap)

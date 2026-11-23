@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.ui.settings
 
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.look.NextLook
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.debug.DebugLogArchive
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
@@ -678,6 +679,12 @@ class SettingsViewModelTest {
             assertEquals(fps, settings.carMapFps.value)
             assertEquals(index, selected(SettingId.CAR_MAP_FPS))
         }
+        for ((index, size) in SettingsCatalogue.carMapSizes.withIndex()) {
+            viewModel.onEvent(SettingsEvent.Chosen(SettingId.CAR_MAP_SIZE, index))
+            runCurrent()
+            assertEquals(size, settings.carMapSize.value)
+            assertEquals(index, selected(SettingId.CAR_MAP_SIZE))
+        }
         for ((index, duck) in SettingsCatalogue.duckModes.withIndex()) {
             viewModel.onEvent(SettingsEvent.Chosen(SettingId.TONE_DUCK, index))
             runCurrent()
@@ -760,6 +767,33 @@ class SettingsViewModelTest {
         assertEquals(DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 5, turnZoom = false), viewModel.values.value.guidance.driveCamera)
         assertEquals(listOf("error", "error", "error"), archive.logged)
         assertEquals(emptyList<DriveCameraSettings>(), settings.storedDriveCameras)
+    }
+
+    @Test
+    fun `the car's map is x1_5 until another size is chosen, and the size shows as stored`() = runTest(dispatcher) {
+        val viewModel = viewModelWithValues()
+        assertEquals(CarScreenSettings(mapSize = CarMapSize.X1_5), viewModel.values.value.carScreen)
+        viewModel.setCarMapSize(CarMapSize.X2)
+        runCurrent()
+        assertEquals(CarMapSize.X2, settings.carMapSize.value)
+        assertEquals(CarMapSize.X2, viewModel.values.value.carScreen.mapSize)
+        // Stored elsewhere, as by another screen: shown as stored.
+        settings.carMapSize.value = CarMapSize.X1
+        runCurrent()
+        assertEquals(CarMapSize.X1, viewModel.values.value.carScreen.mapSize)
+        assertEquals(30, viewModel.values.value.debug.carMapFps, "the car's frames are their own")
+        assertEquals(emptyList<String>(), archive.logged)
+    }
+
+    @Test
+    fun `a car map size that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModelWithValues()
+        viewModel.onEvent(SettingsEvent.Chosen(SettingId.CAR_MAP_SIZE, SettingsCatalogue.carMapSizes.indexOf(CarMapSize.X1)))
+        runCurrent()
+        assertEquals(CarMapSize.X1_5, settings.carMapSize.value)
+        assertEquals(CarMapSize.X1_5, viewModel.values.value.carScreen.mapSize)
+        assertEquals(listOf("error"), archive.logged)
     }
 
     @Test

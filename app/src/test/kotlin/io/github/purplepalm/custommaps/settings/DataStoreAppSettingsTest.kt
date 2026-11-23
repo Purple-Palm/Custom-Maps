@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.LookChoice
 import io.github.purplepalm.custommaps.nav.model.CameraStyle
@@ -304,6 +305,34 @@ class DataStoreAppSettingsTest {
     }
 
     @Test
+    fun `the car's map is x1_5 until another size is chosen, stored as its percent under its own key, each change reported`() = runBlocking {
+        assertEquals(CarMapSize.X1_5, settings.carMapSize.first())
+        assertEquals(emptyMap<String, Any>(), raw(), "x1.5 is read, never written")
+        // x1.5 last: it is also what an empty file reads as.
+        val sizes = listOf(CarMapSize.X2, CarMapSize.X1, CarMapSize.X1_25, CarMapSize.X1_75, CarMapSize.X1_5)
+        for (size in sizes) {
+            settings.setCarMapSize(size)
+            assertEquals(size, settings.carMapSize.first())
+            assertEquals(mapOf<String, Any>("car_map_size" to size.stored), raw())
+        }
+        assertEquals(listOf(200, 100, 125, 175, 150).map { "car_map_size" to it }, changes)
+        assertEquals(30, settings.carMapFps.first(), "the car's frames are their own")
+        assertTrue(settings.carLightWhenHot.first(), "and so is the lighter car map")
+    }
+
+    @Test
+    fun `a stored size number no size has reads as x1_5`() = runBlocking {
+        settings.setCarMapSize(CarMapSize.X2)
+        // As a file from another build could hold them: near misses, a factor stored as is, zero and below, too large.
+        for (stored in listOf(99, 101, 130, 1, 2, 0, -150, 250, 1_000)) {
+            dataStore.edit { it[intPreferencesKey("car_map_size")] = stored }
+            assertEquals(CarMapSize.X1_5, settings.carMapSize.first(), "$stored")
+        }
+        dataStore.edit { it[intPreferencesKey("car_map_size")] = 175 }
+        assertEquals(CarMapSize.X1_75, settings.carMapSize.first())
+    }
+
+    @Test
     fun `a number of frames the switch does not offer reads and stores as 30`() = runBlocking {
         settings.setCarMapFps(60)
         // As a file from a build with other numbers would hold it.
@@ -460,6 +489,7 @@ class DataStoreAppSettingsTest {
         settings.setCarMapFps(60)
         settings.setCarLightWhenHot(false)
         settings.setSideRoadFields(true)
+        settings.setCarMapSize(CarMapSize.X2)
         settings.updateSound { SoundSettings(tones = false, beforeTurn = false, atTurn = false, duck = DuckMode.OFF, level = ToneLevel.LOUD, leadInMillis = 0) }
         settings.updateDriveCamera { DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 0, turnZoom = false) }
         assertEquals(DataStoreAppSettings.KEYS, raw().keys)

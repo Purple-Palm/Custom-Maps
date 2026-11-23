@@ -3,6 +3,7 @@ package io.github.purplepalm.custommaps.ui.settings
 import androidx.annotation.StringRes
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.format.SizeFormat
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
@@ -52,6 +53,7 @@ enum class SettingId(val key: String?, val tab: SettingsTab, val page: SettingsP
     LANE_ZOOM("lane_zoom", SettingsTab.MAP),
     LANES_ON_MAP("lanes_on_map", SettingsTab.MAP),
     LANE_COUNTS_HORIZON("lane_counts_horizon", SettingsTab.MAP),
+    CAR_MAP_SIZE("car_map_size", SettingsTab.MAP),
     TONES("tones", SettingsTab.SOUND),
     TONE_BEFORE_TURN("tone_before_turn", SettingsTab.SOUND),
     TONE_AT_TURN("tone_at_turn", SettingsTab.SOUND),
@@ -157,6 +159,8 @@ data class SettingsGroup(val tab: SettingsTab, @StringRes val title: Int?, val r
 /** Everything Settings shows, in one value: the stored settings and what the app knows of itself. */
 data class SettingsValues(
     val guidance: GuidanceSettings = GuidanceSettings(),
+    /** The car's screen: the size of its map. */
+    val carScreen: CarScreenSettings = CarScreenSettings(),
     val look: LookSettings = LookSettings(),
     val debug: DebugState = DebugState(),
     /** The guidance tones' settings. */
@@ -190,6 +194,7 @@ object SettingsCatalogue {
     val cameraStyles: List<CameraStyle> = CameraStyle.entries
     val laneZooms: List<LaneZoom> = LaneZoom.entries
     val lanesOnMap: List<LanesOnMap> = LanesOnMap.entries
+    val carMapSizes: List<CarMapSize> = CarMapSize.entries
     val lookChoices: List<LookChoice> = LookChoice.entries
     val carMapFps: List<Int> = CarFrameRate.TARGETS
     val duckModes: List<DuckMode> = DuckMode.entries
@@ -201,7 +206,10 @@ object SettingsCatalogue {
 
     /** The groups of [tab] for [values], in their order; the times of recent trips in [zone]. */
     fun groups(tab: SettingsTab, values: SettingsValues, zone: ZoneId = ZoneId.systemDefault()): List<SettingsGroup> = when (tab) {
-        SettingsTab.MAP -> listOf(SettingsGroup(tab, R.string.guidance_title, guidanceRows(values.guidance)))
+        SettingsTab.MAP -> listOf(
+            SettingsGroup(tab, R.string.guidance_title, guidanceRows(values.guidance)),
+            SettingsGroup(tab, R.string.car_screen_title, listOf(carMapSizeRow(values.carScreen))),
+        )
         SettingsTab.SOUND -> listOf(SettingsGroup(tab, R.string.sound_title, soundRows(values)))
         SettingsTab.ROUTE, SettingsTab.TRIPS -> emptyList()
         SettingsTab.APP -> listOf(
@@ -297,6 +305,20 @@ object SettingsCatalogue {
             lines = listOf(RowNote(text(R.string.lane_counts_horizon_note))),
             badge = text(R.string.mapbox_beta_label),
         ),
+    )
+
+    /**
+     * How large the car's screen draws its map, the car's alone: a list, one size a line, since five segments would not
+     * leave a narrow phone room for the sizes' numbers. The note says what grows, that x1 is the car's own size and that a
+     * choice applies at once.
+     */
+    private fun carMapSizeRow(car: CarScreenSettings): SettingRow = ChoiceRow(
+        id = SettingId.CAR_MAP_SIZE,
+        title = text(R.string.car_map_size_title),
+        options = carMapSizes.map { ChoiceOption(text(R.string.car_map_size_value, RowText.Plain(it.factorText))) },
+        selected = carMapSizes.indexOf(car.mapSize),
+        folds = true,
+        lines = listOf(RowNote(text(R.string.car_map_size_note))),
     )
 
     /**

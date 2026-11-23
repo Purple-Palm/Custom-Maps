@@ -191,6 +191,12 @@
     <string name="lane_counts_horizon_note">Mapbox\'s electronic horizon, a beta. Mapbox may end its free use.</string>
     <string name="mapbox_beta_label">Mapbox beta</string>
 
+    <string name="car_screen_title">Car screen</string>
+    <string name="car_map_size_title">Car map size</string>
+    <!-- A size of the car's map against the size the car asks for, as "x1.5". -->
+    <string name="car_map_size_value">x%1$s</string>
+    <string name="car_map_size_note">How large the map on the car\'s screen draws roads, labels, the route line and the car. x1 is the size the car asks for. Applies at once, also during a drive.</string>
+
     <string name="sound_title">Sound</string>
     <string name="tones_title">Tones</string>
     <string name="tones_note">Soft chimes of the app\'s own. They follow the media volume.</string>

@@ -26,6 +26,7 @@ import io.github.purplepalm.custommaps.look.LookController
 import io.github.purplepalm.custommaps.look.NextLook
 import io.github.purplepalm.custommaps.look.SunPlaces
 import io.github.purplepalm.custommaps.nav.MapsAccess
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.debug.CrashRecorder
 import io.github.purplepalm.custommaps.nav.debug.FileDebugLog
 import io.github.purplepalm.custommaps.nav.debug.JsonLines
@@ -55,12 +56,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -189,6 +192,8 @@ class AppGraph(private val application: Application) {
             phoneThermal = deviceLog.thermal,
             lightWhenHot = settings.carLightWhenHot,
             driveCamera = settings.driveCamera,
+            // Read from the app's start on, so that a car map made later has the stored size before its first surface.
+            mapSize = settings.carMapSize.stateIn(applicationScope, SharingStarted.Eagerly, CarMapSize.DEFAULT),
         ),
         look = lookController,
         debugLog = debugLog,

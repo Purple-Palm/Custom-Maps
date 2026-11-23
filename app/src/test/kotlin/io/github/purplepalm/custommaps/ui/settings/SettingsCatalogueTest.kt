@@ -2,6 +2,7 @@ package io.github.purplepalm.custommaps.ui.settings
 
 import io.github.purplepalm.custommaps.R
 import io.github.purplepalm.custommaps.look.NextLook
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.lanes.LanesOnMap
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.look.LookChoice
@@ -72,6 +73,7 @@ class SettingsCatalogueTest {
         assertEquals(
             listOf(
                 R.string.guidance_title,
+                R.string.car_screen_title,
                 R.string.sound_title,
                 R.string.day_night_title,
                 R.string.token_title,
@@ -95,7 +97,10 @@ class SettingsCatalogueTest {
         assertEquals(setOf("tones", "tone_before_turn", "tone_at_turn", "tone_duck", "tone_level"), SettingsCatalogue.keysOn(SettingsTab.SOUND))
         assertEquals(emptySet<String>(), SettingsCatalogue.keysOn(SettingsPage.TOKEN))
         assertEquals(
-            setOf("drive_view", "overview_turn_zoom", "recenter_seconds", "camera_style", "lane_zoom", "lanes_on_map", "lane_counts_horizon"),
+            setOf(
+                "drive_view", "overview_turn_zoom", "recenter_seconds", "camera_style", "lane_zoom", "lanes_on_map", "lane_counts_horizon",
+                "car_map_size",
+            ),
             SettingsCatalogue.keysOn(SettingsTab.MAP),
         )
         assertTrue("day_night" in SettingsCatalogue.keysOn(SettingsTab.APP))
@@ -121,11 +126,33 @@ class SettingsCatalogueTest {
         for (fps in listOf(30, 60)) {
             assertEquals(fps, SettingsCatalogue.carMapFps[row<ChoiceRow>(SettingId.CAR_MAP_FPS, everything.copy(debug = DebugState(carMapFps = fps))).selected])
         }
+        for (size in CarMapSize.entries) {
+            val chosen = row<ChoiceRow>(SettingId.CAR_MAP_SIZE, everything.copy(carScreen = CarScreenSettings(mapSize = size)))
+            assertEquals(size, SettingsCatalogue.carMapSizes[chosen.selected])
+        }
+    }
+
+    @Test
+    fun `the car screen has a group of its own after Guidance, with the map's size from x1 to x2 in a list, x1_5 when never chosen`() {
+        val groups = SettingsCatalogue.groups(SettingsTab.MAP, everything)
+        assertEquals(listOf(R.string.guidance_title, R.string.car_screen_title), groups.map { it.title })
+        assertEquals(listOf(SettingId.CAR_MAP_SIZE), groups.last().rows.map { it.id })
+        val size = row<ChoiceRow>(SettingId.CAR_MAP_SIZE)
+        assertEquals(RowText.Res(R.string.car_map_size_title), size.title)
+        assertEquals(
+            listOf("1", "1.25", "1.5", "1.75", "2").map { ChoiceOption(RowText.Res(R.string.car_map_size_value, listOf(RowText.Plain(it)))) },
+            size.options,
+        )
+        assertTrue(size.folds, "a size a line: five segments leave a narrow phone no room for their numbers")
+        assertEquals(CarMapSize.X1_5, SettingsCatalogue.carMapSizes[size.selected], "never chosen")
+        // One note: what grows, that x1 is the car's own size, and that it applies at once.
+        assertEquals(listOf(RowNote(RowText.Res(R.string.car_map_size_note))), size.lines)
+        assertEquals(CarMapSize.entries.toList(), SettingsCatalogue.carMapSizes)
     }
 
     @Test
     fun `the guidance group begins with the drive view, Zoom in before turns right under it, and Recenter by itself`() {
-        val guidance = SettingsCatalogue.groups(SettingsTab.MAP, everything).single()
+        val guidance = SettingsCatalogue.groups(SettingsTab.MAP, everything).first()
         assertEquals(R.string.guidance_title, guidance.title)
         assertEquals(
             listOf(

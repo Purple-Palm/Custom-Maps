@@ -43,6 +43,7 @@ import io.github.purplepalm.custommaps.nav.car.CarFrameCap
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.car.CarLightRule
 import io.github.purplepalm.custommaps.nav.car.CarLook
+import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.car.CarOverview
 import io.github.purplepalm.custommaps.nav.car.CarZoom
 import io.github.purplepalm.custommaps.nav.car.ThermalStatus
@@ -432,6 +433,9 @@ internal class CarNavigationMap(
     override fun setLightWhenHot(enabled: Boolean) {
         guard("setLightWhenHot") { onLightRule(lightRule.setEnabled(enabled, SystemClock.elapsedRealtime())) }
     }
+
+    /** Settings > Car map size: not taken yet, the map draws at the car's own size whichever is chosen. */
+    override fun setMapSize(size: CarMapSize) = Unit
 
     override fun zoomBy(delta: Double) {
         guard("zoomBy") {
