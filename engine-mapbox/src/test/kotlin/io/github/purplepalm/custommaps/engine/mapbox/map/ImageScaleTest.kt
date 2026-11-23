@@ -15,7 +15,8 @@ class ImageScaleTest {
     fun `the puck's images take the size as their scale, and at x1 the puck stays as it comes`() {
         assertNull(ImageScale.puckScaleJson(ImageScale.NONE))
         assertNull(ImageScale.puckScaleJson(CarMapSize.X1.factor))
-        assertEquals(listOf(null, "1.25", "1.5", "1.75", "2.0"), CarMapSize.entries.map { ImageScale.puckScaleJson(it.factor) })
+        val scales = listOf("1.25", "1.5", "1.75", "2.0").map { "[\"interpolate\",[\"linear\"],[\"zoom\"],0,$it,22,$it]" }
+        assertEquals(listOf(null) + scales, CarMapSize.entries.map { ImageScale.puckScaleJson(it.factor) })
     }
 
     @Test

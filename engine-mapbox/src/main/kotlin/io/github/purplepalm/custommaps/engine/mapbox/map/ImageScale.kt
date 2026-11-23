@@ -19,10 +19,11 @@ internal object ImageScale {
     const val NONE = 1.0
 
     /**
-     * The location component puck's scale expression for [scale], as JSON: the size of its three images; null at [NONE],
-     * the puck as it comes.
+     * The location component puck's scale expression for [scale], as JSON: the size of its three images, the same at every
+     * zoom, in the form Mapbox documents for it (an interpolation over the zoom, here between two equal stops); null at
+     * [NONE], the puck as it comes.
      */
-    fun puckScaleJson(scale: Double): String? = if (scale == NONE) null else scale.toString()
+    fun puckScaleJson(scale: Double): String? = if (scale == NONE) null else "[\"interpolate\",[\"linear\"],[\"zoom\"],0,$scale,22,$scale]"
 
     /** The density in dpi that images drawn from resources for a screen of [densityDpi] are drawn at, for [scale]. */
     fun densityDpi(densityDpi: Int, scale: Double): Int = (densityDpi * scale).roundToInt()
