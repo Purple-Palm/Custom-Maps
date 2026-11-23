@@ -39,8 +39,10 @@ class CarMapSizeWiringTest {
         val inside = body(set)
         assertTrue("val outcome = resize.request(size) ?: return@guard" in inside, "$inside")
         assertTrue("log.log(SURFACE_LINE, surfaceFields(EVENT_SIZE) + (\"outcome\" to outcome.logName))" in inside, "$inside")
-        // A remake that leaves no map on the surface gives the phone its map back.
-        assertTrue("if (carSurface == null) showsSurface(false)" in inside, "$inside")
+        // A remake that leaves no map on the surface gives the phone its map back, and keeps no camera for later.
+        val none = inside.indexOf("if (carSurface == null) {")
+        assertTrue(none >= 0, "$inside")
+        assertEquals(listOf("leftCamera = null", "showsSurface(false)"), inside.subList(none + 1, none + 3).filter { it.isNotBlank() }, "$inside")
         assertTrue("val handed = surfaceCallback?.replay { renewed(it) } ?: false" in body("override fun remake(): Boolean"))
         assertTrue("surfaceCallback = guarded" in body("init {"))
     }

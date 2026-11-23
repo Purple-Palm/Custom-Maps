@@ -502,8 +502,12 @@ internal class CarNavigationMap(
             val outcome = resize.request(size) ?: return@guard
             if (outcome == CarMapResize.Outcome.FAILED) {
                 failed("remakeMap", IllegalStateException("No new map on the surface"))
-                // The old map gone without a new one: the car shows no map now, and the phone its own again.
-                if (carSurface == null) showsSurface(false)
+                // The old map gone without a new one: the car shows no map now, and the phone its own again. The
+                // next surface, maybe much later, starts where the car is, as after a surface the host destroyed.
+                if (carSurface == null) {
+                    leftCamera = null
+                    showsSurface(false)
+                }
             }
             log.log(SURFACE_LINE, surfaceFields(EVENT_SIZE) + ("outcome" to outcome.logName))
         }
