@@ -37,8 +37,8 @@ data class OrnamentPlace(val logoX: Int, val logoBottom: Int, val attributionX: 
  *
  * - While the camera follows the car it frames the stable area, so the car does not move when the
  *   action strip comes or goes: the area's insets plus [MARGIN_DP], but at the bottom the inset plus
- *   a third of the area's height ([FOLLOWING_BOTTOM_SHARE]), which puts the car low in the area. The
- *   visible area stands in until a stable one arrives.
+ *   a quarter of the area's height ([FOLLOWING_BOTTOM_SHARE]), which puts the car low in the area,
+ *   with the road ahead above it. The visible area stands in until a stable one arrives.
  * - The overview frames the visible area: its insets plus [MARGIN_DP].
  * - The Mapbox logo and the attribution sit in the bottom left corner of the stable area, so no strip
  *   covers them and they do not move ([ornaments]).
@@ -51,8 +51,11 @@ object CarAreas {
     /** Around the framed area on every side but the following frame's bottom, as Mapbox's own car camera has it. */
     const val MARGIN_DP = 5.0
 
-    /** How high the car sits in the area while the camera follows it: its bottom padding is this share of the area's height. */
-    const val FOLLOWING_BOTTOM_SHARE = 1.0 / 3.0
+    /**
+     * How high the car sits in the area while the camera follows it: its bottom padding is this share of the area's
+     * height. A quarter, so more of the road ahead fits above the car on the car's low screen than with a third.
+     */
+    const val FOLLOWING_BOTTOM_SHARE = 1.0 / 4.0
 
     /** Between the stable area's edges and the logo and attribution. */
     const val ORNAMENT_MARGIN_DP = 8.0

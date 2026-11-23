@@ -41,10 +41,10 @@ class CarAreasTest {
     }
 
     @Test
-    fun `following frames the stable area with the car a third up, the overview the visible area`() {
+    fun `following frames the stable area with the car a quarter up, the overview the visible area`() {
         val paddings = CarAreas.paddings(width, height, density = 1f, stable = stable, visible = visible)
-        // 5 dp around the stable area; at the bottom its inset of 24 plus a third of its 432 px.
-        assertEquals(ViewportPadding(left = 101, top = 29, right = 101, bottom = 24 + 144), paddings.following)
+        // 5 dp around the stable area; at the bottom its inset of 24 plus a quarter of its 432 px.
+        assertEquals(ViewportPadding(left = 101, top = 29, right = 101, bottom = 24 + 108), paddings.following)
         // 5 dp around the visible area, whose only inset is the strip on the right.
         assertEquals(ViewportPadding(left = 5, top = 5, right = 101, bottom = 5), paddings.overview)
     }
@@ -52,10 +52,24 @@ class CarAreasTest {
     @Test
     fun `the margin is 5 dp at the car screen's density`() {
         val big = CarAreas.paddings(1280, 720, density = 2f, stable = CarArea(0, 0, 1280, 720), visible = null)
-        assertEquals(ViewportPadding(left = 10, top = 10, right = 10, bottom = 240), big.following)
+        assertEquals(ViewportPadding(left = 10, top = 10, right = 10, bottom = 180), big.following)
         assertEquals(ViewportPadding(left = 10, top = 10, right = 10, bottom = 10), big.overview)
         assertEquals(5.0, CarAreas.MARGIN_DP)
-        assertEquals(1.0 / 3.0, CarAreas.FOLLOWING_BOTTOM_SHARE)
+        assertEquals(1.0 / 4.0, CarAreas.FOLLOWING_BOTTOM_SHARE)
+    }
+
+    @Test
+    fun `on a head unit with a low screen the car sits a quarter up, under 220 px of road`() {
+        // An invented 800 x 400 surface: the stable area 88 px from the top, 12 from the bottom and 88 from the right, and
+        // from the left 12, or 344 while the routing card shows.
+        val card = CarAreas.paddings(800, 400, 1f, stable = CarArea(344, 88, 712, 388), visible = CarArea(344, 0, 712, 400))
+        assertEquals(ViewportPadding(left = 349, top = 93, right = 93, bottom = 12 + 75), card.following)
+        val plain = CarAreas.paddings(800, 400, 1f, stable = CarArea(12, 88, 712, 388), visible = null)
+        assertEquals(ViewportPadding(left = 17, top = 93, right = 93, bottom = 87), plain.following)
+        // The car's row is 313 px down, the box's top 93 px: 220 px of road above the car, 25 px more than with a third.
+        assertEquals(220, 400 - plain.following.bottom - plain.following.top)
+        // The overview keeps the visible area's padding.
+        assertEquals(ViewportPadding(left = 349, top = 5, right = 93, bottom = 5), card.overview)
     }
 
     @Test
@@ -69,9 +83,9 @@ class CarAreasTest {
     @Test
     fun `the visible area stands in for a stable one that has not come, and the whole surface for both`() {
         val noStable = CarAreas.paddings(width, height, 1f, stable = null, visible = visible)
-        assertEquals(ViewportPadding(left = 5, top = 5, right = 101, bottom = 160), noStable.following)
+        assertEquals(ViewportPadding(left = 5, top = 5, right = 101, bottom = 120), noStable.following)
         val none = CarAreas.paddings(width, height, 1f, stable = CarArea(0, 0, 0, 0), visible = null)
-        assertEquals(ViewportPadding(left = 5, top = 5, right = 5, bottom = 160), none.following)
+        assertEquals(ViewportPadding(left = 5, top = 5, right = 5, bottom = 120), none.following)
         assertEquals(ViewportPadding(left = 5, top = 5, right = 5, bottom = 5), none.overview)
         // A stable area and no visible one: the overview frames the stable area.
         val noVisible = CarAreas.paddings(width, height, 1f, stable = stable, visible = null)
