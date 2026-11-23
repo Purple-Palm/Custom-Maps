@@ -5,9 +5,12 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import android.os.Parcel
 import android.os.SystemClock
+import android.view.Surface
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
+import androidx.car.app.SurfaceContainer
 import androidx.core.graphics.createBitmap
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
@@ -16,6 +19,7 @@ import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.MapOptions
 import com.mapbox.maps.MapboxExperimental
+import com.mapbox.maps.MapboxMap
 import com.mapbox.maps.ScreenCoordinate
 import com.mapbox.maps.applyDefaultParams
 import com.mapbox.maps.extension.androidauto.DefaultMapboxCarMapGestureHandler
@@ -43,6 +47,7 @@ import io.github.purplepalm.custommaps.nav.car.CarFrameCap
 import io.github.purplepalm.custommaps.nav.car.CarFrameRate
 import io.github.purplepalm.custommaps.nav.car.CarLightRule
 import io.github.purplepalm.custommaps.nav.car.CarLook
+import io.github.purplepalm.custommaps.nav.car.CarMapResize
 import io.github.purplepalm.custommaps.nav.car.CarMapSize
 import io.github.purplepalm.custommaps.nav.car.CarOverview
 import io.github.purplepalm.custommaps.nav.car.CarZoom
@@ -87,9 +92,17 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   phone and the drive share one process, and car-app rethrows an exception of a surface callback on
  *   the main thread. Each surface the host sends ([MapboxCarMapObserver.onAttached]) is a new map:
  *   the car map keeps what it was asked for (the look, the camera style, the lane zoom, who draws
- *   the lanes, the Debug switches, the place, and an overview the driver asked for during the drive under way
+ *   the lanes, the Debug switches, the size, the place, and an overview the driver asked for during the drive under way
  *   and has not left, [CarOverview]) and gives it to the new scene, with the camera where the driver
  *   left the old one.
+ * - **The size.** Settings' car map size ([setMapSize]): each surface's map is made with the host's
+ *   density times the size as its pixel ratio ([CarMapSize.pixelRatio]), so every size of its style
+ *   and the camera's dp grow with it, while the host's areas, the logo, the attribution and the
+ *   routing card keep the host's pixels. A new size makes the map of the surface there is again on
+ *   that surface at once ([CarMapResize]), as for a surface the host gave anew, with the camera
+ *   where it was; the engine goes on counting the surface as shown meanwhile. Every "car_surface"
+ *   line carries the size of the surface's map (`mapSize`) and its pixel ratio (`pixelRatio`), one
+ *   with `event` size says each change, and the car's camera line carries the ratio.
  * - **The host's areas.** The padding comes from the stable and the visible area and the surface's
  *   size, worked out on every surface ([CarAreas]): following frames the stable area, the overview
  *   the visible one. [setViewportPadding] does nothing here.
@@ -146,6 +159,42 @@ internal class CarNavigationMap(
 
     private val scope = MainScope()
     private val carMap = MapboxCarMap()
+
+    /**
+     * The options every map of a surface is made from: the one object the map library keeps and reads at each new
+     * surface, so a new size changes its map options ([resize]) and never asks for another surface callback.
+     */
+    private val mapInitOptions = initOptions(CarMapSize.DEFAULT)
+
+    /** The app's one surface callback, which keeps the host's surface for a remake; null until the setup made it. */
+    private var surfaceCallback: GuardedSurfaceCallback? = null
+
+    /**
+     * Settings' car map size as this car map applies it: the options of every map, and the map of the surface there is
+     * made again on it at a new size, with the camera where it was.
+     */
+    private val resize = CarMapResize(
+        object : CarMapResize.Port<CameraOptions> {
+            override val hasSurface: Boolean get() = carSurface != null
+
+            override fun camera(): CameraOptions? = carSurface?.mapSurface?.mapboxMap?.takeIf { it.isValid() }?.let { keptCamera(it) }
+
+            override fun useSize(size: CarMapSize) {
+                mapInitOptions.mapOptions = mapOptions(size)
+            }
+
+            // The library hears the surface destroyed and given again; a new map on it is a remake.
+            override fun remake(): Boolean {
+                val before = carSurface ?: return false
+                val handed = surfaceCallback?.replay { renewed(it) } ?: false
+                val now = carSurface
+                return handed && now != null && now !== before
+            }
+        },
+    )
+
+    /** The size the map of the surface there is was made at; null without a surface. */
+    private var surfaceSize: CarMapSize? = null
 
     /** The frames of the map on the attached surface: from the display, or from a timer while the main thread gets none. */
     private val frames = CarFrames(log)
@@ -240,8 +289,8 @@ internal class CarNavigationMap(
 
         // The frame clock's ticks of the second, from the display and from the timer while the main
         // thread got no frames, the cap on the surface's frames, the frames a second it is for and
-        // where it comes from, and the display rate measured now. The render thread's next window
-        // starts here.
+        // where it comes from, the display rate measured now and the map's pixel ratio. The render
+        // thread's next window starts here.
         override fun cameraFields(): Map<String, Any?> {
             val fields = mapOf(
                 "clock" to frames.takeTicks(),
@@ -251,6 +300,8 @@ internal class CarNavigationMap(
                 "measuredHz" to frames.displayHz()?.let { Motion.round(it, 1) },
                 // Whether the map leaves out its 3D objects while the phone is hot.
                 "light" to lightRule.light,
+                // The map's pixel ratio: the host's density times the car map size.
+                "pixelRatio" to carSurface?.mapSurface?.mapboxMap?.pixelRatio?.let { Motion.round(it.toDouble(), 3) },
             )
             frameCap.onWindowStart()
             return fields
@@ -316,11 +367,13 @@ internal class CarNavigationMap(
     init {
         log.log(LOOK_LINE, CarLook.fields(hostDark(), CarLook.CAUSE_START, lookRequest))
         guard("setup") {
-            val callback = carMap.prepareSurfaceCallback(carContext, initOptions())
+            val callback = carMap.prepareSurfaceCallback(carContext, mapInitOptions)
             carMap.registerObserver(observer)
             carMap.setGestureHandler(gestures)
             // The one surface callback of the app; Mapbox's own, behind a wrapper that catches.
-            carContext.getCarService(AppManager::class.java).setSurfaceCallback(GuardedSurfaceCallback(callback, { released }, ::failed))
+            val guarded = GuardedSurfaceCallback(callback, { released }, ::failed)
+            surfaceCallback = guarded
+            carContext.getCarService(AppManager::class.java).setSurfaceCallback(guarded)
         }
         // A drive that ends takes its overview along: the next one starts by following the car.
         scope.launch { engine.guidanceState.collect { state -> guard("guidance") { overview.onGuidance(state) } } }
@@ -434,8 +487,27 @@ internal class CarNavigationMap(
         guard("setLightWhenHot") { onLightRule(lightRule.setEnabled(enabled, SystemClock.elapsedRealtime())) }
     }
 
-    /** Settings > Car map size: not taken yet, the map draws at the car's own size whichever is chosen. */
-    override fun setMapSize(size: CarMapSize) = Unit
+    /**
+     * Settings > Car map size: every map from now on is made at it, its pixel ratio the host's density times the size
+     * ([CarMapSize.pixelRatio]). With a surface, its map is made again on it at once ([CarMapResize]): the old map goes
+     * as when the host destroys the surface, and the new one comes as for a new surface, with the camera where it was
+     * and everything the car map keeps; the engine goes on counting the surface as shown meanwhile, so the phone keeps
+     * its list of the turns. Without a surface the next one takes the size. A "car_surface" line with `event` size says
+     * each change and what became of it (`outcome`); a remake that fails writes a "car_error" line and leaves the size
+     * to the next surface.
+     */
+    override fun setMapSize(size: CarMapSize) {
+        if (released) return
+        guard("setMapSize") {
+            val outcome = resize.request(size) ?: return@guard
+            if (outcome == CarMapResize.Outcome.FAILED) {
+                failed("remakeMap", IllegalStateException("No new map on the surface"))
+                // The old map gone without a new one: the car shows no map now, and the phone its own again.
+                if (carSurface == null) showsSurface(false)
+            }
+            log.log(SURFACE_LINE, surfaceFields(EVENT_SIZE) + ("outcome" to outcome.logName))
+        }
+    }
 
     override fun zoomBy(delta: Double) {
         guard("zoomBy") {
@@ -475,6 +547,9 @@ internal class CarNavigationMap(
         if (released) return
         attaches += 1
         carSurface = surface
+        // The size the library's options had as it made this surface's map.
+        surfaceSize = resize.size
+        // Made again for a new size, the surface was shown all along: nothing changes for the engine.
         showsSurface(true)
         val mapSurface = surface.mapSurface
         // The car's screen does not need more, and the frames cost the phone's battery and heat: the
@@ -552,22 +627,25 @@ internal class CarNavigationMap(
         val mapThere = map.isValid()
         leftCamera = null
         if (mapThere) {
-            val shown = map.cameraState
-            // A map that never left the whole world has nothing worth keeping.
-            if (shown.zoom >= MIN_KEPT_ZOOM) leftCamera = shown.toCameraOptions()
+            leftCamera = keptCamera(map)
             guard("removeWidgets") { removeWidgets(surface) }
         }
+        // A map made again for a new size starts where the old one was, which went before this call.
+        if (resize.remaking) leftCamera = resize.keptCamera
         // Whatever goes wrong here, the next surface starts from nothing of this one.
         guard("releaseScene") { scene?.release() }
         // No frame for a surface that has gone; the next one starts the clock again.
         frames.stop()
-        showsSurface(false)
+        // Made again for a new size, the surface still shows the map: the phone keeps its list.
+        if (!resize.remaking) showsSurface(false)
         scene = null
         carSurface = null
+        surfaceSize = null
         logo = null
         attribution = null
         attributionLook = null
-        log.log(SURFACE_LINE, mapOf("event" to EVENT_DETACH, "attaches" to attaches, "mapThere" to mapThere))
+        val remake = mapOf("remake" to true).takeIf { resize.remaking }.orEmpty()
+        log.log(SURFACE_LINE, mapOf("event" to EVENT_DETACH, "attaches" to attaches, "mapThere" to mapThere) + remake)
     }
 
     /** The host's areas changed: the padding and the logo's place again, and a line. */
@@ -757,7 +835,7 @@ internal class CarNavigationMap(
         }
     }
 
-    /** The surface, the areas and how often a surface came, for a "car_surface" line. */
+    /** The surface, the map's size and pixel ratio, the areas and how often a surface came, for a "car_surface" line. */
     private fun surfaceFields(event: String): Map<String, Any?> {
         val container = carSurface?.surfaceContainer
         val width = container?.width ?: 0
@@ -768,6 +846,9 @@ internal class CarNavigationMap(
             "height" to height,
             "dpi" to container?.dpi,
             "density" to carContext.resources.displayMetrics.density,
+            // The size of the surface's map, or the next one's without a surface, and the map's own pixel ratio.
+            "mapSize" to (surfaceSize ?: resize.size).factor,
+            "pixelRatio" to Motion.round((carSurface?.mapSurface?.mapboxMap?.pixelRatio ?: resize.size.pixelRatio(hostDensity())).toDouble(), 3),
             "stable" to CarAreas.insets(width, height, stable)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "visible" to CarAreas.insets(width, height, visible)?.let { listOf(it.top, it.left, it.bottom, it.right) },
             "attaches" to attaches,
@@ -795,14 +876,54 @@ internal class CarNavigationMap(
             .build()
     }
 
-    /** The map options of every surface: the car's context, shared with the widgets, two plugins, no style. */
-    private fun initOptions() = MapInitOptions(
+    /** The map options of every surface: the car's context, shared with the widgets, two plugins, no style; at [size]. */
+    private fun initOptions(size: CarMapSize) = MapInitOptions(
         context = carContext,
-        mapOptions = MapOptions.Builder().applyDefaultParams(carContext).contextMode(ContextMode.SHARED).build(),
+        mapOptions = mapOptions(size),
         plugins = listOf(Plugin.Mapbox(Plugin.MAPBOX_CAMERA_PLUGIN_ID), Plugin.Mapbox(Plugin.MAPBOX_LOCATION_COMPONENT_PLUGIN_ID)),
         styleUri = null,
         mapName = MAP_NAME,
     )
+
+    /**
+     * The map options at [size]: Mapbox's defaults with the host's density times the size as the pixel ratio
+     * ([CarMapSize.pixelRatio]; at x1 the host's density, as Mapbox's defaults for the car's context have it), and the
+     * GL context shared with the widgets.
+     */
+    private fun mapOptions(size: CarMapSize): MapOptions =
+        MapOptions.Builder().applyDefaultParams(size.pixelRatio(hostDensity())).contextMode(ContextMode.SHARED).build()
+
+    /** The host's density: its dpi over 160, 1.0 on a car at 160 dpi. */
+    private fun hostDensity(): Float = carContext.resources.displayMetrics.density
+
+    /** Where [map] shows now, kept for the next map of its surface; null for a map that never left the whole world. */
+    private fun keptCamera(map: MapboxMap): CameraOptions? {
+        val shown = map.cameraState
+        return if (shown.zoom >= MIN_KEPT_ZOOM) shown.toCameraOptions() else null
+    }
+
+    /**
+     * The host's surface in a container of its own, for a remake: the same window in a Surface object of its own, made
+     * from a parcel as car-app makes the host's, since the old map releases the Surface it was given as it goes (Maps
+     * 11.35.2: a map surface's destruction ends its render thread, which releases its Surface). Null when the host's
+     * surface is no longer valid, or no copy of it is.
+     */
+    private fun renewed(container: SurfaceContainer): SurfaceContainer? {
+        val surface = container.surface?.takeIf { it.isValid } ?: return null
+        val parcel = Parcel.obtain()
+        val copy: Surface? = try {
+            surface.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            Surface.CREATOR.createFromParcel(parcel)
+        } finally {
+            parcel.recycle()
+        }
+        if (copy == null || !copy.isValid) {
+            copy?.release()
+            return null
+        }
+        return SurfaceContainer(copy, container.width, container.height, container.dpi)
+    }
 
     /**
      * The host's day or night mode now, for the "car_look" lines; the map does not follow it. Null,
@@ -865,6 +986,7 @@ internal class CarNavigationMap(
         private const val EVENT_VISIBLE = "visible"
         private const val EVENT_RELEASE = "release"
         private const val EVENT_FPS = "fps"
+        private const val EVENT_SIZE = "size"
 
         private const val KIND_SCROLL = "scroll"
         private const val KIND_FLING = "fling"

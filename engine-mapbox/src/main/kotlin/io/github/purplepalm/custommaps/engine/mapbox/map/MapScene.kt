@@ -2050,8 +2050,9 @@ internal class MapScene(
      * ([Host.cameraFields]): the car its frame clock's ticks of the second ("clock" with "vsyncTicks"
      * and "timerTicks"), the cap on its surface's frames ("maxFps"), where it comes from ("capFrom":
      * display or timer for the display's own cap, drawn when the frames drawn moved it), the
-     * display rate measured now ("measuredHz") and whether its map leaves out the 3D objects while
-     * the phone is hot ("light", [setLight]).
+     * display rate measured now ("measuredHz"), whether its map leaves out the 3D objects while
+     * the phone is hot ("light", [setLight]) and the map's pixel ratio ("pixelRatio", the host's
+     * density times the car map size).
      *
      * The camera of the style adds its own fields. The two Mapbox styles: "frameUpdates", the camera
      * animations started, and "frameUpdatesCut", those restarted before they finished; "laneZoom"
