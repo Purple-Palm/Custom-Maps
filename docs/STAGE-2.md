@@ -61,6 +61,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.35.2 with maps-androidauto 
 | A bright, colourful day map in the car, the existing dark map at night; since step 1b the car's map shows the phone's look, Auto by the sun or the driver's choice | [Day and night](#day-and-night) | 36, 48, 50 |
 | No map on the phone while the car shows one during a drive: the list of the maneuvers ahead instead, the map one tap away | [Step 1c (built)](#step-1c-built) | 51 |
 | The car's map takes the phone's drive view and Zoom in before turns; no count and no move by itself after Pan; the bar's two buttons are the phone's | [The drive views on the car](#the-drive-views-on-the-car) | 57 |
+| The car's map of its own: Settings' car map size, x1.5 when never chosen, at once; Smooth follow on the car closer and tilted by the car's speed; no car bar | [The car's map of its own](#the-cars-map-of-its-own-lanes-step-s1-built) | 58 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -516,6 +517,91 @@ and shows a maneuver's own lanes only within two miles of it (DECISIONS 55).
 - The checks for the owner are in [DRIVES.md](DRIVES.md), checks 77 to 82, with the car screen's
   section, The car screen after step 1d.
 
+## The car's map of its own (lanes step S1, built)
+
+The owner's lanes plan of 2026-11-18 puts the car's screen first: the car's map was too small and
+zoomed in too little, and the car bar was not wanted. Lanes step S1 draws the car's map larger, at a
+size chosen in the phone's Settings, gives Smooth follow on the car a camera of its own, takes the
+car bar out on both screens and moves Mapbox to Navigation 3.35.2 with Maps 11.35.2 and Search
+2.35.2 (DECISIONS 58). The phone's camera is unchanged.
+
+### What it has
+
+- **Settings → Car screen → Car map size**, a group of its own after Guidance: x1, the size the car
+  asks for, x1.25, x1.5, x1.75 or x2, one a line, with the note "How large the map on the car's
+  screen draws roads, labels, the route line and the car. x1 is the size the car asks for. Applies
+  at once, also during a drive." Stored under `car_map_size` as the percent, in the settings file
+  the backup already takes; x1.5 on a phone that never chose, and a number no size has reads as x1.5
+  (`CarMapSize`, `:core-nav` `nav/car`). The row is drawn through the shared rows with the look's
+  tokens, by day and at night. `AppGraph` hands the stored size to the car's session as a state
+  (`CarMapSettings.mapSize`), and the session sets it on its car map before the host's first surface
+  and follows every change (`CarMapRenderer.setMapSize`).
+- **The car's map at the size.** Each surface's map is made with the host's density times the size
+  as its pixel ratio, in the map options of the one `MapInitOptions` the car map keeps: every size
+  of the style grows with it, and so do the camera's dp, the map's logical pixels. The puck, the
+  app's own car and the route line's end icons, which the map takes as bitmaps, are scaled by the
+  size as each map is made (`ImageScale`); the maneuver arrow's heads follow the map's ratio
+  already. The host's areas, the paddings, the logo, the attribution and the routing card stay in
+  the host's pixels, and the phone's map keeps the phone's density ([CAMERA.md](CAMERA.md), The car
+  map's size).
+- **At once** (`CarMapResize`, `:core-nav` `nav/car`). A new size while a surface shows the map
+  makes the car's map again on that surface, inside the car map's guard on the main thread: the old
+  map is destroyed first (in maps-androidauto 11.35.2 a new surface's map is made before the old one
+  goes, which on the same window would find the window still taken; `surfaceDestroyed` returns once
+  the old map's GL surface is gone), and the library is handed the host's last surface again, in a
+  copy of its own made as car-app makes the host's (`CarNavigationMap.renewed`), since the old map
+  releases the surface object it was given. `prepareSurfaceCallback` is not called again, so Mapbox
+  counts no second car map. The new scene takes the camera where it was, the overview as for a new
+  surface, the look, the drive views, the lanes, the lighter map and the frame cap; the engine is
+  not told that the surface went and came, so the phone keeps its list of the turns and its frame
+  cap. Without a surface the next one takes the size.
+- **The car's own camera** ([CAMERA.md](CAMERA.md), The car's own camera): Smooth follow on the car
+  anchored on the car, the navigation SDK framing no maneuver there; its zoom the road view by
+  speed, 12 s of driving above the car at the highest speed of the last 10 s, from 150 to 600 m; one
+  tilt of 55° on the road, through junction views and at lane choices; the car a quarter up its area
+  (`CarAreas.FOLLOWING_BOTTOM_SHARE`); with Large the junction's own fit from the latch and the
+  lanes' close view, never out from the road view there. The two Mapbox styles stay the navigation
+  SDK's camera as it comes, on the car too (`CameraTuning.forMapboxStyles`).
+- **No car bar** on either screen: with Drawn by the app the car is the usual dot in every view, on
+  the app's own layer, which stays with its hidden puck, its watchdog and its fallback.
+- **Mapbox 11.35.2** (DECISIONS 42): Navigation 3.35.2 (navigation, tripdata, ui-maps), Search
+  2.35.2 and maps-androidauto 11.35.2, with Maps 11.35.2 and Common 24.35.2 as their module files
+  bring them, for Maps 11.35.0's fixes of thin lines and map-aligned icons at high pitch. In the
+  sources the app uses, ui-maps' viewport data source, its framing strategies, overrides and
+  location provider, the route line and arrows are unchanged, and so are the map's camera,
+  `MapInitOptions`, the render threads and the widgets; maps-androidauto's sources are the same as
+  11.34.1's. ui-maps still turns Standard's lane details off at each style load and at no other
+  time, the order Lanes on the map relies on (DECISIONS 39).
+- **Lines**, numbers and words only:
+  - every `car_surface` line has `mapSize` (the size of the surface's map, or of the next one's
+    without a surface) and `pixelRatio` beside `density`; one with `event` `size` at each change,
+    with `outcome` `remade`, `next_surface` or `failed`; a `detach` line during a remake has
+    `remake` true;
+  - a `car_error` line `remakeMap` for a remake that left no new map, beside the replay's own calls
+    (`renewSurface`, `replaySurfaceDestroyed`, `replaySurfaceAvailable`);
+  - the car's camera line has `pixelRatio`, and with Smooth follow `roadAheadM`, `roadSpeed`,
+    `roadZoom` and, with Large, `junctionZoom`;
+  - the `settings` line has the key `car_map_size`, with the percent.
+
+### Not in this step
+
+- The phone's camera; the drawing of the lanes (its geometry and windows, the lane layers' zoom
+  gates, the swap of the route line and the lit lane, rule P3, the own route line), the card and the
+  car's lanes image, which steps S2 and S3 rebuild; the car's frame work, its home screen, its
+  routing card and the drive views as stage 1.1's second round left them.
+
+### Unverified
+
+- The remake on the Desktop Head Unit and in a car: a `remade` line with no `car_error`, the car's
+  map back in about a second and never black, the phone keeping its list; the puck's scale
+  expression taken by the location component.
+- The camera's numbers, starting values from a model of the 800 × 400 screen and a rig of the real
+  camera: whether the road view by speed, the junction views with and without the routing card and
+  the lanes' close view read right from the driver's seat; the screen against `aheadM` and
+  `roadAheadM`.
+- What x2 costs in labels that no longer fit, and in frames (`render` in the car's camera lines).
+- The checks for the owner are in [DRIVES.md](DRIVES.md), checks 130 to 138.
+
 ## Modules and dependencies
 
 ### Modules
@@ -794,10 +880,14 @@ Other notes:
   `MapboxEngine.createCarMap(carContext: CarContext): CarMapRenderer` makes one per car Session;
   since step 1b `createCarMap(carContext, lookOnMap)`, with the app's look it starts in. The
   engine takes the host's areas itself, so `setViewportPadding` is not used on the car.
-- One `MapboxCarMap` (maps-androidauto 11.34.1) per Session, set up with
+- One `MapboxCarMap` (maps-androidauto 11.35.2) per Session, set up with
   `MapInitOptions(context = carContext, …)`: map options from
-  `MapOptions.Builder().applyDefaultParams(carContext).contextMode(ContextMode.SHARED)`, only the camera
-  and location component plugins, and `styleUri = null`.
+  `MapOptions.Builder().applyDefaultParams(pixelRatio).contextMode(ContextMode.SHARED)`, the pixel
+  ratio the host's density times the car map size (since lanes step S1;
+  `applyDefaultParams(carContext)`, the host's density, before), only the camera and location
+  component plugins, and `styleUri = null`. The car map keeps the one `MapInitOptions` and a new
+  size changes its `mapOptions`, which the library reads for each new map
+  ([The car's map of its own](#the-cars-map-of-its-own-lanes-step-s1-built)).
   - `MapboxCarMap.setup` registers the surface callback itself (`AppManager.setSurfaceCallback`), and an
     app has one. `:car` never calls `setSurfaceCallback`, and there is never a second `MapboxCarMap`.
     Built: the car map takes the callback from `prepareSurfaceCallback` and registers it inside one
@@ -808,12 +898,13 @@ Other notes:
   - `styleUri = null`: the default would load Standard by itself as soon as the surface starts; the
     scene loads it with the palette instead.
 - `CarNavigationMap` is the map's `MapboxCarMapObserver`. Every `onAttached` is a new map: on each
-  `onSurfaceAvailable`, which also comes when the size or the DPI changes, the extension builds a new
-  `MapSurface` and the style loads again. So the car map keeps its state (the look, guidance state,
-  camera mode) and applies it on every attach. Built: of the camera mode, an overview the driver
-  asked for during the drive under way ([Step 1](#where-it-settled-or-changed-the-design)). Expect a
-  short reload when that happens. If it shows on a real head unit, replace `MapboxCarMap` with an
-  own surface callback that calls `MapSurface.surfaceChanged`.
+  `onSurfaceAvailable`, which also comes when the size or the DPI changes, the extension builds a
+  new `MapSurface` and the style loads again, and since lanes step S1 the car map makes one itself
+  on the same surface for a new car map size. So the car map keeps its state (the look, guidance
+  state, camera mode) and applies it on every attach. Built: of the camera mode, an overview the
+  driver asked for during the drive under way ([Step 1](#where-it-settled-or-changed-the-design)).
+  Expect a short reload when that happens. If it shows on a real head unit, replace `MapboxCarMap`
+  with an own surface callback that calls `MapSurface.surfaceChanged`.
 - `onDetached` releases the scene and removes the widgets. On the `onSurfaceDestroyed` path the
   `MapSurface` is destroyed before `onDetached`, so this only unregisters and cancels; it does not
   touch the map or the style.
@@ -832,7 +923,8 @@ Other notes:
   does not use `MapboxCarMap.stableEdgeInsets`, which is computed only when a surface already exists
   and not again for a new one, so it can be null or stale.
 - Camera padding, as in CAMERA.md: following uses the stable area, its insets plus 5 dp, but at the
-  bottom the inset plus a third of the area's height; the overview uses the visible area's insets
+  bottom the inset plus a quarter of the area's height (a third before lanes step S1); the overview
+  uses the visible area's insets
   plus 5 dp; the visible area stands in until a stable area arrives.
 - The Mapbox logo and the text attribution sit in a bottom corner inside the stable area, so nothing
   covers them and they do not move when the strips come and go. This is DECISIONS 25 for the car.
@@ -854,7 +946,9 @@ Other notes:
 
 - The car camera is described in CAMERA.md ("The car map"): `SmoothNavigationCamera` with
   `CameraTuning.CAR`, its own data source and the shared `GuidancePuck`. The style chosen in Settings
-  applies to the car (DECISIONS 26); Smooth follow is the only style designed for the car so far.
+  applies to the car (DECISIONS 26); Smooth follow is the only style designed for the car, and since
+  lanes step S1 a camera of its own there: anchored on the car, its zoom by the car's speed and one
+  tilt of 55° (CAMERA.md, The car's own camera; DECISIONS 58).
 - Pan and zoom reach the app only when the map action strip contains `Action.PAN`. Touch screens do
   not show the pan button. A double-tap arrives as a scale, and rotary nudges in pan mode arrive as
   a scroll. Some head units never send a fling or a scale, so the strip also has zoom buttons.
@@ -869,11 +963,12 @@ Other notes:
 Built with the phone's drive views in stage 1.1's second round ([CAMERA.md](CAMERA.md), Drive view;
 DECISIONS 57):
 
-- **`DriveCamera` on the car.** Every car surface's `MapScene` has a `DriveCamera` of its own, so the
-  car's map has the Overview drive view and the earlier junction view as the phone's does, framed by
-  `CameraTuning.CAR` and the car's own padding and areas. It takes the drive view and **Zoom in
-  before turns** stored on the phone (the Settings rows and the phone's Overview button), on the
-  surface there is and on every later one.
+- **`DriveCamera` on the car.** Every car surface's `MapScene` has a `DriveCamera` of its own, so
+  the car's map has the Overview drive view and the earlier junction view as the phone's does, by
+  `CameraTuning.CAR` and the car's own padding and areas; since lanes step S1 the car's own camera
+  fits the junction view itself, at 55° and with the car on its row. It takes the drive view and
+  **Zoom in before turns** stored on the phone (the Settings rows and the phone's Overview button),
+  on the surface there is and on every later one.
 - **No count, and no move by itself after Pan.** Recenter by itself, its count and the two buttons
   of the guidance bar are the phone's: the car's map keeps Recenter by itself at Off, so after Pan, a
   scroll or a zoom it stays where the driver put it until Recenter in its strip.
@@ -989,6 +1084,10 @@ with the roadmap's stage 8. The facts, read in the libraries:
 - Built in step 1c ([Step 1c](#step-1c-built)): during a drive while a car's surface shows the map,
   the phone shows the list of the maneuvers ahead and its map is put away and draws nothing, unless
   the driver chose the map. The car's frame target can be set to 60 under Debug, to compare.
+- Built in lanes step S1 ([The car's map of its own](#the-cars-map-of-its-own-lanes-step-s1-built)):
+  the car's map at its size draws the same surface with larger style sizes; what x2 costs in frames
+  is not measured yet. The car's camera adds no work per display frame: its road view and its fit of
+  a junction are worked out once for each frame of the data source.
 - With the phone locked or the app in the background the main thread may get no display frames. The
   car's camera, its zoom buttons' ease and its puck take their frames from the car's frame clock,
   which falls back to a main-thread timer then. Mapbox's background animation thread

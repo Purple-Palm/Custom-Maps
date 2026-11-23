@@ -8,7 +8,7 @@ and what moved. Decisions and their reasons live in [DECISIONS.md](DECISIONS.md)
 | 0 | Project skeleton, CI, token and signing setup | Done (2026-11-03) |
 | 1 | Phone: map, location, search, routes with traffic, guidance | Done (2026-11-03) |
 | 1.1 | Guidance polish after the first drives, trip history and prediction (next build) | In progress |
-| 2 | Android Auto: car screen on the navigation template | Steps 1 and 1b built: the map and the drive in the car, Start on the phone; the rest in steps |
+| 2 | Android Auto: car screen on the navigation template | Steps 1 to 1d and lanes step S1 built: the map and the drive in the car, the car's map of its own, Start on the phone; the rest in steps |
 | 3 | Signed release build and Google Play: internal testing, later production | Internal testing built (2026-11-11); production later |
 | 4 | Smart camera: automatic overview and following | Built in stage 1.1 (the Overview drive view) |
 | 5 | 3D navigation and visual polish | Planned |
@@ -112,7 +112,7 @@ zoom setting and the trip history with prediction.
   No End or Cancel within the first minute counts as a successful prediction. Each automatic start
   is a billed trip, so daily limits apply.
 
-## Stage 2: Android Auto (steps 1, 1b, 1c and 1d built)
+## Stage 2: Android Auto (steps 1, 1b, 1c and 1d built, and lanes step S1)
 
 The full design is in [STAGE-2.md](STAGE-2.md). It is built in steps ([DECISIONS.md](DECISIONS.md),
 49). **Step 1 is built**: Android Auto lists the app; the car shows the app's map, the same scene as
@@ -130,10 +130,19 @@ frames a second on the car ([Step 1c (built)](STAGE-2.md#step-1c-built)). **Step
 owner's drives with the car: the car's map holds its frames by what it really draws, also with the
 phone locked, and draws without its 3D objects while the phone is hot, with a Debug switch; and the
 card shows a maneuver's own lanes only within two miles of it
-([Step 1d (built)](STAGE-2.md#step-1d-built)).
+([Step 1d (built)](STAGE-2.md#step-1d-built)). **Lanes step S1**, the first step of the owner's
+lanes plan of 2026-11-18, which puts the car's screen first: the car's map is drawn larger, at
+**Settings → Car screen → Car map size** (x1.5 unless chosen), Smooth follow on the car follows
+closer and tilted, by the car's speed, the car bar is gone on both screens, and Mapbox moves to
+Navigation 3.35.2 with Maps 11.35.2 and Search 2.35.2
+([The car's map of its own](STAGE-2.md#the-cars-map-of-its-own-lanes-step-s1-built); DECISIONS 58).
+Next for the car's map, in the plan's order: new lane arrows in the card (S2); a new drawing of the
+route's lanes, with true lane widths, the route line in its lane and the exits (S3); continuous
+streets (S4); logging for the lane the car is in (S5); a 3D junction view (S6); a lane map of the
+app's own from OpenStreetMap (S7); and lanes from aerial imagery (S8).
 
 Owner checks for steps 1 to 1d, on the DHU or in the car with the internal testing build:
-[DRIVES.md](DRIVES.md), The car screen after step 1d.
+[DRIVES.md](DRIVES.md), The car screen after step 1d; for lanes step S1, checks 130 to 138 there.
 
 The stage, built in step 1 ([x]) and still to come in later steps ([ ]):
 

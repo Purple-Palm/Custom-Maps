@@ -527,9 +527,12 @@ While anything moves:
 | Lead of zoom and bearing ahead of their ramps (`rampLead`) | 1 τ | 1 τ |
 | Fastest zoom and bearing change (outside transitions) | 1 level/s, 60°/s | same |
 | Puck glide per fix | 1.1 s | the same puck |
+| Tilt following, over a junction, at a lane choice (`cruisePitch`, `maneuverPitch`, `lanePitch`) | 45°, 0°, 55° | 55° in every view (lanes step S1) |
+| Zoom while following | the data source's fit of the road, at most 16.35 | the road view by speed (lanes step S1): 12 s of driving above the car, 150 to 600 m |
 
-The tilt and transition constants follow below. All of them come from simulation and need drives
-to tune.
+The tilt and transition constants follow below; the car's own camera is in
+[The car's own camera](#the-cars-own-camera-lanes-step-s1). All of them come from simulation and
+need drives to tune.
 
 ### What it does on the road
 
@@ -717,16 +720,20 @@ otherwise.
 
 ### The car map (stage 2)
 
-Built in stage 2's step 1, its frames reworked in step 1b. `CarNavigationMap` is a
-`MapboxCarMapObserver` (maps-androidauto 11.34.1), registered with
-`registerObserver(...).setGestureHandler(...)`. The style chosen in Settings applies to the car
-screen too (DECISIONS 26); this section covers Smooth follow, the default and the only style
-designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE-2.md).
+Built in stage 2's step 1, its frames reworked in step 1b, its size and its own camera in lanes
+step S1 (DECISIONS 58). `CarNavigationMap` is a `MapboxCarMapObserver` (maps-androidauto 11.35.2),
+registered with `registerObserver(...).setGestureHandler(...)`. The style chosen in Settings applies
+to the car screen too (DECISIONS 26); this section covers Smooth follow, the default and the only
+style designed for the car, which since lanes step S1 is a camera of its own on the car
+([The car's own camera](#the-cars-own-camera-lanes-step-s1)). The rest of the car screen is in
+[STAGE-2.md](STAGE-2.md).
 
-- **On attach:** a new `MapScene` on the car's map surface: the same puck settings as the phone,
+- **On attach:** a new `MapScene` on the car's map surface, its map made at the car map's size
+  ([The car map's size](#the-car-maps-size-lanes-step-s1)): the same puck settings as the phone,
   its own `MapboxNavigationViewportDataSource`, and a `SmoothNavigationCamera` with
   `CameraTuning.CAR`. `MapboxCarMap` builds a new map surface whenever the host sends a new one, for
-  example after a size change, so each attach starts a new data source and controller; the camera
+  example after a change of the surface's size, and the car map makes its map again itself for a
+  new car map size, so each attach starts a new data source and controller; the camera
   starts where it was on the surface before, or else at the newest position the app has. During a
   drive it then does what its drive view wants (a new surface follows the car at once, and in the
   plain Overview shows the overview), or shows the overview again when the driver asked for it
@@ -736,8 +743,9 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
 - **The drive views on the car** (stage 1.1's second round): the car's scene has a `DriveCamera` of
   its own, and takes the drive view and Zoom in before turns stored on the phone (the Settings rows,
   and the phone's Overview button), so its map comes down before turns and goes back out after them
-  as the phone's does, with the junction view's tilt, frame and close zoom framed by
-  `CameraTuning.CAR`. It never counts down and never moves by itself after Pan, a scroll or a zoom:
+  as the phone's does, with the junction views of the car's own camera, at 55° and fitted with the
+  car on its row ([The car's own camera](#the-cars-own-camera-lanes-step-s1)). It never counts down
+  and never moves by itself after Pan, a scroll or a zoom:
   Recenter by itself is the phone's, and the car's map stays where the driver put it until Recenter
   in its strip. The strip's buttons go through the drive views: the overview switch puts the car's
   map in the Overview drive view for the drive, not stored; following and Recenter put it in the
@@ -747,9 +755,10 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   `GuidancePuck` during guidance.
 - **Padding:** following padding comes from the stable area, which does not change when the action
   strip comes and goes, so the car does not move with it. It is the area's insets plus 5 dp, but at
-  the bottom the inset plus a third of the area's height. Mapbox's own `CarNavigationCamera` uses
-  the same 5 dp and third, on the visible area. The visible area stands in until a stable area
-  arrives. Overview padding is the visible area's insets plus 5 dp.
+  the bottom the inset plus a quarter of the area's height (a third before lanes step S1), so more
+  of the road ahead fits above the car. Mapbox's own `CarNavigationCamera` uses the same 5 dp, with
+  a third, on the visible area. The visible area stands in until a stable area arrives. Overview
+  padding is the visible area's insets plus 5 dp.
 - **Padding on a new surface:** `MapboxCarMap` does not send the stable area again when a new
   surface attaches, and its stable insets can be missing or stale. So the padding is computed from
   the stable area's rectangle and the surface size on every attach.
@@ -866,6 +875,130 @@ designed for the car so far. The rest of the car screen is in [STAGE-2.md](STAGE
   so a map made for the list would keep its render thread and its puck's animators going, unseen.
   The new map then starts as at the app's start, style load and all.
 
+#### The car map's size (lanes step S1)
+
+**Settings → Car screen → Car map size**, stored under `car_map_size` as the percent: x1, the size
+the car asks for, x1.25, x1.5, x1.75 or x2; x1.5 on a phone that never chose, and an unknown stored
+value reads as x1.5 (`CarMapSize`, DECISIONS 58). The phone's map keeps the phone's density: the
+setting is the car's alone.
+
+- **The pixel ratio.** Each surface's map is made with the host's density times the size as its
+  pixel ratio, in the map options every surface's map is made from (at x1 the host's density, 1.0
+  on a head unit of 160 dpi). Every size of the style grows with it: Standard's roads, labels and
+  icons, the route line and the app's own lane layers. So do the camera's dp, which are the map's
+  logical pixels, as Smooth follow and the Mapbox styles' adapter read the map's own ratio: a lane
+  of 14 dp shows 21 px at x1.5. The paddings (`CarAreas`), the Mapbox logo, the attribution and the
+  routing card's images stay in the host's pixels.
+- **Bitmaps.** A map keeps a bitmap's own pixels whatever its ratio, so what it takes as bitmaps is
+  scaled by the size as each map is made (`ImageScale`): the location component's puck by its scale
+  expression and the app's own car by its layer's image sizes (the 14 dp dot 14, 21 and 28 px wide
+  at x1, x1.5 and x2 on a head unit of 160 dpi), and the route line's origin and destination icons
+  are drawn at the density times the size. The maneuver arrow's heads need nothing, as the
+  navigation SDK draws them at the map's ratio, and the place pin is a style circle. No setting of
+  the location component changes for it during a drive: a new size makes a new map.
+- **At once** (`CarMapResize`). A new size while a surface shows the map sets the options of every
+  later map, and makes the map of the surface again on it: the old map is destroyed first, its GL
+  surface gone before the call returns, and a new map is made on the same window at the new ratio.
+  The map library is handed the host's surface in a copy of its own, made as car-app makes the
+  host's, since the old map releases the surface object it was given. The new scene starts with the
+  camera where it was and takes the overview, the look, the drive views, the lanes, the lighter map
+  and the frame cap as on any new surface; the engine goes on counting the surface as shown, so the
+  phone keeps its list of the turns and its frame cap. The style and its tiles load again, as for a
+  new surface from the host; nothing else is asked of Mapbox. Without a surface the next one takes
+  the size; a remake that fails writes a `car_error` line (`remakeMap`) and leaves the size to the
+  next surface. The car's session sets the stored size before the host's first surface comes, so a
+  car that connects at a size chosen before draws its first map at it.
+- **Lines.** Every `car_surface` line carries `mapSize` and `pixelRatio` beside `density`; one with
+  `event` `size` says each change, with `outcome` `remade`, `next_surface` or `failed`, and the
+  `detach` line of a remake has `remake` true. The car's camera line carries `pixelRatio`, the
+  `settings` line `car_map_size` with the percent.
+
+#### The car's own camera (lanes step S1)
+
+Smooth follow on the car's map is a camera of its own (`CameraTuning.CAR`, DECISIONS 58), at the
+car map's size. The phone's camera is as it was: `CameraTuning.PHONE`, its padding and its Smooth
+follow give the phone's rig scenarios the same numbers as before, line for line. The two Mapbox
+styles stay the navigation SDK's camera as it comes, on the car too
+(`CameraTuning.forMapboxStyles`: the phone's tilts and look-ahead, with the car's calmer centre).
+
+- **Anchored on the car** (`CameraTuning.anchored`, on the car alone). The car's data source never
+  frames a maneuver: its framing override is false on the car (`LaneZoomFrames.sdkFramesManeuver`)
+  and it gets no points of a junction or its bend. Its following frame is then the car's position on
+  the focal point at the bottom edge of the following box, so the camera centres on the drawn car
+  (`onPuck` 1) and the car stays on its row. The data source's fit of the road, the camera line's
+  `to`, is left aside and keeps its limit of 16.35, so the fit that fails at high zoom with the
+  focal point on the box's bottom edge never comes up. The camera works out the car's zoom itself,
+  once for each frame of the data source, and never hands it to the data source.
+- **The road view by speed** (`RoadView`): the zoom at which 12 s of driving (`roadAheadSeconds`) at
+  the highest speed of the last 10 s (`roadPeakSeconds`, a `PeakSpeed` of its own) lies between the
+  car and the top of the following box, never less than 150 m (`roadMinAheadMeters`: a stop or a
+  crawl; a missing or zero speed counts as standing) and never more than 600 m
+  (`roadMaxAheadMeters`), at the car's tilt, on the map's height and its own pixel ratio, at the
+  frame's latitude (`LookAhead.zoomFor`). Speeding up takes the view out at once; slowing down takes
+  it in only after 10 s at the lower speed. It holds with either lane zoom, takes the place of the
+  SDK's fit of the road, and moves no faster than 1 level a second (`maxZoomRate`). It starts with
+  the drive's first position: a camera made anew during a drive, on a new surface or at a new size,
+  keeps its zoom until then.
+- **One tilt** of 55° on the car's road, through junction views and at lane choices (`cruisePitch`,
+  `maneuverPitch` and `lanePitch`): the car's view is never flat and never tilts back and forth; it
+  only comes closer. The overview's tilt and the follow before Start are as before.
+- **The car a quarter up its area** (the padding above): on the head unit profile below, the
+  following box runs from 93 to 313 px of the surface's 400, with 220 px of road above the car
+  where a third left 195.
+- **Junction views, with Large** (`JunctionFit`, `CarJunction`, `ZoomPlanner.anchoredTarget`). From
+  the latched junction view on (`ManeuverFocus.framesItself`: from the latch, but not while the last
+  junction's hold and the 3 s release of its kept zoom run, unless this junction's own frame has
+  begun), the zoom is the larger of the road view's and the zoom at which the maneuver point and the
+  road to 30 m past it (`largeMetersAfterManeuver`), or to 30 m past the bend after it where
+  `TurnBend` finds one 15 m or more on, all lie inside the following box with the car on its row:
+  how far ahead each lies along the view's bearing, counted 12 dp farther (`maxPuckLagDp`, as far as
+  the centre may trail the car), against the box's top, and how far to its side against the box's
+  half-width at the scale of the car's row; and no closer than a 28 dp lane (`junctionLaneDp`).
+  These are the points `JunctionPoints` gives the phone's frame, read once for each junction. The
+  zoom rises along the focus's curve and lets go after the junction as on the phone: the hold, the
+  bridge between close turns, the kept zoom's release. With Default the car keeps the road view's
+  zoom through junctions: Default adds no zoom, on the car as on the phone.
+- **Lane choices, with Large:** the lanes' close view as on the phone (`LaneFocus`, a 14 dp lane,
+  the run-up held to the gore and through its ramp), its floor of road in view at the car's tilt and
+  with 8 s of driving (`laneLookAheadSeconds`; 12 s would leave it at the road view's zoom on the
+  car's short box).
+- **Never out at a junction or a lane choice:** from the road view the car's zoom only goes in, and
+  after the junction, the gore or its ramp it comes back to the road view along the same curves.
+  Start, a new route, off route, a seek of the replay (`onJump`, which forgets the junction and its
+  fit with the speeds), the overview in and out, the zoom buttons and a pan that the driver ends
+  with Recenter are as before, the car's moves starting from where the camera is.
+- **The latch for the rest.** `ManeuverFocus` keeps its latch, windows and bridge as the drive views
+  built them, for what they decide besides the frame: the close view (`CloseView`), which the swap
+  of the app's lanes and the look's `CLOSE_VIEW` hold read, the bearing's lead and the lane plan's
+  street windows. On the car the framing distance decides only these, never the zoom.
+- **What it comes to,** on an 800 × 400 px head unit profile of 160 dpi with stable insets of 88 px
+  at the top, 12 at the left (344 while the routing card shows), 12 at the bottom and 88 at the
+  right, at x1.5 and latitude 35, by the model and by a rig of the real camera:
+
+  | Speed | Road above the car | Zoom |
+  |---|---|---|
+  | standing, and up to 45 km/h | 150 m | 17.81 |
+  | 50 km/h | 167 m | 17.66 |
+  | 90 km/h | 300 m | 16.81 |
+  | 110 km/h | 367 m | 16.52 |
+  | 130 km/h | 433 m | 16.28 |
+  | 180 km/h and more | 600 m | 15.81 |
+
+  The road view shows the same road at every size; its zoom is the log of the ratio apart: 0.58
+  higher at x1 than at x1.5, 0.42 lower at x2. With Large a junction straight on comes in from about
+  137 m before it and reaches the 28 dp lane's 18.89 some 41 m before it; a right-angle turn without
+  the routing card comes in from about 167 m and reaches 18.89 by about 71 m. With the routing card
+  the box is 179 px either side of the car, and the 30 m of road past a right-angle turn holds the
+  view at 17.96 from about 135 m on, 0.25 closer than the road view at 30 mph. On a freeway at
+  110 km/h the lanes' close view is 17.10 against the road view's 16.52. Before lanes step S1 the car
+  followed at about 15.3 with a 45° tilt (about 650 m to the box's top at x1, a lane 2.3 px wide)
+  and went flat at junctions; the phone follows at about 17.1.
+- **Logged:** the car's camera line adds `roadAheadM` and `roadSpeed` (the road the road view shows
+  above the car, in metres, and the speed it is worked out for, in m/s), `roadZoom` (its zoom) and,
+  with Large, `junctionZoom` (the junction view's zoom, from the latch to past the junction; left
+  out outside one), beside the screen's `pixelRatio`. `to` stays the data source's frame, the SDK's
+  fit of the road, which the car's zoom leaves aside.
+
 ### Logging
 
 A **camera** line once a second during guidance. The map scene writes it, in every camera style, and
@@ -879,9 +1012,9 @@ has no map, and so no line, until the map shows. The car's map writes its own, w
 | `style` | the camera style: `MAPBOX_STANDARD`, `MAPBOX_TUNED` or `SMOOTH_FOLLOW` | |
 | `state` | what the camera is doing: `FOLLOWING`, `OVERVIEW`, `IDLE`, and `TRANSITION_TO_FOLLOWING` or `TRANSITION_TO_OVERVIEW` on the way there | |
 | `zoom`, `pitch`, `bearing` | the map's camera | |
-| `laneDp` | how wide a lane of 3.7 m is on the screen at the camera's centre, in dp | about 4 to 6 on a town road; with Large about 28 at a junction and 14 near a lane choice, less at speed on a run-up |
+| `laneDp` | how wide a lane of 3.7 m is on the screen at the camera's centre, in dp | about 4 to 6 on a town road (on the car, since lanes step S1, about 13 at a stop); with Large about 28 at a junction and 14 near a lane choice, less at speed on a run-up |
 | `aheadM` | while the camera follows the car: how much road it shows above the car, in metres, by the model of [The run-up to a freeway exit](#the-run-up-to-a-freeway-exit), from the car's place to the top of the padding, under the card; left out at other times | with Large on a run-up, at least 12 s of driving |
-| `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre | |
+| `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre. On the car's Smooth follow its fit of the road, which the car's own zoom leaves aside | |
 | `puckLagM` | how far the drawn puck trails the latest matched position | below speed × the puck's glide |
 | `sinceFixMs` | how long ago that position came | up to about 1000 |
 | `camLagM` | how far the camera centre is from the drawn puck | Smooth follow on the road: about 2τ × speed, 0.4 s × speed on the phone; larger in maneuver framing and in the overview |
@@ -900,6 +1033,7 @@ has no map, and so no line, until the map shows. The car's map writes its own, w
 | `clock` | the car's map only: the ticks of its frame clock that second, `vsyncTicks` from the display's frames and `timerTicks` from the timer | about 60 together while moving; `timerTicks` 0 while the display sends frames |
 | `maxFps`, `targetFps`, `capFrom`, `measuredHz` | the car's map only: the cap set on its surface; the frames a second it is worked out for, 30 or 60 (**Settings → Debug → Car map frames**); where the cap comes from, `display` (the display's own cap, for the rate of its frames), `drawn` (moved by the frames the map drew; `render` before step 1d) or `timer`; and the rate of the display's frames measured now (60 on the timer; left out before it is measured) | at a target of 30: 30 and `display` at 60 Hz, the screen on or off; 15 (`display`) or about 19 (`drawn`) at 120 Hz |
 | `light` | the car's map only: true while it draws without its 3D objects because the phone is hot (**Settings → Debug → Lighter car map when hot**), false otherwise | false but while the phone is hot |
+| `pixelRatio` | the car's map only: its map's pixel ratio, the host's density times the car map size (**Settings → Car screen → Car map size**) | 1.5 at x1.5 on a head unit of 160 dpi |
 | `laneDetails` | whether Mapbox's lane details are wanted on this map: Lanes on the map at Mapbox's lane details, or the measuring drive's check under the app's drawing | |
 | `hdRoads` | what the style said about them when it was last asked, once a second; left out while the style has no such setting | the same as `laneDetails` |
 | `hdRoadsReapplied` | how often they had to be set again since the map was made | 0 |
@@ -927,14 +1061,16 @@ Smooth follow adds its controller's own numbers:
 | `focusKind` | what the step's own maneuver is to the view: `NONE`, `TURN` or `COMPLEX` | |
 | `framingM` | how far before its junction the frame begins, fixed when the view latched | 240 to 320 before a turn, 280 to 400 before a complex junction, less where the screen is short |
 | `frameCapM` | the longest approach the frame fits on this screen at the zoom the view holds: the road's, or with Large the lanes' close view's while that holds | |
-| `frames` | whether the junction is framed now, latched to the step's end; the camera tells the data source | |
+| `frames` | whether the junction is framed now, latched to the step's end; the camera tells the data source, on the car false, as the car's camera fits the junction itself | |
 | `latchedBy` | how the step latched the tilt: `window`, `bridge` (as the hold after a turn right before ended) or `ahead` (past a step that goes straight on) | |
 | `keep` | with Large: how much of the last junction's close zoom is still kept, 0 to 1 | 1 through the hold after a turn; falling over 3 s while the view stays down for a turn not framed yet |
 | `zoomTarget` | the zoom the camera is going to | |
 | `bearingError` | target bearing minus camera bearing | within a few degrees |
-| `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview |
+| `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview; on the car 1 at junctions too |
 | `laneZoom` | the Lane zoom setting: `DEFAULT` or `LARGE` | |
 | `zoomPlan` | what sets the zoom with Large: `ROAD`, `JUNCTION`, `AFTER_JUNCTION` or `LANES`; left out in the overview | `ROAD` on most seconds, and always with Default |
+| `roadAheadM`, `roadSpeed`, `roadZoom` | the car only: the road the road view shows above the car, in metres; the speed it is worked out for, the highest of the last 10 s, in m/s; and the road view's zoom | 150 standing, 12 s of driving above 45 km/h, at most 600 |
+| `junctionZoom` | the car with Large: the zoom of its own fit of the junction, from the latch to past the junction; left out outside a junction view | up to the 28 dp lane's zoom |
 | `laneFocus`, `laneGoal` | the lane choices' schedule: how far the view is in for one, 0 to 1, and where that is going. It runs with Default too, without moving the zoom | 0 on most freeway seconds |
 | `laneAheadM` | metres to the nearest lane choice ahead that counts; left out when there is none on the step | |
 | `laneChoice` | the lane choice that holds the view: `key`, `lanes`, `usable`, `atManeuver`; left out on the road | |
@@ -1191,7 +1327,7 @@ Stage 4, smart camera: **built in stage 1.1's second round** as the Overview dri
 
 Stage 5, 3D:
 
-- Raise `cruisePitch` for a steeper tilt while following.
+- Raise `cruisePitch` for a steeper tilt while following. On the car it is 55° since lanes step S1.
 - A 3D car in place of the arrow reports its position through the same listener.
 - Cap the frame rate with `MapView.setMaximumFps(60)` if the phone gets hot. Built for two maps at
   once in stage 2's step 1b: the phone's map draws at most 60 while a car surface shows the map.
@@ -1209,7 +1345,8 @@ Stage 5, 3D:
 - **SDK upgrades.** Check three behaviours of the data source again with each upgrade: the one-pixel
   focal padding, the framing around the rest of the step near maneuvers, and the look-ahead
   bearing. If the padding shape changes, the on-puck detection falls back to centring on the frame's
-  world point, which is safe.
+  world point, which is safe. On the car also the following frame with its framing override false:
+  the car's position on the focal point with the one-point padding, read in ui-maps 3.35.2.
 - **The puck is still the SDK's animation.** Its speed is constant between fixes and steps at each
   fix, and it holds still for one frame at each restart. The springs keep this out of the map's
   motion, but the car icon may show a tiny hitch against the road. If it does, the next step is a
@@ -1861,6 +1998,8 @@ tuned with Large also never take the lanes closer than the zoom that still shows
 above the car at the highest speed of the last 10 s (`LookAhead`, `PeakSpeed`): when the car speeds
 up the view goes out at once, and it comes in again only once the speed has stayed lower for 10 s.
 Without a speed, before the padding is set and before the map is laid out, there is no such floor.
+On the car's screen, since lanes step S1, the floor is 8 s of road and the tilt 55° in every view,
+over junctions too ([The car's own camera](#the-cars-own-camera-lanes-step-s1)).
 
 The road ahead comes from a perspective model of the map's camera: a vertical field of view of
 36.87°, the camera 1.5 map heights from the screen, the car on the bottom edge of the padding, and
@@ -2128,8 +2267,8 @@ inside a lane window, stayed within 1 zoom level a second, and the centre never 
 - **Mapbox's lane details:** Mapbox Standard's own, below, as the earlier switch had them.
 - **Drawn by the app:** on freeways with lane data, and on streets where the route's data allows,
   during guidance, the app's own lanes under its own route line, the line in the lane the card
-  names, that lane lit close in, and the car as a bar across the road over drawn lanes in a close
-  view ([The app's own lanes](#the-apps-own-lanes)). Mapbox's lane details are off meanwhile, but
+  names, that lane lit close in, and the car, the usual dot, on a layer of the app's own
+  ([The app's own lanes](#the-apps-own-lanes)). Mapbox's lane details are off meanwhile, but
   for the measuring drive's one check ([Measuring the drawn lanes](#measuring-the-drawn-lanes)).
 
 A change applies at once, also during a drive, and touches nothing of the drive itself: no new
@@ -2195,9 +2334,10 @@ So nothing moves the car's icon sideways, with any choice of Lanes on the map. A
 lane the route needs would show the driver in the right lane whether they are in it or not, and a
 driver who sees that does not change lanes. With Mapbox's lane details, the icon will often sit on
 a middle lane or on a lane line; that is its place on the road, not a lane, and Settings says so.
-With Drawn by the app, over drawn lanes in a close view the car is a bar across the whole road at
-its place along it, which says nothing about the lane; elsewhere it is the usual dot. The owner
-answered yes to the bar on 2026-11-11.
+With Drawn by the app the car is the usual dot in every view, on a layer of the app's own. Over
+drawn lanes in a close view it was a bar across the whole road at its place along it, which the
+owner answered yes to on 2026-11-11, until lanes step S1 took the bar out, as the owner did not want
+it (DECISIONS 58).
 
 What the owner gets in its place:
 
@@ -2426,23 +2566,19 @@ views rest is in the swap below.
   progress update looks up the swap's state, the arrow and the next window, and sets at most a few
   feature states; a camera change computes the drawn lane's width and writes the opacity only on a
   flip. The `lane_drawing` line gives each window's size, build and load times.
-- **The car** (`CarLayer`, `CarBar`). From Start to the end of guidance the location component's
-  puck is invisible: set once at Start, or once as a map is made during such a drive, and back at
-  guidance end. In between no setting of the location component changes, whatever the camera style,
-  the lane zoom or anything else does, since every change rebuilds the puck and cancels its glide;
-  the camera still follows that puck, which glides on unseen. The app draws the car on a
-  location-indicator layer of its own (`custommaps-car`), on top of everything, moved every frame
-  from the puck's animated position: two property sets a frame, its place and its bearing. Over the
-  drawn lanes, while the lit lane shows in the route line's place, the car is a **bar across the
-  road** at its place along the route, from edge line to edge line of the drawn lanes, 2 m deep and
-  square to them, in the puck's blue with a white rim and a short forward tick on each outer apron.
-  It is placed by its station along the route, never by the matched point beside it, so at a gore it
-  never travels the route's diagonal across the lanes. It says where the car is along the road and
-  nothing of its lane. Elsewhere the car is the usual dot, with the puck's own images and bearing.
-  The bar's image is made again only where the road's width has changed by 0.5 m; its size is a
-  zoom expression that keeps it at its ground size. While the map is off the screen or put away for
-  the list nothing is set or drawn, and what became due is done when it is back. The owner answered
-  yes to the bar on 2026-11-11.
+- **The car** (`CarLayer`). From Start to the end of guidance the location component's puck is
+  invisible: set once at Start, or once as a map is made during such a drive, and back at guidance
+  end. In between no setting of the location component changes, whatever the camera style, the lane
+  zoom or anything else does, since every change rebuilds the puck and cancels its glide; the camera
+  still follows that puck, which glides on unseen. The app draws the car on a location-indicator
+  layer of its own (`custommaps-car`), on top of everything, moved every frame from the puck's
+  animated position: two property sets a frame, its place and its bearing. In every view, the close
+  views over the drawn lanes too, the car is the usual dot, with the puck's own images and bearing,
+  where the navigator puts it on the line of the road. While the map is off the screen or put away
+  for the list nothing is set or drawn, and what became due is done when it is back. Over the drawn
+  lanes in a close view the car was a bar across the road until lanes step S1 took the bar out, as
+  the owner did not want it; the own layer stays, the one place where the app could later draw the
+  car otherwise (DECISIONS 58).
 - **The car's watchdog** (`CarLayerWatch`): where a fix the puck was given has had no position after
   it for a second, while the layer draws the car, the map is on screen and drawing frames, nothing
   covers it and the car moves faster than 2 m/s, the car goes back to Mapbox's puck for the rest of
@@ -2527,8 +2663,7 @@ views rest is in the swap below.
     in Smooth follow, once the junction view has reached its frame and the drawn lane at the car is
     10.45 dp wide (a street's 3.35 m lane), in the design's figures about 100 to 130 m before the
     turn, a few metres later than a freeway lane's 10.4 dp would; the amber then shows 9.76 dp
-    against the held line's 10.38. On a two-way street the car's bar spans the route's own lanes,
-    its tick on the outer side alone.
+    against the held line's 10.38.
   - **Logged:** each window's `lane_drawing` line says how many metres of street it drew (`streetM`)
     and how many stretches with lane data it left to the map for want of a source (`streetNoOneWay`,
     with their metres in `streetNoOneWayM`) or because a source told otherwise of them than of their
@@ -2537,7 +2672,7 @@ views rest is in the swap below.
 - **Not checked on a device:** the frame cost (the measuring drive); whether the chained order holds
   on a phone (the `map_layers` line says); how the drawing reads at speed by day and at night;
   whether the puck's position still comes every frame while the puck is invisible (a `car_layer`
-  fallback with `no_position` would say it does not), and how the bar lies on a map tilted 55°;
+  fallback with `no_position` would say it does not);
   what the electronic horizon's lane count counts, lanes kept for car pools and one direction or
   both, and how well its edge ends meet the route's lane points ([DRIVES.md](DRIVES.md), checks 70
   and 71); whether the horizon's one-way flag holds for the streets driven, whether a stop sign's
@@ -2589,7 +2724,8 @@ measures. With it on:
 
 ### Constants of the lane zoom
 
-All in `CameraTuning`, the same for the phone and the car.
+All in `CameraTuning`, the same for the phone and the car but where the car's own camera has its
+own ([The car's own camera](#the-cars-own-camera-lanes-step-s1)).
 
 | Constant | Value |
 |---|---|
@@ -2611,8 +2747,8 @@ All in `CameraTuning`, the same for the phone and the car.
 | A run-up reaches this far beyond the close view's window (`runUpSeconds`, `runUpMinMeters`) | 60 s of driving, at least 1,500 m |
 | A run-up that ended this recently is taken up again on its reach alone (`runUpResumeSeconds`) | 3 s |
 | Past the gore the run-up holds through the ramp to a point the lane plan constrains this near, at the ramp's planning speed (`rampBridgeSeconds`; `LanePlanner.RAMP_BRIDGE_SECONDS` the same) | 15 s of driving |
-| The close view's tilt with Large, Smooth follow (`lanePitch`) | 55° (on the road `cruisePitch`, 45°) |
-| Road the lane zoom keeps in view above the car (`laneLookAheadSeconds`), at the highest speed of a time back (`laneCapSpeedSeconds`) | 12 s of driving, at the highest speed of the last 10 s |
+| The close view's tilt with Large, Smooth follow (`lanePitch`) | 55° (on the road `cruisePitch`, 45°; on the car 55° in every view) |
+| Road the lane zoom keeps in view above the car (`laneLookAheadSeconds`), at the highest speed of a time back (`laneCapSpeedSeconds`) | 12 s of driving (8 s on the car), at the highest speed of the last 10 s |
 
 Outside `CameraTuning`: a run-up begins no later than 6 s of driving before the lane plan's first
 narrowing for a point within its reach (`LanePlanner.SEAM_SECONDS`); the swap of the app's lanes
@@ -2969,6 +3105,12 @@ With the 800×480 and 1280×720 profiles, run the simulated drive with the car m
 - Showing or hiding the action strip does not move the car.
 - Car scroll and scale switch to idle, and **Recenter** from the action strip comes back smoothly.
 - One fix moves both pucks the same way.
+- Lanes step S1, on an 800 × 400 profile: a new car map size while the map shows draws the car's map
+  again within about a second (a `car_surface` line with `event` `size` and `outcome` `remade`, no
+  `car_error`, never a black screen), and the phone keeps its list of the turns; in a simulated
+  drive the screen against `aheadM` and `roadAheadM`, `pitch` 55 throughout, `onPuck` 1 through the
+  junction views with and without the routing card, and a new surface during the drive keeping its
+  zoom until the drive's first position.
 
 Then lock the phone, and later leave the app with Home: the car's map and its puck keep moving.
 `frame_clock` lines say when the car's clock went to its timer and came back, the car's camera lines

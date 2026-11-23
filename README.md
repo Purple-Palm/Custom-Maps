@@ -182,6 +182,14 @@ car's quality guidelines.
    the list, unless the map was chosen in this drive. Before Start and at the destination the phone
    shows its map as always.
 
+The car's map is drawn larger than the car asks for, at **Settings → Car screen → Car map size**:
+x1, the size the car asks for, x1.25, x1.5, x1.75 or x2, and x1.5 unless chosen otherwise. Roads,
+labels, the route line and the car grow with it; the Mapbox logo and the attribution do not. A new
+size shows on the car's screen at once. With Smooth follow the car's map follows the car tilted and
+by its speed: close in town and at a stop, farther out as the car speeds up, back in about 10 s
+after it slows down; with **Lane zoom** at Large closer before turns and lane choices, never farther
+out there. The phone's own map follows as before.
+
 Day and night on the car's map follow the phone: the same look as on the phone, Auto by the sun or
 Day or Night from **Settings → Day and night**, changing at the same moment on both screens. The
 car's own day and night setting colours only the turn arrow and the lanes on the car's card. The

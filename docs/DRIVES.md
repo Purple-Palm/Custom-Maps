@@ -24,7 +24,8 @@ hot phone, the card's lanes two miles before an exit and the measuring's whole v
 Since step 1c the phone shows the list in place of its map during a drive with the car: for checks
 7 to 13, which look at the phone's map too, press **Map** on the list first.
 The guidance tones in the car are check 110 of that list: one sound for each tone, and none while
-another navigation app guides on the car's screen.
+another navigation app guides on the car's screen. Lanes step S1's are checks 130 to 138 of that
+list: the car map's size, the car's own camera and no car bar.
 
 1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
    the map, or first with a message while the phone has no token or no precise location (the setup
@@ -778,7 +779,9 @@ Asked on 2026-11-11, with the answers about the app's own lanes:
   with Mapbox's lane details one tap away. Until then Lanes on the map starts at Off and Drawn by the
   app is a choice.
 - **The car over drawn lanes in a close view:** yes to a blue bar across the road at its place along
-  it, which claims no lane; elsewhere the usual dot (check 60).
+  it, which claims no lane; elsewhere the usual dot (check 60). Superseded by lanes step S1: the
+  owner did not want the bar, and the car is the usual dot in every view
+  ([DECISIONS.md](DECISIONS.md), 58).
 - **Mapbox's electronic horizon, for lane counts between the points:** the owner wants it on, against
   the design's proposal to wait for Mapbox's written yes. **Settings → Guidance → Lane counts
   between lane points** turns it on, and is on unless turned off, marked as a Mapbox beta whose
@@ -1224,17 +1227,16 @@ data ([CAMERA.md](CAMERA.md), The app's own lanes):
     over asphalt without any line of the app's from where it turns off until it is in the ramp's
     lane, and the arrow there is Mapbox's. On the ramp the lit lane begins where the line moves into
     its lane.
-60. **The car.** Over the drawn lanes in a close view, once the lit lane shows in the route line's
-    place: a blue bar with a white rim across all the drawn lanes and a small forward tick on each
-    outer apron, lying flat on the road and reading as paint across it, not standing up or floating;
-    its width follows the road's, so a lane added or dropped widens or narrows it. Everywhere else
-    Mapbox's dot with its bearing arrow, as before, by day and at night. The bar and the dot glide
-    with the car, with no stutter. If the car freezes and Mapbox's puck comes back after about a
-    second, a `car_layer` line says `carLayerFallback` `no_position`: the puck's position did not
-    come while it was invisible, and the bar needs another source. A camera style or lane zoom
-    change during the drive, and Settings opened and closed: the car stays as it is, with no flash
-    of the puck. The log: `car_layer` `own` `start` after Start and `sdk` `guidance_end` at the end,
-    no `fallback`. In the car the car's map does the same on its own (`car_layer` with `screen` `car`).
+60. **The car.** Superseded by lanes step S1, which took the car bar out (check 137): the blue bar
+    across the drawn lanes that this check looked at is gone, and the car is Mapbox's dot with its
+    bearing arrow in every view, over the drawn lanes in a close view too, by day and at night. What
+    still holds: the dot glides with the car, with no stutter. If the car freezes and Mapbox's puck
+    comes back after about a second, a `car_layer` line says `carLayerFallback` `no_position`: the
+    puck's position did not come while it was invisible, and the app's own car needs another source.
+    A camera style or lane zoom change during the drive, and Settings opened and closed: the car
+    stays as it is, with no flash of the puck. The log: `car_layer` `own` `start` after Start and
+    `sdk` `guidance_end` at the end, no `fallback`. In the car the car's map does the same on its
+    own (`car_layer` with `screen` `car`).
 61. **An exit whose ramp splits soon after the gore.** The close view stays through the ramp to the
     split, the card shows the split's lanes from the gore on, the lit lane stays on the ramp's lane
     for it, and the view lets go about 2 s after the split. On the ramp the `lane_row` lines have
@@ -1254,8 +1256,9 @@ data ([CAMERA.md](CAMERA.md), The app's own lanes):
     moment, and its words may wait a moment for the new plan. A change of Day and night in Settings
     during the run-up: the lanes take the new look's colours at once, nothing else moves (a change by
     the sun waits for the close view to end, as before). Lanes on the map changed to another choice
-    during a drive, parked or by a passenger: the lanes and the bar go at once, Mapbox's puck is back
-    (`car_layer` `sdk` `switch`), and the next `map_layers` line has no `lanes`.
+    during a drive, parked or by a passenger: the lanes go at once, Mapbox's puck is back
+    (`car_layer` `sdk` `switch`), and the next `map_layers` line has no `lanes`. The car bar this
+    check named is gone since lanes step S1.
 65. **Bridges and trees.** Where a road crosses over the route, note whether the drawing lies on top
     of the bridge; at the tilt, whether trees stand over the paint.
 66. **The cost.** The camera lines against a drive with Off: `render` (`p95Ms`, `missedVsync`),
@@ -1425,19 +1428,20 @@ second drawing window of a route on ([DECISIONS.md](DECISIONS.md), 52; [CAMERA.m
 app's own lanes). Screenshots from a passenger or a simulated drive, never from the driver:
 
 87. **A two-way street.** Past the route's first 3 km, at a street with lane data: the route's lanes
-    to the right of the road's line, plain asphalt over the oncoming half, no centre line, no line of
-    the oncoming lanes, no double line, no crosswalk. Closing on a turn with Large in Smooth follow:
-    the junction view, the lane to take lit, the swap at about 100 to 130 m before the turn (on the
-    street's own lane width: the amber about as wide as the line it takes over, not visibly
-    thinner), the car a bar across the route's lanes only with its tick on the outer side, and the
-    card's row lighting the same lane as the map. By day and at night. That window's `lane_drawing`
-    line: `streetM` above 0; the turn's `lane_agree` line: `source` `maneuver`, `agree` true.
-88. **A one-way street.** The lanes about the road's line with an edge line on each side, and the
-    bar with a tick on each side. Note whether the street is one-way where the drawing has it so.
-    Where the horizon tells one street of a road otherwise than the road's first, that street is
-    left to the map (`streetMixed` above 0): note where. Where a street goes on onto a freeway
-    without a turn, the freeway's lanes about its line with both edge lines, and a two-way street
-    before it left to the map.
+    to the right of the road's line, plain asphalt over the oncoming half, no centre line, no line
+    of the oncoming lanes, no double line, no crosswalk. Closing on a turn with Large in Smooth
+    follow: the junction view, the lane to take lit, the swap at about 100 to 130 m before the turn
+    (on the street's own lane width: the amber about as wide as the line it takes over, not visibly
+    thinner), the car the usual dot (the bar across the route's lanes that this check named is gone
+    since lanes step S1), and the card's row lighting the same lane as the map. By day and at night.
+    That window's `lane_drawing` line: `streetM` above 0; the turn's `lane_agree` line: `source`
+    `maneuver`, `agree` true.
+88. **A one-way street.** The lanes about the road's line with an edge line on each side (the bar
+    that this check named is gone since lanes step S1). Note whether the street is one-way where the
+    drawing has it so. Where the horizon tells one street of a road otherwise than the road's first,
+    that street is left to the map (`streetMixed` above 0): note where. Where a street goes on onto
+    a freeway without a turn, the freeway's lanes about its line with both edge lines, and a two-way
+    street before it left to the map.
 89. **A turn pocket.** Before a turn whose lane list adds a pocket: the pocket drawn from where it
     may begin, with no line beside it until it is known, at full width before the stop line, and the
     lit lane moving into it along its taper, never back.
@@ -1598,6 +1602,61 @@ hold's `holdS` every second:
     in the seconds of each move into and out of the overview, and `camWrites` in a standing overview:
     about one write every 10 s.
 
+The car's map of its own, lanes step S1 ([DECISIONS.md](DECISIONS.md), 58; [CAMERA.md](CAMERA.md),
+The car map's size and The car's own camera): nothing has run on the car or the Desktop Head Unit
+yet. With the car's screen, Smooth follow and the car map size at x1.5 unless a check says
+otherwise; screenshots of the car's screen from a passenger or a parked car, never from the driver.
+Every `car_surface` line carries `mapSize` and `pixelRatio`, and the car's camera line `pixelRatio`,
+`roadAheadM`, `roadSpeed`, `roadZoom` and, with Large, `junctionZoom`:
+
+130. **The size row.** Parked, before Start: **Settings → Car screen → Car map size**, by day and at
+    night, at the phone's own width and with the font size at 1.3: x1, x1.25, x1.5, x1.75 and x2,
+    one a line, x1.5 chosen on a phone that never chose, and the note under them; each a tap.
+131. **The sizes at once.** Parked, with the car's screen showing the map: choose x1, then x2, then
+    x1.5. Each time the car's map is drawn again within about a second, its roads, labels, route
+    line, the route's end icons and the car larger at each step up and smaller at each step down,
+    the Mapbox logo and the attribution the same size in the same corner. At x1 the roads, labels
+    and the car are as large as before this step. For each change a `settings` line with
+    `car_map_size` (100, 200, 150) and a `car_surface` line with `event` `size`, `outcome` `remade`
+    and `mapSize` 1, 2 and 1.5, its `pixelRatio` the car's `density` times that; no `car_error`
+    line, and no black or frozen car screen.
+132. **A car that connects at a size chosen before.** Plug the car in with x2 chosen: the map comes
+    at x2 at once, with no second drawing: a `car_surface` line with `event` `size` and `outcome`
+    `next_surface` as the car connects, then `attach` with `mapSize` 2, and no `remade`. Back to
+    x1.5 after.
+133. **In town, close and by speed.** At a stop the car's map is close, about 490 ft of road above
+    the car (the camera line's `roadAheadM` 150, `zoom` about 17.8 at x1.5), tilted 55°, the car
+    about a quarter of the way up the map. Driving off, the view stays until about 28 mph and goes
+    out with the speed (about 530 ft above the car at 30 mph); slowing down, it comes back in about
+    10 s after the speed dropped, not with each touch of the brake (`roadSpeed` holds the highest
+    speed of the last 10 s). With Default and with Large alike; `pitch` 55 all along.
+134. **Turns, with Large.** At a right-angle turn in town at 30 mph the view comes closer in the
+    last part of the approach, from about 450 ft before the turn, never farther out and never flat
+    (`pitch` 55; `junctionZoom` from there to past the turn). With the routing card on the car's
+    screen it comes only a little closer, to about 18 at x1.5, as the card leaves the map little
+    width beside the car; the turn and the road past it stay on the screen above the car, and the
+    car stays on its row. After the turn the view goes back to the road view over a few seconds.
+    Two turns about 1,000 ft apart: after the first the view eases back to the road view and comes
+    closer again for the second, the tilt at 55° all along, with no jump.
+135. **Turns, with Default.** The view keeps the road view through the turn, at 55°: no zoom of the
+    turn's own.
+136. **A freeway.** At 65 mph the road view shows about 0.22 mi above the car (`roadAheadM` about
+    350, `zoom` about 16.6 at x1.5), at 80 mph about 0.27 mi. With Large the lanes' close view
+    before a lane choice and from the run-up of an exit, closer (about 17.2), held to the gore and
+    down the ramp, then back to the road view at the ramp's speed; never out at the lane choice or
+    the exit.
+137. **No car bar.** With **Lanes on the map → Drawn by the app**, in a close view over the drawn
+    lanes, once the lit lane shows in the route line's place: the car is Mapbox's dot, on the phone
+    and on the car's screen, never a bar across the road. `car_layer` `own` `start` after Start and
+    `sdk` `guidance_end` at the end, no `fallback`.
+138. **The phone as before, and the lines.** Without the car, the phone's map follows as before this
+    step: the same zoom on the road, the junction view flat with Large; Mapbox tuned and Mapbox
+    standard as before, also on the car's screen. After the drive, in the car's camera lines:
+    `pixelRatio`, `roadAheadM`, `roadSpeed` and `roadZoom` every second, `junctionZoom` only in the
+    junction views with Large, `onPuck` 1 all along (the car never framed off its row), and `to`,
+    the data source's own fit, farther out than `zoom`; every `car_surface` line with `mapSize` and
+    `pixelRatio`.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -1665,8 +1724,10 @@ Then share the debug log. What to read in it:
 | `trip_summary`: `horizon` | Every drive: `on`, the switch Lane counts between lane points as the trip began; `switched`, how often it changed in the trip; `listenedS`, how long the app listened to the electronic horizon; `updates` of its position, and of them `notAvailable` (off the road, or unsure where the car is); `edges`, how many edges' details were read; the lane `points` compared, of which the count agreed with every listed lane (`agreeAll`), with the lanes open to every car (`agreeGeneral`), with neither (`disagree`), or had none to compare (`noCount`); `stretchesUsed`, the horizon's stretches between two lane points it agreed with that a path of the app's lanes took past the window on screen, each pair of points once a route; `windows`, the drawing windows that loaded with lines or zones from its counts, on each map that drew them; `failed`, whether reading it failed |
 | `progress`: `motion.ehLanes`, `horizon` | `ehLanes` in the motion object, on freeways while the app listens to the electronic horizon: its count of lanes on the edge the car is on, null where none is known; nothing on the screen uses it. With **Measure the drawn lanes** on, `horizon`: the app's observer of the horizon on the main thread since the line before, `updates`, `ms` in all and `maxMs` the longest |
 | `error` with `where` `horizon` | Reading the electronic horizon failed: the kind of error and its stack, never its message, and the rest of the drive goes on without it. Where a drawing with its counts could not be made, an `error` line with `where` `ownRouteLine`, and the route's windows go on without them |
-| `car_layer` | Only with **Lanes on the map** at **Drawn by the app**: one at each change of who draws the car. `drawer`, `own` (the app's own layer: the bar over drawn lanes in a close view, else the dot) or `sdk` (Mapbox's puck); `reason`: `start` (guidance began on a map that was there before it), `scene` (a map made during a drive, as the car's surface or the phone's map made again), `switch` (Lanes on the map changed during a drive), `guidance_end` or `fallback`; with `fallback` also `carLayerFallback`: `no_position` (a fix the puck was given had no position after it for a second while the watchdog counted) or `exception` (the style refused a call; with an `error` line, `where` `carLayer`). After a fallback the drive goes on with Mapbox's puck; the next drive tries again. Words only, about 100 bytes, a few a drive |
+| `car_layer` | Only with **Lanes on the map** at **Drawn by the app**: one at each change of who draws the car. `drawer`, `own` (the app's own layer, the dot; over drawn lanes in a close view a bar until lanes step S1) or `sdk` (Mapbox's puck); `reason`: `start` (guidance began on a map that was there before it), `scene` (a map made during a drive, as the car's surface or the phone's map made again), `switch` (Lanes on the map changed during a drive), `guidance_end` or `fallback`; with `fallback` also `carLayerFallback`: `no_position` (a fix the puck was given had no position after it for a second while the watchdog counted) or `exception` (the style refused a call; with an `error` line, `where` `carLayer`). After a fallback the drive goes on with Mapbox's puck; the next drive tries again. Words only, about 100 bytes, a few a drive |
 | `car_light` | Only with the car screen, `screen` `car`: one at each change of the car's lighter map, `on` (whether it draws without its 3D objects) and `thermal` (the phone's thermal status by Android's name, null while none was read). From `MODERATE` on it is light, after two minutes in a row of `LIGHT` or better full again; the car's camera line has `light` beside it. With **Settings → Debug → Lighter car map when hot** off (`settings` `car_light_when_hot` false) it is never light. Words only, a few a drive at most |
+| `car_surface`: `mapSize`, `pixelRatio`; `event` `size`; `settings` with `car_map_size` | Only with the car screen, `screen` `car`: on every `car_surface` line the size of the car's map (1 to 2) and its pixel ratio, the host's density times the size; one with `event` `size` for each new size, with `outcome` `remade` (the map made again on the surface), `next_surface` (none there: the next surface takes it) or `failed` (with a `car_error` line `remakeMap`), and a `detach` line with `remake` true during a remake; the `settings` line with the percent, 100 to 200. Numbers and words only |
+| Camera on the car: `pixelRatio`, `roadAheadM`, `roadSpeed`, `roadZoom`, `junctionZoom` | The car's own camera (lanes step S1): the map's pixel ratio; the road the road view shows above the car, in metres, and the speed it is worked out for, the highest of the last 10 s, in m/s; its zoom; with Large the junction view's zoom, from the latch to past the junction. To tune the 12 s, the 150 and 600 m and the junction views against the car's screen |
 | `lane_measure` | Only with **Settings → Debug → Measure the drawn lanes** on and Drawn by the app, from the phone's map: one as the measuring begins, `check` `details_under_drawing` with `on` true (Mapbox's lane details under the drawing for the drive), then one at the end of each close view. `view`, counted from 1 in the drive; `drawn`, whether the drawing showed (the odd views); `kind`, `run_up` or `junction`; `look`, `DAY` or `NIGHT`; `seconds` and `frames`; `ms`, how long the view lasted, from the update it began on to its end; `p95Ms` and `maxMs`, over every frame time of the view; `missedVsync` and `missedPerS`; `uploadMaxMs`, the longest upload of a frame in Mapbox's statistics; `programsMs` and `programs`, the time spent making graphics programs and how many there are, as Mapbox's statistics give them (whether a sample counts since its own start or the map's is not verified); `windows`, `windowLoadMaxMs` and `windowBytesMax`, the drawing windows that loaded in the view; `carPositions`, the positions handed to the car's layer; `hdRoads`, what the style said of Mapbox's lane details as the view began; `end`: `let_go`, `guidance_end`, `switch`, `setting`, `background`, `covered`, `away`, `camera_style` or `released`; `counts`, true only for a whole view, one with frames, begun 5 s or more after the drawing was shown or hidden, that lasted 3 s or more and ended `let_go`, and false for every other. Numbers and words only, about 390 bytes, one a close view |
 | `motion_sensors` | One each time the sensors are asked to start, as a drive comes onto a freeway: whether the phone has a gyroscope (`gyroscope`), a gravity sensor (`gravity`) and a linear acceleration sensor (`linearAcceleration`), the period asked for (`periodUs`, 40000: 25 samples a second, each delivered at once) and whether listening `started`. They stop at the first update off the freeway and when the drive ends. Without a gyroscope or a gravity sensor nothing is registered: one line a drive with `started` false, and no `motion`. Without linear acceleration, `fwd` and `side` stay null |
 | `tone` | One for each tone the rule decides, from the main thread: `tone` (`ahead`, `at_turn`, `start`, `demo`), `why` (`ahead`, `lane_choice`, `at_turn`, `arrived`, `start`, `demo`, `sample`: a level chosen in Settings), the maneuver's `maneuver` and `modifier`, `lookedPast` (the next maneuver, where the tones passed over it to this one: straight on under a new name, a merge, a roundabout's way out), `metersLeft` and `secondsLeft` to it, `speed` in m/s, the two distances of the update (`aheadMeters`, `finalMeters`), `laneMeters` and `laneKey` for a lane choice, `sinceLast` (seconds since the tone before) and `pacing` (`play`, `hold`: waits for the sound that plays, `drop`). With **Tones** off, and while another app guides on the car's screen, none |
