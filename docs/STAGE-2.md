@@ -26,7 +26,8 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.35.2 with maps-androidauto 
 - A car app service in the navigation category, with screens on the navigation template, on Car
   App Library 1.8.0-rc01 for its host check fix.
 - The car map is Mapbox's map surface (maps-androidauto) drawing the app's own scene: the same
-  style, route line, puck and camera as the phone. Mapbox's ready-made car screens are not used.
+  style, route line and puck as the phone, and since lanes step S1 a size and a Smooth follow camera
+  of its own. Mapbox's ready-made car screens are not used.
 - One drive across both screens. The drive belongs to the engine, not to a screen. When the car
   disconnects, guidance continues on the phone; when it connects again, it continues in the car,
   once Android Auto opens the app again (unverified). Another navigation app in the car does not
