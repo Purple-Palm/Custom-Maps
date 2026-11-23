@@ -790,6 +790,91 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `the car's camera frames a junction itself from the latch to the maneuver point`() {
+        val car = CameraTuning.CAR
+        val v = 30.0 * MPH
+        val turn = ManeuverFacts("r/0/0", FocusKind.TURN, turnDegrees = 90.0)
+        val window = FocusWindow.windowMeters(FocusKind.TURN, v, Double.POSITIVE_INFINITY, car)
+        for (phase in phases) {
+            val focus = ManeuverFocus(car)
+            var k = 0
+            while (true) {
+                val t = phase + k
+                val toTurn = 600.0 - v * t
+                if (toTurn < 0.0) break
+                focus.onProgress(t, "r/0/0", toTurn, v * t, turn, Double.POSITIVE_INFINITY, v)
+                // From the latch on, with the tilt's focus, and the junction is this step's own.
+                assertEquals(focus.goal == 1.0, focus.framesItself(t), "phase $phase at $toTurn m")
+                assertEquals(if (focus.goal == 1.0) "r/0/0" else null, focus.latchedJunction, "phase $phase at $toTurn m")
+                assertEquals(toTurn <= window, focus.goal == 1.0, "phase $phase at $toTurn m")
+                k += 1
+            }
+            // Past it, in the hold, nothing ahead is latched: the junction behind keeps its zoom.
+            val t = phase + k
+            focus.onProgress(t, "r/0/1", 2_000.0, 5.0, ManeuverFacts("r/0/1", FocusKind.TURN), Double.POSITIVE_INFINITY, v)
+            assertEquals(1.0, focus.goal)
+            assertFalse(focus.framesItself(t))
+            assertEquals(null, focus.latchedJunction)
+            assertTrue(focus.afterManeuver)
+        }
+    }
+
+    @Test
+    fun `the car's camera frames a next junction only once the last one let go of the view`() {
+        val focus = ManeuverFocus(tuning)
+        focus.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        // The next turn, 212 m on, inside its window of 215 m during the hold: latched, not framed, the last one holds.
+        focus.onBanner(10.0, "r/0/1", 212.0, 0.0, "turn", excluded, 10.0)
+        assertEquals(ManeuverFocus.Latch.WINDOW, focus.latchedBy)
+        assertFalse(focus.framesManeuver)
+        assertEquals("r/0/1", focus.latchedJunction)
+        assertFalse(focus.framesItself(10.0))
+        focus.onBanner(11.0, "r/0/1", 202.0, 10.0, "turn", excluded, 10.0)
+        assertFalse(focus.framesItself(11.5))
+        // The hold ends 30 m past the turn: the last junction's zoom is let go over 3 s, and only then is the next one's.
+        focus.onBanner(13.0, "r/0/1", 182.0, 30.0, "turn", excluded, 10.0)
+        assertFalse(focus.framesManeuver)
+        assertEquals(1.0, focus.keepAt(13.0), 1e-9)
+        for (at in listOf(13.0, 14.5, 15.9)) assertFalse(focus.framesItself(at), "at $at s")
+        assertTrue(focus.framesItself(16.0))
+        // Its own frame beginning takes it at once.
+        val early = ManeuverFocus(tuning)
+        early.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        early.onBanner(10.0, "r/0/1", 212.0, 0.0, "turn", excluded, 10.0)
+        early.onBanner(13.0, "r/0/1", 175.0, 30.0, "turn", excluded, 10.0)
+        assertTrue(early.framesManeuver)
+        assertTrue(early.framesItself(13.0))
+        // A next turn framed already in the hold, as close turns are: framed by itself at once.
+        val close = ManeuverFocus(tuning)
+        close.onBanner(0.0, "r/0/0", 100.0, 0.0, "turn", excluded, 10.0)
+        close.onBanner(10.0, "r/0/1", 120.0, 0.0, "turn", excluded, 10.0)
+        assertTrue(close.framesManeuver)
+        assertTrue(close.framesItself(10.0))
+        // A reset leaves nothing framed.
+        close.reset(11.0)
+        assertFalse(close.framesItself(11.0))
+        assertEquals(null, close.latchedJunction)
+    }
+
+    @Test
+    fun `past a step the view stays up for, the junction framed is the next step's`() {
+        val turn = ManeuverFacts("r/0/1", FocusKind.TURN)
+        val nameChange = ManeuverFacts("r/0/0", FocusKind.NONE, next = turn, nextMeters = 100.0)
+        val focus = ManeuverFocus(CameraTuning.CAR)
+        focus.onProgress(0.0, "r/0/0", 500.0, 0.0, nameChange, Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(null, focus.latchedJunction)
+        assertFalse(focus.framesItself(0.0))
+        focus.onProgress(30.0, "r/0/0", 170.0, 330.0, nameChange, Double.POSITIVE_INFINITY, 10.0)
+        assertEquals(ManeuverFocus.Latch.AHEAD, focus.latchedBy)
+        assertEquals("r/0/1", focus.latchedJunction)
+        assertTrue(focus.framesItself(30.0))
+        // On the junction's own step it is the step's own.
+        focus.onProgress(48.0, "r/0/1", 90.0, 10.0, turn, Double.POSITIVE_INFINITY, 10.0)
+        assertEquals("r/0/1", focus.latchedJunction)
+        assertTrue(focus.framesItself(48.0))
+    }
+
+    @Test
     fun `the two Mapbox styles move on the car as before it had a camera of its own`() {
         // The car's numbers before it had a camera of its own: the phone's with the calmer center.
         assertEquals(CameraTuning.PHONE.copy(centerTau = 0.25), CameraTuning.CAR.forMapboxStyles())

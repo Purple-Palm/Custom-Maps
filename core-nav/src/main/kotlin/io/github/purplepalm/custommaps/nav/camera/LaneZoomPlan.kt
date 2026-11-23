@@ -329,8 +329,9 @@ class ZoomPlanner(private val tuning: CameraTuning) {
     var kind = Kind.ROAD
         private set
 
-    /** The zoom over the junction the car is at or has just left; not a number on the road. */
-    private var junctionZoom = Double.NaN
+    /** The zoom over the junction the car is at or has just left; not a number on the road. The camera line tells it too. */
+    var junctionZoom = Double.NaN
+        private set
 
     /**
      * How much of [junctionZoom] is still kept, from 1 to 0: the lowest the focus has been since
@@ -367,7 +368,52 @@ class ZoomPlanner(private val tuning: CameraTuning) {
             reset()
             return frameZoom
         }
-        val road = min(frameZoom, tuning.defaultMaxZoom)
+        return large(min(frameZoom, tuning.defaultMaxZoom), frameZoom, latitude, junctionFocus, afterManeuver, laneFocus, roadFrame, lanesCap, junctionKeep)
+    }
+
+    /**
+     * [target] for a camera anchored on the car ([CameraTuning.anchored]), which works out each zoom itself: the road is
+     * its road view by speed ([roadZoom], [RoadView]) in place of the frame's zoom up to [CameraTuning.defaultMaxZoom],
+     * and a junction the camera frames itself ([ManeuverFocus.framesItself]) has its own fit ([junctionFit],
+     * [JunctionFit]) in place of the frame of a maneuver. The rest is [target]'s: Default is the road view; Large goes
+     * toward the junction along the focus, no closer than a [CameraTuning.junctionLaneDp] lane, keeps its zoom past it
+     * and lets it go along the curve; near a lane choice it goes in no closer than [lanesCap], and while it frames a
+     * junction no closer than that junction's fit.
+     *
+     * @param roadZoom the road view's zoom
+     * @param junctionFit the zoom of the fit of the junction the camera frames now; not a number while it frames none
+     */
+    fun anchoredTarget(
+        mode: LaneZoom,
+        roadZoom: Double,
+        junctionFit: Double,
+        latitude: Double,
+        junctionFocus: Double,
+        afterManeuver: Boolean,
+        laneFocus: Double,
+        lanesCap: Double = Double.POSITIVE_INFINITY,
+        junctionKeep: Double = junctionFocus,
+    ): Double {
+        if (mode == LaneZoom.DEFAULT) {
+            reset()
+            return roadZoom
+        }
+        val framed = !junctionFit.isNaN()
+        return large(roadZoom, if (framed) junctionFit else roadZoom, latitude, junctionFocus, afterManeuver, laneFocus, !framed, lanesCap, junctionKeep)
+    }
+
+    /** [target]'s rule with Large, from the zoom of the [road] and of the frame. */
+    private fun large(
+        road: Double,
+        frameZoom: Double,
+        latitude: Double,
+        junctionFocus: Double,
+        afterManeuver: Boolean,
+        laneFocus: Double,
+        roadFrame: Boolean,
+        lanesCap: Double,
+        junctionKeep: Double,
+    ): Double {
         if (junctionFocus <= 0.0) junctionZoom = Double.NaN
         // The frame shows the road by now, beyond the junction or short of the next one that
         // the view stays down for: what the junction had is kept.

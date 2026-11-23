@@ -418,6 +418,9 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     /** When the view stayed down past the hold for a next maneuver not framed yet; not a number otherwise. */
     private var keptDownSince = Double.NaN
 
+    /** Whether the car was in the hold after the last maneuver at the last update. */
+    private var inHold = false
+
     /** The step whose junction is framed, from its first update at the framing distance to the step's end. */
     private var framedStep: String? = null
 
@@ -445,6 +448,24 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     /** Whether the navigation SDK is to frame the junction now: from the framing distance on, to the end of the step. */
     val framesManeuver: Boolean
         get() = framedStep != null && framedStep == stepKey
+
+    /**
+     * The step at whose end lies the junction the view is latched down for from this step: this step itself, or past a
+     * step the view stays up for, the next one; null while the view is not latched down for a junction from this step. A
+     * camera that frames its junctions itself ([framesItself]) reads the junction's road by it.
+     */
+    val latchedJunction: String?
+        get() = latchedStep.takeIf { latchedHere() }
+
+    /**
+     * Whether a camera anchored on the car ([CameraTuning.anchored]), which the navigation SDK never frames a maneuver
+     * for, frames the junction the view is latched down for itself now: from the latch on, so its zoom comes in along the
+     * focus with the view. Not while the last junction still holds the view, in the hold after it and while its close
+     * zoom is let go past the hold for this one ([keepAt]), until this one's frame begins ([framesManeuver]): one
+     * junction's zoom at a time, as the navigation SDK frames one junction at a time on the phone.
+     */
+    fun framesItself(now: Double): Boolean =
+        latchedHere() && (framesManeuver || (!inHold && !(now - keptDownSince < tuning.keptZoomReleaseSeconds)))
 
     fun focusAt(now: Double) = lerp(from, to, easeInOut((now - start) / duration))
 
@@ -507,6 +528,7 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         }
         val speed = speedMps ?: 0.0
         val inTurn = holdStep == stepKey && (metersOnStep < tuning.holdAfterManeuverMeters || now < holdUntil)
+        inHold = inTurn
         // The first update past the hold after the last maneuver.
         val holdEnds = holdStep == stepKey && !inTurn && !holdOver
         if (holdEnds) holdOver = true
@@ -570,6 +592,7 @@ class ManeuverFocus(private val tuning: CameraTuning) {
         holdStep = null
         holdOver = false
         keptDownSince = Double.NaN
+        inHold = false
         framedStep = null
         latchedBy = null
         framingMeters = Double.NaN

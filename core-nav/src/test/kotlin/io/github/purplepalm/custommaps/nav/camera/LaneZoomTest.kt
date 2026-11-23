@@ -997,6 +997,105 @@ class LaneZoomTest {
     }
 
     @Test
+    fun `anchored on the car, Default is the road view and adds no zoom`() {
+        val plan = ZoomPlanner(CameraTuning.CAR)
+        for (fit in listOf(Double.NaN, 18.4, 25.0)) {
+            for (focus in listOf(0.0, 0.5, 1.0)) {
+                assertEquals(17.7, plan.anchoredTarget(LaneZoom.DEFAULT, 17.7, fit, 35.0, focus, false, 1.0, lanesCap = 19.0), "$fit at $focus")
+                assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
+            }
+        }
+    }
+
+    @Test
+    fun `anchored on the car, Large holds the road view on the road, also closer than the SDK's limit`() {
+        val plan = ZoomPlanner(CameraTuning.CAR)
+        // The road view by speed, not the navigation SDK's limit of 16.35.
+        assertEquals(17.8, plan.anchoredTarget(LaneZoom.LARGE, 17.8, Double.NaN, 35.0, 0.0, false, 0.0), 1e-12)
+        assertEquals(15.9, plan.anchoredTarget(LaneZoom.LARGE, 15.9, Double.NaN, 35.0, 0.0, false, 0.0), 1e-12)
+        assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
+        // While the tilt's focus moves but no junction is framed, the road view stays.
+        assertEquals(17.8, plan.anchoredTarget(LaneZoom.LARGE, 17.8, Double.NaN, 35.0, 0.7, false, 0.0), 1e-12)
+        assertTrue(plan.junctionZoom.isNaN())
+    }
+
+    @Test
+    fun `anchored on the car, a junction comes in along the focus to its fit, never out and no closer than the 28 dp lane`() {
+        val car = CameraTuning.CAR
+        val lane28 = MapScale.zoomForLaneDp(car.junctionLaneDp, 35.0)
+        val plan = ZoomPlanner(car)
+        val road = 17.66
+        // The fit below the road view: the road view.
+        assertEquals(road, plan.anchoredTarget(LaneZoom.LARGE, road, 17.4, 35.0, 0.6, false, 0.0), 1e-12)
+        assertEquals(ZoomPlanner.Kind.ROAD, plan.kind)
+        // Above it: in along the focus.
+        assertEquals(lerp(road, 18.3, 0.5), plan.anchoredTarget(LaneZoom.LARGE, road, 18.3, 35.0, 0.5, false, 0.0), 1e-12)
+        assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
+        assertEquals(18.3, plan.anchoredTarget(LaneZoom.LARGE, road, 18.3, 35.0, 1.0, false, 0.0), 1e-12)
+        assertEquals(lane28, plan.anchoredTarget(LaneZoom.LARGE, road, 19.7, 35.0, 1.0, false, 0.0), 1e-12)
+        // No point left to limit it: the 28 dp lane.
+        assertEquals(lane28, plan.anchoredTarget(LaneZoom.LARGE, road, Double.POSITIVE_INFINITY, 35.0, 1.0, false, 0.0), 1e-12)
+        assertEquals(lane28, plan.junctionZoom, 1e-12)
+        // Past the junction: kept, and let go along the curve as the view comes back.
+        assertEquals(lane28, plan.anchoredTarget(LaneZoom.LARGE, road, Double.NaN, 35.0, 1.0, true, 0.0), 1e-12)
+        assertEquals(ZoomPlanner.Kind.AFTER_JUNCTION, plan.kind)
+        assertEquals(lerp(road, lane28, 0.4), plan.anchoredTarget(LaneZoom.LARGE, road, Double.NaN, 35.0, 0.4, true, 0.0), 1e-12)
+        assertEquals(road, plan.anchoredTarget(LaneZoom.LARGE, road, Double.NaN, 35.0, 0.0, true, 0.0), 1e-12)
+        assertTrue(plan.junctionZoom.isNaN())
+        // At every focus and fit the zoom is the road view's or closer.
+        for (fit in listOf(Double.NaN, 15.0, 17.0, 18.0, 19.0, 30.0)) {
+            for (focus in listOf(0.0, 0.3, 1.0)) {
+                for (lanes in listOf(0.0, 1.0)) {
+                    val zoom = ZoomPlanner(car).anchoredTarget(LaneZoom.LARGE, road, fit, 35.0, focus, false, lanes, lanesCap = 18.2)
+                    assertTrue(zoom >= road && zoom <= lane28 + 1e-12, "$fit at $focus, lanes $lanes: $zoom")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `anchored on the car, the kept junction is let go before the next one's fit takes the view`() {
+        val car = CameraTuning.CAR
+        val lane28 = MapScale.zoomForLaneDp(car.junctionLaneDp, 35.0)
+        val plan = ZoomPlanner(car)
+        assertEquals(lane28, plan.anchoredTarget(LaneZoom.LARGE, 17.7, 19.5, 35.0, 1.0, false, 0.0), 1e-12)
+        // Past the first turn the view stays down for the next one, whose fit waits: the keep falls.
+        assertEquals(lane28, plan.anchoredTarget(LaneZoom.LARGE, 17.7, Double.NaN, 35.0, 1.0, false, 0.0, junctionKeep = 1.0), 1e-12)
+        assertEquals(lerp(17.7, lane28, 0.5), plan.anchoredTarget(LaneZoom.LARGE, 17.7, Double.NaN, 35.0, 1.0, false, 0.0, junctionKeep = 0.5), 1e-12)
+        assertEquals(17.7, plan.anchoredTarget(LaneZoom.LARGE, 17.7, Double.NaN, 35.0, 1.0, false, 0.0, junctionKeep = 0.0), 1e-12)
+        // Then the next one's fit, far yet, is the road view's; it comes in as the car comes up to it.
+        assertEquals(17.7, plan.anchoredTarget(LaneZoom.LARGE, 17.7, 16.9, 35.0, 1.0, false, 0.0), 1e-12)
+        assertEquals(18.1, plan.anchoredTarget(LaneZoom.LARGE, 17.7, 18.1, 35.0, 1.0, false, 0.0), 1e-12)
+        assertEquals(ZoomPlanner.Kind.JUNCTION, plan.kind)
+    }
+
+    @Test
+    fun `anchored on the car at 110 km per h, the lanes' close view is about 17 point 1 against the road view's 16 point 5`() {
+        // An invented head unit: 800 x 400 px, the box from row 93 to the car's row 313, pixel ratio 1.5, latitude 35.
+        val car = CameraTuning.CAR
+        val speed = 110.0 / 3.6
+        val road = RoadView.zoom(car, speed, 400.0, 313.0, 93.0, 1.5, 35.0)
+        val cap = LookAhead.zoomFor(speed * car.laneLookAheadSeconds, car.lanePitch, 400.0, 313.0, 93.0, 1.5, 35.0)
+        assertEquals(16.52, road, 0.01)
+        assertEquals(17.10, cap, 0.01)
+        val plan = ZoomPlanner(car)
+        assertEquals(cap, plan.anchoredTarget(LaneZoom.LARGE, road, Double.NaN, 35.0, 0.0, false, 1.0, lanesCap = cap), 1e-12)
+        assertEquals(ZoomPlanner.Kind.LANES, plan.kind)
+        assertEquals(lerp(road, cap, 0.5), plan.anchoredTarget(LaneZoom.LARGE, road, Double.NaN, 35.0, 0.0, false, 0.5, lanesCap = cap), 1e-12)
+        // With the phone's 12 s the car's short box would leave the lanes at the road view.
+        val twelve = LookAhead.zoomFor(speed * CameraTuning.PHONE.laneLookAheadSeconds, car.lanePitch, 400.0, 313.0, 93.0, 1.5, 35.0)
+        assertEquals(road, ZoomPlanner(car).anchoredTarget(LaneZoom.LARGE, road, Double.NaN, 35.0, 0.0, false, 1.0, lanesCap = twelve), 1e-9)
+    }
+
+    @Test
+    fun `the phone's planner is as it was for the same numbers`() {
+        // The anchored rule leaves target alone: the frame's zoom up to the SDK's limit on the road.
+        val plan = ZoomPlanner(tuning)
+        assertEquals(16.35, plan.target(LaneZoom.LARGE, 17.8, 35.0, 0.0, false, 0.0, roadFrame = true), 1e-12)
+        assertEquals(ZoomPlanner(tuning).anchoredTarget(LaneZoom.LARGE, 16.35, Double.NaN, 35.0, 0.0, false, 0.0), plan.target(LaneZoom.LARGE, 16.35, 35.0, 0.0, false, 0.0, roadFrame = true), 1e-12)
+    }
+
+    @Test
     fun `without a keep of its own the junction keep is the focus`() {
         val plain = ZoomPlanner(tuning)
         val kept = ZoomPlanner(tuning)
