@@ -25,9 +25,9 @@ class CarJunctionTest {
         return Point.fromLngLat(local.longitudeOf(p), local.latitudeOf(p))
     }
 
-    private fun zoomFrom(junction: CarJunction, metersBefore: Double, bearing: Double = 0.0): Double {
+    private fun zoomFrom(junction: CarJunction, metersBefore: Double, bearing: Double = 0.0, lagMeters: Double = 0.0): Double {
         val carAt = at(0.0, -metersBefore)
-        return junction.zoomAt(carAt.latitude(), carAt.longitude(), bearing, 55.0, 400.0, 313.0, 93.0, 179.0, 1.5)
+        return junction.zoomAt(carAt.latitude(), carAt.longitude(), bearing, 55.0, 400.0, 313.0, 93.0, 179.0, 1.5, lagMeters)
     }
 
     @Test
@@ -71,6 +71,21 @@ class CarJunctionTest {
         assertEquals(turned, zoomFrom(junction, 100.0, bearing = 20.0), 1e-4)
         // Turned around, every point lies behind the car's row: none limits the zoom.
         assertEquals(Double.POSITIVE_INFINITY, zoomFrom(junction, 100.0, bearing = 180.0))
+    }
+
+    @Test
+    fun `each point ahead counts as far farther as the camera may trail the car, a point behind it none`() {
+        val junction = CarJunction()
+        junction.hold(listOf(at(0.0, 0.0), at(0.0, 2_000.0)), bearingBefore = 0.0, car)
+        // Straight on, 100 m before: the maneuver point and the road 30 m past it, each 3 m farther from the camera's center.
+        val lagged = listOf(100.0, 130.0).minOf { JunctionFit.zoomFor(it + 3.0, 0.0, 55.0, 400.0, 313.0, 93.0, 179.0, 1.5, 35.0) }
+        assertEquals(lagged, zoomFrom(junction, 100.0, lagMeters = 3.0), 1e-4)
+        assertTrue(lagged < zoomFrom(junction, 100.0) - 0.01, "the trailing camera needs a wider view")
+        // A meter past a right turn its points lie behind the car's row, nearer than the lag: they still limit nothing.
+        val turned = CarJunction()
+        turned.hold(listOf(at(0.0, 0.0), at(2_000.0, 0.0)), bearingBefore = 0.0, car)
+        assertEquals(Double.POSITIVE_INFINITY, zoomFrom(turned, -1.0))
+        assertEquals(Double.POSITIVE_INFINITY, zoomFrom(turned, -1.0, lagMeters = 3.0))
     }
 
     @Test

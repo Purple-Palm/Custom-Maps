@@ -11,7 +11,8 @@ import org.junit.jupiter.api.Test
  * Smooth follow anchored on the car ([io.github.purplepalm.custommaps.nav.camera.CameraTuning.anchored]): the data source
  * frames no maneuver and gets no junction's points, the camera works out the road view and the junction's fit itself once
  * per update, and the phone's path is left as it was. The camera needs a map, so it is pinned here by its source
- * ([SourceText]); the numbers are core-nav's RoadViewTest, JunctionFitTest, LaneZoomTest and CameraMotionTest.
+ * ([SourceText]); the numbers are core-nav's RoadViewTest, JunctionFitTest, LaneZoomTest and CameraMotionTest, and the
+ * junction's points CarJunctionTest's.
  */
 class AnchoredCameraWiringTest {
 
@@ -81,6 +82,47 @@ class AnchoredCameraWiringTest {
         assertTrue("located = false" in body(camera, "override fun onGuidanceEnded()"))
         val progress = body(camera, "override fun onRouteProgress(")
         assertTrue("if (laneZoom == LaneZoom.LARGE) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()" in progress)
+    }
+
+    @Test
+    fun `the road view and the junction's fit take the following box, the frame's tilt and the map's own pixel ratio`() {
+        // The road view: the box from the car's row up to the top padding of this map, at the map's own ratio (the
+        // host's density times the car map's size), never the host's density alone.
+        val road = body(camera, "private fun roadViewZoom(latitude: Double): Double")
+        assertEquals(
+            listOf(
+                "if (!mapboxMap.isValid()) return Double.NaN",
+                "val padding = dataSource.followingPadding",
+                "val height = mapboxMap.getSize().height.toDouble()",
+                "return RoadView.zoom(tuning, roadSpeed, height, height - padding.bottom, padding.top, mapboxMap.getMapOptions().pixelRatio.toDouble(), latitude)",
+            ),
+            road.filter { it.isNotBlank() },
+        )
+        // The junction's fit: the same box and ratio, the frame's bearing and tilt, the box's half-width between the side
+        // paddings (the routing card's included), and each point ahead as far farther as the camera may trail the car.
+        val push = body(camera, "private fun pushJunctionFit(")
+        assertTrue("val heading = target.bearing ?: if (bearingRamp.ready) bearingRamp.value(now) else bearing.value" in push, "$push")
+        val padding = push.indexOf("val padding = dataSource.followingPadding")
+        assertTrue(padding >= 0, "$push")
+        assertEquals(listOf("val size = mapboxMap.getSize()", "val height = size.height.toDouble()"), push.subList(padding + 1, padding + 3), "$push")
+        val call = push.indexOf("val fit = carJunction.zoomAt(")
+        val end = push.subList(call + 1, push.size).indexOf(")")
+        assertTrue(call > padding && end >= 0, "$push")
+        assertEquals(
+            listOf(
+                "latitude = center.latitude(),",
+                "longitude = center.longitude(),",
+                "bearing = heading,",
+                "pitch = target.pitch ?: tuning.cruisePitch,",
+                "mapHeightPx = height,",
+                "carRowPx = height - padding.bottom,",
+                "rowPx = padding.top,",
+                "halfWidthPx = (size.width.toDouble() - padding.left - padding.right) / 2.0,",
+                "pixelRatio = mapboxMap.getMapOptions().pixelRatio.toDouble(),",
+                "lagMeters = tuning.maxPuckLagDp * MapScale.metersPerDp(zoom.value, center.latitude()),",
+            ),
+            push.subList(call + 1, call + 1 + end),
+        )
     }
 
     @Test
