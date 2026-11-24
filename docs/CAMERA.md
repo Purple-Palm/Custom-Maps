@@ -1046,10 +1046,11 @@ control of it.
 - **The tilt waits for the zoom.** The zoom goes out no faster than 1 level a second, behind its
   spring. Where it lags the tilt, the tilt goes no lower than keeps the junction's maneuver point 4
   px below the screen's top at the zoom, the centre, the bearing and the padding the camera has
-  (`LookAhead.pitchFor`): within the mode only, for the junction the view went down for (not one the
-  bridge latched while the view was down already), and it is flat by the end of the descent. On the
-  rig it held the tilt up to about 9° higher for a moment at 20 and 30 mph, and not at all at 45;
-  without it the turn went up to 7 px past the screen's top.
+  (`LookAhead.pitchFor`): within the mode, and in the switch's own move into the view from above
+  (below), for the junction the view went down for (not one the bridge latched while the view was
+  down already), and it is flat by the end of the descent. On the rig it held the tilt up to about
+  9° higher for a moment at 20 and 30 mph, and not at all at 45; without it the turn went up to 7
+  px past the screen's top.
 - **After the junction** the hold keeps the junction's zoom; as the view comes back up the zoom is
   let go to the road view at the car's tilt, and between close turns, with the view down, to the
   road view at the flat tilt, which shows the road to the next turn.
@@ -1060,7 +1061,12 @@ control of it.
 - **A change applies at once:** the data source is told the new kind's tilt, framing, limit and
   bend's points with the last progress and computes its frame again. During a junction view
   (latched, held or on its way back up, `ManeuverFocus.inView`) the camera goes over to the other
-  kind in one eased move, as for a change of mode; elsewhere the next junction shows it.
+  kind in one eased move, as for a change of mode; elsewhere the next junction shows it. Into the
+  view from above the move takes the tilt down on its own curve, and the tilt's spring runs well
+  ahead of the zoom's and of the centre's way to the SDK's frame, so the tilt waits for the zoom in
+  the move too, to its last frame. On the rig, the switch turned on 90 to 210 m before a right-angle
+  turn at 30 mph took the turn up to about 200 px past the screen's top for up to about 1.3 s
+  without the wait, and not at all with it; the view was flat within about 3 s of the switch.
 - **What it comes to,** on the profile above at x1.5 with the routing card, a right-angle turn at 30
   mph braking to 12 mph at it, by a rig of the real camera (the zoom, and the tilt):
 
@@ -3205,7 +3211,8 @@ With the 800×480 and 1280×720 profiles, run the simulated drive with the car m
   the end of the descent through the hold, `junctionView` `above`, `frames` true from the framing
   distance, `onPuck` 0 in the frame), the turn on the screen from the latch on, the road view and
   the lanes' views at 55° between them; the switch turned off and on during a junction view moving
-  the camera once each time; off, the checks of lanes step S1.
+  the camera once each time, the turn on the screen through the move into the view from above; off,
+  the checks of lanes step S1.
 
 Then lock the phone, and later leave the app with Home: the car's map and its puck keep moving.
 `frame_clock` lines say when the car's clock went to its timer and came back, the car's camera lines

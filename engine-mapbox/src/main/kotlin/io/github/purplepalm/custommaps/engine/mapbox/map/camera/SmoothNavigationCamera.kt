@@ -114,7 +114,8 @@ import kotlin.math.sin
  * ([ZoomPlanner.aboveTarget]); where the zoom, at its top speed, lags the tilt, the tilt waits for
  * it, so the junction stays on the screen ([tiltFloor]). The road view, the lanes' close view, the
  * overview and the follow before Start stay the car's own. A change of the switch during a junction
- * view is one eased move to the other kind of view; otherwise it shows at the next junction.
+ * view is one eased move to the other kind of view, in which the tilt down to the view from above
+ * waits for the zoom too; otherwise it shows at the next junction.
  *
  * On the browsing map, before guidance, it follows the drawn puck in the same way, at a fixed zoom
  * and tilt and without the data source.
@@ -341,6 +342,13 @@ internal class SmoothNavigationCamera(
      * ([tiltFloor]). Null before a latch.
      */
     private var descendingFor: String? = null
+
+    /**
+     * The eased move the switch began into the view from above during a junction view ([setTurnsFromAbove]) is under way:
+     * its tilt goes down ahead of the zoom and the centre, so it too goes no lower than [tiltFloor], to the move's last
+     * frame. Any other move ends it.
+     */
+    private var aboveMove = false
 
     /** Whether the data source's newest following frame is one of the open road, not of a maneuver. */
     private var roadFrame = true
@@ -720,7 +728,8 @@ internal class SmoothNavigationCamera(
      * views are from above already. At once: the data source is told what this camera decided with the last progress, for
      * the new kind of view (the tilt it goes to, whether it frames the maneuver, its limit and the bend's points), and
      * computes its frame again; during a junction view the camera goes over to the other kind in one eased move, as for a
-     * change of mode. Otherwise the next junction shows it.
+     * change of mode, in which the tilt down to the view from above waits for the zoom as it does within the mode
+     * ([aboveMove]). Otherwise the next junction shows it.
      */
     @OptIn(MapboxDelicateApi::class, ExperimentalPreviewMapboxNavigationAPI::class)
     override fun setTurnsFromAbove(enabled: Boolean) {
@@ -740,7 +749,10 @@ internal class SmoothNavigationCamera(
             LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction, maneuverFocus.framesManeuver, junctionView)
             dataSource.evaluate()
         }
-        if (mode == Mode.FOLLOWING && maneuverFocus.inView(now)) beginTransition(mode, again = true)
+        if (mode == Mode.FOLLOWING && maneuverFocus.inView(now)) {
+            beginTransition(mode, again = true)
+            aboveMove = above
+        }
         requestFrame()
     }
 
@@ -903,6 +915,7 @@ internal class SmoothNavigationCamera(
         if (teleportUntil != 0.0) watchTeleport(now)
         computeTargets(now, dt)
         blendTransition(now)
+        if (aboveMove) holdTiltFloorInMove()
         if (snapOnNextFrame) {
             snapOnNextFrame = false
             snapToTargets()
@@ -1092,6 +1105,18 @@ internal class SmoothNavigationCamera(
         val centerRow = pad[TOP].value + (height - pad[TOP].value - pad[BOTTOM].value) / 2.0
         val floor = LookAhead.pitchFor(ahead, zoom.value, height, centerRow, TILT_FLOOR_ROW_PX, mapPixelRatio, lat.value)
         return if (floor.isNaN()) 0.0 else floor
+    }
+
+    /**
+     * In the switch's move into the view from above ([aboveMove]): the move's tilt, the blended target, goes no lower than
+     * [tiltFloor], as the targets' within the mode do. The move takes the tilt from 55° to straight down on the zoom's own
+     * curve, and the tilt's spring runs well ahead of the zoom's and of the centre's way to the data source's frame: without
+     * the floor the junction would go over the screen's top. On the move's last frame too; from the next one the targets
+     * hold the floor within the mode.
+     */
+    private fun holdTiltFloorInMove() {
+        if (mode == Mode.FOLLOWING && above) toPitch = max(toPitch, tiltFloor())
+        if (transitionSeconds <= 0.0 || mode != Mode.FOLLOWING || !above) aboveMove = false
     }
 
     /**
@@ -1334,6 +1359,8 @@ internal class SmoothNavigationCamera(
      */
     private fun beginTransition(target: Mode, seconds: Double? = null, again: Boolean = false) {
         if (target == mode && !again) return
+        // A move of its own: the switch's move into the view from above, if one ran, is over.
+        aboveMove = false
         val now = now()
         if (mode == Mode.IDLE) {
             // An animation still on its way, the end of a fling or of an ease, would go on moving the

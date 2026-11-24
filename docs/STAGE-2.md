@@ -633,7 +633,7 @@ unchanged.
   fit at the tilt it goes down by, so the view goes out from the tilted road view to the flat frame
   in one move, farther out than the road view; where the zoom lags the tilt, the tilt waits for it,
   so the turn stays on the screen. A change during a junction view is one eased move to the other
-  kind of view.
+  kind of view, the tilt down to the view from above waiting for the zoom in it too.
 - **Everything else as lanes step S1 built it:** the road view by speed at 55°, the lanes' close
   views at freeway lane choices and run-ups, the overview, the follow before Start; with the switch
   off the junction views of lanes step S1, line for line. The two Mapbox styles and the phone's

@@ -1690,8 +1690,9 @@ junction view is latched:
 142. **With it off.** Turned off, parked: the next turns are lanes step S1's tilted view, at 55° all
     along, closer near the turn with Large only (checks 134 and 135), never flat, with
     `junctionView` `tilted`. Turned on during a junction view, by a passenger or in a parked
-    simulated drive: the view goes over to the flat frame in one eased move, and turned off again
-    back to the tilted one; changed on the open road, nothing moves until the next turn.
+    simulated drive: the view goes over to the flat frame in one eased move, the turn on the car's
+    screen all the way, and turned off again back to the tilted one; changed on the open road,
+    nothing moves until the next turn.
 143. **A freeway exit.** At 65 mph with Large: the lanes' close view before a lane choice and from
     the exit's run-up stays tilted at 55° through the gore and down the ramp (check 136); the turn
     at the ramp's end is flat and framed, with `junctionView` `above` there, and after it the view

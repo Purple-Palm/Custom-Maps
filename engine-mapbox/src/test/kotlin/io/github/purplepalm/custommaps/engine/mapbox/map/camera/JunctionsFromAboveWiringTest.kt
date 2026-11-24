@@ -10,9 +10,10 @@ import org.junit.jupiter.api.Test
  * The car's junction views from above (Turns from above, [io.github.purplepalm.custommaps.nav.camera.JunctionView.ABOVE])
  * in Smooth follow: the tilt goes down to straight above along the focus, the data source frames the maneuver as the
  * camera decided with the lane zoom's limits, the road view and the junction's own fit go down with the tilt until then,
- * and a change of the switch tells the data source at once and moves the camera only during a junction view. The camera
- * needs a map, so it is pinned here by its source ([SourceText]); the rules are core-nav's CameraMotionTest,
- * JunctionViewTest, RoadViewTest and LaneZoomTest, the limits LaneZoomFramesTest's.
+ * and a change of the switch tells the data source at once and moves the camera only during a junction view, the tilt
+ * of a move into the view from above waiting for the zoom as within the mode. The camera needs a map, so it is pinned
+ * here by its source ([SourceText]); the rules are core-nav's CameraMotionTest, JunctionViewTest, RoadViewTest and
+ * LaneZoomTest, the limits LaneZoomFramesTest's.
  */
 class JunctionsFromAboveWiringTest {
 
@@ -76,7 +77,7 @@ class JunctionsFromAboveWiringTest {
         val latch = progress.indexOf("if (goalBefore < 1.0 && maneuverFocus.goal == 1.0) {")
         assertEquals(listOf("foldTiltIntoMove(now)", "descendingFor = maneuverFocus.latchedJunction"), progress.subList(latch + 1, latch + 3), "$progress")
         for (declaration in listOf("override fun onJump()", "override fun onGuidanceEnded()")) assertTrue("descendingFor = null" in body(declaration), declaration)
-        // Within the mode only, after the focus's tilt.
+        // Within the mode, after the focus's tilt; the switch's own move holds it on the move's blended tilt (below).
         val targets = body("private fun computeTargets(")
         val floor = targets.indexOf("if (mode == Mode.FOLLOWING && above && steady) toPitch = max(toPitch, tiltFloor())")
         assertTrue(floor > targets.indexOf("Mode.FOLLOWING -> guidancePitch(tuning, laneShare, junctionFocus, junctionPitch)"), "$targets")
@@ -112,12 +113,45 @@ class JunctionsFromAboveWiringTest {
         )) {
             assertTrue(call in tellings, "$call: $set")
         }
-        // One eased move, from the frame the data source computed again, only while a junction view is on.
-        val move = set.indexOf("if (mode == Mode.FOLLOWING && maneuverFocus.inView(now)) beginTransition(mode, again = true)")
+        // One eased move, from the frame the data source computed again, only while a junction view is on; a move into the
+        // view from above holds the tilt's floor.
+        val move = set.indexOf("if (mode == Mode.FOLLOWING && maneuverFocus.inView(now)) {")
         assertTrue(move > evaluate, "$set")
+        assertEquals(listOf("beginTransition(mode, again = true)", "aboveMove = above"), set.subList(move + 1, move + 3), "$set")
         assertEquals("requestFrame()", set.last())
         // The move starts from the frame the data source has now.
         assertTrue("latestData?.let { data -> applySample(data, now) }" in body("private fun beginTransition("))
+    }
+
+    @Test
+    fun `in the switch's move into the view from above the tilt waits for the zoom too, to the move's last frame`() {
+        // The move blends the tilt down on the zoom's curve, and the tilt's spring runs ahead of the zoom's: the floor acts
+        // on the blended tilt, on every frame of the move, before the springs take it.
+        val frame = body("override fun doFrame(frameTimeNanos: Long)").filter { it.isNotBlank() }
+        val blend = frame.indexOf("blendTransition(now)")
+        assertTrue(blend > frame.indexOf("computeTargets(now, dt)"), "$frame")
+        assertEquals("if (aboveMove) holdTiltFloorInMove()", frame[blend + 1], "$frame")
+        assertTrue(blend + 1 < frame.indexOf("stepSprings(dt)") && blend + 1 < frame.indexOf("snapToTargets()"), "$frame")
+        // The floor first, so the move's last frame keeps it too; from the next frame the targets hold it within the mode.
+        assertEquals(
+            listOf(
+                "if (mode == Mode.FOLLOWING && above) toPitch = max(toPitch, tiltFloor())",
+                "if (transitionSeconds <= 0.0 || mode != Mode.FOLLOWING || !above) aboveMove = false",
+            ),
+            body("private fun holdTiltFloorInMove()").filter { it.isNotBlank() },
+        )
+        // Only the switch's move to the view from above sets it; any other move ends it.
+        val begin = body("private fun beginTransition(").filter { it.isNotBlank() }
+        assertEquals(listOf("if (target == mode && !again) return", "aboveMove = false"), begin.subList(0, 2), "$begin")
+        assertEquals(
+            listOf(
+                "private var aboveMove = false",
+                "aboveMove = above",
+                "if (transitionSeconds <= 0.0 || mode != Mode.FOLLOWING || !above) aboveMove = false",
+                "aboveMove = false",
+            ),
+            code.filter { "aboveMove =" in it },
+        )
     }
 
     @Test
