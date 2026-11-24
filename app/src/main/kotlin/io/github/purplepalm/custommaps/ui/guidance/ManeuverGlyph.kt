@@ -73,12 +73,13 @@ internal fun glyphKey(type: ManeuverType, turn: TurnModifier?, roundaboutExitDeg
  * One lane: every arrow painted on it, the one the route takes in [highlight] and the others in
  * [dim]. In a lane to take ([isLaneToTake]) the route's arrow is also drawn heavier than any other
  * lane arrow ([laneStroke]), since the two colours alone differ too little in lightness to tell
- * at a glance in the sun: 1.91:1 by day, 2.31:1 at night. A lane drawn as an outline
- * ([Lane.outline]) has hollow arrows in [dim]: their middle is cut out on a layer of the lane's own,
- * so the card shows through.
+ * at a glance in the sun: 1.91:1 by day, 2.31:1 at night. A part on a tile is drawn in [tile],
+ * amber as a fill, and a mark on it in [onTile]. A lane drawn as an outline ([Lane.outline]) has
+ * hollow arrows in [dim]: their middle is cut out on a layer of the lane's own, so the card shows
+ * through. Only a lane with such a hollow is drawn on a layer of its own.
  */
 @Composable
-fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, modifier: Modifier = Modifier) {
+fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, tile: Color, onTile: Color, modifier: Modifier = Modifier) {
     val parts = remember(lane) { GlyphShapes.lane(lane) }
     val layer = if (parts.any { it.ink == GlyphInk.HOLE }) Modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen) else Modifier
     Canvas(modifier.then(layer)) {
@@ -86,6 +87,8 @@ fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, modifier: Modifier = Mod
             when (it.ink) {
                 GlyphInk.LIT -> drawPart(it.part, highlight)
                 GlyphInk.DIM -> drawPart(it.part, dim)
+                GlyphInk.TILE -> drawPart(it.part, tile)
+                GlyphInk.ON_TILE -> drawPart(it.part, onTile)
                 GlyphInk.HOLE -> drawPart(it.part, dim, BlendMode.Clear)
             }
         }
@@ -136,13 +139,20 @@ private fun DrawScope.drawPart(part: GlyphPart, color: Color, blendMode: BlendMo
         is GlyphPart.Segment -> drawLine(color, point(part.from), point(part.to), strokeWidth = side * part.width, cap = StrokeCap.Round, blendMode = blendMode)
         is GlyphPart.Ring -> drawCircle(color, side * part.radius, point(part.center), style = stroke(part.width), blendMode = blendMode)
         is GlyphPart.Dot -> drawCircle(color, side * part.radius, point(part.center), blendMode = blendMode)
+        is GlyphPart.Fill -> drawPath(closedPathOf(part), color, blendMode = blendMode)
     }
 }
 
-private fun DrawScope.pathOf(line: GlyphPart.Line): Path = Path().apply {
-    val start = point(line.start)
+private fun DrawScope.pathOf(line: GlyphPart.Line): Path = pathOf(line.start, line.steps)
+
+/** A filled shape's outline, closed back to its start. */
+private fun DrawScope.closedPathOf(fill: GlyphPart.Fill): Path = pathOf(fill.start, fill.steps).apply { close() }
+
+/** The path from [from] through [steps], on the canvas. */
+private fun DrawScope.pathOf(from: GlyphPoint, steps: List<GlyphStep>): Path = Path().apply {
+    val start = point(from)
     moveTo(start.x, start.y)
-    line.steps.forEach { step ->
+    steps.forEach { step ->
         when (step) {
             is GlyphStep.LineTo -> point(step.to).let { lineTo(it.x, it.y) }
             is GlyphStep.ArcTo -> arcTo(

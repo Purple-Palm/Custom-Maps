@@ -14,7 +14,7 @@ import kotlin.math.sin
  */
 data class GlyphPoint(val x: Float, val y: Float)
 
-/** One step of a glyph's line after its start ([GlyphPart.Line]). */
+/** One step of a glyph's line or filled shape after its start ([GlyphPart.Line], [GlyphPart.Fill]). */
 sealed interface GlyphStep {
     /** A straight piece to [to]. */
     data class LineTo(val to: GlyphPoint) : GlyphStep
@@ -47,11 +47,25 @@ sealed interface GlyphPart {
 
     /** A filled circle. */
     data class Dot(val center: GlyphPoint, val radius: Float) : GlyphPart
+
+    /**
+     * A closed shape, from [start] through [steps] and straight back to [start], filled by the non-zero rule, with no
+     * line along it. Its corners are sharp; an [GlyphStep.ArcTo] rounds one. The car draws its edge as the shape filled
+     * and outlined with a line twice the edge wide, round at the corners, so the edge stands out of the shape by the
+     * edge's width on every side, as it does round every other part.
+     */
+    data class Fill(val start: GlyphPoint, val steps: List<GlyphStep>) : GlyphPart
 }
 
-/** How a part of a lane is coloured: as a lane to take, dim as every other arrow, or cut out of what is drawn under it. */
+/**
+ * How a part of a lane is coloured: in the route's amber, dim as every other arrow, as an amber tile or a dark mark on
+ * one, or cut out of what is drawn under it.
+ */
 enum class GlyphInk {
+    /** The route's amber as a line or an arrow: the car's lit ink, the phone's laneOn. */
     LIT,
+
+    /** The look's grey of every other lane arrow. */
     DIM,
 
     /**
@@ -59,6 +73,15 @@ enum class GlyphInk {
      * of an outline does. Drawn after every coloured part of its lane, on a layer of the lane's own.
      */
     HOLE,
+
+    /** Amber as a fill, a tile with marks on it: the car's lit ink with its dark edge, the phone's accent. */
+    TILE,
+
+    /**
+     * A mark on a [TILE], in the dark ink of icons on amber, so it reads the same on any card the tile lies on: the car's
+     * onTile ink, the phone's onAccent.
+     */
+    ON_TILE,
 }
 
 /** A part of a lane's glyph with its colour, in drawing order: a later part lies over an earlier one. */

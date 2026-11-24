@@ -150,10 +150,14 @@ class LanesImageRenderer(private val density: () -> Float, private val log: Debu
         /** The rows of a run-up, a lane choice and the maneuver after it, in both looks. */
         const val CAPACITY = 6
 
-        /** The car's ink for [ink]: null for a part cut out of what is drawn under it, the hollow of an outline lane. */
+        /**
+         * The car's ink for [ink]: amber for the route's arrows and for a tile, the dark ink of icons on amber for a mark on
+         * a tile, null for a part cut out of what is drawn under it, the hollow of an outline lane.
+         */
         fun inkOf(ink: GlyphInk, colors: CarImageColors): CarInk? = when (ink) {
-            GlyphInk.LIT -> colors.lit
+            GlyphInk.LIT, GlyphInk.TILE -> colors.lit
             GlyphInk.DIM -> colors.dim
+            GlyphInk.ON_TILE -> colors.onTile
             GlyphInk.HOLE -> null
         }
     }
@@ -173,10 +177,10 @@ private class BoundedSet<K : Any>(private val capacity: Int) {
 
 /**
  * Draws glyph parts on a canvas, as the phone's card draws them with Compose: lines with round ends
- * and corners, in the middle of a box and as large as its shorter side. Every part's edge is drawn
- * first and every colour after, so no edge crosses a colour drawn before it. A part without an ink
- * is cut out of what lies under it, to the image's transparent ground: the hollow of an outline
- * lane's arrows, which only that lane's own ink lies under.
+ * and corners and filled shapes, in the middle of a box and as large as its shorter side. Every
+ * part's edge is drawn first and every colour after, so no edge crosses a colour drawn before it. A
+ * part without an ink is cut out of what lies under it, to the image's transparent ground: the
+ * hollow of an outline lane's arrows, which only that lane's own ink lies under.
  */
 private object GlyphPainter {
 
@@ -206,7 +210,7 @@ private object GlyphPainter {
         fun y(point: GlyphPoint) = top + point.y * side
     }
 
-    /** [part] in [color], every line [grow] pixels wider on each side, for the edge under it; with [cut], cleared to transparent. */
+    /** [part] in [color], every line and shape [grow] pixels wider on each side, for the edge under it; with [cut], cleared to transparent. */
     private fun draw(canvas: Canvas, part: GlyphPart, color: Int, place: Place, grow: Float, cut: Boolean = false) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color
@@ -219,7 +223,7 @@ private object GlyphPainter {
             is GlyphPart.Line -> {
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = part.width * side + 2 * grow
-                canvas.drawPath(pathOf(part, place), paint)
+                canvas.drawPath(pathOf(part.start, part.steps, place), paint)
             }
             is GlyphPart.Segment -> {
                 paint.style = Paint.Style.STROKE
@@ -235,12 +239,20 @@ private object GlyphPainter {
                 paint.style = Paint.Style.FILL
                 canvas.drawCircle(place.x(part.center), place.y(part.center), part.radius * side + grow, paint)
             }
+            is GlyphPart.Fill -> {
+                // The edge stands out by grow on every side: the shape filled and outlined with a line twice as wide,
+                // round at the corners. Without an edge the shape alone, since a line of no width is a hairline.
+                paint.style = if (grow > 0f) Paint.Style.FILL_AND_STROKE else Paint.Style.FILL
+                paint.strokeWidth = 2 * grow
+                canvas.drawPath(pathOf(part.start, part.steps, place).apply { close() }, paint)
+            }
         }
     }
 
-    private fun pathOf(line: GlyphPart.Line, place: Place): Path = Path().apply {
-        moveTo(place.x(line.start), place.y(line.start))
-        for (step in line.steps) {
+    /** The path from [start] through [steps], in pixels of [place]. */
+    private fun pathOf(start: GlyphPoint, steps: List<GlyphStep>, place: Place): Path = Path().apply {
+        moveTo(place.x(start), place.y(start))
+        for (step in steps) {
             when (step) {
                 is GlyphStep.LineTo -> lineTo(place.x(step.to), place.y(step.to))
                 is GlyphStep.ArcTo -> arcTo(

@@ -236,9 +236,10 @@ class GlyphShapesTest {
         val side: Float get() = min(width, height)
     }
 
-    /** What the phone drew: lines through pixel points, straight segments, rings and dots, with their widths in pixels. */
+    /** What the phone drew: lines through pixel points, straight segments, rings, dots and filled shapes, with their widths in pixels. */
     private sealed interface Drawn {
         data class Line(val points: List<Pair<Float, Float>>, val width: Float) : Drawn
+        data class Fill(val points: List<Pair<Float, Float>>) : Drawn
         data class Arc(val left: Float, val top: Float, val right: Float, val bottom: Float, val start: Float, val sweep: Float) : Drawn
         data class Segment(val from: Pair<Float, Float>, val to: Pair<Float, Float>, val width: Float) : Drawn
         data class Ring(val center: Pair<Float, Float>, val radius: Float, val width: Float) : Drawn
@@ -248,27 +249,29 @@ class GlyphShapesTest {
     /** [parts] laid on [canvas] the way the phone lays them: in the middle, as large as the shorter side. */
     private fun drawnOf(parts: List<GlyphPart>, canvas: Canvas): List<Drawn> {
         fun px(p: GlyphPoint) = (canvas.width / 2 + (p.x - 0.5f) * canvas.side) to (canvas.height / 2 + (p.y - 0.5f) * canvas.side)
+        // A path with an arc is compared as its straight pieces and the arc's oval.
+        fun path(start: GlyphPoint, steps: List<GlyphStep>): Pair<List<Pair<Float, Float>>, List<Drawn>> {
+            val points = mutableListOf(px(start))
+            val arcs = mutableListOf<Drawn>()
+            steps.forEach { step ->
+                when (step) {
+                    is GlyphStep.LineTo -> points += px(step.to)
+                    is GlyphStep.ArcTo -> {
+                        val (l, t) = px(GlyphPoint(step.left, step.top))
+                        val (r, b) = px(GlyphPoint(step.right, step.bottom))
+                        arcs += Drawn.Arc(l, t, r, b, step.startDegrees, step.sweepDegrees)
+                    }
+                }
+            }
+            return points to arcs
+        }
         return parts.flatMap { part ->
             when (part) {
-                is GlyphPart.Line -> {
-                    // A line with an arc is compared as its straight pieces and the arc's oval.
-                    val points = mutableListOf(px(part.start))
-                    val arcs = mutableListOf<Drawn>()
-                    part.steps.forEach { step ->
-                        when (step) {
-                            is GlyphStep.LineTo -> points += px(step.to)
-                            is GlyphStep.ArcTo -> {
-                                val (l, t) = px(GlyphPoint(step.left, step.top))
-                                val (r, b) = px(GlyphPoint(step.right, step.bottom))
-                                arcs += Drawn.Arc(l, t, r, b, step.startDegrees, step.sweepDegrees)
-                            }
-                        }
-                    }
-                    listOf(Drawn.Line(points, canvas.side * part.width)) + arcs
-                }
+                is GlyphPart.Line -> path(part.start, part.steps).let { (points, arcs) -> listOf(Drawn.Line(points, canvas.side * part.width)) + arcs }
                 is GlyphPart.Segment -> listOf(Drawn.Segment(px(part.from), px(part.to), canvas.side * part.width))
                 is GlyphPart.Ring -> listOf(Drawn.Ring(px(part.center), canvas.side * part.radius, canvas.side * part.width))
                 is GlyphPart.Dot -> listOf(Drawn.Dot(px(part.center), canvas.side * part.radius))
+                is GlyphPart.Fill -> path(part.start, part.steps).let { (points, arcs) -> listOf(Drawn.Fill(points)) + arcs }
             }
         }
     }
@@ -289,6 +292,7 @@ class GlyphShapesTest {
 
     private fun numbers(drawn: Drawn): List<Float> = when (drawn) {
         is Drawn.Line -> drawn.points.flatMap { listOf(it.first, it.second) } + drawn.width
+        is Drawn.Fill -> drawn.points.flatMap { listOf(it.first, it.second) }
         is Drawn.Arc -> listOf(drawn.left, drawn.top, drawn.right, drawn.bottom, drawn.start, drawn.sweep)
         is Drawn.Segment -> listOf(drawn.from.first, drawn.from.second, drawn.to.first, drawn.to.second, drawn.width)
         is Drawn.Ring -> listOf(drawn.center.first, drawn.center.second, drawn.radius, drawn.width)
@@ -296,15 +300,19 @@ class GlyphShapesTest {
     }
 
     private fun pointsOf(part: GlyphPart): List<GlyphPoint> = when (part) {
-        is GlyphPart.Line -> listOf(part.start) + part.steps.flatMap { step ->
-            when (step) {
-                is GlyphStep.LineTo -> listOf(step.to)
-                is GlyphStep.ArcTo -> listOf(GlyphPoint(step.left, step.top), GlyphPoint(step.right, step.bottom))
-            }
-        }
+        is GlyphPart.Line -> pointsOf(part.start, part.steps)
+        is GlyphPart.Fill -> pointsOf(part.start, part.steps)
         is GlyphPart.Segment -> listOf(part.from, part.to)
         is GlyphPart.Ring -> listOf(GlyphPoint(part.center.x - part.radius, part.center.y - part.radius), GlyphPoint(part.center.x + part.radius, part.center.y + part.radius))
         is GlyphPart.Dot -> listOf(part.center)
+    }
+
+    /** A path's points, an arc's as the corners of its oval. */
+    private fun pointsOf(start: GlyphPoint, steps: List<GlyphStep>): List<GlyphPoint> = listOf(start) + steps.flatMap { step ->
+        when (step) {
+            is GlyphStep.LineTo -> listOf(step.to)
+            is GlyphStep.ArcTo -> listOf(GlyphPoint(step.left, step.top), GlyphPoint(step.right, step.bottom))
+        }
     }
 
     private fun widthOf(part: GlyphPart): Float? = when (part) {
@@ -312,6 +320,7 @@ class GlyphShapesTest {
         is GlyphPart.Segment -> part.width
         is GlyphPart.Ring -> part.width
         is GlyphPart.Dot -> null
+        is GlyphPart.Fill -> null
     }
 
     private fun GlyphPart.withWidth(width: Float): GlyphPart = when (this) {
@@ -319,6 +328,7 @@ class GlyphShapesTest {
         is GlyphPart.Segment -> copy(width = width)
         is GlyphPart.Ring -> copy(width = width)
         is GlyphPart.Dot -> this
+        is GlyphPart.Fill -> this
     }
 
     /**

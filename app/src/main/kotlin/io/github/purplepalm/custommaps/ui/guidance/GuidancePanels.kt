@@ -239,13 +239,15 @@ fun LanesRow(
     val tokens = LookTheme.tokens
     val highlight = tokens.laneOn
     val dim = tokens.laneOff
+    val tile = tokens.accent
+    val onTile = tokens.onAccent
     val labelStyle = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_DIGITS)
     val measurer = rememberTextMeasurer()
     val count = lanes.lanes.size
     val described = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier
     Layout(
         content = {
-            lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim) }
+            lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim, tile = tile, onTile = onTile) }
             if (label != null) LaneLabel(label, labelStyle, labelMinSize, Modifier.layoutId(LaneRowPart.LABEL))
             lanes.lanes.forEachIndexed { index, lane ->
                 if (isLaneToTake(lane)) LaneBar(highlight, Modifier.layoutId(LaneBarOf(index)))

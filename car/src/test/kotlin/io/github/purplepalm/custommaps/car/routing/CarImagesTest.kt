@@ -28,6 +28,14 @@ class CarImagesTest {
     }
 
     @Test
+    fun `a mark on an amber tile is the dark ink of icons on amber in both looks, its edge the same`() {
+        // The phone's onAccent, whatever card the host draws behind the image; the tile's amber covers the edge.
+        for (look in Look.entries) {
+            assertEquals(CarInk(0xFF1C1300.toInt(), 0xFF1C1300.toInt()), CarImageColors.of(look).onTile, "$look")
+        }
+    }
+
+    @Test
     fun `the edge is one and a half dp, thinner on the narrow lanes of a wide road`() {
         assertEquals(1.5f, CarImageColors.edgePx(density = 1f, side = 128f))
         assertEquals(3f, CarImageColors.edgePx(density = 2f, side = 256f))

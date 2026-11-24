@@ -13,6 +13,11 @@ data class CarImageColors(
     val dim: CarInk,
     /** The maneuver after it, the Then step, in the card's ink as on the phone: amber stays for what the driver does now. */
     val then: CarInk,
+    /**
+     * A mark on an amber tile: the dark ink of icons on amber, the phone's onAccent, the same in both looks, so the mark
+     * never depends on the colour of the host's card. Its edge is the same ink, as the tile's amber covers it.
+     */
+    val onTile: CarInk,
 ) {
     companion object {
         /**
@@ -31,17 +36,20 @@ data class CarImageColors(
         private const val AMBER = 0xFFF5A524.toInt()
         private const val GRAPHITE = 0xFF0E1013.toInt()
         private const val PLATINUM = 0xFFE5E4E2.toInt()
+        private const val ON_AMBER = 0xFF1C1300.toInt()
 
         private val DAY = CarImageColors(
             lit = CarInk(AMBER, edge = 0xFF5C3B00.toInt()),
             dim = CarInk(0xFF9AA1AB.toInt(), edge = GRAPHITE),
             then = CarInk(PLATINUM, edge = GRAPHITE),
+            onTile = CarInk(ON_AMBER, edge = ON_AMBER),
         )
 
         private val NIGHT = CarImageColors(
             lit = CarInk(AMBER, edge = 0xFF3A2800.toInt()),
             dim = CarInk(0xFF6E747C.toInt(), edge = GRAPHITE),
             then = CarInk(PLATINUM, edge = GRAPHITE),
+            onTile = CarInk(ON_AMBER, edge = ON_AMBER),
         )
 
         /** How wide the edge round every arrow and bar is, in dp of the car's screen, at most. */
