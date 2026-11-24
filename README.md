@@ -91,7 +91,9 @@ The same builds also reach the phone through Google Play, where they update by t
    Tap a route, on the map or in the list, to choose it.
 4. Tap **Start**. On Android 13 and newer the app asks once to show notifications, for the trip
    notification. The maneuver card shows the next turn, its distance and, from two miles before it,
-   its lanes; the bottom bar shows the arrival time, what is left, **Overview** and **End**. With the
+   its lanes: each lane to take an amber tile with its arrows on it in dark ink, the route's arrow
+   bold, every other lane grey arrows, a lane still to come hollow. The bottom bar shows the arrival
+   time, what is left, **Overview** and **End**. With the
    largest font sizes on a narrow phone, the arrival time and what is left take a row of their own
    above the two buttons, for the whole drive, so that no number is cut off. **Overview** switches
    the drive view and keeps it for the next drives (also **Settings → Drive view**): **Normal**
@@ -167,7 +169,8 @@ car's quality guidelines.
 2. Choose the destination and press **Start on the phone**, when parked. **Start on phone** in the
    car says so. The routes the phone shows are on the car's map as well.
 3. During the drive the car shows what the phone's card shows: the next turn with its arrow,
-   distance and road, the lanes to take, the turn after it when the phone shows **Then**, and the
+   distance and road, the lanes, each lane to take an amber tile as on the phone, the turn after it
+   when the phone shows **Then**, and the
    arrival time, the time and the distance left. **End** in the car ends the drive on both screens,
    as the phone's End does. At the destination the car says so until **Done** on the phone.
 4. The map's buttons in the car: pan, zoom in and out, and **Recenter** or the overview. The car's

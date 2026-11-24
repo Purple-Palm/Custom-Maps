@@ -13,8 +13,11 @@ rates, and the phone's look on the car ([Step 1b (built)](#step-1b-built)). Step
 during a drive while the car shows the map, the phone shows the turns ahead as a list in place of its
 own map, with the map one tap away ([Step 1c (built)](#step-1c-built)). Step 1d is built too: the
 car map's frame cap held by the frames it really draws, a lighter car map while the phone is hot, and
-the card's lanes of a maneuver only within two miles of it ([Step 1d (built)](#step-1d-built)). The
-rest is the design as decided so far.
+the card's lanes of a maneuver only within two miles of it ([Step 1d (built)](#step-1d-built)). Of
+the owner's lanes plan, lanes steps S1 and S1b gave the car's map a size, a camera and turns from
+above of its own, and lanes step S2 the cards their lane arrows, a lane to take an amber tile
+([The lane arrows of the cards](#the-lane-arrows-of-the-cards-lanes-step-s2-built)). The rest is the
+design as decided so far.
 **Unverified** marks behaviour that no document or library source settles; it is checked on the
 Desktop Head Unit (DHU) or on the phone before code depends on it.
 
@@ -64,6 +67,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.35.2 with maps-androidauto 
 | The car's map takes the phone's drive view and Zoom in before turns; no count and no move by itself after Pan; the bar's two buttons are the phone's | [The drive views on the car](#the-drive-views-on-the-car) | 57 |
 | The car's map of its own: Settings' car map size, x1.5 when never chosen, at once; Smooth follow on the car closer and tilted by the car's speed; no car bar | [The car's map of its own](#the-cars-map-of-its-own-lanes-step-s1-built) | 58 |
 | The car's turns from above: a switch in Settings only, on when never chosen, with either lane zoom; flat and framed as before lanes step S1 at junctions, the road and the lanes' views tilted | [The car's turns from above](#the-cars-turns-from-above-lanes-step-s1b-built) | 59 |
+| The lane arrows of both cards: candidate A of three drawn, a lane to take an amber tile with its arrows in dark ink, one arrow family for every lane, no bar; no words under the lanes | [The lane arrows of the cards](#the-lane-arrows-of-the-cards-lanes-step-s2-built) | 60 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -153,7 +157,9 @@ screen", with no separate screens for now. Step 1 is that screen.
   words. The host draws the card behind the images in its own colour, dark on the Android Auto
   versions read: every arrow and bar is bright, amber for what the driver does now, grey for the
   other lanes, platinum for the Then step, with a thin dark edge that keeps it readable on a light
-  card too. Unverified: the card's colour by day.
+  card too. Unverified: the card's colour by day. Since lanes step S2 a lane to take is an amber
+  tile with its arrows in dark ink, and the bar is gone
+  ([The lane arrows of the cards](#the-lane-arrows-of-the-cards-lanes-step-s2-built)).
 - **The trip** holds the routing card's steps, the Then step only while it shows, and the
   destination by its name.
 - **The arrival** has no Done in the car: the phone's Done ends it on both screens.
@@ -656,6 +662,55 @@ unchanged.
   camera on the 800 × 400 profile; on the Desktop Head Unit, in simulated drives, the views went as
   planned (DECISIONS 59), not yet in a car.
 - The checks for the owner are in [DRIVES.md](DRIVES.md), checks 139 to 144.
+
+## The lane arrows of the cards (lanes step S2, built)
+
+The owner chose among three drawn candidates for the lane arrows of the cards, each beside today's
+row, by day and at night, on both screens: A, tiles; B, sign arrows with today's bar; C, an amber
+frame; and answered no to words under the lanes. Lanes step S2 builds A on the phone's maneuver
+card and in the car's lanes image alike (DECISIONS 60). The camera, the map's lanes and the route
+line are unchanged.
+
+### What it has
+
+- **One arrow family for the lanes** in `:core-nav` (`nav/glyph/LaneShapes.kt`, internal, behind
+  `GlyphShapes.lane`): one stem per lane with a square foot, every direction a branch of it with a
+  solid triangular head, laid out by a table of where each turn leaves the stem, then placed in the
+  lane's square by a box, the same place whatever the lane's state. The maneuver arrow keeps its own
+  shapes. `GlyphShapes.laneArrows` and `routeArrows` name the arrows a lane is drawn with and the
+  ones drawn as the route's, exactly the host's arrows and recommended ones (`LanesToCar`, unchanged).
+- **Two new inks and a filled part:** `GlyphPart.Fill`, a closed shape filled with no line along
+  it, and `GlyphInk.TILE` (amber as a fill) and `ON_TILE` (a mark on it). The car's `GlyphPainter`
+  fills it, its edge the shape outlined twice the edge wide; the phone's `drawPart` fills its path.
+  The car maps `TILE` to its lit ink and `ON_TILE` to its new `onTile` ink, `#1C1300` with the same
+  edge in both looks; the phone's `LaneGlyph` takes `tile` and `onTile`, which `LanesRow` gives as
+  the look's `accent` and `onAccent`. No new colour in the palette.
+- **A lane to take is a tile:** an amber square with round corners inside its lane's square, its
+  arrows on it in dark ink, the route's arrow bold, the lane's other arrows thin, and where the data
+  names no route arrow every arrow at one weight between the two. Every other lane is plain grey
+  arrows; a car-pool or bus lane has two short side lines and is never a tile, lit by colour alone
+  where the route marks it as the only lane; a lane still to come is hollow and never lit.
+- **No bar and no band:** the car's `LanesImageLayout` has no bar under the lanes, so a lane at full
+  size fills the image's 74 dp: squares of 60 px at a density of 1 for up to six lanes, 59 at seven,
+  50 at eight (54, 54 and 50 before), the row in the middle, the edge 1.5 dp or 3 % of the square at
+  most. The phone's `LanesRow` lays out no bar and no band, so the card is 5 dp shorter with lanes;
+  the map's padding, the compass and the Then chip follow the card's measured height.
+- **Frames:** the car's lanes image is drawn once for each row, look and density, as before; the
+  phone draws a tile straight on the card, and only a lane still to come keeps a layer of its own.
+  Nothing new per frame, nothing new logged, no request.
+
+### Not in this step
+
+- The maneuver arrow, the routing card's other images, the camera, the map's lanes, the route line,
+  the settings and the car's screens other than the routing card's lanes image; words under the
+  lanes (the owner's answer was no). The route's lanes drawn on the map come in lanes step S3.
+
+### Unverified
+
+- How four or more tiles look at night in a dark cabin, the tiles in sun glare, and the dark arrows
+  on amber against what the driver is used to: the pictures were drawn by the design's renderer on
+  a model of the host's card and the car's video, not yet on the rig or in a car.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), checks 145 to 152.
 
 ## Modules and dependencies
 
@@ -1237,7 +1292,8 @@ with the roadmap's stage 8. The facts, read in the libraries:
   road alone where the host has less room), and the arrows are the phone's shapes (`GlyphShapes`).
   The lanes image is the row without its words or distance. Lanes whose image could not be drawn
   are left out with it. The images have a day and a night version, with a thin dark edge round
-  every arrow and bar ([Step 1](#where-it-settled-or-changed-the-design)).
+  every arrow and tile ([Step 1](#where-it-settled-or-changed-the-design)); a lane to take is an
+  amber tile with its arrows in dark ink since lanes step S2, which took the bar away.
 - `RouteProgressSnapshot` has what the car needs beyond the phone's card, since the Then chip was
   built ([DECISIONS.md](DECISIONS.md), 37): the step after the next one for
   `RoutingInfo.setNextStep` (`thenManeuver`, set when the Then rule shows it, so the car shows the

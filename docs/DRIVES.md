@@ -26,7 +26,8 @@ Since step 1c the phone shows the list in place of its map during a drive with t
 The guidance tones in the car are check 110 of that list: one sound for each tone, and none while
 another navigation app guides on the car's screen. Lanes step S1's are checks 130 to 138 of that
 list: the car map's size, the car's own camera and no car bar; lanes step S1b's are checks 139 to
-144: the car's turns from above.
+144: the car's turns from above; lanes step S2's are checks 145 to 152: the lane arrows of both
+cards, a lane to take an amber tile.
 
 1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
    the map, or first with a message while the phone has no token or no precise location (the setup
@@ -1707,6 +1708,42 @@ latched:
     after a turn; `junctionZoom` in the junction views with either lane zoom; `frames` true from the
     framing distance; `keep` falling after each turn; `roadZoom` below the road's while a view goes
     down. The phone's camera lines have no `junctionView`.
+
+The lane arrows of the cards, lanes step S2 ([DECISIONS.md](DECISIONS.md), 60;
+[STAGE-2.md](STAGE-2.md), The lane arrows of the cards): the same rows on the phone's maneuver card
+and in the car's routing card, the card showing a maneuver's own lanes from two miles before it. On
+the car's screen and on the phone, by day and at night; screenshots of the car's screen from a
+passenger or a parked car, never from the driver. Nothing new is logged: the `lane_row` lines say
+which lanes the card drew and which were lit, as before.
+
+145. **The tiles in the car by day, in the sun.** At a lane choice, a freeway exit or a turn with
+    lanes, the car's routing card shows each lane to take as an amber tile with its arrows on it in
+    dark ink, the route's arrow bold and the lane's other arrows thin; every other lane is plain grey
+    arrows; nothing lies under the lanes, and the arrows are a little larger than before. Say whether
+    the tiles read at a glance with the sun on the screen, whether a run of two or three tiles still
+    counts as separate lanes, and whether the thin arrows on a tile still show.
+146. **The tiles in the car at night.** The same at night, in a dark cabin: say whether the tiles
+    glare, above all a row with four or more of them, and whether the grey lanes not to take still
+    read beside them. If they glare, the fallback is a frame round a lane to take in place of the
+    tile, or a dimmer tile at night.
+147. **The phone's card by day and at night.** The same rows on the phone's card: by day a bright
+    amber tile on the white card with a dark arrow, at night on the graphite card. With lanes the card
+    is a little shorter than before (no band under the row), the route and the car stay clear of it,
+    and the Then chip still hangs under it; a lane choice's distance and the run-up's words beside
+    the row as before.
+148. **A lane not to take.** Grey arrows only, never a tile, by day and at night, on both screens; a
+    lane with two or three arrows shows all of them, and a lane with no arrows a straight one.
+149. **A car-pool lane.** Two short grey lines at the sides of its lane, its arrow grey, never a
+    tile; where the route marks it as the only lane to use, its arrow amber, still with no tile.
+150. **A lane still to come.** On the run-up to an exit, a lane that opens on the way shows hollow
+    grey arrows, never a tile and never lit, and once it is there it is drawn as any other lane.
+151. **A lane whose arrow the data does not name.** A lane to take whose route arrow the route's
+    data does not name is a tile with every arrow of it at one weight, between the bold and the
+    thin; before this step such a lane was all grey with a bar under it. The car's cluster or head-up
+    display, where the car shows lanes, lights the same arrows.
+152. **A row of 7 or 8 lanes.** On a wide road every lane shows, on both screens: the tiles still
+    apart from each other and countable, the squares a little smaller in the car at 7 and at 8 lanes
+    than at 6, and on a narrow phone with a lane choice's distance beside the row.
 
 Then share the debug log. What to read in it:
 
