@@ -1084,9 +1084,10 @@ control of it.
   close view tilted through the gore and down the ramp, and the turn at the ramp's end is flat (15.6
   at 150 m before it, 16.7 at 50 m).
 - **Logged:** the car's camera line has `junctionView` (`above` or `tilted`) while a junction view
-  is latched, from the latch to the end of its step; from above `junctionZoom` with either lane
-  zoom, `keep` with Default too, `frames` true from the framing distance, and `roadZoom` at the tilt
-  the view goes down by. The `settings` line has `car_turns_from_above`.
+  is latched, from the latch to the end of its step; from above, with either lane zoom,
+  `junctionZoom` and `zoomPlan` `JUNCTION` and `AFTER_JUNCTION`, `keep` with Default too, from the
+  framing distance `frames` true and `to` the SDK's frame of the maneuver, whose zoom the car takes,
+  and `roadZoom` at the tilt the view goes down by. The `settings` line has `car_turns_from_above`.
 
 ### Logging
 
@@ -1103,7 +1104,7 @@ has no map, and so no line, until the map shows. The car's map writes its own, w
 | `zoom`, `pitch`, `bearing` | the map's camera | |
 | `laneDp` | how wide a lane of 3.7 m is on the screen at the camera's centre, in dp | about 4 to 6 on a town road (on the car, since lanes step S1, about 13 at a stop); with Large about 28 at a junction and 14 near a lane choice, less at speed on a run-up |
 | `aheadM` | while the camera follows the car: how much road it shows above the car, in metres, by the model of [The run-up to a freeway exit](#the-run-up-to-a-freeway-exit), from the car's place to the top of the padding, under the card; left out at other times | with Large on a run-up, at least 12 s of driving |
-| `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre. On the car's Smooth follow its fit of the road, which the car's own zoom leaves aside | |
+| `to` | the following frame the data source asks for: `zoom`, `pitch`, `bearing`, and `m`, the metres from the camera centre to the frame's centre. On the car's Smooth follow its fit of the road, which the car's own zoom leaves aside, except with Turns from above from a junction view's framing distance to the end of its step: there the SDK's frame of the maneuver, whose zoom the car's zoom takes (with Large no closer than the 28 dp lane) | |
 | `puckLagM` | how far the drawn puck trails the latest matched position | below speed × the puck's glide |
 | `sinceFixMs` | how long ago that position came | up to about 1000 |
 | `camLagM` | how far the camera centre is from the drawn puck | Smooth follow on the road: about 2τ × speed, 0.4 s × speed on the phone; larger in maneuver framing and in the overview |
@@ -1157,7 +1158,7 @@ Smooth follow adds its controller's own numbers:
 | `bearingError` | target bearing minus camera bearing | within a few degrees |
 | `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview; on the car 1 at its tilted junction views too, 0 in the frame of a junction from above |
 | `laneZoom` | the Lane zoom setting: `DEFAULT` or `LARGE` | |
-| `zoomPlan` | what sets the zoom with Large: `ROAD`, `JUNCTION`, `AFTER_JUNCTION` or `LANES`; left out in the overview | `ROAD` on most seconds, and always with Default |
+| `zoomPlan` | what sets the zoom with Large, and on the car with Turns from above with either lane zoom: `ROAD`, `JUNCTION`, `AFTER_JUNCTION` or `LANES`; left out in the overview | `ROAD` on most seconds; always with Default on the phone and on the car with Turns from above off; on the car with it on, `JUNCTION` and `AFTER_JUNCTION` through each junction view with Default too |
 | `roadAheadM`, `roadSpeed`, `roadZoom` | the car only: the road the road view shows above the car, in metres; the speed it is worked out for, the highest of the last 10 s, in m/s; and the road view's zoom, with Turns from above at the tilt the view goes down by while a junction view goes down or stays down | 150 standing, 12 s of driving above 45 km/h, at most 600 |
 | `junctionZoom` | the car with Large, and with Turns from above with either lane zoom: the zoom of its junction view (its own fit, or from above the frame's), from the latch to past the junction; left out outside a junction view | up to the 28 dp lane's zoom; from above with Default up to 16.35 |
 | `junctionView` | the car only, while a junction view is latched (from the latch to the end of its step): `above` with Turns from above, `tilted` without | |

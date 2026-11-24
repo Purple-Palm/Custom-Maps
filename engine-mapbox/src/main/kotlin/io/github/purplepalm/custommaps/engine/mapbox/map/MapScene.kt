@@ -2123,7 +2123,9 @@ internal class MapScene(
      * goes down by while a junction view goes down or stays down), with Large, and with Turns from
      * above with either lane zoom, "junctionZoom" (the zoom of the junction view the car is in or has
      * just left; none outside one) and, while a junction view is latched, "junctionView" (above or
-     * tilted, as Turns from above shows it). Turns from above also gives "keep" with Default.
+     * tilted, as Turns from above shows it). Turns from above also gives "keep" and the junction kinds
+     * of "zoomPlan" with Default, and from a junction view's framing distance to the end of its step
+     * "to" is the SDK's frame of the maneuver, whose zoom the car's zoom takes.
      *
      * "aheadM", while the camera follows the car, is how much road the camera as shown has clear
      * above the car, in meters, by the look-ahead model ([LookAhead]): from the car's row, the
