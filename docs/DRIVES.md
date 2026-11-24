@@ -1713,8 +1713,11 @@ The lane arrows of the cards, lanes step S2 ([DECISIONS.md](DECISIONS.md), 60;
 [STAGE-2.md](STAGE-2.md), The lane arrows of the cards): the same rows on the phone's maneuver card
 and in the car's routing card, the card showing a maneuver's own lanes from two miles before it. On
 the car's screen and on the phone, by day and at night; screenshots of the car's screen from a
-passenger or a parked car, never from the driver. Nothing new is logged: the `lane_row` lines say
-which lanes the card drew and which were lit, as before.
+passenger or a parked car, never from the driver. On the Desktop Head Unit and the phone, in
+simulated drives by day and at night, the rows of checks 145 to 150 and 152 showed as below, four
+tiles in one row at night included; the sun, the dark cabin and check 151 are still to see in a
+car. Nothing new is logged: the `lane_row` lines say which lanes the card drew and which were lit,
+as before.
 
 145. **The tiles in the car by day, in the sun.** At a lane choice, a freeway exit or a turn with
     lanes, the car's routing card shows each lane to take as an amber tile with its arrows on it in

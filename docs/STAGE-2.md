@@ -709,7 +709,8 @@ line are unchanged.
 
 - How four or more tiles look at night in a dark cabin, the tiles in sun glare, and the dark arrows
   on amber against what the driver is used to: the pictures were drawn by the design's renderer on
-  a model of the host's card and the car's video, not yet on the rig or in a car.
+  a model of the host's card and the car's video; on the Desktop Head Unit and the phone, in simulated
+  drives by day and at night, the rows showed as designed (DECISIONS 60), not yet in a car.
 - The checks for the owner are in [DRIVES.md](DRIVES.md), checks 145 to 152.
 
 ## Modules and dependencies
