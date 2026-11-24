@@ -207,6 +207,7 @@ class CarLookSessionTest {
         override fun setPhoneThermal(status: ThermalStatus?) = Unit
         override fun setLightWhenHot(enabled: Boolean) = Unit
         override fun setMapSize(size: CarMapSize) = Unit
+        override fun setTurnsFromAbove(enabled: Boolean) = Unit
         override fun release() = Unit
     }
 }

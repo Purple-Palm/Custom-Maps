@@ -610,6 +610,7 @@ class SettingsViewModelTest {
             SettingId.SIDE_ROAD_FIELDS to { settings.sideRoadFields.value },
             SettingId.CAR_LIGHT_WHEN_HOT to { settings.carLightWhenHot.value },
             SettingId.LANE_COUNTS_HORIZON to { settings.laneCountsHorizon.value },
+            SettingId.CAR_TURNS_FROM_ABOVE to { settings.carTurnsFromAbove.value },
             SettingId.OVERVIEW_TURN_ZOOM to { settings.driveCamera.value.turnZoom },
             SettingId.TONE_BEFORE_TURN to { settings.sound.value.beforeTurn },
             SettingId.TONE_AT_TURN to { settings.sound.value.atTurn },
@@ -783,6 +784,34 @@ class SettingsViewModelTest {
         assertEquals(CarMapSize.X1, viewModel.values.value.carScreen.mapSize)
         assertEquals(30, viewModel.values.value.debug.carMapFps, "the car's frames are their own")
         assertEquals(emptyList<String>(), archive.logged)
+    }
+
+    @Test
+    fun `the car's turns from above are on until switched off, and the switch shows as stored`() = runTest(dispatcher) {
+        val viewModel = viewModelWithValues()
+        assertEquals(CarScreenSettings(mapSize = CarMapSize.X1_5, turnsFromAbove = true), viewModel.values.value.carScreen)
+        viewModel.setCarTurnsFromAbove(false)
+        runCurrent()
+        assertFalse(settings.carTurnsFromAbove.value)
+        assertFalse(viewModel.values.value.carScreen.turnsFromAbove)
+        assertEquals(CarMapSize.X1_5, viewModel.values.value.carScreen.mapSize, "the size is its own")
+        // Stored elsewhere, as by another screen: shown as stored.
+        settings.carTurnsFromAbove.value = true
+        runCurrent()
+        assertTrue(viewModel.values.value.carScreen.turnsFromAbove)
+        assertEquals(LaneZoom.DEFAULT, viewModel.values.value.guidance.laneZoom, "the lane zoom is its own")
+        assertEquals(emptyList<String>(), archive.logged)
+    }
+
+    @Test
+    fun `a switch of the car's turns from above that cannot be stored stays as it was`() = runTest(dispatcher) {
+        settings.storageFull = true
+        val viewModel = viewModelWithValues()
+        viewModel.onEvent(SettingsEvent.Switched(SettingId.CAR_TURNS_FROM_ABOVE, false))
+        runCurrent()
+        assertTrue(settings.carTurnsFromAbove.value)
+        assertTrue(viewModel.values.value.carScreen.turnsFromAbove)
+        assertEquals(listOf("error"), archive.logged)
     }
 
     @Test

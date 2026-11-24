@@ -61,11 +61,12 @@ import kotlinx.coroutines.launch
  *   token, and let go of when the session ends ([CarMapStep]). It takes the phone's camera style, lane
  *   zoom, Lanes on the map and Debug switches, and the phone's thermal status, by which it gets lighter
  *   while the phone is hot; Settings' car map size, the car's alone, the stored one before its first
- *   surface and every change at once; it pins the destination of the preview or the drive, and
- *   shows the app's one look, the phone's ([CarParts.look]): the session starts the look if no screen
- *   has yet (the host may have started the process with no activity), keeps it deciding while the
- *   session is started, as the phone's activity does, and hands the look to the map as the phone's
- *   screen does; while the phone's activity is not started the map's close view holds a switch.
+ *   surface and every change at once, and its turns from above; it pins the destination of the preview
+ *   or the drive, and shows the app's one look, the phone's ([CarParts.look]): the session starts the
+ *   look if no screen has yet (the host may have started the process with no activity), keeps it
+ *   deciding while the session is started, as the phone's activity does, and hands the look to the map
+ *   as the phone's screen does; while the phone's activity is not started the map's close view holds a
+ *   switch.
  * - **The screens** are the home screen and at most one message on top of it ([CarStack]), so the
  *   host's template count stays low and every flow ends on the home screen.
  * - **The drive** goes to the host through the guidance bridge ([CarGuidanceBridge]), set up first
@@ -346,6 +347,8 @@ class CarSession(private val parts: CarParts, private val displayType: Int) : Se
         mapJobs = scope.launch {
             // The car's map alone: the size it draws at, a change at once on the surface there is.
             follow(settings.mapSize, "setMapSize", created::setMapSize)
+            // And whether its junction views look straight down, every change at once.
+            follow(settings.turnsFromAbove, "setTurnsFromAbove", created::setTurnsFromAbove)
             follow(settings.cameraStyle, "setCameraStyle", created::setCameraStyle)
             follow(settings.laneZoom, "setLaneZoom", created::setLaneZoom)
             follow(settings.lanesOnMap, "setLanesOnMap", created::setLanesOnMap)

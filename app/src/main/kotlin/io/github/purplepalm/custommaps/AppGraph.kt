@@ -194,6 +194,7 @@ class AppGraph(private val application: Application) {
             driveCamera = settings.driveCamera,
             // Read from the app's start on, so that a car map made later has the stored size before its first surface.
             mapSize = settings.carMapSize.stateIn(applicationScope, SharingStarted.Eagerly, CarMapSize.DEFAULT),
+            turnsFromAbove = settings.carTurnsFromAbove,
         ),
         look = lookController,
         debugLog = debugLog,

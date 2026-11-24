@@ -25,6 +25,7 @@ class FakeAppSettings(
     carMapFps: Int = 30,
     carLightWhenHot: Boolean = CAR_LIGHT_WHEN_HOT_DEFAULT,
     carMapSize: CarMapSize = CarMapSize.DEFAULT,
+    carTurnsFromAbove: Boolean = CAR_TURNS_FROM_ABOVE_DEFAULT,
     sideRoadFields: Boolean = false,
     sound: SoundSettings = SoundSettings(),
     driveCamera: DriveCameraSettings = DriveCameraSettings(),
@@ -76,6 +77,10 @@ class FakeAppSettings(
     override val carMapSize = MutableStateFlow(carMapSize)
 
     override suspend fun setCarMapSize(size: CarMapSize) = store { carMapSize.value = size }
+
+    override val carTurnsFromAbove = MutableStateFlow(carTurnsFromAbove)
+
+    override suspend fun setCarTurnsFromAbove(enabled: Boolean) = store { carTurnsFromAbove.value = enabled }
 
     override val sideRoadFields = MutableStateFlow(sideRoadFields)
 

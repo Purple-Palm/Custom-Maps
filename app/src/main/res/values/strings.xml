@@ -196,6 +196,8 @@
     <!-- A size of the car's map against the size the car asks for, as "x1.5". -->
     <string name="car_map_size_value">x%1$s</string>
     <string name="car_map_size_note">How large the map on the car\'s screen draws roads, labels, the route line and the car. x1 is the size the car asks for. Applies at once, also during a drive.</string>
+    <string name="car_turns_from_above_title">Turns from above</string>
+    <string name="car_turns_from_above_note">Before turns and at junctions the car\'s map looks straight down; off, it stays tilted.</string>
 
     <string name="sound_title">Sound</string>
     <string name="tones_title">Tones</string>

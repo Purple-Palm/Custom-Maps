@@ -100,7 +100,7 @@ class SettingsCatalogueTest {
         assertEquals(
             setOf(
                 "drive_view", "overview_turn_zoom", "recenter_seconds", "camera_style", "lane_zoom", "lanes_on_map", "lane_counts_horizon",
-                "car_map_size",
+                "car_map_size", "car_turns_from_above",
             ),
             SettingsCatalogue.keysOn(SettingsTab.MAP),
         )
@@ -137,7 +137,7 @@ class SettingsCatalogueTest {
     fun `the car screen has a group of its own after Guidance, with the map's size from x1 to x2 in a list, x1_5 when never chosen`() {
         val groups = SettingsCatalogue.groups(SettingsTab.MAP, everything)
         assertEquals(listOf(R.string.guidance_title, R.string.car_screen_title), groups.map { it.title })
-        assertEquals(listOf(SettingId.CAR_MAP_SIZE), groups.last().rows.map { it.id })
+        assertEquals(listOf(SettingId.CAR_MAP_SIZE, SettingId.CAR_TURNS_FROM_ABOVE), groups.last().rows.map { it.id })
         val size = row<ChoiceRow>(SettingId.CAR_MAP_SIZE)
         assertEquals(RowText.Res(R.string.car_map_size_title), size.title)
         assertEquals(
@@ -149,6 +149,27 @@ class SettingsCatalogueTest {
         // One note: what grows, that x1 is the car's own size, and that it applies at once.
         assertEquals(listOf(RowNote(RowText.Res(R.string.car_map_size_note))), size.lines)
         assertEquals(CarMapSize.entries.toList(), SettingsCatalogue.carMapSizes)
+    }
+
+    @Test
+    fun `the car screen's turns from above come after its map size, a switch with one note, on when never chosen`() {
+        val rows = SettingsCatalogue.groups(SettingsTab.MAP, everything).last().rows
+        assertEquals(SettingId.CAR_TURNS_FROM_ABOVE, rows.last().id, "after Car map size")
+        val above = row<SwitchRow>(SettingId.CAR_TURNS_FROM_ABOVE)
+        assertEquals(RowText.Res(R.string.car_turns_from_above_title), above.title)
+        assertTrue(above.on, "never chosen")
+        assertEquals(listOf(RowNote(RowText.Res(R.string.car_turns_from_above_note))), above.lines)
+        assertEquals(null, above.badge)
+        val off = row<SwitchRow>(SettingId.CAR_TURNS_FROM_ABOVE, everything.copy(carScreen = CarScreenSettings(turnsFromAbove = false)))
+        assertFalse(off.on)
+        assertEquals(above.lines, off.lines, "the same note either way")
+        // The switch is the car's: the guidance group, which both screens take, has no such row.
+        assertTrue(SettingsCatalogue.groups(SettingsTab.MAP, everything).first().rows.none { it.id == SettingId.CAR_TURNS_FROM_ABOVE })
+        // The words: its name, and a note of one sentence that says what on does and that off stays tilted.
+        val strings = File("src/main/res/values/strings.xml").readText()
+        val words = Regex("""<string name="(car_turns_from_above\w*)">(.*?)</string>""").findAll(strings).associate { it.groupValues[1] to it.groupValues[2] }
+        assertEquals("Turns from above", words["car_turns_from_above_title"])
+        assertEquals("Before turns and at junctions the car\\'s map looks straight down; off, it stays tilted.", words["car_turns_from_above_note"])
     }
 
     @Test

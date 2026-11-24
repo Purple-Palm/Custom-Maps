@@ -115,6 +115,14 @@ internal interface GuidanceCamera {
      */
     fun setLaneZoom(mode: LaneZoom)
 
+    /**
+     * The car's Settings > Car screen > Turns from above: whether the junction views of a camera anchored on the car
+     * ([io.github.purplepalm.custommaps.nav.camera.CameraTuning.anchored]) look straight down, the junction framed by the
+     * navigation SDK as on the phone, or stay at the car's one tilt. The phone's camera, whose junction views are flat
+     * already, and the two Mapbox styles take no notice of it.
+     */
+    fun setTurnsFromAbove(enabled: Boolean) = Unit
+
     /** False while the map is not on screen; a camera that draws its own frames stops them then. */
     fun setVisible(visible: Boolean)
 

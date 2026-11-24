@@ -321,6 +321,22 @@ class DataStoreAppSettingsTest {
     }
 
     @Test
+    fun `the car's turns from above are on until switched off, stored under their own key, each change reported`() = runBlocking {
+        assertTrue(settings.carTurnsFromAbove.first())
+        assertEquals(emptyMap<String, Any>(), raw(), "on is read, never written")
+        settings.setCarTurnsFromAbove(false)
+        assertFalse(settings.carTurnsFromAbove.first())
+        assertEquals(mapOf<String, Any>("car_turns_from_above" to false), raw())
+        assertEquals(CarMapSize.X1_5, settings.carMapSize.first(), "the car map's size is its own")
+        assertEquals(LaneZoom.DEFAULT, settings.laneZoom.first(), "and so is the lane zoom")
+        assertTrue(settings.carLightWhenHot.first())
+        settings.setCarTurnsFromAbove(true)
+        assertTrue(settings.carTurnsFromAbove.first())
+        assertEquals(mapOf<String, Any>("car_turns_from_above" to true), raw())
+        assertEquals(listOf<Pair<String, Any>>("car_turns_from_above" to false, "car_turns_from_above" to true), changes)
+    }
+
+    @Test
     fun `a stored size number no size has reads as x1_5`() = runBlocking {
         settings.setCarMapSize(CarMapSize.X2)
         // As a file from another build could hold them: near misses, a factor stored as is, zero and below, too large.
@@ -490,6 +506,7 @@ class DataStoreAppSettingsTest {
         settings.setCarLightWhenHot(false)
         settings.setSideRoadFields(true)
         settings.setCarMapSize(CarMapSize.X2)
+        settings.setCarTurnsFromAbove(false)
         settings.updateSound { SoundSettings(tones = false, beforeTurn = false, atTurn = false, duck = DuckMode.OFF, level = ToneLevel.LOUD, leadInMillis = 0) }
         settings.updateDriveCamera { DriveCameraSettings(driveView = DriveView.OVERVIEW, recenterSeconds = 0, turnZoom = false) }
         assertEquals(DataStoreAppSettings.KEYS, raw().keys)

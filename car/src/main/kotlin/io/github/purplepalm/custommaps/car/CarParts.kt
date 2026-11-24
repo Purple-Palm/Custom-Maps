@@ -72,4 +72,9 @@ class CarMapSettings(
      * at it from its first surface on, and every later change at once.
      */
     val mapSize: StateFlow<CarMapSize>,
+    /**
+     * Settings > Car screen > Turns from above, the car's map alone: whether its junction views look straight down or
+     * stay tilted, every change at once.
+     */
+    val turnsFromAbove: Flow<Boolean>,
 )

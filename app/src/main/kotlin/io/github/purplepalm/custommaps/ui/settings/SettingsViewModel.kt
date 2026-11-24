@@ -20,6 +20,7 @@ import io.github.purplepalm.custommaps.nav.trip.TripLogStore
 import io.github.purplepalm.custommaps.nav.trip.TripSessionStart
 import io.github.purplepalm.custommaps.settings.AppSettings
 import io.github.purplepalm.custommaps.settings.CAR_LIGHT_WHEN_HOT_DEFAULT
+import io.github.purplepalm.custommaps.settings.CAR_TURNS_FROM_ABOVE_DEFAULT
 import io.github.purplepalm.custommaps.settings.LANE_COUNTS_HORIZON_DEFAULT
 import io.github.purplepalm.custommaps.settings.SoundSettings
 import io.github.purplepalm.custommaps.sound.ToneResult
@@ -37,7 +38,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -53,10 +53,12 @@ data class GuidanceSettings(
     val driveCamera: DriveCameraSettings = DriveCameraSettings(),
 )
 
-/** The car's screen, as the driver chose it on the phone: how large its map draws. */
+/** The car's screen, as the driver chose it on the phone: how large its map draws, and whether it shows turns from above. */
 data class CarScreenSettings(
     /** The size of the car's map against the size the car asks for; x1.5 when never chosen. */
     val mapSize: CarMapSize = CarMapSize.DEFAULT,
+    /** Whether the car's map looks straight down before turns and at junctions; on when never chosen. */
+    val turnsFromAbove: Boolean = CAR_TURNS_FROM_ABOVE_DEFAULT,
 )
 
 /** The look section: Auto, Day or Night, and under Auto when the look changes next. */
@@ -130,9 +132,9 @@ class SettingsViewModel(
             GuidanceSettings(cameraStyle = style, laneZoom = laneZoom, lanesOnMap = lanesOnMap, laneCountsHorizon = horizon, driveCamera = driveCamera)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidanceSettings())
 
-    /** The car's screen: the size of its map. */
+    /** The car's screen: the size of its map and its turns from above. */
     val carScreen: StateFlow<CarScreenSettings> =
-        settings.carMapSize.map { CarScreenSettings(mapSize = it) }
+        combine(settings.carMapSize, settings.carTurnsFromAbove) { size, fromAbove -> CarScreenSettings(mapSize = size, turnsFromAbove = fromAbove) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CarScreenSettings())
 
     /**
@@ -209,6 +211,7 @@ class SettingsViewModel(
             SettingId.LANES_ON_MAP -> event.chosen(SettingsCatalogue.lanesOnMap, ::setLanesOnMap)
             SettingId.LANE_COUNTS_HORIZON -> event.switched(::setLaneCountsHorizon)
             SettingId.CAR_MAP_SIZE -> event.chosen(SettingsCatalogue.carMapSizes, ::setCarMapSize)
+            SettingId.CAR_TURNS_FROM_ABOVE -> event.switched(::setCarTurnsFromAbove)
             SettingId.TONES -> event.switched { on -> updateSound { it.copy(tones = on) } }
             SettingId.TONE_BEFORE_TURN -> event.switched { on -> updateSound { it.copy(beforeTurn = on) } }
             SettingId.TONE_AT_TURN -> event.switched { on -> updateSound { it.copy(atTurn = on) } }
@@ -374,6 +377,18 @@ class SettingsViewModel(
             } catch (e: IOException) {
                 // Not stored, so the choice keeps showing the stored value, which the car's map keeps too.
                 debugLog.error("settings.setCarMapSize", e)
+            }
+        }
+    }
+
+    /** Stored at once, also during a drive, for the car's map, which follows the stored switch; the phone's map does not read it. */
+    fun setCarTurnsFromAbove(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settings.setCarTurnsFromAbove(enabled)
+            } catch (e: IOException) {
+                // Not stored, so the switch keeps showing the stored value, which the car's map keeps too.
+                debugLog.error("settings.setCarTurnsFromAbove", e)
             }
         }
     }

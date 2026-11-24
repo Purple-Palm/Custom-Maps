@@ -54,6 +54,7 @@ enum class SettingId(val key: String?, val tab: SettingsTab, val page: SettingsP
     LANES_ON_MAP("lanes_on_map", SettingsTab.MAP),
     LANE_COUNTS_HORIZON("lane_counts_horizon", SettingsTab.MAP),
     CAR_MAP_SIZE("car_map_size", SettingsTab.MAP),
+    CAR_TURNS_FROM_ABOVE("car_turns_from_above", SettingsTab.MAP),
     TONES("tones", SettingsTab.SOUND),
     TONE_BEFORE_TURN("tone_before_turn", SettingsTab.SOUND),
     TONE_AT_TURN("tone_at_turn", SettingsTab.SOUND),
@@ -159,7 +160,7 @@ data class SettingsGroup(val tab: SettingsTab, @StringRes val title: Int?, val r
 /** Everything Settings shows, in one value: the stored settings and what the app knows of itself. */
 data class SettingsValues(
     val guidance: GuidanceSettings = GuidanceSettings(),
-    /** The car's screen: the size of its map. */
+    /** The car's screen: the size of its map and its turns from above. */
     val carScreen: CarScreenSettings = CarScreenSettings(),
     val look: LookSettings = LookSettings(),
     val debug: DebugState = DebugState(),
@@ -208,7 +209,7 @@ object SettingsCatalogue {
     fun groups(tab: SettingsTab, values: SettingsValues, zone: ZoneId = ZoneId.systemDefault()): List<SettingsGroup> = when (tab) {
         SettingsTab.MAP -> listOf(
             SettingsGroup(tab, R.string.guidance_title, guidanceRows(values.guidance)),
-            SettingsGroup(tab, R.string.car_screen_title, listOf(carMapSizeRow(values.carScreen))),
+            SettingsGroup(tab, R.string.car_screen_title, carScreenRows(values.carScreen)),
         )
         SettingsTab.SOUND -> listOf(SettingsGroup(tab, R.string.sound_title, soundRows(values)))
         SettingsTab.ROUTE, SettingsTab.TRIPS -> emptyList()
@@ -308,17 +309,21 @@ object SettingsCatalogue {
     )
 
     /**
-     * How large the car's screen draws its map, the car's alone: a list, one size a line, since five segments would not
-     * leave a narrow phone room for the sizes' numbers. The note says what grows, that x1 is the car's own size and that a
-     * choice applies at once.
+     * The car's screen, the car's alone: how large it draws its map, a list, one size a line, since five segments would
+     * not leave a narrow phone room for the sizes' numbers, its note saying what grows, that x1 is the car's own size and
+     * that a choice applies at once; then whether its map looks straight down before turns and at junctions, its note
+     * saying so and that off it stays tilted.
      */
-    private fun carMapSizeRow(car: CarScreenSettings): SettingRow = ChoiceRow(
-        id = SettingId.CAR_MAP_SIZE,
-        title = text(R.string.car_map_size_title),
-        options = carMapSizes.map { ChoiceOption(text(R.string.car_map_size_value, RowText.Plain(it.factorText))) },
-        selected = carMapSizes.indexOf(car.mapSize),
-        folds = true,
-        lines = listOf(RowNote(text(R.string.car_map_size_note))),
+    private fun carScreenRows(car: CarScreenSettings): List<SettingRow> = listOf(
+        ChoiceRow(
+            id = SettingId.CAR_MAP_SIZE,
+            title = text(R.string.car_map_size_title),
+            options = carMapSizes.map { ChoiceOption(text(R.string.car_map_size_value, RowText.Plain(it.factorText))) },
+            selected = carMapSizes.indexOf(car.mapSize),
+            folds = true,
+            lines = listOf(RowNote(text(R.string.car_map_size_note))),
+        ),
+        switch(SettingId.CAR_TURNS_FROM_ABOVE, R.string.car_turns_from_above_title, car.turnsFromAbove, R.string.car_turns_from_above_note),
     )
 
     /**

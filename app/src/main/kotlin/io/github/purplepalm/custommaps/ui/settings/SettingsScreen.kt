@@ -272,8 +272,8 @@ private fun GroupPreview(look: Look, groups: List<SettingsGroup>) {
 }
 
 /** The whole page, its switches one on and one off, on a narrow phone and with a large font. */
-@Preview(name = "settings", widthDp = 360, heightDp = 4000)
-@Preview(name = "settings, large font", widthDp = 360, heightDp = 5100, fontScale = 1.3f)
+@Preview(name = "settings", widthDp = 360, heightDp = 4100)
+@Preview(name = "settings, large font", widthDp = 360, heightDp = 5250, fontScale = 1.3f)
 @Composable
 private fun SettingsScreenPreview(@PreviewParameter(LookParameter::class) look: Look) {
     CustomMapsTheme(look) {
@@ -334,15 +334,15 @@ private fun GuidanceGroupPreview(@PreviewParameter(LookParameter::class) look: L
 }
 
 /**
- * The Car screen group on a narrow phone with every font size, by day and at night: x1.5, as when never chosen, and x2,
- * the last of the list.
+ * The Car screen group on a narrow phone with every font size, by day and at night: x1.5 with Turns from above on, as when
+ * never chosen, and x2, the last of the list, with Turns from above off.
  */
 @Preview(name = "car screen", widthDp = 360)
 @Preview(name = "car screen, large font", widthDp = 360, fontScale = 1.3f)
 @Preview(name = "car screen, largest font", widthDp = 360, fontScale = 2f)
 @Composable
 private fun CarScreenGroupPreview(@PreviewParameter(LookParameter::class) look: Look) {
-    val sizes = listOf(CarScreenSettings(), CarScreenSettings(mapSize = CarMapSize.X2))
+    val sizes = listOf(CarScreenSettings(), CarScreenSettings(mapSize = CarMapSize.X2, turnsFromAbove = false))
     GroupPreview(look, sizes.map { car -> SettingsCatalogue.groups(SettingsTab.MAP, SettingsValues(carScreen = car)).last() })
 }
 

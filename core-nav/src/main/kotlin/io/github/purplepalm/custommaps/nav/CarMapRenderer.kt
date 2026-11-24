@@ -46,6 +46,13 @@ interface CarMapRenderer : MapRenderer {
     fun setMapSize(size: CarMapSize)
 
     /**
+     * Settings > Car screen > Turns from above: whether the junction views of the car's camera look straight down, the
+     * junction framed as on the phone, or stay at the car's one tilt. On until told otherwise. The car's alone: the
+     * phone's junction views are flat whatever it says.
+     */
+    fun setTurnsFromAbove(enabled: Boolean)
+
+    /**
      * The car session ends: the map lets go of the surface, the navigator and everything it drew.
      * Nothing it does stops the drive. Calling it again does nothing.
      */

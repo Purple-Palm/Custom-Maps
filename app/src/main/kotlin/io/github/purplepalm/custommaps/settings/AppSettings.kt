@@ -32,6 +32,9 @@ const val LANE_COUNTS_HORIZON_DEFAULT = true
 /** The car's map gets lighter while the phone is hot until the Debug switch is turned off. */
 const val CAR_LIGHT_WHEN_HOT_DEFAULT = true
 
+/** The car's map looks straight down before turns and at junctions until the driver turns it off. */
+const val CAR_TURNS_FROM_ABOVE_DEFAULT = true
+
 /**
  * The guidance tones' settings, kept together: whether the tones sound at all, the one tone before a turn and
  * the two at it, how the music is lowered, how loud a tone is against it, and Debug's silence in front of a
@@ -122,6 +125,15 @@ interface AppSettings {
     val carMapSize: Flow<CarMapSize>
 
     suspend fun setCarMapSize(size: CarMapSize)
+
+    /**
+     * Whether the map on the car's screen looks straight down before turns and at junctions, the junction framed as on
+     * the phone; off, it stays at the car's one tilt there too. On when never chosen ([CAR_TURNS_FROM_ABOVE_DEFAULT]).
+     * The car's alone: the phone's junction views are flat either way.
+     */
+    val carTurnsFromAbove: Flow<Boolean>
+
+    suspend fun setCarTurnsFromAbove(enabled: Boolean)
 
     /**
      * Debug: whether the route requests the app makes anyway, and the reroutes inside a trip, also ask Mapbox for the
@@ -310,6 +322,15 @@ class DataStoreAppSettings(
         onChanged(CAR_MAP_SIZE.name, stored)
     }
 
+    /** An absent value reads as [CAR_TURNS_FROM_ABOVE_DEFAULT] and is never written. */
+    override val carTurnsFromAbove: Flow<Boolean> =
+        preferences.map { it[CAR_TURNS_FROM_ABOVE] ?: CAR_TURNS_FROM_ABOVE_DEFAULT }.distinctUntilChanged()
+
+    override suspend fun setCarTurnsFromAbove(enabled: Boolean) {
+        dataStore.edit { it[CAR_TURNS_FROM_ABOVE] = enabled }
+        onChanged(CAR_TURNS_FROM_ABOVE.name, enabled)
+    }
+
     override val sideRoadFields: Flow<Boolean> = preferences.map { it[SIDE_ROAD_FIELDS] ?: false }.distinctUntilChanged()
 
     override suspend fun setSideRoadFields(enabled: Boolean) {
@@ -342,7 +363,7 @@ class DataStoreAppSettings(
             linkedSetOf(
                 SIMULATE_DRIVE.name, CAMERA_STYLE.name, LANE_ZOOM.name, LANES_ON_MAP.name, LANE_COUNTS_HORIZON.name, DAY_NIGHT.name,
                 OWN_ROUTE_LINE.name, MEASURE_OWN_LANES.name, CAR_MAP_FPS.name, CAR_LIGHT_WHEN_HOT.name, SIDE_ROAD_FIELDS.name,
-                CAR_MAP_SIZE.name,
+                CAR_MAP_SIZE.name, CAR_TURNS_FROM_ABOVE.name,
             ).apply {
                 addAll(SOUND.keyNames)
                 addAll(DRIVE_CAMERA.keyNames)
@@ -360,6 +381,7 @@ class DataStoreAppSettings(
         private val CAR_LIGHT_WHEN_HOT = booleanPreferencesKey("car_light_when_hot")
         private val SIDE_ROAD_FIELDS = booleanPreferencesKey("side_road_fields")
         private val CAR_MAP_SIZE = intPreferencesKey("car_map_size")
+        private val CAR_TURNS_FROM_ABOVE = booleanPreferencesKey("car_turns_from_above")
 
         private val TONES = booleanPreferencesKey("tones")
         private val TONE_BEFORE_TURN = booleanPreferencesKey("tone_before_turn")

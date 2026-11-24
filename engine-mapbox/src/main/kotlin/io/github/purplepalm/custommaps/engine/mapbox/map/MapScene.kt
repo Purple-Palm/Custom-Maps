@@ -472,6 +472,12 @@ internal class MapScene(
     /** How close the camera goes before turns and lane choices; Settings brings the stored choice. */
     private var laneZoom = LaneZoom.DEFAULT
 
+    /**
+     * The car's Settings > Car screen > Turns from above, kept for every camera of the map: whether the junction views of
+     * the car's camera look straight down. On until told otherwise; the phone's cameras take no notice of it.
+     */
+    private var turnsFromAbove = true
+
     /** Moves the map during guidance and in the route preview, in the way of [cameraStyle]. */
     private var camera: GuidanceCamera
 
@@ -1065,6 +1071,16 @@ internal class MapScene(
         LaneZoomFrames.apply(viewportDataSource, cameraStyle, mode, tuning, framedRoute, lastProgress, junctionPoints)
         camera.setLaneZoom(mode)
         viewportDataSource.evaluate()
+    }
+
+    /**
+     * The car's Settings > Car screen > Turns from above, for the camera there is and every later one: at once, also
+     * during a drive. Only the car's map calls it; the phone's junction views are flat whatever it says.
+     */
+    fun setTurnsFromAbove(enabled: Boolean) {
+        if (enabled == turnsFromAbove) return
+        turnsFromAbove = enabled
+        camera.setTurnsFromAbove(enabled)
     }
 
     /**
@@ -1988,6 +2004,7 @@ internal class MapScene(
                 )
         }
         created.setLaneZoom(laneZoom)
+        created.setTurnsFromAbove(turnsFromAbove)
         created.setAway(away)
         created.setVisible(visible && !away)
         return created

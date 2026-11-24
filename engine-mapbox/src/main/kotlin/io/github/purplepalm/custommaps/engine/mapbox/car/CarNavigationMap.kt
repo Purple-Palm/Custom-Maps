@@ -92,8 +92,8 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   phone and the drive share one process, and car-app rethrows an exception of a surface callback on
  *   the main thread. Each surface the host sends ([MapboxCarMapObserver.onAttached]) is a new map:
  *   the car map keeps what it was asked for (the look, the camera style, the lane zoom, who draws
- *   the lanes, the Debug switches, the size, the place, and an overview the driver asked for during the drive under way
- *   and has not left, [CarOverview]) and gives it to the new scene, with the camera where the driver
+ *   the lanes, the Debug switches, the size, the turns from above, the place, and an overview the driver asked for during
+ *   the drive under way and has not left, [CarOverview]) and gives it to the new scene, with the camera where the driver
  *   left the old one.
  * - **The size.** Settings' car map size ([setMapSize]): each surface's map is made with the host's
  *   density times the size as its pixel ratio ([CarMapSize.pixelRatio]), so every size of its style
@@ -209,6 +209,9 @@ internal class CarNavigationMap(
     private var lanesOnMap = LanesOnMap.DEFAULT
     private var ownRouteLine = false
     private var place: Place? = null
+
+    /** Settings > Car screen > Turns from above: on until told otherwise, as when never chosen. */
+    private var turnsFromAbove = true
 
     /**
      * The drive views' settings, the phone's, as the car's map takes them: the drive view and Zoom in
@@ -517,6 +520,15 @@ internal class CarNavigationMap(
         }
     }
 
+    /**
+     * Settings > Car screen > Turns from above: whether the junction views of the car's camera look straight down, on the
+     * scene of the surface there is and on every later one.
+     */
+    override fun setTurnsFromAbove(enabled: Boolean) {
+        turnsFromAbove = enabled
+        guard("setTurnsFromAbove") { scene?.setTurnsFromAbove(enabled) }
+    }
+
     override fun zoomBy(delta: Double) {
         guard("zoomBy") {
             // The scene lets the camera go before it zooms, as for a gesture.
@@ -600,6 +612,7 @@ internal class CarNavigationMap(
         created.setDriveCamera(driveSettings)
         created.setCameraStyle(cameraStyle)
         created.setLaneZoom(laneZoom)
+        created.setTurnsFromAbove(turnsFromAbove)
         created.setLanesOnMap(lanesOnMap)
         created.setOwnRouteLine(ownRouteLine)
         created.showPlace(place)
