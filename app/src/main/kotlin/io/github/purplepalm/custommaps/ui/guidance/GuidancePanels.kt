@@ -7,7 +7,6 @@ import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Button
@@ -52,7 +50,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.dp
@@ -209,24 +206,23 @@ internal fun cardContentAlpha(pending: Boolean, dimmed: Float): Float = if (pend
 /**
  * Lanes from left to right. A lane to take ([isLaneToTake]) is marked by shape as well as colour:
  * an amber tile ([LookTokens.accent]) with its arrows on it in [LookTokens.onAccent], the route's
- * arrow bold; a short bar lies under it, in a band the row has whether any lane is to take or not.
- * Every other lane is its arrows in [LookTokens.laneOff], and so is a lane kept for car pools or
- * buses, whose route arrows are [LookTokens.laneOn] only where the route marks it as the only lane.
- * Every lane is shown: when there are more than fit, all of them get narrower, since the lane to
- * take is often the last one. A lane the map does not draw yet ([Lane.outline]) has hollow arrows
- * in [LookTokens.laneOff], is never lit and never has the bar; it takes a lane's place like any
- * other.
+ * arrow bold, inside the lane's own square, so nothing lies under the row. Every other lane is its
+ * arrows in [LookTokens.laneOff], and so is a lane kept for car pools or buses, whose route arrows
+ * are [LookTokens.laneOn] only where the route marks it as the only lane. Every lane is shown: when
+ * there are more than fit, all of them get narrower, since the lane to take is often the last one.
+ * A lane the map does not draw yet ([Lane.outline]) has hollow arrows in [LookTokens.laneOff] and is
+ * never lit; it takes a lane's place like any other.
  *
  * With a [label], for lanes that are not the next maneuver's, the label stands at the start of the
  * row in small type: a lane choice's distance, or on the run-up to an exit the lanes to use in
  * words. It takes at most [labelShare] of the row and shrinks to fit, not below [labelMinSize],
  * and shows whole or not at all: a label wider than its share at that size is left out, never cut.
  * The lanes stay in the middle of the row while there is room for that beside the label, and move
- * over, and get narrower, when there is not. The row is as high as its lanes are without a label,
- * and the band ([laneRowGeometry]), so a label that comes or goes never changes the card's height;
- * lanes made narrower by it stand in the middle of the lanes' height, with their bars right under
- * them. A [description] is what the screen reader says for the row. [onLabelShown] hears, each time
- * the row is placed with a label, whether the label was shown or left out.
+ * over, and get narrower, when there is not. The row is as high as its lanes are without a label
+ * ([laneRowGeometry]), so a label that comes or goes never changes the card's height; lanes made
+ * narrower by it stand in the middle of the row's height. A [description] is what the screen reader
+ * says for the row. [onLabelShown] hears, each time the row is placed with a label, whether the
+ * label was shown or left out.
  */
 @Composable
 fun LanesRow(
@@ -251,9 +247,6 @@ fun LanesRow(
         content = {
             lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim, tile = tile, onTile = onTile) }
             if (label != null) LaneLabel(label, labelStyle, labelMinSize, Modifier.layoutId(LaneRowPart.LABEL))
-            lanes.lanes.forEachIndexed { index, lane ->
-                if (isLaneToTake(lane)) LaneBar(highlight, Modifier.layoutId(LaneBarOf(index)))
-            }
         },
         modifier = modifier.fillMaxWidth().then(described),
     ) { measurables, constraints ->
@@ -272,22 +265,14 @@ fun LanesRow(
             null
         }
         val reserved = if (shown != null) shown.width + LANE_LABEL_GAP.roundToPx() else 0
-        val barGap = LANE_BAR_GAP.roundToPx()
-        val barThickness = LANE_BAR_THICKNESS.roundToPx()
-        val row = laneRowGeometry(width, count, fullSlot, reserved, band = barGap + barThickness)
+        val row = laneRowGeometry(width, count, fullSlot, reserved)
         val slot = row.plan.slot
         val gap = (slot * LANE_GAP_SHARE).roundToInt()
         val arrows = (slot - 2 * gap).coerceAtLeast(0)
         val glyphs = List(count) { measurables[it].measure(Constraints.fixed(arrows, arrows)) }
-        val bars = measurables.mapNotNull { measurable ->
-            val lane = (measurable.layoutId as? LaneBarOf)?.lane ?: return@mapNotNull null
-            val bounds = laneBarBounds(row, lane, barGap, barThickness)
-            bounds to measurable.measure(Constraints.fixed(bounds.width, bounds.height))
-        }
         layout(width, row.height) {
-            shown?.placeRelative(0, (row.lanesHeight - shown.height) / 2)
+            shown?.placeRelative(0, (row.height - shown.height) / 2)
             glyphs.forEachIndexed { index, glyph -> glyph.placeRelative(row.plan.start + index * slot + gap, row.lanesTop + gap) }
-            bars.forEach { (bounds, bar) -> bar.placeRelative(bounds.left, bounds.top) }
             // Once placed, so whoever listens hears what is on the screen.
             if (label != null) onLabelShown?.invoke(shown != null)
         }
@@ -296,15 +281,6 @@ fun LanesRow(
 
 /** The parts of a lane row other than its lanes, by which its layout finds them. */
 private enum class LaneRowPart { LABEL }
-
-/** The bar under the lane at [lane], counted from the left. */
-private data class LaneBarOf(val lane: Int)
-
-/** The bar under a lane to take: a short line with round ends. Nothing for a screen reader. */
-@Composable
-private fun LaneBar(color: Color, modifier: Modifier = Modifier) {
-    Box(modifier.background(color, CircleShape))
-}
 
 /** Where the lanes of a row go: how wide each lane is, gap included, and where the first one starts. */
 internal data class LaneRowPlan(val slot: Int, val start: Int)
@@ -315,35 +291,19 @@ internal data class LaneRowPlan(val slot: Int, val start: Int)
  */
 internal fun laneRowHeight(width: Int, lanes: Int, fullSlot: Int): Int = planLaneRow(width, lanes, fullSlot, reserved = 0).slot
 
-/** Where everything of a lane row goes, in pixels: its height, the lanes' part of it, and the lanes across it. */
-internal data class LaneRowGeometry(val height: Int, val lanesHeight: Int, val plan: LaneRowPlan) {
-    /** Where the lanes' top is: lanes made narrower by a label stand in the middle of their part. */
-    val lanesTop: Int get() = (lanesHeight - plan.slot) / 2
+/** Where everything of a lane row goes, in pixels: its height and the lanes across it. */
+internal data class LaneRowGeometry(val height: Int, val plan: LaneRowPlan) {
+    /** Where the lanes' top is: lanes made narrower by a label stand in the middle of the row. */
+    val lanesTop: Int get() = (height - plan.slot) / 2
 }
 
 /**
- * Lays out a row of [lanes] lanes [width] wide, the first [reserved] of it the label's: the
- * lanes' part is one lane high ([laneRowHeight]) and the [band] for the bars of the lanes to take
- * lies under it. The row's height is the same with a label and without one, and with lanes to take
- * and without.
+ * Lays out a row of [lanes] lanes [width] wide, the first [reserved] of it the label's: the row is
+ * one lane high ([laneRowHeight]) with a label and without one, and nothing lies under its lanes,
+ * a lane to take being a tile in its own square.
  */
-internal fun laneRowGeometry(width: Int, lanes: Int, fullSlot: Int, reserved: Int, band: Int): LaneRowGeometry {
-    val lanesHeight = laneRowHeight(width, lanes, fullSlot)
-    return LaneRowGeometry(height = lanesHeight + band, lanesHeight = lanesHeight, plan = planLaneRow(width, lanes, fullSlot, reserved))
-}
-
-/**
- * Where the bar under lane [index] of [row] goes: [thickness] high and [gap] under the lane, as wide
- * as the middle [share] of the lane. Under lanes at full size it fills the band to the row's
- * bottom; under lanes made narrower by a label it stays right under them.
- */
-internal fun laneBarBounds(row: LaneRowGeometry, index: Int, gap: Int, thickness: Int, share: Float = LANE_BAR_SHARE): IntRect {
-    val slot = row.plan.slot
-    val width = (slot * share).roundToInt()
-    val left = row.plan.start + index * slot + (slot - width) / 2
-    val top = row.lanesTop + slot + gap
-    return IntRect(left, top, left + width, top + thickness)
-}
+internal fun laneRowGeometry(width: Int, lanes: Int, fullSlot: Int, reserved: Int): LaneRowGeometry =
+    LaneRowGeometry(height = laneRowHeight(width, lanes, fullSlot), plan = planLaneRow(width, lanes, fullSlot, reserved))
 
 /**
  * Lays [lanes] lanes into a row [width] wide, of which the first [reserved] belong to the distance
@@ -392,15 +352,6 @@ private const val LANE_GAP_SHARE = 4f / 44f
 
 /** Between the distance label and the first lane. */
 private val LANE_LABEL_GAP = 8.dp
-
-/** Between a lane to take and the bar under it. */
-internal val LANE_BAR_GAP = 2.dp
-
-/** How high the bar under a lane to take is. With [LANE_BAR_GAP] it makes the band under the lanes, 5 dp. */
-internal val LANE_BAR_THICKNESS = 3.dp
-
-/** How much of its lane's width the bar takes, in the middle of it. */
-internal const val LANE_BAR_SHARE = 0.6f
 
 /** The most of the row the distance label may take, whatever the font size: the lanes are what the row is for. */
 internal const val LANE_LABEL_MAX_WIDTH_SHARE = 0.3f
@@ -1079,8 +1030,8 @@ private fun ArrivedCardPreview(@PreviewParameter(LookParameter::class) look: Loo
 /**
  * Lanes rows on a card: two lanes with one to take, four with two to take (one of them with two
  * arrows), six with one to take, a lane choice's row with its distance, and a row whose right lane is
- * still to come, an outline. A lane to take is an amber tile with the bar under it; an outline
- * lane is hollow and never has the bar; on a narrow phone, also with a large font.
+ * still to come, an outline. A lane to take is an amber tile with its arrows in dark ink; an outline
+ * lane is hollow and never lit; on a narrow phone, also with a large font.
  */
 @Preview(name = "lanes to take", widthDp = 360)
 @Preview(name = "lanes to take, large font", widthDp = 360, fontScale = 1.3f)

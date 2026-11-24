@@ -1,10 +1,7 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.dp
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
-import kotlin.math.roundToInt
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -12,22 +9,17 @@ import org.junit.jupiter.api.Test
 
 /**
  * Where the lanes of the card's row go, in pixels: a row 300 wide and lanes 44 wide at full size,
- * and under them the band for the bars as the row takes it, at one pixel a dp.
+ * at one pixel a dp. Nothing lies under the lanes: a lane to take is a tile in its own square.
  */
 class LaneRowTest {
 
-    /** Between a lane to take and its bar, the bar's height, and the band the two make. */
-    private val gap = LANE_BAR_GAP.value.roundToInt()
-    private val thickness = LANE_BAR_THICKNESS.value.roundToInt()
-    private val band = gap + thickness
-
     @Test
-    fun `the row is one lane plus 5 dp high, for a 3 dp bar 2 dp under its lane`() {
-        // The bar is half of what tells a lane to take by shape: by day laneOn and laneOff differ
-        // by only 1.91:1.
-        assertEquals(2.dp, LANE_BAR_GAP)
-        assertEquals(3.dp, LANE_BAR_THICKNESS)
-        assertEquals(5.dp, LANE_BAR_GAP + LANE_BAR_THICKNESS)
+    fun `the row is one lane high, with no band under the lanes`() {
+        // The band of the bar that marked a lane to take before the tiles is gone: the card is 5 dp shorter.
+        val row = laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 0)
+        assertEquals(44, row.height)
+        assertEquals(0, row.lanesTop)
+        assertEquals(row.height, row.lanesTop + row.plan.slot)
     }
 
     @Test
@@ -119,23 +111,26 @@ class LaneRowTest {
     }
 
     @Test
-    fun `the row is one lane plus the band high, with and without a label`() {
-        assertEquals(44 + band, laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 0, band = band).height)
-        assertEquals(44 + band, laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 98, band = band).height)
+    fun `the row is one lane high, with and without a label`() {
+        assertEquals(44, laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 0).height)
+        assertEquals(44, laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 98).height)
         for (width in listOf(200, 304, 355, 720)) {
             for (lanes in 1..12) {
                 val lane = laneRowHeight(width, lanes, fullSlot = 44)
                 for (reserved in listOf(0, 40, 90, width / 3)) {
-                    val row = laneRowGeometry(width, lanes, fullSlot = 44, reserved = reserved, band = band)
-                    assertEquals(lane + band, row.height, "$width $lanes $reserved")
-                    assertEquals(lane, row.lanesHeight, "$width $lanes $reserved")
+                    val row = laneRowGeometry(width, lanes, fullSlot = 44, reserved = reserved)
+                    val at = "$width $lanes $reserved"
+                    assertEquals(lane, row.height, at)
+                    // Lanes made narrower by a label stand in the middle of the row, inside it.
+                    assertTrue(row.lanesTop >= 0 && row.lanesTop + row.plan.slot <= row.height, at)
+                    assertTrue(row.height - (row.lanesTop + row.plan.slot) - row.lanesTop in 0..1, at)
                 }
             }
         }
     }
 
     @Test
-    fun `a lane still to come takes a lane's place, has no bar, and leaves the row as high as before`() {
+    fun `a lane still to come takes a lane's place, is never one to take, and leaves the row as high as before`() {
         val off = Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false)
         val option = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
         val toCome = Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
@@ -145,56 +140,22 @@ class LaneRowTest {
         // The row's places and height come from the number of lanes alone, so the lane coming changes neither.
         for (reserved in listOf(0, 98)) {
             assertEquals(
-                laneRowGeometry(width = 304, lanes = withLane.size, fullSlot = 44, reserved = reserved, band = band),
-                laneRowGeometry(width = 304, lanes = withOutline.size, fullSlot = 44, reserved = reserved, band = band),
+                laneRowGeometry(width = 304, lanes = withLane.size, fullSlot = 44, reserved = reserved),
+                laneRowGeometry(width = 304, lanes = withOutline.size, fullSlot = 44, reserved = reserved),
             )
         }
-        // Only the option lane has a bar, before and after the lane comes; marked to take, the outline still has none.
+        // Only the option lane is a tile, before and after the lane comes; marked to take, the outline still is not.
         assertEquals(listOf(3), withOutline.indices.filter { isLaneToTake(withOutline[it]) })
         assertEquals(listOf(3), withLane.indices.filter { isLaneToTake(withLane[it]) })
         assertFalse(isLaneToTake(option.copy(outline = true)))
     }
 
     @Test
-    fun `a bar lies under a lane to take, in the middle of its lane and inside the row`() {
-        for (width in listOf(200, 304, 355, 720)) {
-            for (lanes in 1..12) {
-                for (reserved in listOf(0, 40, 90, width / 3)) {
-                    val row = laneRowGeometry(width, lanes, fullSlot = 44, reserved = reserved, band = band)
-                    val slot = row.plan.slot
-                    for (index in 0 until lanes) {
-                        val bar = laneBarBounds(row, index, gap = gap, thickness = thickness)
-                        val laneLeft = row.plan.start + index * slot
-                        val at = "$width $lanes $reserved lane $index: $bar"
-                        assertTrue(bar.left >= laneLeft && bar.right <= laneLeft + slot, at)
-                        assertEquals(Math.round(slot * LANE_BAR_SHARE), bar.width, at)
-                        assertTrue(bar.left - laneLeft - (laneLeft + slot - bar.right) in -1..1, at)
-                        assertEquals(row.lanesTop + slot + gap, bar.top, at)
-                        assertEquals(thickness, bar.height, at)
-                        assertTrue(bar.bottom <= row.height, at)
-                    }
-                }
-            }
-        }
-    }
-
-    @Test
-    fun `under lanes at full size the bar fills the band to the bottom of the row`() {
-        val row = laneRowGeometry(width = 304, lanes = 4, fullSlot = 44, reserved = 0, band = band)
-        // Lanes from 64, 44 wide; the third one's bar is 26 wide, 9 in from each side of it.
-        val bar = laneBarBounds(row, index = 2, gap = gap, thickness = thickness)
-        assertEquals(IntRect(left = 161, top = 44 + gap, right = 187, bottom = 44 + band), bar)
-        assertEquals(row.height, bar.bottom)
-    }
-
-    @Test
-    fun `beside the run-up's words the bars stay right under their narrower lanes`() {
-        val row = laneRowGeometry(width = 304, lanes = 6, fullSlot = 44, reserved = 144, band = band)
-        // Six lanes 26 wide from 144, in the middle of the lanes' 44: from 9 to 35, the bars just under them.
+    fun `beside the run-up's words the narrower lanes stand in the middle of the row`() {
+        val row = laneRowGeometry(width = 304, lanes = 6, fullSlot = 44, reserved = 144)
+        // Six lanes 26 wide from 144, in the middle of the row's 44: from 9 to 35.
         assertEquals(LaneRowPlan(slot = 26, start = 144), row.plan)
         assertEquals(9, row.lanesTop)
-        val bar = laneBarBounds(row, index = 0, gap = gap, thickness = thickness)
-        assertEquals(IntRect(left = 149, top = 35 + gap, right = 165, bottom = 35 + band), bar)
-        assertEquals(44 + band, row.height)
+        assertEquals(44, row.height)
     }
 }
