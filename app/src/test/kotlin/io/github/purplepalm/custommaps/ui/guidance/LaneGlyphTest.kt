@@ -1,9 +1,13 @@
 package io.github.purplepalm.custommaps.ui.guidance
 
+import androidx.compose.ui.graphics.Color
 import io.github.purplepalm.custommaps.nav.glyph.GlyphInk
 import io.github.purplepalm.custommaps.nav.glyph.GlyphShapes
+import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
+import io.github.purplepalm.custommaps.ui.theme.LookPalette
+import io.github.purplepalm.custommaps.ui.theme.LookTokens
 import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -65,6 +69,22 @@ class LaneGlyphTest {
     @Test
     fun `only a lane still to come is drawn on a layer of its own`() {
         assertAll(rows.map { row -> Executable { assertEquals(row.lane.outline, drawnOnLayer(GlyphShapes.lane(row.lane)), row.what) } })
+    }
+
+    @Test
+    fun `a tile is the amber fill with its arrows in the ink of icons on amber, other lanes the lane tokens, day and night`() {
+        for (look in Look.entries) {
+            val palette = LookPalette.of(look)
+            // The colours the row hands each lane, and the one of them each part of the lane is drawn in.
+            val row = LaneColors.of(LookTokens(palette))
+            fun drawnIn(ink: GlyphInk) = laneColor(ink, highlight = row.highlight, dim = row.dim, tile = row.tile, onTile = row.onTile)
+            assertEquals(Color(palette.accent), drawnIn(GlyphInk.TILE), "$look")
+            assertEquals(Color(palette.onAccent), drawnIn(GlyphInk.ON_TILE), "$look")
+            assertEquals(Color(palette.laneOn), drawnIn(GlyphInk.LIT), "$look")
+            assertEquals(Color(palette.laneOff), drawnIn(GlyphInk.DIM), "$look")
+            // A hollow is cut out of the lane's own grey, whatever colour it is drawn with.
+            assertEquals(Color(palette.laneOff), drawnIn(GlyphInk.HOLE), "$look")
+        }
     }
 
     private fun straightOrRight(lit: Boolean) =

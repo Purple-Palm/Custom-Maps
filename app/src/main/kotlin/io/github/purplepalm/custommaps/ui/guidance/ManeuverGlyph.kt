@@ -86,15 +86,22 @@ fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, tile: Color, onTile: Col
     val layer = if (drawnOnLayer(parts)) Modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen) else Modifier
     Canvas(modifier.then(layer)) {
         parts.forEach {
-            when (it.ink) {
-                GlyphInk.LIT -> drawPart(it.part, highlight)
-                GlyphInk.DIM -> drawPart(it.part, dim)
-                GlyphInk.TILE -> drawPart(it.part, tile)
-                GlyphInk.ON_TILE -> drawPart(it.part, onTile)
-                GlyphInk.HOLE -> drawPart(it.part, dim, BlendMode.Clear)
-            }
+            val color = laneColor(it.ink, highlight = highlight, dim = dim, tile = tile, onTile = onTile)
+            drawPart(it.part, color, if (it.ink == GlyphInk.HOLE) BlendMode.Clear else DrawScope.DefaultBlendMode)
         }
     }
+}
+
+/**
+ * Which of [LaneGlyph]'s colours a part of a lane in [ink] is drawn in: a tile in [tile] and the marks on it in [onTile],
+ * a route's arrow lit by colour alone in [highlight], every other arrow in [dim], and a hollow with [dim] too, as it is
+ * cut out of what lies under it whatever its colour.
+ */
+internal fun laneColor(ink: GlyphInk, highlight: Color, dim: Color, tile: Color, onTile: Color): Color = when (ink) {
+    GlyphInk.LIT -> highlight
+    GlyphInk.DIM, GlyphInk.HOLE -> dim
+    GlyphInk.TILE -> tile
+    GlyphInk.ON_TILE -> onTile
 }
 
 /**

@@ -235,17 +235,14 @@ fun LanesRow(
     onLabelShown: ((Boolean) -> Unit)? = null,
 ) {
     val tokens = LookTheme.tokens
-    val highlight = tokens.laneOn
-    val dim = tokens.laneOff
-    val tile = tokens.accent
-    val onTile = tokens.onAccent
+    val colors = remember(tokens) { LaneColors.of(tokens) }
     val labelStyle = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TABULAR_DIGITS)
     val measurer = rememberTextMeasurer()
     val count = lanes.lanes.size
     val described = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier
     Layout(
         content = {
-            lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = highlight, dim = dim, tile = tile, onTile = onTile) }
+            lanes.lanes.forEach { lane -> LaneGlyph(lane = lane, highlight = colors.highlight, dim = colors.dim, tile = colors.tile, onTile = colors.onTile) }
             if (label != null) LaneLabel(label, labelStyle, labelMinSize, Modifier.layoutId(LaneRowPart.LABEL))
         },
         modifier = modifier.fillMaxWidth().then(described),
@@ -276,6 +273,21 @@ fun LanesRow(
             // Once placed, so whoever listens hears what is on the screen.
             if (label != null) onLabelShown?.invoke(shown != null)
         }
+    }
+}
+
+/**
+ * The colours a lane row hands each of its lanes ([LaneGlyph]): [tile] for a lane to take's tile and [onTile] for its
+ * arrows on it, [dim] for every other lane's arrows, and [highlight] for the route's arrows of a lane kept for car pools
+ * or buses that the route marks as the only one, lit by colour alone.
+ */
+internal class LaneColors(val highlight: Color, val dim: Color, val tile: Color, val onTile: Color) {
+    companion object {
+        /**
+         * A lane row's colours in the look of [tokens]: the amber fill ([LookTokens.accent]) for a tile with the ink of
+         * icons on amber ([LookTokens.onAccent]) for its arrows, [LookTokens.laneOff] and [LookTokens.laneOn] for the rest.
+         */
+        fun of(tokens: LookTokens) = LaneColors(highlight = tokens.laneOn, dim = tokens.laneOff, tile = tokens.accent, onTile = tokens.onAccent)
     }
 }
 
