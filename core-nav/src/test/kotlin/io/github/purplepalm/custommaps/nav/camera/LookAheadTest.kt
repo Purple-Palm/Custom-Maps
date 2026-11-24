@@ -46,6 +46,31 @@ class LookAheadTest {
     }
 
     @Test
+    fun `the tilt for a distance is the inverse of the distance at a tilt`() {
+        for (zoom in listOf(15.5, 16.8, 17.7)) {
+            for (meters in listOf(150.0, 300.0, 1_000.0)) {
+                for (row in listOf(top, 0.0)) {
+                    val pitch = LookAhead.pitchFor(meters, zoom, height, carRow, row, ratio, 0.0)
+                    if (pitch > 0.0) {
+                        assertEquals(meters, ahead(zoom, pitch, row = row), 1e-6, "$meters m at $zoom, row $row")
+                    } else {
+                        // Shown at every tilt: straight down already reaches it.
+                        assertTrue(ahead(zoom, 0.0, row = row) >= meters - 1e-9, "$meters m at $zoom, row $row")
+                    }
+                }
+            }
+        }
+        // Tilted more, a point farther ahead shows; tilted less, it leaves the screen above the row.
+        val pitch = LookAhead.pitchFor(600.0, 17.0, height, carRow, 0.0, ratio, 0.0)
+        assertTrue(pitch > 0.0 && pitch < 90.0, "$pitch")
+        assertTrue(ahead(17.0, pitch + 1.0, row = 0.0) > 600.0 && ahead(17.0, pitch - 1.0, row = 0.0) < 600.0)
+        // Nothing to ask without a distance or a screen.
+        assertTrue(LookAhead.pitchFor(0.0, 17.0, height, carRow, 0.0, ratio, 0.0).isNaN())
+        assertTrue(LookAhead.pitchFor(300.0, 17.0, 0.0, carRow, 0.0, ratio, 0.0).isNaN())
+        assertTrue(LookAhead.pitchFor(300.0, 17.0, height, 0.0, 10.0, ratio, 0.0).isNaN())
+    }
+
+    @Test
     fun `the zoom for a distance is the inverse of the distance at a zoom`() {
         for (pitch in listOf(0.0, 30.0, 45.0, 55.0, 60.0)) {
             for (meters in listOf(150.0, 300.0, 348.0, 396.0, 1_000.0)) {

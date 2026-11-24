@@ -790,6 +790,55 @@ class CameraMotionTest {
     }
 
     @Test
+    fun `from above the car's junction view is flat once the descent ends and back at 55 after it, tilted 55 throughout`() {
+        val car = CameraTuning.CAR
+        val v = 30.0 * MPH
+        val turn = ManeuverFacts("r/0/0", FocusKind.TURN, turnDegrees = 90.0)
+        // The car's box at x1.5 fits 113 m at the road's zoom: the junction is framed from the SDK's 180 m.
+        val cap = 113.0
+        val window = FocusWindow.windowMeters(FocusKind.TURN, v, cap, car)
+        assertEquals(180.0, FocusWindow.framingMeters(FocusKind.TURN, v, cap, car), 1e-9)
+        for (phase in listOf(0.0, 0.25, 0.5, 0.75)) {
+            val focus = ManeuverFocus(car)
+            var latchedAt = Double.NaN
+            var latchedMeters = Double.NaN
+            var lastAbove = Double.NaN
+            var t = phase
+            // An update a second and sixty frames a second for a minute, from 500 m before the turn to 300 m past it.
+            for (frame in 0 until 60 * 60) {
+                t = phase + frame / 60.0
+                val toTurn = 500.0 - v * (t - phase)
+                if (frame % 60 == 0) {
+                    if (toTurn >= 0.0) {
+                        focus.onProgress(t, "r/0/0", toTurn, 500.0 - toTurn, turn, cap, v)
+                    } else {
+                        focus.onProgress(t, "r/0/1", 3_000.0 + toTurn, -toTurn, ManeuverFacts("r/0/1", FocusKind.TURN), cap, v)
+                    }
+                    if (latchedAt.isNaN() && focus.goal == 1.0) {
+                        latchedAt = t
+                        latchedMeters = toTurn
+                    }
+                }
+                val above = guidancePitch(car, 0.0, focus.focusAt(t), car.junctionPitch(JunctionView.ABOVE))
+                val tilted = guidancePitch(car, 0.0, focus.focusAt(t), car.junctionPitch(JunctionView.TILTED))
+                assertEquals(55.0, tilted, 1e-12, "tilted at $toTurn m")
+                when {
+                    latchedAt.isNaN() -> assertEquals(55.0, above, 1e-12, "before the latch, at $toTurn m")
+                    toTurn >= 0.0 && t >= latchedAt + car.descentSeconds -> assertEquals(0.0, above, 1e-12, "flat once the descent ended, at $toTurn m")
+                    toTurn >= 0.0 -> assertTrue(above <= lastAbove + 1e-12 && (above < 55.0 || t == latchedAt), "down on the way in, at $toTurn m: $above")
+                }
+                // A change of the view moves the camera from the latch until the view is back up.
+                if (toTurn >= 0.0) assertEquals(focus.goal == 1.0, focus.inView(t), "at $toTurn m")
+                lastAbove = above
+            }
+            // Latched at its window, 3.5 s of driving before the framing distance, and up again by 300 m past the turn.
+            assertTrue(latchedMeters <= window && latchedMeters > window - v, "latched at $latchedMeters m, the window $window m")
+            assertEquals(55.0, lastAbove, 1e-9, "back at 55 after the turn")
+            assertFalse(focus.inView(t))
+        }
+    }
+
+    @Test
     fun `the car's camera frames a junction itself from the latch to the maneuver point`() {
         val car = CameraTuning.CAR
         val v = 30.0 * MPH

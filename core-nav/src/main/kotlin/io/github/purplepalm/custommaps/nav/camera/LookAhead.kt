@@ -1,9 +1,11 @@
 package io.github.purplepalm.custommaps.nav.camera
 
 import kotlin.math.PI
+import kotlin.math.acos
 import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.log2
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.tan
@@ -69,10 +71,40 @@ object LookAhead {
     }
 
     /**
+     * The lowest tilt at which the row [rowPx] still lies [meters] or more ahead of the car at [zoom], the inverse of
+     * [metersAhead] in the tilt: tilted less, a point [meters] ahead leaves the screen above that row. 0 where such a
+     * point shows at every tilt; not a number where the screen is not known or [meters] is not more than 0. A point
+     * ahead of a row r pixels above the car's is f sin(a) / cos(p + a) pixels ahead ([groundDp]), so the tilt is
+     * acos(f sin(a) / its pixels) - a.
+     *
+     * @param carRowPx the row the camera's centre is on, in pixels from the map's top
+     */
+    fun pitchFor(
+        meters: Double,
+        zoom: Double,
+        mapHeightPx: Double,
+        carRowPx: Double,
+        rowPx: Double,
+        pixelRatio: Double,
+        latitude: Double,
+    ): Double {
+        if (!(meters > 0.0) || !(mapHeightPx > 0.0) || !(pixelRatio > 0.0) || carRowPx.isNaN() || rowPx.isNaN()) return Double.NaN
+        val above = carRowPx - rowPx
+        if (above <= 0.0) return Double.NaN
+        val f = 0.5 * mapHeightPx / tan(FIELD_OF_VIEW_RADIANS / 2.0)
+        val ray = atan(above / f)
+        val pointPx = meters / MapScale.metersPerDp(zoom, latitude) * pixelRatio
+        val cosine = f * sin(ray) / pointPx
+        if (cosine.isNaN()) return Double.NaN
+        if (cosine >= 1.0) return 0.0
+        return max(0.0, Math.toDegrees(acos(cosine) - ray))
+    }
+
+    /**
      * The ground from the car to the row, in dp at the camera's center. With the camera f =
      * 0.5 H / tan(fov / 2) pixels from the screen, a row v pixels above the car is seen at
      * a = atan(v / f) above the view's axis, and meets the ground f (cos p tan(p + a) - sin p)
-     * pixels ahead at a tilt p.
+     * pixels ahead at a tilt p, which is f sin(a) / cos(p + a).
      */
     private fun groundDp(pitchDegrees: Double, mapHeightPx: Double, carRowPx: Double, rowPx: Double, pixelRatio: Double): Double {
         if (!(mapHeightPx > 0.0) || !(pixelRatio > 0.0) || pitchDegrees.isNaN() || carRowPx.isNaN() || rowPx.isNaN()) return Double.NaN
@@ -112,9 +144,9 @@ object RoadView {
     /**
      * The road view's zoom at [peakSpeedMps] ([aheadMeters]), on a map [mapHeightPx] high whose
      * following padding puts the car on the row [carRowPx] and the box's top on the row [rowPx],
-     * at [pixelRatio] pixels a dp; no closer than [CameraTuning.maxZoom]. Not a number where the
-     * screen is not known or leaves no map between the car and the row: the camera then keeps
-     * the zoom it has.
+     * at [pixelRatio] pixels a dp, seen at a tilt of [pitchDegrees] ([pitch]); no closer than
+     * [CameraTuning.maxZoom]. Not a number where the screen is not known or leaves no map between
+     * the car and the row: the camera then keeps the zoom it has.
      */
     fun zoom(
         tuning: CameraTuning,
@@ -124,10 +156,23 @@ object RoadView {
         rowPx: Double,
         pixelRatio: Double,
         latitude: Double,
+        pitchDegrees: Double = tuning.cruisePitch,
     ): Double {
-        val zoom = LookAhead.zoomFor(aheadMeters(tuning, peakSpeedMps), tuning.cruisePitch, mapHeightPx, carRowPx, rowPx, pixelRatio, latitude)
+        val zoom = LookAhead.zoomFor(aheadMeters(tuning, peakSpeedMps), pitchDegrees, mapHeightPx, carRowPx, rowPx, pixelRatio, latitude)
         return if (zoom.isFinite()) min(zoom, tuning.maxZoom) else Double.NaN
     }
+
+    /**
+     * The tilt the road view is worked out at: the car's own ([CameraTuning.cruisePitch]), but while a junction view from
+     * above ([JunctionView.ABOVE]) goes down or stays down (the focus's goal 1) the tilt of the frame, the one the camera
+     * goes to then, so the same road stays between the car and the box's top as the camera looks down. On the way back
+     * up, the car's tilt the view comes back to. A frame without a tilt counts as the car's.
+     *
+     * @param focusGoal [ManeuverFocus.goal]
+     * @param framePitch the tilt of the data source's frame, which the camera told it ([guidancePitch] a sample ahead)
+     */
+    fun pitch(tuning: CameraTuning, view: JunctionView, focusGoal: Double, framePitch: Double?): Double =
+        if (tuning.anchored && view == JunctionView.ABOVE && focusGoal >= 1.0 && framePitch != null && !framePitch.isNaN()) framePitch else tuning.cruisePitch
 }
 
 /**

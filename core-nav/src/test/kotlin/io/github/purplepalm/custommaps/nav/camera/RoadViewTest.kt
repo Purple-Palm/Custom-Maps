@@ -52,6 +52,39 @@ class RoadViewTest {
     }
 
     @Test
+    fun `at a lower tilt the road view shows the same road, farther out`() {
+        for (speed in listOf(0.0, 13.41, 20.1, 29.0)) {
+            var last = Double.POSITIVE_INFINITY
+            for (pitch in listOf(55.0, 45.0, 30.0, 15.0, 0.0)) {
+                val zoom = RoadView.zoom(car, speed, height, carRow, top, 1.5, latitude, pitch)
+                val ahead = LookAhead.metersAhead(zoom, pitch, height, carRow, top, 1.5, latitude)
+                assertEquals(RoadView.aheadMeters(car, speed), ahead, 1e-6, "$speed m/s at $pitch degrees")
+                assertTrue(zoom < last, "farther out as the tilt goes down: $speed m/s at $pitch degrees")
+                last = zoom
+            }
+        }
+        // The car's tilt when none is named, as before.
+        assertEquals(zoom(13.41), RoadView.zoom(car, 13.41, height, carRow, top, 1.5, latitude, car.cruisePitch), 0.0)
+        // At 30 mph from above: 161 m in the box straight down at about 15.8, against 17.7 at 55 degrees.
+        assertEquals(15.83, RoadView.zoom(car, 13.41, height, carRow, top, 1.5, latitude, 0.0), 0.01)
+        assertEquals(17.71, zoom(13.41), 0.01)
+    }
+
+    @Test
+    fun `the road view goes down with the tilt only while a junction view from above goes down or stays down`() {
+        val phone = CameraTuning.PHONE
+        // Down or held from above: the frame's tilt.
+        assertEquals(20.0, RoadView.pitch(car, JunctionView.ABOVE, 1.0, 20.0))
+        assertEquals(0.0, RoadView.pitch(car, JunctionView.ABOVE, 1.0, 0.0))
+        // On the way back up, on the road, tilted, on the phone and without a tilt: the car's own.
+        assertEquals(car.cruisePitch, RoadView.pitch(car, JunctionView.ABOVE, 0.0, 20.0))
+        assertEquals(car.cruisePitch, RoadView.pitch(car, JunctionView.TILTED, 1.0, 20.0))
+        assertEquals(car.cruisePitch, RoadView.pitch(car, JunctionView.ABOVE, 1.0, null))
+        assertEquals(car.cruisePitch, RoadView.pitch(car, JunctionView.ABOVE, 1.0, Double.NaN))
+        assertEquals(phone.cruisePitch, RoadView.pitch(phone, JunctionView.ABOVE, 1.0, 20.0))
+    }
+
+    @Test
     fun `the map's pixel ratio moves the same road by its logarithm`() {
         for (speed in listOf(0.0, 25.0)) {
             assertEquals(log2(1.5), zoom(speed, ratio = 1.0) - zoom(speed, ratio = 1.5), 1e-9)

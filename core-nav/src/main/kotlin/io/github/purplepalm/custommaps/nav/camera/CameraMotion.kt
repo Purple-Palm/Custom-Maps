@@ -210,6 +210,12 @@ data class CameraTuning(
             )
         }
 
+    /**
+     * The tilt over a junction shown as [view]: on a camera anchored on the car, from above, straight down as on the
+     * phone ([PHONE]'s [maneuverPitch]); otherwise this tuning's own [maneuverPitch], the phone's and the car's tilted one.
+     */
+    fun junctionPitch(view: JunctionView): Double = if (anchored && view == JunctionView.ABOVE) PHONE.maneuverPitch else maneuverPitch
+
     companion object {
         val PHONE = CameraTuning()
 
@@ -359,15 +365,16 @@ fun lerp(a: Double, b: Double, f: Double) = a + (b - a) * f
 
 /**
  * The tilt of the camera that follows the car in Smooth follow: [CameraTuning.cruisePitch] on the
- * road, up to [CameraTuning.lanePitch] along the lane focus, and down to
- * [CameraTuning.maneuverPitch] over a junction, which wins over the lanes. With a lane share of 0
- * it is [ManeuverFocus.pitchAt].
+ * road, up to [CameraTuning.lanePitch] along the lane focus, and down to [junctionPitch] over a
+ * junction, which wins over the lanes. With a lane share of 0 and the tuning's own
+ * [CameraTuning.maneuverPitch] it is [ManeuverFocus.pitchAt].
  *
  * @param laneShare [LaneFocus.focusAt] with the Large lane zoom, 0 otherwise
  * @param junctionFocus [ManeuverFocus.focusAt]
+ * @param junctionPitch the tilt over the junction, [CameraTuning.junctionPitch] of the camera's junction view
  */
-fun guidancePitch(tuning: CameraTuning, laneShare: Double, junctionFocus: Double): Double =
-    lerp(lerp(tuning.cruisePitch, tuning.lanePitch, laneShare), tuning.maneuverPitch, junctionFocus)
+fun guidancePitch(tuning: CameraTuning, laneShare: Double, junctionFocus: Double, junctionPitch: Double = tuning.maneuverPitch): Double =
+    lerp(lerp(tuning.cruisePitch, tuning.lanePitch, laneShare), junctionPitch, junctionFocus)
 
 /**
  * How far the view has moved from the road onto the next maneuver, as a smooth function of time:
@@ -482,6 +489,12 @@ class ManeuverFocus(private val tuning: CameraTuning) {
     fun pitchAt(now: Double) = lerp(tuning.cruisePitch, tuning.maneuverPitch, focusAt(now))
 
     fun isAnimating(now: Double) = from != to && now - start < duration
+
+    /**
+     * Whether a junction view is on at [now]: latched or held through the turn (goal 1), or on its way back up. A change of
+     * how the view shows junctions ([JunctionView]) moves the camera at once only then; otherwise at the next junction.
+     */
+    fun inView(now: Double): Boolean = goal > 0.0 || focusAt(now) > 0.0
 
     /**
      * True on the step after a maneuver the view went down for, until the next maneuver of that
