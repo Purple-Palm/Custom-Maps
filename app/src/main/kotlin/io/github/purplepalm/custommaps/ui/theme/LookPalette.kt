@@ -11,7 +11,7 @@ import io.github.purplepalm.custommaps.nav.look.Look
  * letter, a line or a small arrow is [accentInk], since the bright amber on white is 2.04:1. A
  * number read at a glance is [onCard] by day, [glanceAccent] where it is amber at night, and
  * [successStrong] where it is green. A state never shows by a fill or a hue alone: the lanes to
- * take, for one, are a heavier arrow and a bar as well as [laneOn].
+ * take, for one, are an amber tile ([accent]) with a dark arrow ([onAccent]).
  */
 class LookPalette private constructor(
     /** Which look these are. */

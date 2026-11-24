@@ -207,13 +207,15 @@ private val NO_WORDS_REPORT: (String, Boolean) -> Unit = { _, _ -> }
 internal fun cardContentAlpha(pending: Boolean, dimmed: Float): Float = if (pending) dimmed else 1f
 
 /**
- * Lanes from left to right; the ones to use in [LookTokens.laneOn], the others in
- * [LookTokens.laneOff], and so is a lane kept for car pools or buses. Every lane is shown: when
- * there are more than fit, all of them get narrower, since the lane to take is often the last one.
- * A lane to take ([isLaneToTake]) is marked by shape as well as colour: its arrow is heavier
- * ([laneStroke]) and a short bar lies under it, in a band the row has whether any lane is to take
- * or not. A lane the map does not draw yet ([Lane.outline]) has hollow arrows in
- * [LookTokens.laneOff], is never lit and never has the bar; it takes a lane's place like any other.
+ * Lanes from left to right. A lane to take ([isLaneToTake]) is marked by shape as well as colour:
+ * an amber tile ([LookTokens.accent]) with its arrows on it in [LookTokens.onAccent], the route's
+ * arrow bold; a short bar lies under it, in a band the row has whether any lane is to take or not.
+ * Every other lane is its arrows in [LookTokens.laneOff], and so is a lane kept for car pools or
+ * buses, whose route arrows are [LookTokens.laneOn] only where the route marks it as the only lane.
+ * Every lane is shown: when there are more than fit, all of them get narrower, since the lane to
+ * take is often the last one. A lane the map does not draw yet ([Lane.outline]) has hollow arrows
+ * in [LookTokens.laneOff], is never lit and never has the bar; it takes a lane's place like any
+ * other.
  *
  * With a [label], for lanes that are not the next maneuver's, the label stands at the start of the
  * row in small type: a lane choice's distance, or on the run-up to an exit the lanes to use in
@@ -1077,7 +1079,7 @@ private fun ArrivedCardPreview(@PreviewParameter(LookParameter::class) look: Loo
 /**
  * Lanes rows on a card: two lanes with one to take, four with two to take (one of them with two
  * arrows), six with one to take, a lane choice's row with its distance, and a row whose right lane is
- * still to come, an outline. A lane to take has the heavier arrow and the bar under it; an outline
+ * still to come, an outline. A lane to take is an amber tile with the bar under it; an outline
  * lane is hollow and never has the bar; on a narrow phone, also with a large font.
  */
 @Preview(name = "lanes to take", widthDp = 360)

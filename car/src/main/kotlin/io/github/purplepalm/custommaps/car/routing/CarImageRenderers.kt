@@ -89,8 +89,8 @@ class ManeuverIconRenderer(private val density: () -> Float, private val log: De
 
 /**
  * The lanes image of the car's routing card: the lane row the phone's card shows at that moment,
- * the same lanes from the left with the same lanes to take ([GlyphShapes.isLaneToTake]: the heavier
- * arrow and the bar under it), lanes kept for car pools and buses dim as on the phone. It is the row
+ * the same lanes from the left with the same lanes to take ([GlyphShapes.isLaneToTake]: the tile
+ * and the bar under it), lanes kept for car pools and buses dim as on the phone. It is the row
  * alone, without the card's words for it or a lane choice's distance: the distance changes with every
  * update, which would draw the image again each time, and the host shows the image too small for words.
  *

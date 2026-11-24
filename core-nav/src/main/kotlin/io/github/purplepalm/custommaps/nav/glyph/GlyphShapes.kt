@@ -96,23 +96,14 @@ data class InkedPart(val part: GlyphPart, val ink: GlyphInk)
  * falling back to the turn when they are unknown; the arrival is the destination's mark. A sharp turn
  * goes up the stem past where the other turns bend and comes back down at its angle, its head clear
  * of the stem, so it reads at a glance as a turn back, also at the card's smaller sizes.
+ *
+ * A lane has arrows of its own family, as the road paints them (DECISIONS 60): one stem with a
+ * square foot, every arrow a branch of it with a solid head, and a lane to take an amber tile ([lane]).
  */
 object GlyphShapes {
 
     /** The maneuver arrow's line, as a share of the glyph. */
     const val MANEUVER_STROKE = 0.11f
-
-    /** The route's arrow in a lane to take. */
-    const val LANE_STROKE_ACTIVE = 0.15f
-
-    /** Every other lane arrow. */
-    const val LANE_STROKE_OTHER = 0.09f
-
-    /** An outline lane's arrow, its outside: as wide as the route's arrow in a lane to take, so its hollow reads. */
-    const val LANE_OUTLINE_STROKE = 0.15f
-
-    /** An outline lane's arrow, its hollow: the rest of [LANE_OUTLINE_STROKE] is a rim of 0.04 on each side. */
-    const val LANE_OUTLINE_HOLE = 0.07f
 
     /** The kinds drawn as a roundabout. */
     val ROUNDABOUTS: Set<ManeuverType> = setOf(
@@ -131,47 +122,53 @@ object GlyphShapes {
     }
 
     /**
-     * One lane: every arrow painted on it, a straight one when it has none, the route's arrow
-     * [GlyphInk.LIT] and the others [GlyphInk.DIM], the route's arrow last. In a lane to take
-     * ([isLaneToTake]) the route's arrow is also drawn heavier than any other lane arrow
-     * ([laneStroke]), since the two colours alone differ too little in lightness to tell at a glance
-     * in the sun.
+     * One lane, in drawing order: every arrow of [laneArrows] a branch of one stem with a square foot,
+     * each ending in a solid head, standing in the same place of the lane's square whatever the lane's
+     * state ([LaneShapes], DECISIONS 60).
      *
-     * A lane drawn as an outline ([Lane.outline]) is never lit: every arrow of it is hollow, [LANE_OUTLINE_STROKE] wide
-     * in [GlyphInk.DIM] with a [LANE_OUTLINE_HOLE] cut out of its middle ([GlyphInk.HOLE]), so it differs from a lane
-     * not to take by its shape, not by a colour.
+     * A lane to take ([isLaneToTake]) is an amber tile ([GlyphInk.TILE]) with its arrows on it in the
+     * dark ink of icons on amber ([GlyphInk.ON_TILE]): the route's arrow bold over the stem, the lane's
+     * other arrows thin, and every arrow at one weight between the two where the route names none of
+     * them. The tile tells the lane to take by its shape, at a glance in the sun, where the two colours
+     * alone differ too little in lightness. Every other lane is plain arrows in [GlyphInk.DIM]. A lane
+     * kept for car pools or buses has two short solid lines at its sides, inside its square, and where
+     * the route marks it as the only lane its route arrows are [GlyphInk.LIT], lit by colour alone.
+     *
+     * A lane drawn as an outline ([Lane.outline]) is never lit: its arrows are hollow, [GlyphInk.DIM]
+     * with their middle cut out ([GlyphInk.HOLE]), so it differs from a lane not to take by its
+     * shape, not by a colour.
      */
-    fun lane(lane: Lane): List<InkedPart> {
-        val arrows = lane.indications.ifEmpty { setOf(TurnModifier.STRAIGHT) }
-        if (lane.outline) {
-            val outside = arrows.flatMap { arrow -> laneArrow(arrow, LANE_OUTLINE_STROKE).map { InkedPart(it, GlyphInk.DIM) } }
-            val hollow = arrows.flatMap { arrow -> laneArrow(arrow, LANE_OUTLINE_HOLE).map { InkedPart(it, GlyphInk.HOLE) } }
-            return outside + hollow
-        }
-        val active = lane.activeIndication.takeIf { lane.isRecommended }
-        val dim = arrows.filter { it != active }.flatMap { arrow -> laneArrow(arrow, laneArrowStroke(lane, arrow)).map { InkedPart(it, GlyphInk.DIM) } }
-        val lit = active?.let { arrow -> laneArrow(arrow, laneArrowStroke(lane, arrow)).map { InkedPart(it, GlyphInk.LIT) } }.orEmpty()
-        return dim + lit
+    fun lane(lane: Lane): List<InkedPart> = LaneShapes.lane(lane).map { it.inked }
+
+    /**
+     * The arrows [lane] is drawn with: those painted on it, a straight one for a lane with none, and
+     * the route's arrow should the data not list it on the lane. The car's host gets the same arrows
+     * for its cluster (`LanesToCar`), so the card and the cluster never disagree.
+     */
+    fun laneArrows(lane: Lane): Set<TurnModifier> {
+        val named = lane.activeIndication.takeIf { lane.isRecommended && !lane.outline }
+        return lane.indications.ifEmpty { setOf(TurnModifier.STRAIGHT) } + listOfNotNull(named)
     }
 
     /**
-     * Whether [lane] is one to take, and so marked by shape as well as colour: a heavier arrow and a
-     * bar under it. Every lane the route can be followed from is, but a lane kept for car pools or
-     * buses never is: it is drawn dim, and where it is the only lane lit it keeps its colour alone.
-     * Nor is a lane drawn as an outline, which is never lit.
+     * The arrows of [lane] drawn as the route's: in a lane the route can be followed from, the arrow
+     * the route names, or every arrow of [laneArrows] where it names none; none in any other lane or
+     * in an outline lane. On a lane to take's tile they are the arrows drawn heavier; in a lane kept
+     * for car pools or buses that is the only lane the route marks, the lit ones. The host's
+     * recommended arrows are the same (`LanesToCar`).
      */
-    fun isLaneToTake(lane: Lane): Boolean = lane.isRecommended && !lane.designated && !lane.outline
-
-    /** How heavy [arrow] of [lane] is drawn: the route's arrow in a lane to take is the heavy one; an outline's arrows have their own width. */
-    fun laneArrowStroke(lane: Lane, arrow: TurnModifier): Float =
-        if (lane.outline) LANE_OUTLINE_STROKE else laneStroke(active = isLaneToTake(lane) && arrow == lane.activeIndication)
+    fun routeArrows(lane: Lane): Set<TurnModifier> = when {
+        !lane.isRecommended || lane.outline -> emptySet()
+        else -> lane.activeIndication?.let { setOf(it) } ?: laneArrows(lane)
+    }
 
     /**
-     * The width of a lane arrow's line, as a share of the glyph: the route's arrow in a lane to take
-     * ([active]) at [LANE_STROKE_ACTIVE], every other lane arrow at [LANE_STROKE_OTHER]; the maneuver
-     * arrow's [MANEUVER_STROKE] lies between the two.
+     * Whether [lane] is one to take, and so drawn on a tile, marked by shape as well as colour. Every
+     * lane the route can be followed from is, but a lane kept for car pools or buses never is: it is
+     * drawn dim, and where it is the only lane lit it keeps its colour alone. Nor is a lane drawn as
+     * an outline, which is never lit.
      */
-    fun laneStroke(active: Boolean): Float = if (active) LANE_STROKE_ACTIVE else LANE_STROKE_OTHER
+    fun isLaneToTake(lane: Lane): Boolean = lane.isRecommended && !lane.designated && !lane.outline
 
     /**
      * Direction of a roundabout's exit arm, in degrees from straight ahead, positive to the right.
@@ -200,8 +197,6 @@ object GlyphShapes {
         TurnModifier.SHARP_LEFT -> -135f
         TurnModifier.STRAIGHT, TurnModifier.U_TURN, null -> 0f
     }
-
-    private fun laneArrow(turn: TurnModifier, width: Float): List<GlyphPart> = arrow(turn, width)
 
     /** The arrow of [turn] in lines [width] wide: the U-turn's own, a sharp turn's higher bend, or a plain bend. */
     private fun arrow(turn: TurnModifier?, width: Float): List<GlyphPart> = when (turn) {

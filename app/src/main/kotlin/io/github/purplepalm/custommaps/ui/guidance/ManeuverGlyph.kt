@@ -31,6 +31,7 @@ import io.github.purplepalm.custommaps.nav.glyph.GlyphPart
 import io.github.purplepalm.custommaps.nav.glyph.GlyphPoint
 import io.github.purplepalm.custommaps.nav.glyph.GlyphShapes
 import io.github.purplepalm.custommaps.nav.glyph.GlyphStep
+import io.github.purplepalm.custommaps.nav.glyph.InkedPart
 import io.github.purplepalm.custommaps.nav.look.Look
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
@@ -70,18 +71,19 @@ internal fun glyphKey(type: ManeuverType, turn: TurnModifier?, roundaboutExitDeg
 }
 
 /**
- * One lane: every arrow painted on it, the one the route takes in [highlight] and the others in
- * [dim]. In a lane to take ([isLaneToTake]) the route's arrow is also drawn heavier than any other
- * lane arrow ([laneStroke]), since the two colours alone differ too little in lightness to tell
- * at a glance in the sun: 1.91:1 by day, 2.31:1 at night. A part on a tile is drawn in [tile],
- * amber as a fill, and a mark on it in [onTile]. A lane drawn as an outline ([Lane.outline]) has
- * hollow arrows in [dim]: their middle is cut out on a layer of the lane's own, so the card shows
- * through. Only a lane with such a hollow is drawn on a layer of its own.
+ * One lane, in the lanes' own arrows ([GlyphShapes.lane]): a lane to take ([isLaneToTake]) is a
+ * tile in [tile], amber as a fill, with its arrows on it in [onTile], the route's arrow bold, since
+ * [highlight] and [dim] alone differ too little in lightness to tell at a glance in the sun: 1.91:1
+ * by day, 2.31:1 at night. Every other lane is its arrows in [dim]; a lane kept for car pools or
+ * buses that the route marks as the only one has its route arrows in [highlight]. A lane drawn as
+ * an outline ([Lane.outline]) has hollow arrows in [dim]: their middle is cut out on a layer of the
+ * lane's own, so the card shows through. Only a lane with such a hollow is drawn on a layer of its
+ * own; a tile needs none.
  */
 @Composable
 fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, tile: Color, onTile: Color, modifier: Modifier = Modifier) {
     val parts = remember(lane) { GlyphShapes.lane(lane) }
-    val layer = if (parts.any { it.ink == GlyphInk.HOLE }) Modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen) else Modifier
+    val layer = if (drawnOnLayer(parts)) Modifier.graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen) else Modifier
     Canvas(modifier.then(layer)) {
         parts.forEach {
             when (it.ink) {
@@ -96,30 +98,17 @@ fun LaneGlyph(lane: Lane, highlight: Color, dim: Color, tile: Color, onTile: Col
 }
 
 /**
- * Whether [lane] is one to take, and so marked by shape as well as colour: a heavier arrow and a
- * bar under it. Every lane the route can be followed from is, but a lane kept for car pools or
- * buses never is: it is drawn dim, and where it is the only lane lit it keeps its colour alone.
+ * Whether a lane of [parts] is drawn on a layer of its own: only one with a hollow cut out of it
+ * ([GlyphInk.HOLE]), an outline lane, so the cut takes away the lane's own ink alone.
  */
-internal fun isLaneToTake(lane: Lane): Boolean = GlyphShapes.isLaneToTake(lane)
-
-/** How heavy [arrow] of [lane] is drawn: the route's arrow in a lane to take is the heavy one. */
-internal fun laneArrowStroke(lane: Lane, arrow: TurnModifier): Float = GlyphShapes.laneArrowStroke(lane, arrow)
+internal fun drawnOnLayer(parts: List<InkedPart>): Boolean = parts.any { it.ink == GlyphInk.HOLE }
 
 /**
- * The width of a lane arrow's line, as a share of the glyph: the route's arrow in a lane to take
- * ([active]) at [LANE_STROKE_ACTIVE], every other lane arrow at [LANE_STROKE_OTHER]; the maneuver
- * arrow's [MANEUVER_STROKE] lies between the two.
+ * Whether [lane] is one to take, and so marked by shape as well as colour: drawn on a tile. Every
+ * lane the route can be followed from is, but a lane kept for car pools or buses never is: it is
+ * drawn dim, and where it is the only lane lit it keeps its colour alone.
  */
-internal fun laneStroke(active: Boolean): Float = GlyphShapes.laneStroke(active)
-
-/** The maneuver arrow's line, as a share of the glyph. */
-internal const val MANEUVER_STROKE = GlyphShapes.MANEUVER_STROKE
-
-/** The route's arrow in a lane to take. */
-internal const val LANE_STROKE_ACTIVE = GlyphShapes.LANE_STROKE_ACTIVE
-
-/** Every other lane arrow. */
-internal const val LANE_STROKE_OTHER = GlyphShapes.LANE_STROKE_OTHER
+internal fun isLaneToTake(lane: Lane): Boolean = GlyphShapes.isLaneToTake(lane)
 
 internal val ROUNDABOUTS = GlyphShapes.ROUNDABOUTS
 
@@ -173,7 +162,8 @@ private fun DrawScope.point(at: GlyphPoint) = Offset(size.width / 2 + (at.x - 0.
 /**
  * Every turn glyph on the card, from sharp left to the U-turn: at the card's size, then at the Then chip's, then lanes
  * with sharp arrows, lit and dim. A sharp turn bends higher up its stem than the others and comes back down, its head
- * pointing back at the angle, clear of the stem.
+ * pointing back at the angle, clear of the stem; on a lane it goes up, a short way straight across and back down at 45
+ * degrees, never round like the U-turn.
  */
 @Preview(name = "turn glyphs", widthDp = 360)
 @Composable

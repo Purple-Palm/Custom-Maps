@@ -1,6 +1,7 @@
 package io.github.purplepalm.custommaps.car.routing
 
 import androidx.car.app.navigation.model.LaneDirection
+import io.github.purplepalm.custommaps.nav.glyph.GlyphShapes
 import io.github.purplepalm.custommaps.nav.model.Lane
 import io.github.purplepalm.custommaps.nav.model.LaneInfo
 import io.github.purplepalm.custommaps.nav.model.TurnModifier
@@ -105,6 +106,29 @@ class LanesToCarTest {
         assertEquals(car.size, built.size)
         for ((lane, host) in car.zip(built)) {
             assertEquals(lane.directions.map { it.shape to it.recommended }, host.directions.map { it.shape to it.isRecommended })
+        }
+    }
+
+    @Test
+    fun `the card draws every lane with the host's arrows, the route's ones where the host's are recommended`() {
+        // Every lane of none to three of the eight arrows, in every state, the route's arrow named on the lane or not.
+        val eight = TurnModifier.entries
+        val sets = listOf(emptySet<TurnModifier>()) + eight.indices.flatMap { i ->
+            listOf(setOf(eight[i])) + (i + 1 until eight.size).flatMap { j ->
+                listOf(setOf(eight[i], eight[j])) + (j + 1 until eight.size).map { k -> setOf(eight[i], eight[j], eight[k]) }
+            }
+        }
+        assertEquals(93, sets.size)
+        for (set in sets) {
+            for (designated in listOf(false, true)) for (outline in listOf(false, true)) {
+                val lanes = listOf(Lane(set, isRecommended = false, designated = designated, outline = outline)) +
+                    (listOf<TurnModifier?>(null) + eight).map { Lane(set, isRecommended = true, activeIndication = it, designated = designated, outline = outline) }
+                for (lane in lanes) {
+                    val host = LanesToCar.lane(lane).directions
+                    assertEquals(host.map { it.shape }, GlyphShapes.laneArrows(lane).map(LanesToCar::shape), "$lane")
+                    assertEquals(host.filter { it.recommended }.map { it.shape }.toSet(), GlyphShapes.routeArrows(lane).map(LanesToCar::shape).toSet(), "$lane")
+                }
+            }
         }
     }
 

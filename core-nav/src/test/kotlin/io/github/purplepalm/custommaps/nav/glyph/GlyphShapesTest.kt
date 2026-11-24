@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test
  * from code until they moved here; [Reference] is that code's geometry, point for point, in pixels,
  * so the shapes are shown to be the ones the phone drew, on a square glyph and on one that is not.
  * The sharp turns are the exception, redrawn on purpose: [Reference.sharpTurn] is their new shape.
+ * The lanes have a family of their own since lanes step S2, measured in [LaneShapesTest].
  */
 class GlyphShapesTest {
 
@@ -73,27 +74,14 @@ class GlyphShapesTest {
     }
 
     @Test
-    fun `a sharp turn's head stays clear of its stem at every width it is drawn, where the old shape's ran into it`() {
-        val widths = listOf(GlyphShapes.MANEUVER_STROKE, GlyphShapes.LANE_STROKE_ACTIVE, GlyphShapes.LANE_STROKE_OTHER, GlyphShapes.LANE_OUTLINE_STROKE)
+    fun `a sharp turn's head stays clear of its stem, where the old shape's ran into it`() {
         for (sharp in SHARP) {
             val parts = GlyphShapes.maneuver(ManeuverType.TURN, sharp)
-            for (width in widths) {
-                assertTrue(headClearance(parts) - width > 0.03f, "$sharp at $width: ${headClearance(parts)}")
-            }
+            assertTrue(headClearance(parts) - GlyphShapes.MANEUVER_STROKE > 0.03f, "$sharp: ${headClearance(parts)}")
         }
         // The shape before: its arm left the stem where the other turns' do, and its head reached back across the stem.
         val old = Reference.turnShares(135f)
         assertTrue(headClearance(old) - GlyphShapes.MANEUVER_STROKE < 0f, "${headClearance(old)}")
-    }
-
-    @Test
-    fun `a sharp lane arrow is the sharp turn at the lane's width, on the stem every arrow of the lane shares`() {
-        val lane = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SHARP_RIGHT), isRecommended = true, activeIndication = TurnModifier.SHARP_RIGHT)
-        val straight = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.STRAIGHT).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_OTHER), GlyphInk.DIM) }
-        val sharp = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SHARP_RIGHT).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_ACTIVE), GlyphInk.LIT) }
-        assertEquals(straight + sharp, GlyphShapes.lane(lane))
-        // Both stand at the same foot.
-        assertEquals((straight.first().part as GlyphPart.Line).start, (sharp.first().part as GlyphPart.Line).start)
     }
 
     @Test
@@ -147,67 +135,33 @@ class GlyphShapesTest {
     }
 
     @Test
-    fun `a lane draws its other arrows dim first, then the route's arrow lit`() {
-        val lane = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
-        val parts = GlyphShapes.lane(lane)
-        val straight = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.STRAIGHT).map { it.withWidth(GlyphShapes.LANE_STROKE_OTHER) }
-        val right = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SLIGHT_RIGHT).map { it.withWidth(GlyphShapes.LANE_STROKE_ACTIVE) }
-        assertEquals(straight.map { InkedPart(it, GlyphInk.DIM) } + right.map { InkedPart(it, GlyphInk.LIT) }, parts)
-    }
-
-    @Test
-    fun `a lane without arrows is a straight one, a lane not to take is all dim, a car pool lane lit in colour alone`() {
-        val none = GlyphShapes.lane(Lane(emptySet(), isRecommended = false))
-        assertEquals(GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.STRAIGHT).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_OTHER), GlyphInk.DIM) }, none)
-        val notToTake = GlyphShapes.lane(Lane(setOf(TurnModifier.LEFT, TurnModifier.U_TURN), isRecommended = false))
-        assertTrue(notToTake.all { it.ink == GlyphInk.DIM })
-        val carPool = GlyphShapes.lane(Lane(setOf(TurnModifier.STRAIGHT), true, TurnModifier.STRAIGHT, designated = true))
-        assertTrue(carPool.all { it.ink == GlyphInk.LIT && widthOf(it.part) == GlyphShapes.LANE_STROKE_OTHER })
-        // A U-turn lane arrow is the phone's U-turn at the lane's width.
-        val uTurn = GlyphShapes.lane(Lane(setOf(TurnModifier.U_TURN), true, TurnModifier.U_TURN))
-        assertEquals(GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.U_TURN).map { InkedPart(it.withWidth(GlyphShapes.LANE_STROKE_ACTIVE), GlyphInk.LIT) }, uTurn)
-    }
-
-    @Test
-    fun `a lane still to come is hollow arrows, never lit, whatever else the lane says`() {
-        val toCome = Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true)
-        val straight = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.STRAIGHT)
-        val right = GlyphShapes.maneuver(ManeuverType.TURN, TurnModifier.SLIGHT_RIGHT)
-        val outside = (straight + right).map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_STROKE), GlyphInk.DIM) }
-        val hollow = (straight + right).map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_HOLE), GlyphInk.HOLE) }
-        // Every arrow's outside first, then every hollow, so no outside covers a hollow cut before it.
-        assertEquals(outside + hollow, GlyphShapes.lane(toCome))
-        // Marked recommended with the route's arrow all the same: still hollow and dim, never lit, never to take.
-        val odd = toCome.copy(isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT)
-        assertEquals(outside + hollow, GlyphShapes.lane(odd))
-        assertTrue(GlyphShapes.lane(odd).none { it.ink == GlyphInk.LIT })
-        assertFalse(GlyphShapes.isLaneToTake(odd))
-        assertEquals(GlyphShapes.LANE_OUTLINE_STROKE, GlyphShapes.laneArrowStroke(odd, TurnModifier.SLIGHT_RIGHT))
-        // A lane without arrows still comes as a straight one; a car pool lane still to come is the same outline.
-        assertEquals(
-            straight.map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_STROKE), GlyphInk.DIM) } +
-                straight.map { InkedPart(it.withWidth(GlyphShapes.LANE_OUTLINE_HOLE), GlyphInk.HOLE) },
-            GlyphShapes.lane(Lane(emptySet(), isRecommended = false, designated = true, outline = true)),
+    fun `a lane is the painters' parts of its own family, in order, and no maneuver arrow`() {
+        val lanes = listOf(
+            Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.SLIGHT_RIGHT), isRecommended = true, activeIndication = TurnModifier.SLIGHT_RIGHT),
+            Lane(setOf(TurnModifier.LEFT, TurnModifier.U_TURN), isRecommended = false),
+            Lane(emptySet(), isRecommended = false),
+            Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT, designated = true),
+            Lane(setOf(TurnModifier.SLIGHT_RIGHT), isRecommended = false, outline = true),
         )
+        for (lane in lanes) {
+            assertEquals(LaneShapes.lane(lane).map { InkedPart(it.part, it.ink) }, GlyphShapes.lane(lane), "$lane")
+            // Solid heads and a stem with a square foot: none of the maneuver arrow's stroked open heads.
+            assertTrue(GlyphShapes.lane(lane).any { it.part is GlyphPart.Fill }, "$lane")
+            for (turn in TurnModifier.entries) {
+                val arrow = GlyphShapes.maneuver(ManeuverType.TURN, turn).toSet()
+                assertTrue(GlyphShapes.lane(lane).none { it.part in arrow }, "$lane $turn")
+            }
+        }
     }
 
     @Test
-    fun `an outline is as wide as the route's arrow in a lane to take, with a rim of 0_04 on each side of its hollow`() {
-        assertEquals(GlyphShapes.LANE_STROKE_ACTIVE, GlyphShapes.LANE_OUTLINE_STROKE)
-        assertEquals(0.07f, GlyphShapes.LANE_OUTLINE_HOLE)
-        assertEquals(0.04f, (GlyphShapes.LANE_OUTLINE_STROKE - GlyphShapes.LANE_OUTLINE_HOLE) / 2f, 1e-6f)
-        // Its rim is thinner than any lane arrow, so the hollow is what tells it.
-        assertTrue((GlyphShapes.LANE_OUTLINE_STROKE - GlyphShapes.LANE_OUTLINE_HOLE) / 2f < GlyphShapes.LANE_STROKE_OTHER)
-    }
-
-    @Test
-    fun `the lane strokes and which lanes are to take`() {
-        assertEquals(0.15f, GlyphShapes.laneStroke(active = true))
-        assertEquals(0.09f, GlyphShapes.laneStroke(active = false))
+    fun `the maneuver arrow's line and which lanes are to take`() {
         assertEquals(0.11f, GlyphShapes.MANEUVER_STROKE)
         assertTrue(GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true)))
+        assertTrue(GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT, TurnModifier.LEFT), isRecommended = true, activeIndication = TurnModifier.LEFT)))
         assertTrue(!GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, designated = true)))
         assertTrue(!GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = false)))
+        assertTrue(!GlyphShapes.isLaneToTake(Lane(setOf(TurnModifier.STRAIGHT), isRecommended = true, activeIndication = TurnModifier.STRAIGHT, outline = true)))
     }
 
     /** A turn's stem (its start and its bend) and its arm's tip, from its first part. */
@@ -313,22 +267,6 @@ class GlyphShapesTest {
             is GlyphStep.LineTo -> listOf(step.to)
             is GlyphStep.ArcTo -> listOf(GlyphPoint(step.left, step.top), GlyphPoint(step.right, step.bottom))
         }
-    }
-
-    private fun widthOf(part: GlyphPart): Float? = when (part) {
-        is GlyphPart.Line -> part.width
-        is GlyphPart.Segment -> part.width
-        is GlyphPart.Ring -> part.width
-        is GlyphPart.Dot -> null
-        is GlyphPart.Fill -> null
-    }
-
-    private fun GlyphPart.withWidth(width: Float): GlyphPart = when (this) {
-        is GlyphPart.Line -> copy(width = width)
-        is GlyphPart.Segment -> copy(width = width)
-        is GlyphPart.Ring -> copy(width = width)
-        is GlyphPart.Dot -> this
-        is GlyphPart.Fill -> this
     }
 
     /**
