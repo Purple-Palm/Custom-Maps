@@ -6,7 +6,7 @@ Google Play's internal testing and as test builds made by the repository's CI; a
 described here. This policy says what the app keeps on the phone, what leaves the phone and why, and
 how to delete it.
 
-Last updated: 2026-11-23. It describes the app as it is today; see [Changes](#changes).
+Last updated: 2026-11-24. It describes the app as it is today; see [Changes](#changes).
 
 ## In short
 
@@ -35,11 +35,12 @@ Last updated: 2026-11-23. It describes the app as it is today; see [Changes](#ch
 - **Settings:** day and night, camera style, lane zoom, the drive view (Normal or Overview), Zoom in
   before turns and Recenter by itself, lanes on the map (off, Mapbox's lane details or drawn by the
   app), lane counts between lane points (whether the app takes them from Mapbox's electronic
-  horizon), the car map's size, the guidance tones (on or off, each of them, how the music is
-  lowered and how loud a tone is, and under Debug the silence before a tone on Bluetooth), and the
-  switches for the simulated drive, for the app's own route line, for measuring the drawn lanes, for
-  asking routes for the side roads' access and form of way, for how many frames a second the car's
-  map draws and for a lighter car map while the phone is hot, under Debug.
+  horizon), the car map's size and whether its turns show from above, the guidance tones (on or off,
+  each of them, how the music is lowered and how loud a tone is, and under Debug the silence before
+  a tone on Bluetooth), and the switches for the simulated drive, for the app's own route line, for
+  measuring the drawn lanes, for asking routes for the side roads' access and form of way, for how
+  many frames a second the car's map draws and for a lighter car map while the phone is hot, under
+  Debug.
 - **The trip session log:** when each guidance session started, its kind, whether it was
   simulated, and an id the app gave the token it ran on, never the token itself; the last 500 at
   most. It holds no places.
@@ -223,6 +224,8 @@ view, Zoom in before turns and Recenter by itself among the settings, and the dr
 and the moves of the map, in numbers and words only, in the debug log; nothing new is sent.
 2026-11-23: the car map's size among the settings, and the car map's size, its pixel ratio and how
 far ahead its camera shows the road, in numbers only, in the debug log; nothing new is sent.
+2026-11-24: whether the car's map shows its turns from above among the settings, and how its camera
+showed each junction, above or tilted, in the debug log; nothing new is sent.
 
 ## Contact
 

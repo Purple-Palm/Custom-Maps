@@ -25,7 +25,8 @@ Since step 1c the phone shows the list in place of its map during a drive with t
 7 to 13, which look at the phone's map too, press **Map** on the list first.
 The guidance tones in the car are check 110 of that list: one sound for each tone, and none while
 another navigation app guides on the car's screen. Lanes step S1's are checks 130 to 138 of that
-list: the car map's size, the car's own camera and no car bar.
+list: the car map's size, the car's own camera and no car bar; lanes step S1b's are checks 139 to
+144: the car's turns from above.
 
 1. **The app in Android Auto's launcher.** Custom Maps is among the navigation apps; it opens with
    the map, or first with a message while the phone has no token or no precise location (the setup
@@ -1658,6 +1659,49 @@ the driver. Every `car_surface` line carries `mapSize` and `pixelRatio`, and the
     the data source's own fit, farther out than `zoom`; every `car_surface` line with `mapSize` and
     `pixelRatio`.
 
+The car's turns from above, lanes step S1b ([DECISIONS.md](DECISIONS.md), 59;
+[CAMERA.md](CAMERA.md), The car's turns from above): it has run on a rig of the real camera only,
+not on the Desktop Head Unit or in a car. With the car's screen, Smooth follow and the car map size
+at x1.5 unless a check says otherwise; screenshots of the car's screen from a passenger or a parked
+car, never from the driver. With the switch on, as on a phone that never chose, the turns of checks
+134 and 135 are flat (checks 140 and 141), and checks 134, 135 and the `pitch` and `onPuck` of check
+138 are those of the switch off (check 142). The car's camera line has `junctionView` while a
+junction view is latched:
+
+139. **The row.** Parked, before Start: **Settings → Car screen → Turns from above**, after Car map
+    size, by day and at night, at the phone's own width and with the font size at 1.3: on, on a
+    phone that never chose, with the note "Before turns and at junctions the car's map looks
+    straight down; off, it stays tilted." A tap turns it off and on, each time with a `settings`
+    line with `car_turns_from_above` false or true. Nothing on the car's screen or in the phone's
+    guidance bar is there for it.
+140. **Turns from above, with Large.** At a right-angle turn in town at 30 mph, from about 750 ft
+    before the turn the view tilts down and goes out in the same move, until it looks straight down
+    onto the road to the turn about 600 ft before it, farther out than the road view; the turn stays
+    on the car's screen all the way. From about 590 ft the turn is framed with the road past it, the
+    car low in the frame and a little off its usual place, and the view comes in as the car comes up
+    to the turn, close at it. Past the turn the view stays down for a moment, then tilts back up to
+    55° and goes back to the road view in one move. Two turns about 1,000 ft apart: the view stays
+    down between them, eases out after the first and comes in again for the second. In the camera
+    line `pitch` 0 from the end of the tilt to past the turn, `junctionView` `above`, `frames` true
+    from about 590 ft and `onPuck` 0 in the frame.
+141. **Turns from above, with Default.** The same tilt and the same frame; the view comes in only to
+    the navigation SDK's own limit (`zoom` 16.35) and holds it through the turn; past it, back up to
+    55° and to the road view.
+142. **With it off.** Turned off, parked: the next turns are lanes step S1's tilted view, at 55° all
+    along, closer near the turn with Large only (checks 134 and 135), never flat, with
+    `junctionView` `tilted`. Turned on during a junction view, by a passenger or in a parked
+    simulated drive: the view goes over to the flat frame in one eased move, and turned off again
+    back to the tilted one; changed on the open road, nothing moves until the next turn.
+143. **A freeway exit.** At 65 mph with Large: the lanes' close view before a lane choice and from
+    the exit's run-up stays tilted at 55° through the gore and down the ramp (check 136); the turn
+    at the ramp's end is flat and framed, with `junctionView` `above` there, and after it the view
+    tilts back up.
+144. **The camera line.** After the drive, in the car's camera lines: `junctionView` `above` from
+    each turn's latch to the end of its step, none on the road, at lane choices and in the hold
+    after a turn; `junctionZoom` in the junction views with either lane zoom; `frames` true from the
+    framing distance; `keep` falling after each turn; `roadZoom` below the road's while a view goes
+    down. The phone's camera lines have no `junctionView`.
+
 Then share the debug log. What to read in it:
 
 | Lines | Question |
@@ -1729,6 +1773,7 @@ Then share the debug log. What to read in it:
 | `car_light` | Only with the car screen, `screen` `car`: one at each change of the car's lighter map, `on` (whether it draws without its 3D objects) and `thermal` (the phone's thermal status by Android's name, null while none was read). From `MODERATE` on it is light, after two minutes in a row of `LIGHT` or better full again; the car's camera line has `light` beside it. With **Settings → Debug → Lighter car map when hot** off (`settings` `car_light_when_hot` false) it is never light. Words only, a few a drive at most |
 | `car_surface`: `mapSize`, `pixelRatio`; `event` `size`; `settings` with `car_map_size` | Only with the car screen, `screen` `car`: on every `car_surface` line the size of the car's map (1 to 2) and its pixel ratio, the host's density times the size; one with `event` `size` for each new size, with `outcome` `remade` (the map made again on the surface), `next_surface` (none there: the next surface takes it) or `failed` (with a `car_error` line `remakeMap`), and a `detach` line with `remake` true during a remake; the `settings` line with the percent, 100 to 200. Numbers and words only |
 | Camera on the car: `pixelRatio`, `roadAheadM`, `roadSpeed`, `roadZoom`, `junctionZoom` | The car's own camera (lanes step S1): the map's pixel ratio; the road the road view shows above the car, in metres, and the speed it is worked out for, the highest of the last 10 s, in m/s; its zoom; with Large the junction view's zoom, from the latch to past the junction. To tune the 12 s, the 150 and 600 m and the junction views against the car's screen |
+| Camera on the car: `junctionView`; `settings` with `car_turns_from_above` | The car's turns from above (lanes step S1b): while a junction view is latched, `above` with **Settings → Car screen → Turns from above** on, `tilted` with it off; from above `junctionZoom` with either lane zoom, `frames` true from the framing distance and `roadZoom` at the tilt the view goes down by; the `settings` line with the switch, true or false. Words and numbers only |
 | `lane_measure` | Only with **Settings → Debug → Measure the drawn lanes** on and Drawn by the app, from the phone's map: one as the measuring begins, `check` `details_under_drawing` with `on` true (Mapbox's lane details under the drawing for the drive), then one at the end of each close view. `view`, counted from 1 in the drive; `drawn`, whether the drawing showed (the odd views); `kind`, `run_up` or `junction`; `look`, `DAY` or `NIGHT`; `seconds` and `frames`; `ms`, how long the view lasted, from the update it began on to its end; `p95Ms` and `maxMs`, over every frame time of the view; `missedVsync` and `missedPerS`; `uploadMaxMs`, the longest upload of a frame in Mapbox's statistics; `programsMs` and `programs`, the time spent making graphics programs and how many there are, as Mapbox's statistics give them (whether a sample counts since its own start or the map's is not verified); `windows`, `windowLoadMaxMs` and `windowBytesMax`, the drawing windows that loaded in the view; `carPositions`, the positions handed to the car's layer; `hdRoads`, what the style said of Mapbox's lane details as the view began; `end`: `let_go`, `guidance_end`, `switch`, `setting`, `background`, `covered`, `away`, `camera_style` or `released`; `counts`, true only for a whole view, one with frames, begun 5 s or more after the drawing was shown or hidden, that lasted 3 s or more and ended `let_go`, and false for every other. Numbers and words only, about 390 bytes, one a close view |
 | `motion_sensors` | One each time the sensors are asked to start, as a drive comes onto a freeway: whether the phone has a gyroscope (`gyroscope`), a gravity sensor (`gravity`) and a linear acceleration sensor (`linearAcceleration`), the period asked for (`periodUs`, 40000: 25 samples a second, each delivered at once) and whether listening `started`. They stop at the first update off the freeway and when the drive ends. Without a gyroscope or a gravity sensor nothing is registered: one line a drive with `started` false, and no `motion`. Without linear acceleration, `fwd` and `side` stay null |
 | `tone` | One for each tone the rule decides, from the main thread: `tone` (`ahead`, `at_turn`, `start`, `demo`), `why` (`ahead`, `lane_choice`, `at_turn`, `arrived`, `start`, `demo`, `sample`: a level chosen in Settings), the maneuver's `maneuver` and `modifier`, `lookedPast` (the next maneuver, where the tones passed over it to this one: straight on under a new name, a merge, a roundabout's way out), `metersLeft` and `secondsLeft` to it, `speed` in m/s, the two distances of the update (`aheadMeters`, `finalMeters`), `laneMeters` and `laneKey` for a lane choice, `sinceLast` (seconds since the tone before) and `pacing` (`play`, `hold`: waits for the sound that plays, `drop`). With **Tones** off, and while another app guides on the car's screen, none |

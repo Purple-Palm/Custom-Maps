@@ -431,6 +431,7 @@ Also added: the renderer's frame rate in the log (`MapView.setOnFpsChangedListen
 | `RunUpLatch`, `TurnAhead` | `:core-nav`, `nav/camera/RunUp.kt` | The run-up to a freeway exit: when it begins, how long it holds and when it is taken up again, one latch for the card and both cameras; and a turn right after the exit that keeps the close view until it is framed. See [The run-up to a freeway exit](#the-run-up-to-a-freeway-exit). |
 | `LookAhead`, `PeakSpeed` | `:core-nav`, `nav/camera/LookAhead.kt` | How much road the camera shows above the car, by a perspective model, and the closest zoom that still shows 12 s of it at the highest speed of the last 10 s. |
 | `guidancePitch` | `:core-nav`, `nav/camera/CameraMotion.kt` | Smooth follow's tilt: 45° on the road, up to 55° along the lane focus with Large, and down to 0° over a junction, which wins. |
+| `JunctionView` | `:core-nav`, `nav/camera/JunctionView.kt` | How Smooth follow shows a junction: from above, flat and framed by the navigation SDK (the phone's always, the car's with Turns from above), or tilted with the car on its row (the car's with it off); `CameraTuning.junctionPitch` gives the tilt over it. |
 | `RunUpRule`, `CardLanes` | `:core-nav`, `nav/guidance/` | The card's row on a run-up, with its edge points, the composed lane and the lanes to use in words; and which lane row the card draws. |
 | `LaneChoices` | `:engine-mapbox`, `navigation/LaneChoices.kt` | The points with lanes ahead of the car, read from the route once for each step, and the run-up's one latch and row. The engine owns the one copy; the cameras and the maneuver card read from it. |
 | `GuidanceCamera` | `:engine-mapbox`, `map/camera/GuidanceCamera.kt` | What the map scene asks of the camera of any style: `requestFollowing`, `requestOverview`, `requestIdleFollow`, `requestIdle`, `onLocation`, `onRouteProgress` (with the lane choices ahead and the facts of the step's maneuver), `onPuckGlide`, `onGuidanceEnded`, `onJump`, `setLaneZoom`, `setVisible`, `diagnostics`, `requestSerial`, `destroy`, and a listener for its state, for who took the map, for each latch of the junction view and for a move asked again. |
@@ -527,7 +528,7 @@ While anything moves:
 | Lead of zoom and bearing ahead of their ramps (`rampLead`) | 1 τ | 1 τ |
 | Fastest zoom and bearing change (outside transitions) | 1 level/s, 60°/s | same |
 | Puck glide per fix | 1.1 s | the same puck |
-| Tilt following, over a junction, at a lane choice (`cruisePitch`, `maneuverPitch`, `lanePitch`) | 45°, 0°, 55° | 55° in every view (lanes step S1) |
+| Tilt following, over a junction, at a lane choice (`cruisePitch`, `maneuverPitch`, `lanePitch`) | 45°, 0°, 55° | 55° in every view (lanes step S1); over a junction 0° with Turns from above (lanes step S1b, `junctionPitch`) |
 | Zoom while following | the data source's fit of the road, at most 16.35 | the road view by speed (lanes step S1): 12 s of driving above the car, 150 to 600 m |
 
 The tilt and transition constants follow below; the car's own camera is in
@@ -720,11 +721,12 @@ otherwise.
 
 ### The car map (stage 2)
 
-Built in stage 2's step 1, its frames reworked in step 1b, its size and its own camera in lanes
-step S1 (DECISIONS 58). `CarNavigationMap` is a `MapboxCarMapObserver` (maps-androidauto 11.35.2),
-registered with `registerObserver(...).setGestureHandler(...)`. The style chosen in Settings applies
-to the car screen too (DECISIONS 26); this section covers Smooth follow, the default and the only
-style designed for the car, which since lanes step S1 is a camera of its own on the car
+Built in stage 2's step 1, its frames reworked in step 1b, its size and its own camera in lanes step
+S1 (DECISIONS 58), its turns from above in lanes step S1b (DECISIONS 59). `CarNavigationMap` is a
+`MapboxCarMapObserver` (maps-androidauto 11.35.2), registered with
+`registerObserver(...).setGestureHandler(...)`. The style chosen in Settings applies to the car
+screen too (DECISIONS 26); this section covers Smooth follow, the default and the only style
+designed for the car, which since lanes step S1 is a camera of its own on the car
 ([The car's own camera](#the-cars-own-camera-lanes-step-s1)). The rest of the car screen is in
 [STAGE-2.md](STAGE-2.md).
 
@@ -743,14 +745,16 @@ style designed for the car, which since lanes step S1 is a camera of its own on 
 - **The drive views on the car** (stage 1.1's second round): the car's scene has a `DriveCamera` of
   its own, and takes the drive view and Zoom in before turns stored on the phone (the Settings rows,
   and the phone's Overview button), so its map comes down before turns and goes back out after them
-  as the phone's does, with the junction views of the car's own camera, at 55° and fitted with the
-  car on its row ([The car's own camera](#the-cars-own-camera-lanes-step-s1)). It never counts down
-  and never moves by itself after Pan, a scroll or a zoom:
-  Recenter by itself is the phone's, and the car's map stays where the driver put it until Recenter
-  in its strip. The strip's buttons go through the drive views: the overview switch puts the car's
-  map in the Overview drive view for the drive, not stored; following and Recenter put it in the
-  Normal one and bring the car at once, also out of a hold. The car's screens and strips are
-  otherwise as before ([STAGE-2.md](STAGE-2.md)).
+  as the phone's does, with the junction views of the car's own camera: from above and framed by the
+  navigation SDK with Turns from above
+  ([The car's turns from above](#the-cars-turns-from-above-lanes-step-s1b)), at 55° and fitted with
+  the car on its row with it off ([The car's own camera](#the-cars-own-camera-lanes-step-s1)). It
+  never counts down and never moves by itself after Pan, a scroll or a zoom: Recenter by itself is
+  the phone's, and the car's map stays where the driver put it until Recenter in its strip. The
+  strip's buttons go through the drive views: the overview switch puts the car's map in the Overview
+  drive view for the drive, not stored; following and Recenter put it in the Normal one and bring
+  the car at once, also out of a hold. The car's screens and strips are otherwise as before
+  ([STAGE-2.md](STAGE-2.md)).
 - **Location:** as on the phone, the platform provider before Start (DECISIONS 14) and the engine's
   `GuidancePuck` during guidance.
 - **Padding:** following padding comes from the stable area, which does not change when the action
@@ -920,15 +924,20 @@ car map's size. The phone's camera is as it was: `CameraTuning.PHONE`, its paddi
 follow give the phone's rig scenarios the same numbers as before, line for line. The two Mapbox
 styles stay the navigation SDK's camera as it comes, on the car too
 (`CameraTuning.forMapboxStyles`: the phone's tilts and look-ahead, with the car's calmer centre).
+With **Settings → Car screen → Turns from above**, on unless turned off, the car's junction views
+are flat instead and framed by the navigation SDK
+([The car's turns from above](#the-cars-turns-from-above-lanes-step-s1b)): this section's junction
+views are the ones with it off; its road view and lanes' views hold either way.
 
-- **Anchored on the car** (`CameraTuning.anchored`, on the car alone). The car's data source never
-  frames a maneuver: its framing override is false on the car (`LaneZoomFrames.sdkFramesManeuver`)
-  and it gets no points of a junction or its bend. Its following frame is then the car's position on
-  the focal point at the bottom edge of the following box, so the camera centres on the drawn car
-  (`onPuck` 1) and the car stays on its row. The data source's fit of the road, the camera line's
-  `to`, is left aside and keeps its limit of 16.35, so the fit that fails at high zoom with the
-  focal point on the box's bottom edge never comes up. The camera works out the car's zoom itself,
-  once for each frame of the data source, and never hands it to the data source.
+- **Anchored on the car** (`CameraTuning.anchored`, on the car alone). With Turns from above off the
+  car's data source never frames a maneuver: its framing override is false on the car
+  (`LaneZoomFrames.sdkFramesManeuver`) and it gets no points of a junction or its bend. Its
+  following frame is then the car's position on the focal point at the bottom edge of the following
+  box, so the camera centres on the drawn car (`onPuck` 1) and the car stays on its row. The data
+  source's fit of the road, the camera line's `to`, is left aside and keeps its limit of 16.35, so
+  the fit that fails at high zoom with the focal point on the box's bottom edge never comes up. The
+  camera works out the car's zoom itself, once for each frame of the data source, and never hands it
+  to the data source.
 - **The road view by speed** (`RoadView`): the zoom at which 12 s of driving (`roadAheadSeconds`) at
   the highest speed of the last 10 s (`roadPeakSeconds`, a `PeakSpeed` of its own) lies between the
   car and the top of the following box, never less than 150 m (`roadMinAheadMeters`: a stop or a
@@ -940,8 +949,9 @@ styles stay the navigation SDK's camera as it comes, on the car too
   the drive's first position: a camera made anew during a drive, on a new surface or at a new size,
   keeps its zoom until then.
 - **One tilt** of 55° on the car's road, through junction views and at lane choices (`cruisePitch`,
-  `maneuverPitch` and `lanePitch`): the car's view is never flat and never tilts back and forth; it
-  only comes closer. The overview's tilt and the follow before Start are as before.
+  `maneuverPitch` and `lanePitch`): with Turns from above off the car's view is never flat and never
+  tilts back and forth; it only comes closer. The overview's tilt and the follow before Start are as
+  before.
 - **The car a quarter up its area** (the padding above): on the head unit profile below, the
   following box runs from 93 to 313 px of the surface's 400, with 220 px of road above the car
   where a third left 195.
@@ -962,11 +972,12 @@ styles stay the navigation SDK's camera as it comes, on the car too
   the run-up held to the gore and through its ramp), its floor of road in view at the car's tilt and
   with 8 s of driving (`laneLookAheadSeconds`; 12 s would leave it at the road view's zoom on the
   car's short box).
-- **Never out at a junction or a lane choice:** from the road view the car's zoom only goes in, and
-  after the junction, the gore or its ramp it comes back to the road view along the same curves.
-  Start, a new route, off route, a seek of the replay (`onJump`, which forgets the junction and its
-  fit with the speeds), the overview in and out, the zoom buttons and a pan that the driver ends
-  with Recenter are as before, the car's moves starting from where the camera is.
+- **Never out at a junction or a lane choice** (with Turns from above off; from above a junction
+  view may lie farther out): from the road view the car's zoom only goes in, and after the junction,
+  the gore or its ramp it comes back to the road view along the same curves. Start, a new route, off
+  route, a seek of the replay (`onJump`, which forgets the junction and its fit with the speeds),
+  the overview in and out, the zoom buttons and a pan that the driver ends with Recenter are as
+  before, the car's moves starting from where the camera is.
 - **The latch for the rest.** `ManeuverFocus` keeps its latch, windows and bridge as the drive views
   built them, for what they decide besides the frame: the close view (`CloseView`), which the swap
   of the app's lanes and the look's `CLOSE_VIEW` hold read, the bearing's lead and the lane plan's
@@ -996,8 +1007,80 @@ styles stay the navigation SDK's camera as it comes, on the car too
 - **Logged:** the car's camera line adds `roadAheadM` and `roadSpeed` (the road the road view shows
   above the car, in metres, and the speed it is worked out for, in m/s), `roadZoom` (its zoom) and,
   with Large, `junctionZoom` (the junction view's zoom, from the latch to past the junction; left
-  out outside one), beside the screen's `pixelRatio`. `to` stays the data source's frame, the SDK's
+  out outside one), beside the screen's `pixelRatio`, and while a junction view is latched
+  `junctionView` (`tilted` with Turns from above off). `to` stays the data source's frame, the SDK's
   fit of the road, which the car's zoom leaves aside.
+
+#### The car's turns from above (lanes step S1b)
+
+**Settings → Car screen → Turns from above**, after Car map size, stored under
+`car_turns_from_above`, on unless turned off (DECISIONS 59): with Smooth follow the car's junction
+views are flat again, as on the phone and as the car had them before lanes step S1, with either lane
+zoom. The phone's camera and the two Mapbox styles do not read it, and the car's screen has no
+control of it.
+
+- **A state of the car's camera** (`JunctionView.ABOVE`, `JunctionView.of(anchored,
+  turnsFromAbove)`): `CameraTuning.CAR` keeps lanes step S1's numbers, and the switch reaches Smooth
+  follow through the car map and its scene (`CarMapRenderer.setTurnsFromAbove`,
+  `MapScene.setTurnsFromAbove`, `GuidanceCamera.setTurnsFromAbove`), for the camera there is and
+  every later one.
+- **The tilt** over a junction is straight down from above (`CameraTuning.junctionPitch`: the
+  phone's 0°). The junction view of `ManeuverFocus`, with its latch, its windows by speed and kind,
+  the bridge between close turns and the hold after the maneuver as the drive views built them, goes
+  down from 55° over the 3.5 s before its framing distance and back up over 3 s after the hold.
+- **The frame, as before lanes step S1:** from the framing distance to the end of the step the data
+  source frames the maneuver through the framing override, as the camera decided
+  (`LaneZoomFrames.sdkFramesManeuver` for a view from above), with Large's limits (the raised upper
+  limit while it frames, 30 m past the maneuver point, the road to past its bend from
+  `JunctionPoints`, and the planner's 28 dp lane at the closest), and with Default the SDK's own
+  upper limit of 16.35 and 100 m past. The car leaves its row inside that frame (`onPuck` 0), as it
+  did then.
+- **The way down,** from the latch to the framing distance, where the data source still frames the
+  road with the car on its row: the camera holds the junction above the car with its own fit
+  (`CarJunction`: the maneuver point and the road past it, at the tilt the view goes down by), and
+  works out the road view at that tilt too (`RoadView.pitch`: the frame's tilt while the focus's
+  goal is 1). The zoom goes from the road view to the junction's fit along the focus
+  (`ZoomPlanner.aboveTarget`), and the data source's frame of the maneuver takes the fit's place on
+  the same ramp, at about the same zoom. Unlike the tilted views this may lie farther out than the
+  road view: at x1.5 at 30 mph from 17.71 to about 15.7.
+- **The tilt waits for the zoom.** The zoom goes out no faster than 1 level a second, behind its
+  spring. Where it lags the tilt, the tilt goes no lower than keeps the junction's maneuver point 4
+  px below the screen's top at the zoom, the centre, the bearing and the padding the camera has
+  (`LookAhead.pitchFor`): within the mode only, for the junction the view went down for (not one the
+  bridge latched while the view was down already), and it is flat by the end of the descent. On the
+  rig it held the tilt up to about 9° higher for a moment at 20 and 30 mph, and not at all at 45;
+  without it the turn went up to 7 px past the screen's top.
+- **After the junction** the hold keeps the junction's zoom; as the view comes back up the zoom is
+  let go to the road view at the car's tilt, and between close turns, with the view down, to the
+  road view at the flat tilt, which shows the road to the next turn.
+- **Unchanged:** the road view by speed at 55° with the car anchored, the lanes' close views at
+  freeway lane choices and run-ups (tilted at 55°, anchored), the overview, the follow before Start,
+  the zoom buttons and the gestures. With the switch off the junction views are lanes step S1's,
+  line for line ([The car's own camera](#the-cars-own-camera-lanes-step-s1)).
+- **A change applies at once:** the data source is told the new kind's tilt, framing, limit and
+  bend's points with the last progress and computes its frame again. During a junction view
+  (latched, held or on its way back up, `ManeuverFocus.inView`) the camera goes over to the other
+  kind in one eased move, as for a change of mode; elsewhere the next junction shows it.
+- **What it comes to,** on the profile above at x1.5 with the routing card, a right-angle turn at 30
+  mph braking to 12 mph at it, by a rig of the real camera (the zoom, and the tilt):
+
+  | | 400 m | 200 m | 180 m | 160 m | 120 m | 40 m | 5 m | 30 m past | 60 m past | 90 m past |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | From above, Large | 17.71 (55°) | 17.26 (47°) | 16.04 (13°) | 15.70 (0°) | 16.03 (0°) | 17.25 (0°) | 18.75 (0°) | 18.89 (0°) | 18.27 (47°) | 17.72 (55°) |
+  | From above, Default | 17.71 (55°) | 17.26 (47°) | 16.04 (13°) | 15.70 (0°) | 16.03 (0°) | 16.35 (0°) | 16.35 (0°) | 16.35 (0°) | 17.08 (47°) | 17.69 (55°) |
+  | Tilted (off), Large | 17.71 (55°) | 17.71 (55°) | 17.71 (55°) | 17.71 (55°) | 17.87 (55°) | 17.96 (55°) | 17.96 (55°) | 17.96 (55°) | 17.82 (55°) | 17.71 (55°) |
+  | Before lanes step S1, Large | 15.34 (45°) | 16.03 (38°) | 15.54 (7°) | 15.51 (0°) | 15.86 (0°) | 17.08 (0°) | 18.68 (0°) | 18.89 (0°) | 17.67 (38°) | 15.45 (45°) |
+
+  The car leaves its row by up to about 29 dp as the frame begins and about 41 dp near the turn, and
+  the turn stays on the screen from the latch on. Two turns 300 m apart stay flat from the first
+  descent through the second turn; the second shows on the screen once the first's hold and the
+  release of its zoom are over, about 6 to 7 s past the first. A freeway exit keeps the run-up's
+  close view tilted through the gore and down the ramp, and the turn at the ramp's end is flat (15.6
+  at 150 m before it, 16.7 at 50 m).
+- **Logged:** the car's camera line has `junctionView` (`above` or `tilted`) while a junction view
+  is latched, from the latch to the end of its step; from above `junctionZoom` with either lane
+  zoom, `keep` with Default too, `frames` true from the framing distance, and `roadZoom` at the tilt
+  the view goes down by. The `settings` line has `car_turns_from_above`.
 
 ### Logging
 
@@ -1061,16 +1144,17 @@ Smooth follow adds its controller's own numbers:
 | `focusKind` | what the step's own maneuver is to the view: `NONE`, `TURN` or `COMPLEX` | |
 | `framingM` | how far before its junction the frame begins, fixed when the view latched | 240 to 320 before a turn, 280 to 400 before a complex junction, less where the screen is short |
 | `frameCapM` | the longest approach the frame fits on this screen at the zoom the view holds: the road's, or with Large the lanes' close view's while that holds | |
-| `frames` | whether the junction is framed now, latched to the step's end; the camera tells the data source, on the car false, as the car's camera fits the junction itself | |
+| `frames` | whether the junction is framed now, latched to the step's end; the camera tells the data source; on the car only with Turns from above, as the car's tilted junction views are fitted by its camera | |
 | `latchedBy` | how the step latched the tilt: `window`, `bridge` (as the hold after a turn right before ended) or `ahead` (past a step that goes straight on) | |
-| `keep` | with Large: how much of the last junction's close zoom is still kept, 0 to 1 | 1 through the hold after a turn; falling over 3 s while the view stays down for a turn not framed yet |
+| `keep` | with Large, and on the car with Turns from above: how much of the last junction's close zoom is still kept, 0 to 1 | 1 through the hold after a turn; falling over 3 s while the view stays down for a turn not framed yet |
 | `zoomTarget` | the zoom the camera is going to | |
 | `bearingError` | target bearing minus camera bearing | within a few degrees |
-| `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview; on the car 1 at junctions too |
+| `onPuck` | the on-puck weight | 1 on the road, 0 in maneuver framing and overview; on the car 1 at its tilted junction views too, 0 in the frame of a junction from above |
 | `laneZoom` | the Lane zoom setting: `DEFAULT` or `LARGE` | |
 | `zoomPlan` | what sets the zoom with Large: `ROAD`, `JUNCTION`, `AFTER_JUNCTION` or `LANES`; left out in the overview | `ROAD` on most seconds, and always with Default |
-| `roadAheadM`, `roadSpeed`, `roadZoom` | the car only: the road the road view shows above the car, in metres; the speed it is worked out for, the highest of the last 10 s, in m/s; and the road view's zoom | 150 standing, 12 s of driving above 45 km/h, at most 600 |
-| `junctionZoom` | the car with Large: the zoom of its own fit of the junction, from the latch to past the junction; left out outside a junction view | up to the 28 dp lane's zoom |
+| `roadAheadM`, `roadSpeed`, `roadZoom` | the car only: the road the road view shows above the car, in metres; the speed it is worked out for, the highest of the last 10 s, in m/s; and the road view's zoom, with Turns from above at the tilt the view goes down by while a junction view goes down or stays down | 150 standing, 12 s of driving above 45 km/h, at most 600 |
+| `junctionZoom` | the car with Large, and with Turns from above with either lane zoom: the zoom of its junction view (its own fit, or from above the frame's), from the latch to past the junction; left out outside a junction view | up to the 28 dp lane's zoom; from above with Default up to 16.35 |
+| `junctionView` | the car only, while a junction view is latched (from the latch to the end of its step): `above` with Turns from above, `tilted` without | |
 | `laneFocus`, `laneGoal` | the lane choices' schedule: how far the view is in for one, 0 to 1, and where that is going. It runs with Default too, without moving the zoom | 0 on most freeway seconds |
 | `laneAheadM` | metres to the nearest lane choice ahead that counts; left out when there is none on the step | |
 | `laneChoice` | the lane choice that holds the view: `key`, `lanes`, `usable`, `atManeuver`; left out on the road | |
@@ -1422,6 +1506,10 @@ For the Large lane zoom and Mapbox's lane details:
 - **The tilt of 55° draws more map** far ahead, about 1.3 km to the screen's top against 0.5 km at
   45°: more data and frame time, which the next drive measures (the camera line's `render` and the
   phone's data use).
+- **The car's view from above begins farther out** than its road view (lanes step S1b): about 2
+  levels at 30 mph at x1.5 within the 3.5 s of the tilt's descent, the tilt waiting for the zoom by
+  up to about 9° for a moment. Whether that reads well before a turn, and whether the switch should
+  be off by default, the owner's drive says ([DRIVES.md](DRIVES.md), checks 139 to 144).
 - **Rows without words.** Where lanes are added between two edge points, or the lane data
   contradicts itself, a run-up's row lights the careful lane and has no words. How often, the
   `lane_row` lines count (`odd`).
@@ -1999,7 +2087,9 @@ above the car at the highest speed of the last 10 s (`LookAhead`, `PeakSpeed`): 
 up the view goes out at once, and it comes in again only once the speed has stayed lower for 10 s.
 Without a speed, before the padding is set and before the map is laid out, there is no such floor.
 On the car's screen, since lanes step S1, the floor is 8 s of road and the tilt 55° in every view,
-over junctions too ([The car's own camera](#the-cars-own-camera-lanes-step-s1)).
+over junctions too ([The car's own camera](#the-cars-own-camera-lanes-step-s1)), but straight down
+over junctions with Turns from above, on unless turned off
+([The car's turns from above](#the-cars-turns-from-above-lanes-step-s1b)).
 
 The road ahead comes from a perspective model of the map's camera: a vertical field of view of
 36.87°, the camera 1.5 map heights from the screen, the car on the bottom edge of the padding, and
@@ -2747,7 +2837,7 @@ own ([The car's own camera](#the-cars-own-camera-lanes-step-s1)).
 | A run-up reaches this far beyond the close view's window (`runUpSeconds`, `runUpMinMeters`) | 60 s of driving, at least 1,500 m |
 | A run-up that ended this recently is taken up again on its reach alone (`runUpResumeSeconds`) | 3 s |
 | Past the gore the run-up holds through the ramp to a point the lane plan constrains this near, at the ramp's planning speed (`rampBridgeSeconds`; `LanePlanner.RAMP_BRIDGE_SECONDS` the same) | 15 s of driving |
-| The close view's tilt with Large, Smooth follow (`lanePitch`) | 55° (on the road `cruisePitch`, 45°; on the car 55° in every view) |
+| The close view's tilt with Large, Smooth follow (`lanePitch`) | 55° (on the road `cruisePitch`, 45°; on the car 55° in every view, over a junction 0° with Turns from above) |
 | Road the lane zoom keeps in view above the car (`laneLookAheadSeconds`), at the highest speed of a time back (`laneCapSpeedSeconds`) | 12 s of driving (8 s on the car), at the highest speed of the last 10 s |
 
 Outside `CameraTuning`: a run-up begins no later than 6 s of driving before the lane plan's first
@@ -3108,9 +3198,14 @@ With the 800×480 and 1280×720 profiles, run the simulated drive with the car m
 - Lanes step S1, on an 800 × 400 profile: a new car map size while the map shows draws the car's map
   again within about a second (a `car_surface` line with `event` `size` and `outcome` `remade`, no
   `car_error`, never a black screen), and the phone keeps its list of the turns; in a simulated
-  drive the screen against `aheadM` and `roadAheadM`, `pitch` 55 throughout, `onPuck` 1 through the
-  junction views with and without the routing card, and a new surface during the drive keeping its
-  zoom until the drive's first position.
+  drive the screen against `aheadM` and `roadAheadM`, with Turns from above off `pitch` 55
+  throughout and `onPuck` 1 through the junction views with and without the routing card, and a new
+  surface during the drive keeping its zoom until the drive's first position.
+- Lanes step S1b, the same profile with Turns from above on: the junction views flat (`pitch` 0 from
+  the end of the descent through the hold, `junctionView` `above`, `frames` true from the framing
+  distance, `onPuck` 0 in the frame), the turn on the screen from the latch on, the road view and
+  the lanes' views at 55° between them; the switch turned off and on during a junction view moving
+  the camera once each time; off, the checks of lanes step S1.
 
 Then lock the phone, and later leave the app with Home: the car's map and its puck keep moving.
 `frame_clock` lines say when the car's clock went to its timer and came back, the car's camera lines

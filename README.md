@@ -187,8 +187,13 @@ x1, the size the car asks for, x1.25, x1.5, x1.75 or x2, and x1.5 unless chosen 
 labels, the route line and the car grow with it; the Mapbox logo and the attribution do not. A new
 size shows on the car's screen at once. With Smooth follow the car's map follows the car tilted and
 by its speed: close in town and at a stop, farther out as the car speeds up, back in about 10 s
-after it slows down; with **Lane zoom** at Large closer before turns and lane choices, never farther
-out there. The phone's own map follows as before.
+after it slows down; with **Lane zoom** at Large closer before lane choices, never farther out
+there. Before turns and at junctions it looks straight down, as the phone's map does, with
+**Settings → Car screen → Turns from above**, on unless turned off: the view tilts down onto the
+turn, framed with the road past it and farther out than the road view at first, and back up after
+it, with either lane zoom. Off, it stays tilted there too, closer with Large and never farther out.
+The switch is in the phone's Settings only; a change shows at the next turn, or in one move during
+one. The phone's own map follows as before.
 
 Day and night on the car's map follow the phone: the same look as on the phone, Auto by the sun or
 Day or Night from **Settings → Day and night**, changing at the same moment on both screens. The

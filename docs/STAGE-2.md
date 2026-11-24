@@ -63,6 +63,7 @@ Versions: Car App Library 1.8.0-rc01; Mapbox Maps 11.35.2 with maps-androidauto 
 | No map on the phone while the car shows one during a drive: the list of the maneuvers ahead instead, the map one tap away | [Step 1c (built)](#step-1c-built) | 51 |
 | The car's map takes the phone's drive view and Zoom in before turns; no count and no move by itself after Pan; the bar's two buttons are the phone's | [The drive views on the car](#the-drive-views-on-the-car) | 57 |
 | The car's map of its own: Settings' car map size, x1.5 when never chosen, at once; Smooth follow on the car closer and tilted by the car's speed; no car bar | [The car's map of its own](#the-cars-map-of-its-own-lanes-step-s1-built) | 58 |
+| The car's turns from above: a switch in Settings only, on when never chosen, with either lane zoom; flat and framed as before lanes step S1 at junctions, the road and the lanes' views tilted | [The car's turns from above](#the-cars-turns-from-above-lanes-step-s1b-built) | 59 |
 | Turn-by-turn notifications on the car screen while another app is in front | [Turn-by-turn notifications in the car](#turn-by-turn-notifications-in-the-car) | ROADMAP |
 | Starting a drive by voice comes later | No `NAVIGATE` intent filter in this stage | ROADMAP |
 
@@ -557,9 +558,10 @@ car bar out on both screens and moves Mapbox to Navigation 3.35.2 with Maps 11.3
   not told that the surface went and came, so the phone keeps its list of the turns and its frame
   cap. Without a surface the next one takes the size.
 - **The car's own camera** ([CAMERA.md](CAMERA.md), The car's own camera): Smooth follow on the car
-  anchored on the car, the navigation SDK framing no maneuver there; its zoom the road view by
-  speed, 12 s of driving above the car at the highest speed of the last 10 s, from 150 to 600 m; one
-  tilt of 55° on the road, through junction views and at lane choices; the car a quarter up its area
+  anchored on the car, the navigation SDK framing no maneuver there (since lanes step S1b, with
+  Turns from above off); its zoom the road view by speed, 12 s of driving above the car at the
+  highest speed of the last 10 s, from 150 to 600 m; one tilt of 55° on the road, through junction
+  views (with Turns from above off) and at lane choices; the car a quarter up its area
   (`CarAreas.FOLLOWING_BOTTOM_SHARE`); with Large the junction's own fit from the latch and the
   lanes' close view, never out from the road view there. The two Mapbox styles stay the navigation
   SDK's camera as it comes, on the car too (`CameraTuning.forMapboxStyles`).
@@ -602,6 +604,57 @@ car bar out on both screens and moves Mapbox to Navigation 3.35.2 with Maps 11.3
   `roadAheadM`.
 - What x2 costs in labels that no longer fit, and in frames (`render` in the car's camera lines).
 - The checks for the owner are in [DRIVES.md](DRIVES.md), checks 130 to 138.
+
+## The car's turns from above (lanes step S1b, built)
+
+Driving lanes step S1's build, the owner found turns hard to read in the car's tilted view, and
+asked for the view from above before turns, for a driver who finds junctions hard, with Large and
+with Default, the control in Settings only. Lanes step S1b brings the flat, framed junction views
+back to the car's map behind a switch, on unless turned off (DECISIONS 59). The phone's camera is
+unchanged.
+
+### What it has
+
+- **Settings → Car screen → Turns from above**, after Car map size: a switch with the note "Before
+  turns and at junctions the car's map looks straight down; off, it stays tilted." Stored under
+  `car_turns_from_above` in the settings file the backup already takes, on when never chosen and
+  never written until changed; a `settings` line at each change. The row is drawn through the shared
+  rows with the look's tokens, by day and at night. `AppGraph` hands the stored switch to the car's
+  sessions (`CarMapSettings.turnsFromAbove`), each session follows it to its car map
+  (`CarMapRenderer.setTurnsFromAbove`), which keeps it for every later surface and hands it to the
+  scene there is (`MapScene.setTurnsFromAbove`) and its camera.
+- **The car's junction views from above,** with Smooth follow and either lane zoom
+  ([CAMERA.md](CAMERA.md), The car's turns from above): the tilt goes from 55° down to straight
+  above over the 3.5 s before the junction's framing distance and back up after the hold, with the
+  latch, the windows, the bridge between close turns and the hold as the drive views built them;
+  from the framing distance the navigation SDK frames the maneuver through the framing override,
+  with Large's limits and with Default the SDK's own, the car free to leave its row in that frame,
+  as before lanes step S1. On the way down the camera holds the junction above the car with its own
+  fit at the tilt it goes down by, so the view goes out from the tilted road view to the flat frame
+  in one move, farther out than the road view; where the zoom lags the tilt, the tilt waits for it,
+  so the turn stays on the screen. A change during a junction view is one eased move to the other
+  kind of view.
+- **Everything else as lanes step S1 built it:** the road view by speed at 55°, the lanes' close
+  views at freeway lane choices and run-ups, the overview, the follow before Start; with the switch
+  off the junction views of lanes step S1, line for line. The two Mapbox styles and the phone's
+  camera do not read the switch.
+- **Lines**, numbers and words only: the car's camera line has `junctionView` (`above` or `tilted`)
+  while a junction view is latched, and from above `junctionZoom` with either lane zoom; the
+  `settings` line has the key `car_turns_from_above`.
+
+### Not in this step
+
+- A control on the car's screen or in the phone's guidance bar (the owner: Settings only); the
+  phone's camera; the lanes' drawing, the card and the car's lanes image, which lanes step S2 and
+  later rebuild.
+
+### Unverified
+
+- How the view from above reads in a car: it begins about 2 levels farther out than the road view at
+  30 mph at x1.5 and comes in to the turn, and the tilt waits for the zoom by up to about 9° for a
+  moment; whether the owner wants the switch off by default. The numbers come from a rig of the real
+  camera on the 800 × 400 profile, not from the Desktop Head Unit or a car.
+- The checks for the owner are in [DRIVES.md](DRIVES.md), checks 139 to 144.
 
 ## Modules and dependencies
 
@@ -949,7 +1002,9 @@ Other notes:
   `CameraTuning.CAR`, its own data source and the shared `GuidancePuck`. The style chosen in Settings
   applies to the car (DECISIONS 26); Smooth follow is the only style designed for the car, and since
   lanes step S1 a camera of its own there: anchored on the car, its zoom by the car's speed and one
-  tilt of 55° (CAMERA.md, The car's own camera; DECISIONS 58).
+  tilt of 55° (CAMERA.md, The car's own camera; DECISIONS 58), its junction views flat and framed by
+  the navigation SDK with Turns from above, since lanes step S1b (CAMERA.md, The car's turns from
+  above; DECISIONS 59).
 - Pan and zoom reach the app only when the map action strip contains `Action.PAN`. Touch screens do
   not show the pan button. A double-tap arrives as a scale, and rotary nudges in pan mode arrive as
   a scroll. Some head units never send a fling or a scale, so the strip also has zoom buttons.
@@ -967,9 +1022,10 @@ DECISIONS 57):
 - **`DriveCamera` on the car.** Every car surface's `MapScene` has a `DriveCamera` of its own, so
   the car's map has the Overview drive view and the earlier junction view as the phone's does, by
   `CameraTuning.CAR` and the car's own padding and areas; since lanes step S1 the car's own camera
-  fits the junction view itself, at 55° and with the car on its row. It takes the drive view and
-  **Zoom in before turns** stored on the phone (the Settings rows and the phone's Overview button),
-  on the surface there is and on every later one.
+  fits the junction view itself, at 55° and with the car on its row, and since lanes step S1b, with
+  Turns from above, the junction view is flat and framed by the navigation SDK. It takes the drive
+  view and **Zoom in before turns** stored on the phone (the Settings rows and the phone's Overview
+  button), on the surface there is and on every later one.
 - **No count, and no move by itself after Pan.** Recenter by itself, its count and the two buttons
   of the guidance bar are the phone's: the car's map keeps Recenter by itself at Off, so after Pan, a
   scroll or a zoom it stays where the driver put it until Recenter in its strip.
