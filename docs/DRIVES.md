@@ -1603,11 +1603,12 @@ hold's `holdS` every second:
     about one write every 10 s.
 
 The car's map of its own, lanes step S1 ([DECISIONS.md](DECISIONS.md), 58; [CAMERA.md](CAMERA.md),
-The car map's size and The car's own camera): nothing has run on the car or the Desktop Head Unit
-yet. With the car's screen, Smooth follow and the car map size at x1.5 unless a check says
-otherwise; screenshots of the car's screen from a passenger or a parked car, never from the driver.
-Every `car_surface` line carries `mapSize` and `pixelRatio`, and the car's camera line `pixelRatio`,
-`roadAheadM`, `roadSpeed`, `roadZoom` and, with Large, `junctionZoom`:
+The car map's size and The car's own camera): on the Desktop Head Unit, in a simulated drive, the
+sizes, the tilt, the road view, the close views and the car without a bar showed as below; nothing
+has run in a car yet. With the car's screen, Smooth follow and the car map size at x1.5 unless a
+check says otherwise; screenshots of the car's screen from a passenger or a parked car, never from
+the driver. Every `car_surface` line carries `mapSize` and `pixelRatio`, and the car's camera line
+`pixelRatio`, `roadAheadM`, `roadSpeed`, `roadZoom` and, with Large, `junctionZoom`:
 
 130. **The size row.** Parked, before Start: **Settings → Car screen → Car map size**, by day and at
     night, at the phone's own width and with the font size at 1.3: x1, x1.25, x1.5, x1.75 and x2,

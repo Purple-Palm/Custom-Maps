@@ -593,9 +593,9 @@ car bar out on both screens and moves Mapbox to Navigation 3.35.2 with Maps 11.3
 
 ### Unverified
 
-- The remake on the Desktop Head Unit and in a car: a `remade` line with no `car_error`, the car's
-  map back in about a second and never black, the phone keeping its list; the puck's scale
-  expression taken by the location component.
+- The remake in a car. On the Desktop Head Unit it worked: three `remade` lines with no
+  `car_error`, the car's map back within about a second and never black, the puck's scale
+  expression taken by the location component; the phone keeping its list is still to see.
 - The camera's numbers, starting values from a model of the 800 × 400 screen and a rig of the real
   camera: whether the road view by speed, the junction views with and without the routing card and
   the lanes' close view read right from the driver's seat; the screen against `aheadM` and
