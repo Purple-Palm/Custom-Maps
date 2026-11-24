@@ -1660,8 +1660,9 @@ the driver. Every `car_surface` line carries `mapSize` and `pixelRatio`, and the
     `pixelRatio`.
 
 The car's turns from above, lanes step S1b ([DECISIONS.md](DECISIONS.md), 59;
-[CAMERA.md](CAMERA.md), The car's turns from above): it has run on a rig of the real camera only,
-not on the Desktop Head Unit or in a car. With the car's screen, Smooth follow and the car map size
+[CAMERA.md](CAMERA.md), The car's turns from above): on the Desktop Head Unit, in simulated drives,
+the row, the turns from above with Large and with Default, the switch off and a freeway exit showed
+as below; nothing has run in a car yet. With the car's screen, Smooth follow and the car map size
 at x1.5 unless a check says otherwise; screenshots of the car's screen from a passenger or a parked
 car, never from the driver. With the switch on, as on a phone that never chose, the turns of checks
 134 and 135 are flat (checks 140 and 141), and checks 134 and 135, check 133's `pitch` 55 all along

@@ -653,7 +653,8 @@ unchanged.
 - How the view from above reads in a car: it begins about 2 levels farther out than the road view at
   30 mph at x1.5 and comes in to the turn, and the tilt waits for the zoom by up to about 9° for a
   moment; whether the owner wants the switch off by default. The numbers come from a rig of the real
-  camera on the 800 × 400 profile, not from the Desktop Head Unit or a car.
+  camera on the 800 × 400 profile; on the Desktop Head Unit, in simulated drives, the views went as
+  planned (DECISIONS 59), not yet in a car.
 - The checks for the owner are in [DRIVES.md](DRIVES.md), checks 139 to 144.
 
 ## Modules and dependencies
