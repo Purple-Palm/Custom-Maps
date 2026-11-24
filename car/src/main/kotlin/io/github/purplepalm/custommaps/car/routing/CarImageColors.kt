@@ -7,7 +7,7 @@ data class CarInk(val fill: Int, val edge: Int)
 
 /** The colours of the car's maneuver arrows and lane rows in one look. */
 data class CarImageColors(
-    /** The maneuver to make now and the lanes to take: the route's amber. */
+    /** The maneuver to make now and the tiles of the lanes to take: the route's amber. */
     val lit: CarInk,
     /** Every other lane arrow. */
     val dim: CarInk,
@@ -52,7 +52,7 @@ data class CarImageColors(
             onTile = CarInk(ON_AMBER, edge = ON_AMBER),
         )
 
-        /** How wide the edge round every arrow and bar is, in dp of the car's screen, at most. */
+        /** How wide the edge round every arrow and tile is, in dp of the car's screen, at most. */
         const val EDGE_DP = 1.5f
 
         /** And at most this share of the glyph's side, so that the narrow lanes of a wide road keep their arrows. */

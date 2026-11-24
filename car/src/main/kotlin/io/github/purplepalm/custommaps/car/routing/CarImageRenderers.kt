@@ -89,10 +89,11 @@ class ManeuverIconRenderer(private val density: () -> Float, private val log: De
 
 /**
  * The lanes image of the car's routing card: the lane row the phone's card shows at that moment,
- * the same lanes from the left with the same lanes to take ([GlyphShapes.isLaneToTake]: the tile
- * and the bar under it), lanes kept for car pools and buses dim as on the phone. It is the row
- * alone, without the card's words for it or a lane choice's distance: the distance changes with every
- * update, which would draw the image again each time, and the host shows the image too small for words.
+ * the same lanes from the left with the same lanes to take ([GlyphShapes.isLaneToTake]: the amber
+ * tile with its arrows in dark ink), lanes kept for car pools and buses dim as on the phone. It is
+ * the row alone, without the card's words for it or a lane choice's distance: the distance changes
+ * with every update, which would draw the image again each time, and the host shows the image too
+ * small for words.
  *
  * Drawn once for each lane row, look and density on a transparent image of [LanesImageLayout.WIDTH_DP]
  * by [LanesImageLayout.HEIGHT_DP] dp ([LanesImageLayout]), and kept in a small cache, so a progress
@@ -141,7 +142,6 @@ class LanesImageRenderer(private val density: () -> Float, private val log: Debu
             val parts = GlyphShapes.lane(lane).map { it.part to inkOf(it.ink, colors) }
             val edge = CarImageColors.edgePx(key.density, box.width.toFloat())
             GlyphPainter.paint(canvas, parts, box, edge)
-            if (GlyphShapes.isLaneToTake(lane)) GlyphPainter.bar(canvas, layout.bar(index), colors.lit, edge)
         }
         return CarIcon.Builder(IconCompat.createWithBitmap(bitmap)).build()
     }
@@ -190,17 +190,6 @@ private object GlyphPainter {
         for ((part, ink) in parts) if (ink != null) draw(canvas, part, ink.edge, place, grow = edge)
         for ((part, ink) in parts) if (ink != null) draw(canvas, part, ink.fill, place, grow = 0f)
         for ((part, ink) in parts) if (ink == null) draw(canvas, part, Color.TRANSPARENT, place, grow = 0f, cut = true)
-    }
-
-    /** A bar under a lane to take: a short line with round ends, with its edge. */
-    fun bar(canvas: Canvas, box: PixelBox, ink: CarInk, edge: Float) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        val rect = RectF(box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat())
-        paint.color = ink.edge
-        val outer = RectF(rect.left - edge, rect.top - edge, rect.right + edge, rect.bottom + edge)
-        canvas.drawRoundRect(outer, outer.height() / 2, outer.height() / 2, paint)
-        paint.color = ink.fill
-        canvas.drawRoundRect(rect, rect.height() / 2, rect.height() / 2, paint)
     }
 
     /** Where a glyph's square lies: its top left corner and its side, in pixels. */
