@@ -139,7 +139,7 @@ class LanesImageRenderer(private val density: () -> Float, private val log: Debu
         val colors = CarImageColors.of(key.look)
         lanes.forEachIndexed { index, lane ->
             val box = layout.arrows(index)
-            val parts = GlyphShapes.lane(lane).map { it.part to inkOf(it.ink, colors) }
+            val parts = GlyphShapes.lane(lane).map { it.part to laneInk(it.ink, colors) }
             val edge = CarImageColors.edgePx(key.density, box.width.toFloat())
             GlyphPainter.paint(canvas, parts, box, edge)
         }
@@ -149,18 +149,19 @@ class LanesImageRenderer(private val density: () -> Float, private val log: Debu
     private companion object {
         /** The rows of a run-up, a lane choice and the maneuver after it, in both looks. */
         const val CAPACITY = 6
-
-        /**
-         * The car's ink for [ink]: amber for the route's arrows and for a tile, the dark ink of icons on amber for a mark on
-         * a tile, null for a part cut out of what is drawn under it, the hollow of an outline lane.
-         */
-        fun inkOf(ink: GlyphInk, colors: CarImageColors): CarInk? = when (ink) {
-            GlyphInk.LIT, GlyphInk.TILE -> colors.lit
-            GlyphInk.DIM -> colors.dim
-            GlyphInk.ON_TILE -> colors.onTile
-            GlyphInk.HOLE -> null
-        }
     }
+}
+
+/**
+ * The car's colour in [colors] for a part of a lane in [ink] ([LanesImageRenderer]): amber for the route's arrows and for
+ * a tile, the dark ink of icons on amber for a mark on a tile, the grey of every other arrow, and null for a part cut out
+ * of what is drawn under it, the hollow of an outline lane.
+ */
+internal fun laneInk(ink: GlyphInk, colors: CarImageColors): CarInk? = when (ink) {
+    GlyphInk.LIT, GlyphInk.TILE -> colors.lit
+    GlyphInk.DIM -> colors.dim
+    GlyphInk.ON_TILE -> colors.onTile
+    GlyphInk.HOLE -> null
 }
 
 /** The keys that failed to draw, the newest [capacity] of them. */

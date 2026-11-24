@@ -1,5 +1,6 @@
 package io.github.purplepalm.custommaps.car.routing
 
+import io.github.purplepalm.custommaps.nav.glyph.GlyphInk
 import io.github.purplepalm.custommaps.nav.look.Look
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -7,7 +8,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
 
-/** The colours of the car's own images, their edges, and the cache that draws each image once. */
+/** The colours of the car's own images, the lanes' inks in them, their edges, and the cache that draws each image once. */
 class CarImagesTest {
 
     @Test
@@ -32,6 +33,23 @@ class CarImagesTest {
         // The phone's onAccent, whatever card the host draws behind the image; the tile's amber covers the edge.
         for (look in Look.entries) {
             assertEquals(CarInk(0xFF1C1300.toInt(), 0xFF1C1300.toInt()), CarImageColors.of(look).onTile, "$look")
+        }
+    }
+
+    @Test
+    fun `a lane to take is an amber tile with its marks in the dark ink, every other arrow its own colour, in both looks`() {
+        for (look in Look.entries) {
+            val colors = CarImageColors.of(look)
+            assertEquals(colors.lit, laneInk(GlyphInk.TILE, colors), "$look")
+            assertEquals(colors.onTile, laneInk(GlyphInk.ON_TILE, colors), "$look")
+            // A bright tile with dark marks on it, never the other way round, on whatever card the host draws.
+            assertEquals(0xFFF5A524.toInt(), laneInk(GlyphInk.TILE, colors)?.fill, "$look")
+            assertEquals(0xFF1C1300.toInt(), laneInk(GlyphInk.ON_TILE, colors)?.fill, "$look")
+            // A car-pool lane lit by colour alone, and the lanes not to take.
+            assertEquals(colors.lit, laneInk(GlyphInk.LIT, colors), "$look")
+            assertEquals(colors.dim, laneInk(GlyphInk.DIM, colors), "$look")
+            // The hollow of a lane still to come is cut out to the image's transparent ground.
+            assertNull(laneInk(GlyphInk.HOLE, colors), "$look")
         }
     }
 
