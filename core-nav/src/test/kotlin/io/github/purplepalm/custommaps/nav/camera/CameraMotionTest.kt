@@ -803,6 +803,7 @@ class CameraMotionTest {
             var latchedAt = Double.NaN
             var latchedMeters = Double.NaN
             var lastAbove = Double.NaN
+            var risingFrames = 0
             var t = phase
             // An update a second and sixty frames a second for a minute, from 500 m before the turn to 300 m past it.
             for (frame in 0 until 60 * 60) {
@@ -827,14 +828,21 @@ class CameraMotionTest {
                     toTurn >= 0.0 && t >= latchedAt + car.descentSeconds -> assertEquals(0.0, above, 1e-12, "flat once the descent ended, at $toTurn m")
                     toTurn >= 0.0 -> assertTrue(above <= lastAbove + 1e-12 && (above < 55.0 || t == latchedAt), "down on the way in, at $toTurn m: $above")
                 }
-                // A change of the view moves the camera from the latch until the view is back up.
+                // A change of the view moves the camera from the latch until the view is back up: on the way in with the
+                // goal, and past the turn also while the view comes back up with the goal 0 already.
                 if (toTurn >= 0.0) assertEquals(focus.goal == 1.0, focus.inView(t), "at $toTurn m")
+                if (toTurn < 0.0 && focus.goal == 0.0 && focus.focusAt(t) > 0.0) {
+                    assertTrue(focus.inView(t), "coming back up, $toTurn m")
+                    risingFrames += 1
+                }
                 lastAbove = above
             }
             // Latched at its window, 3.5 s of driving before the framing distance, and up again by 300 m past the turn.
             assertTrue(latchedMeters <= window && latchedMeters > window - v, "latched at $latchedMeters m, the window $window m")
             assertEquals(55.0, lastAbove, 1e-9, "back at 55 after the turn")
             assertFalse(focus.inView(t))
+            // The view came back up over the ascent's 3 s at 60 frames a second.
+            assertTrue(risingFrames > 150, "$risingFrames frames coming back up")
         }
     }
 
