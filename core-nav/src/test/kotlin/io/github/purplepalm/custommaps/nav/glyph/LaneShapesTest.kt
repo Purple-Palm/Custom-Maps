@@ -20,10 +20,12 @@ import java.awt.geom.PathIterator
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
 
 /**
  * The lanes' arrows of the cards (DECISIONS 60), candidate A, measured on the shapes as they are drawn: lines stroked
@@ -137,9 +139,16 @@ class LaneShapesTest {
                     val marks = LaneShapes.lane(lane)
                     val what = "${name(set)} car pool, recommended $recommended on ${active ?: "none"}"
                     assertFalse(GlyphShapes.isLaneToTake(lane), what)
-                    // Two solid lines inside the square, first of all.
+                    // Two solid lines inside the square, first of all: 0.03 in from each side, from 0.14 to 0.86, 0.04 wide,
+                    // whatever the lane's arrows and their fit.
                     assertEquals(listOf(LaneRole.SIDE_LINE, LaneRole.SIDE_LINE), marks.take(2).map { it.role }, what)
                     assertTrue(marks.take(2).all { it.ink == GlyphInk.DIM && it.part is GlyphPart.Segment }, what)
+                    assertEquals(
+                        listOf(GlyphPart.Segment(GlyphPoint(0.03f, 0.14f), GlyphPoint(0.03f, 0.86f), 0.04f), GlyphPart.Segment(GlyphPoint(0.97f, 0.14f), GlyphPoint(0.97f, 0.86f), 0.04f))
+                            .map(::numbersOf),
+                        marks.take(2).map { numbersOf(it.part as GlyphPart.Segment) },
+                        what,
+                    )
                     assertTrue(marks.none { it.ink == GlyphInk.TILE || it.ink == GlyphInk.ON_TILE }, what)
                     val route = GlyphShapes.routeArrows(lane)
                     for (mark in marks.drop(2)) {
@@ -180,6 +189,31 @@ class LaneShapesTest {
                 }
             }
             assertEquals(plain, LaneShapes.lane(Lane(set, isRecommended = false, designated = true, outline = true)), what)
+        }
+    }
+
+    @Test
+    fun `a lane still to come has its heads smaller where two or more arrows share it, each hollow a rim inside its head`() {
+        for (set in listOf(emptySet<TurnModifier>()) + SETS) {
+            val lane = Lane(set, isRecommended = false, outline = true)
+            val marks = LaneShapes.lane(lane)
+            val what = name(set)
+            val fit = fitOf(lane)
+            val arrows = GlyphShapes.laneArrows(lane)
+            // Hollow heads are large: 0.85 of their size in a lane of two or more arrows, so they keep apart.
+            val size = if (arrows.size >= 2) 0.85f else 1f
+            val heads = marks.filter { it.role == LaneRole.HEAD }
+            val hollows = marks.filter { it.role == LaneRole.HOLLOW && it.part is GlyphPart.Fill && it.turn != null }
+            assertEquals(arrows, heads.map { it.turn }.toSet(), what)
+            assertEquals(arrows, hollows.map { it.turn }.toSet(), what)
+            for (head in heads) {
+                val corners = cornersOf(head.part as GlyphPart.Fill)
+                assertEquals(LaneShapes.OUTLINE.headWidth * size * fit, baseOf(corners), 1e-5f, "$what: ${head.turn}'s head")
+                assertEquals(LaneShapes.OUTLINE.headLength * size * fit, lengthOf(corners), 1e-5f, "$what: ${head.turn}'s head")
+                // The hollow is the head drawn in by the rim on every side.
+                val hollow = cornersOf(hollows.single { it.turn == head.turn }.part as GlyphPart.Fill)
+                assertEquals(inradiusOf(corners) - LaneShapes.RIM * fit, inradiusOf(hollow), 1e-5f, "$what: ${head.turn}'s hollow")
+            }
         }
     }
 
@@ -251,25 +285,65 @@ class LaneShapesTest {
 
     @Test
     fun `the common lanes stand where the design put them`() {
-        // From the design's plans: the stem's line and each tip, shares of the square.
-        val expected = listOf(
-            Triple(setOf(STRAIGHT), 0.500f, mapOf(STRAIGHT to (0.500f to 0.090f))),
-            Triple(setOf(STRAIGHT, RIGHT), 0.365f, mapOf(STRAIGHT to (0.365f to 0.090f), RIGHT to (0.855f to 0.598f))),
-            Triple(setOf(STRAIGHT, SLIGHT_LEFT), 0.674f, mapOf(STRAIGHT to (0.674f to 0.090f), SLIGHT_LEFT to (0.106f to 0.162f))),
-            Triple(setOf(LEFT, STRAIGHT, RIGHT), 0.500f, mapOf(STRAIGHT to (0.500f to 0.105f), LEFT to (0.080f to 0.604f), RIGHT to (0.920f to 0.604f))),
-            Triple(setOf(LEFT, U_TURN), 0.763f, mapOf(U_TURN to (0.464f to 0.572f), LEFT to (0.149f to 0.756f))),
-            Triple(setOf(SHARP_RIGHT), 0.256f, mapOf(SHARP_RIGHT to (0.834f to 0.704f))),
-            Triple(setOf(U_TURN), 0.752f, mapOf(U_TURN to (0.378f to 0.803f))),
+        // The design's plans of every lane roads paint, shares of the square to three places: the stem's line and its
+        // top, how large the heads are, the fit, and each arrow's tip. All of them, so no number of the layout table
+        // moves one of these lanes unseen.
+        val design = listOf(
+            Stand(setOf(STRAIGHT), 0.500f, 0.357f, 1.00f, 1.000f, STRAIGHT to (0.500f to 0.090f)),
+            Stand(setOf(STRAIGHT, SLIGHT_LEFT), 0.674f, 0.767f, 1.00f, 1.000f, STRAIGHT to (0.674f to 0.090f), SLIGHT_LEFT to (0.106f to 0.162f)),
+            Stand(
+                setOf(STRAIGHT, SLIGHT_LEFT, SLIGHT_RIGHT), 0.500f, 0.839f, 0.85f, 1.000f,
+                STRAIGHT to (0.500f to 0.090f), SLIGHT_LEFT to (0.086f to 0.391f), SLIGHT_RIGHT to (0.914f to 0.391f),
+            ),
+            Stand(setOf(STRAIGHT, SLIGHT_LEFT, RIGHT), 0.493f, 0.839f, 0.85f, 0.998f, STRAIGHT to (0.493f to 0.092f), SLIGHT_LEFT to (0.080f to 0.392f), RIGHT to (0.920f to 0.599f)),
+            Stand(setOf(STRAIGHT, LEFT), 0.635f, 0.714f, 1.00f, 1.000f, STRAIGHT to (0.635f to 0.090f), LEFT to (0.145f to 0.598f)),
+            Stand(setOf(STRAIGHT, LEFT, SLIGHT_RIGHT), 0.507f, 0.839f, 0.85f, 0.998f, STRAIGHT to (0.507f to 0.092f), LEFT to (0.080f to 0.599f), SLIGHT_RIGHT to (0.920f to 0.392f)),
+            Stand(setOf(STRAIGHT, LEFT, RIGHT), 0.500f, 0.718f, 1.00f, 0.982f, STRAIGHT to (0.500f to 0.105f), LEFT to (0.080f to 0.604f), RIGHT to (0.920f to 0.604f)),
+            Stand(setOf(STRAIGHT, SHARP_LEFT), 0.644f, 0.500f, 1.00f, 1.000f, STRAIGHT to (0.644f to 0.090f), SHARP_LEFT to (0.136f to 0.866f)),
+            Stand(setOf(STRAIGHT, U_TURN), 0.660f, 0.625f, 0.85f, 1.000f, STRAIGHT to (0.660f to 0.090f), U_TURN to (0.340f to 0.910f)),
+            Stand(setOf(STRAIGHT, SLIGHT_RIGHT), 0.326f, 0.767f, 1.00f, 1.000f, STRAIGHT to (0.326f to 0.090f), SLIGHT_RIGHT to (0.894f to 0.162f)),
+            Stand(setOf(STRAIGHT, RIGHT), 0.365f, 0.714f, 1.00f, 1.000f, STRAIGHT to (0.365f to 0.090f), RIGHT to (0.855f to 0.598f)),
+            Stand(setOf(STRAIGHT, SHARP_RIGHT), 0.356f, 0.500f, 1.00f, 1.000f, STRAIGHT to (0.356f to 0.090f), SHARP_RIGHT to (0.864f to 0.866f)),
+            Stand(setOf(SLIGHT_LEFT), 0.639f, 0.553f, 1.00f, 1.000f, SLIGHT_LEFT to (0.271f to 0.112f)),
+            Stand(setOf(SLIGHT_LEFT, SLIGHT_RIGHT), 0.500f, 0.553f, 1.00f, 1.000f, SLIGHT_LEFT to (0.133f to 0.112f), SLIGHT_RIGHT to (0.867f to 0.112f)),
+            Stand(setOf(SLIGHT_LEFT, RIGHT), 0.470f, 0.553f, 1.00f, 1.000f, SLIGHT_LEFT to (0.102f to 0.112f), RIGHT to (0.898f to 0.357f)),
+            Stand(setOf(LEFT), 0.722f, 0.500f, 1.00f, 1.000f, LEFT to (0.188f to 0.357f)),
+            Stand(setOf(LEFT, U_TURN), 0.763f, 0.826f, 0.85f, 0.984f, U_TURN to (0.464f to 0.572f), LEFT to (0.149f to 0.756f)),
+            Stand(setOf(LEFT, SLIGHT_RIGHT), 0.530f, 0.553f, 1.00f, 1.000f, LEFT to (0.102f to 0.357f), SLIGHT_RIGHT to (0.898f to 0.112f)),
+            Stand(setOf(LEFT, RIGHT), 0.500f, 0.507f, 1.00f, 0.982f, LEFT to (0.080f to 0.367f), RIGHT to (0.920f to 0.367f)),
+            Stand(setOf(SHARP_LEFT), 0.744f, 0.250f, 1.00f, 1.000f, SHARP_LEFT to (0.166f to 0.704f)),
+            Stand(setOf(U_TURN), 0.752f, 0.357f, 1.00f, 1.000f, U_TURN to (0.378f to 0.803f)),
+            Stand(setOf(SLIGHT_RIGHT), 0.361f, 0.553f, 1.00f, 1.000f, SLIGHT_RIGHT to (0.729f to 0.112f)),
+            Stand(setOf(RIGHT), 0.278f, 0.500f, 1.00f, 1.000f, RIGHT to (0.812f to 0.357f)),
+            Stand(setOf(SHARP_RIGHT), 0.256f, 0.250f, 1.00f, 1.000f, SHARP_RIGHT to (0.834f to 0.704f)),
         )
-        for ((set, stemX, tips) in expected) {
-            val marks = LaneShapes.lane(Lane(set, isRecommended = false))
-            assertEquals(stemX, stemX(marks.first { it.role == LaneRole.STEM }.part as GlyphPart.Fill), 0.0006f, name(set))
-            for ((turn, tip) in tips) {
-                val head = marks.first { it.role == LaneRole.HEAD && it.turn == turn }.part as GlyphPart.Fill
-                assertEquals(tip.first, head.start.x, 0.0006f, "${name(set)} $turn")
-                assertEquals(tip.second, head.start.y, 0.0006f, "${name(set)} $turn")
-            }
-        }
+        assertEquals(COMMON.toSet(), design.map { it.set }.toSet())
+        assertAll(
+            design.map { stand ->
+                Executable {
+                    val what = name(stand.set)
+                    val marks = LaneShapes.lane(Lane(stand.set, isRecommended = false))
+                    val stem = cornersOf(marks.single { it.role == LaneRole.STEM }.part as GlyphPart.Fill)
+                    val left = stem.minOf { it.x }
+                    val right = stem.maxOf { it.x }
+                    // The fit as drawn: a lane not to take has its stem at the dim line, times the fit.
+                    val fit = (right - left) / LaneShapes.DIM.line
+                    assertEquals(stand.stemX, (left + right) / 2, PLACES, "$what: the stem's line")
+                    assertEquals(stand.stemTop, stem.minOf { it.y }, PLACES, "$what: the stem's top")
+                    assertEquals(stand.fit, fit, PLACES, "$what: the fit")
+                    val heads = marks.filter { it.role == LaneRole.HEAD }
+                    assertEquals(stand.tips.keys, heads.map { it.turn }.toSet(), what)
+                    for (head in heads) {
+                        val corners = cornersOf(head.part as GlyphPart.Fill)
+                        val (x, y) = stand.tips.getValue(head.turn!!)
+                        assertEquals(x, corners[0].x, PLACES, "$what: ${head.turn}'s tip")
+                        assertEquals(y, corners[0].y, PLACES, "$what: ${head.turn}'s tip")
+                        // Its base the dim heads' width, times the lane's heads and its fit.
+                        assertEquals(stand.heads, baseOf(corners) / (LaneShapes.DIM.headWidth * fit), PLACES, "$what: ${head.turn}'s head")
+                    }
+                }
+            },
+        )
         // Every lane's foot on one line, the box's; a lane with a U-turn, whose hook would reach above the box, a little
         // lower, never past the room the box leaves under the foot.
         for (set in COMMON) {
@@ -352,9 +426,7 @@ class LaneShapesTest {
     private fun isThin(mark: LaneMark, lane: Lane): Boolean {
         val heads = LaneArrows.plan(GlyphShapes.laneArrows(lane)).heads
         val thinWidth = LaneShapes.THIN.headWidth * heads * fitOf(lane)
-        val corners = cornersOf(mark.part as GlyphPart.Fill)
-        val base = hypot(corners[1].x - corners[2].x, corners[1].y - corners[2].y)
-        return abs(base - thinWidth) < 1e-5f
+        return abs(baseOf(cornersOf(mark.part as GlyphPart.Fill)) - thinWidth) < 1e-5f
     }
 
     /** The fit of [lane]'s arrows in the box: its stem's line drawn at the dim or the route's weight shows it. */
@@ -364,6 +436,28 @@ class LaneShapesTest {
     }
 
     private fun cornersOf(fill: GlyphPart.Fill): List<GlyphPoint> = listOf(fill.start) + fill.steps.map { (it as GlyphStep.LineTo).to }
+
+    /** How wide a head is at its base: from one end of its base to the other ([corners] its tip, then the base's ends). */
+    private fun baseOf(corners: List<GlyphPoint>): Float = hypot(corners[1].x - corners[2].x, corners[1].y - corners[2].y)
+
+    /** How long a head is: from the middle of its base to its tip. */
+    private fun lengthOf(corners: List<GlyphPoint>): Float =
+        hypot(corners[0].x - (corners[1].x + corners[2].x) / 2, corners[0].y - (corners[1].y + corners[2].y) / 2)
+
+    /** The radius of the largest circle inside the triangle [corners]: twice its area over its perimeter. */
+    private fun inradiusOf(corners: List<GlyphPoint>): Float {
+        val (a, b, c) = corners
+        val area = abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2
+        return 2 * area / (hypot(b.x - c.x, b.y - c.y) + hypot(c.x - a.x, c.y - a.y) + hypot(a.x - b.x, a.y - b.y))
+    }
+
+    /**
+     * Where the design put a lane of [set] in its square: its stem's line ([stemX]) and top, how large its heads are
+     * ([heads], the crowded factor), its [fit], and each arrow's tip ([tip], x and y).
+     */
+    private class Stand(val set: Set<TurnModifier>, val stemX: Float, val stemTop: Float, val heads: Float, val fit: Float, vararg tip: Pair<TurnModifier, Pair<Float, Float>>) {
+        val tips: Map<TurnModifier, Pair<Float, Float>> = tip.toMap()
+    }
 
     /** Which way a head points: from the middle of its base to its tip, a unit step (y down). */
     private fun headingOf(head: GlyphPart.Fill): Pair<Float, Float> {
@@ -385,6 +479,10 @@ class LaneShapesTest {
         val numbers = listOf(fill.start.x, fill.start.y) + fill.steps.flatMap { (it as GlyphStep.ArcTo).let { a -> listOf(a.left, a.top, a.right, a.bottom, a.startDegrees, a.sweepDegrees) } }
         return numbers.map { Math.round(it * 1e6) }
     }
+
+    /** A straight line's numbers to six places: its ends and its width. */
+    private fun numbersOf(segment: GlyphPart.Segment): List<Long> =
+        listOf(segment.from.x, segment.from.y, segment.to.x, segment.to.y, segment.width).map { Math.round(it * 1e6) }
 
     /** Every lane of [set] in every state, with its name. */
     private fun allStates(set: Set<TurnModifier>): List<Pair<String, Lane>> =
@@ -489,6 +587,9 @@ class LaneShapesTest {
 
         /** The least room between a mark on a tile and the tile's edge. */
         const val TILE_MARGIN = 0.035f
+
+        /** How near a number comes to the design's, which it printed to three places. */
+        const val PLACES = 0.0006f
 
         val EIGHT = listOf(STRAIGHT, SLIGHT_LEFT, LEFT, SHARP_LEFT, U_TURN, SLIGHT_RIGHT, RIGHT, SHARP_RIGHT)
 
