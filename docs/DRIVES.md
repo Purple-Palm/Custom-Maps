@@ -1664,9 +1664,13 @@ The car's turns from above, lanes step S1b ([DECISIONS.md](DECISIONS.md), 59;
 not on the Desktop Head Unit or in a car. With the car's screen, Smooth follow and the car map size
 at x1.5 unless a check says otherwise; screenshots of the car's screen from a passenger or a parked
 car, never from the driver. With the switch on, as on a phone that never chose, the turns of checks
-134 and 135 are flat (checks 140 and 141), and checks 134, 135 and the `pitch` and `onPuck` of check
-138 are those of the switch off (check 142). The car's camera line has `junctionView` while a
-junction view is latched:
+134 and 135 are flat (checks 140 and 141), and checks 134 and 135, check 133's `pitch` 55 all along
+and check 138's `junctionZoom` only with Large, `onPuck` 1 all along and `to` farther out than
+`zoom` are those of the switch off (check 142). With the switch on, `pitch` goes to 0 at each turn,
+`junctionZoom` comes with Default too, and from each turn's framing distance to the turn `to` is
+the navigation SDK's frame of the turn, whose zoom the car's map takes (with Large no closer than
+the 28 dp lane), with `onPuck` 0. The car's camera line has `junctionView` while a junction view is
+latched:
 
 139. **The row.** Parked, before Start: **Settings → Car screen → Turns from above**, after Car map
     size, by day and at night, at the phone's own width and with the font size at 1.3: on, on a
