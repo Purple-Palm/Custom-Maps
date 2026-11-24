@@ -77,6 +77,18 @@ internal class CarJunction {
     /** How many points the junction's fit holds; 0 without a junction. */
     val points: Int get() = latitudes.size
 
+    /**
+     * How far ahead of [latitude], [longitude] the junction's maneuver point lies along [bearing], in meters (negative
+     * behind); not a number without a junction. Cheap enough for every frame: a camera checks with it that the junction
+     * stays on its screen while its view goes down.
+     */
+    fun metersAhead(latitude: Double, longitude: Double, bearing: Double): Double {
+        if (latitudes.isEmpty()) return Double.NaN
+        val p = LocalMeters(latitude, longitude).toLocal(latitudes[0], longitudes[0])
+        val heading = Math.toRadians(bearing)
+        return p.x * sin(heading) + p.y * cos(heading)
+    }
+
     /** No junction: the drive ended, the car was put somewhere else, or the lane zoom is Default. */
     fun clear() {
         key = null

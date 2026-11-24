@@ -112,8 +112,10 @@ import com.mapbox.maps.extension.androidauto.R as CarMapR
  *   neither.
  * - **Camera and gestures.** The camera of the style chosen in Settings with [CameraTuning.CAR]: Smooth
  *   follow is the car's own camera, anchored on the car with the road view by speed, one tilt of 55
- *   degrees and, with Large, junction views fitted with the car on its row; the two Mapbox styles are
- *   the navigation SDK's camera as it comes ([CameraTuning.forMapboxStyles]). The camera's dp are the
+ *   degrees and, with Large, junction views fitted with the car on its row; with Settings' Turns from
+ *   above ([setTurnsFromAbove], on unless turned off) its junction views are flat instead and framed by
+ *   the navigation SDK, as on the phone, with either lane zoom. The two Mapbox styles are the
+ *   navigation SDK's camera as it comes ([CameraTuning.forMapboxStyles]). The camera's dp are the
  *   map's logical pixels, so they grow with the size, as the style does.
  *   The car's scroll, fling and pinch move the map without an animation of their own, so the gesture
  *   handler lets the camera go first ([MapScene.onDriverMoved]); a pinch past the zoom limits is

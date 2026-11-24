@@ -37,14 +37,17 @@ class AnchoredCameraWiringTest {
     }
 
     @Test
-    fun `the data source frames a maneuver only as the camera decided, never for the anchored camera`() {
+    fun `the data source frames a maneuver only as the camera decided, never for the anchored camera's tilted views`() {
         val progress = body(camera, "override fun onRouteProgress(")
-        assertTrue("dataSource.isFramingManeuverPropertyOverride(LaneZoomFrames.sdkFramesManeuver(tuning, maneuverFocus.framesManeuver))" in progress)
-        // Its limit and the junction's points follow the same rule, at the map's setup and before each frame.
+        assertTrue(
+            "dataSource.isFramingManeuverPropertyOverride(LaneZoomFrames.sdkFramesManeuver(tuning, maneuverFocus.framesManeuver, junctionView))" in progress,
+        )
+        // Its limit and the junction's points follow the same rule before each frame; the map's setup frames none for an
+        // anchored camera, which takes back a maneuver's frame as it starts.
         val setup = body(frames, "fun applySmoothFollow(")
-        assertTrue("val maneuver = large && sdkFramesManeuver(tuning, framesManeuver(framed, options))" in setup)
+        assertTrue("val maneuver = large && !tuning.anchored && framesManeuver(framed, options)" in setup)
         val before = body(frames, "fun beforeSmoothEvaluate(")
-        assertTrue("val maneuver = mode == LaneZoom.LARGE && sdkFramesManeuver(tuning, framesManeuver)" in before)
+        assertTrue("val maneuver = mode == LaneZoom.LARGE && sdkFramesManeuver(tuning, framesManeuver, view)" in before)
         assertTrue("junction.update(progress, mode, maneuver, coalesceMeters(options), tuning)" in before)
         // The Mapbox tuned style frames by the SDK's own rule as before.
         val tuned = body(frames, "fun applyTuned(")
@@ -68,7 +71,7 @@ class AnchoredCameraWiringTest {
         val phone = sample.indexOf("zoomRamp.push(if (carOnFocalPoint && laneZoom == LaneZoom.LARGE) min(fitted, tuning.defaultMaxZoom) else fitted, now)")
         assertTrue(anchored in 0 until phone, "the phone's zoom is the data source's fit, after the anchored branch")
         val branch = sample.subList(anchored, phone)
-        assertTrue("roadZoom = roadViewZoom(latitude)" in branch)
+        assertTrue("roadZoom = roadViewZoom(latitude, RoadView.pitch(tuning, junctionView, maneuverFocus.goal, target.pitch))" in branch)
         assertTrue("pushJunctionFit(target, carOnFocalPoint, now)" in branch)
         assertTrue("return" in branch)
         // Before the drive's first position nothing is pushed: a camera made anew during a drive stays where it starts.
@@ -81,20 +84,22 @@ class AnchoredCameraWiringTest {
         assertTrue("located = true" in located)
         assertTrue("located = false" in body(camera, "override fun onGuidanceEnded()"))
         val progress = body(camera, "override fun onRouteProgress(")
-        assertTrue("if (laneZoom == LaneZoom.LARGE) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()" in progress)
+        assertTrue(
+            "if (laneZoom == LaneZoom.LARGE || above) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()" in progress,
+        )
     }
 
     @Test
     fun `the road view and the junction's fit take the following box, the frame's tilt and the map's own pixel ratio`() {
         // The road view: the box from the car's row up to the top padding of this map, at the map's own ratio (the
         // host's density times the car map's size), never the host's density alone.
-        val road = body(camera, "private fun roadViewZoom(latitude: Double): Double")
+        val road = body(camera, "private fun roadViewZoom(latitude: Double, pitch: Double): Double")
         assertEquals(
             listOf(
                 "if (!mapboxMap.isValid()) return Double.NaN",
                 "val padding = dataSource.followingPadding",
                 "val height = mapboxMap.getSize().height.toDouble()",
-                "return RoadView.zoom(tuning, roadSpeed, height, height - padding.bottom, padding.top, mapboxMap.getMapOptions().pixelRatio.toDouble(), latitude)",
+                "return RoadView.zoom(tuning, roadSpeed, height, height - padding.bottom, padding.top, mapboxMap.getMapOptions().pixelRatio.toDouble(), latitude, pitch)",
             ),
             road.filter { it.isNotBlank() },
         )
@@ -126,10 +131,12 @@ class AnchoredCameraWiringTest {
     }
 
     @Test
-    fun `the anchored camera plans its zoom with Large only, and Default is the road view`() {
+    fun `the anchored camera plans its tilted views with Large only, and Default is the road view`() {
         val targets = body(camera, "private fun computeTargets(")
-        val anchored = targets.indexOf("val zoomGoal = if (largeFollowing && tuning.anchored) {")
+        val above = targets.indexOf("val zoomGoal = if (mode == Mode.FOLLOWING && above) {")
+        val anchored = targets.indexOf("} else if (largeFollowing && tuning.anchored) {")
         val phone = targets.indexOf("} else if (largeFollowing) {")
+        assertTrue(above in 0 until anchored, "the views from above first, with either lane zoom")
         assertTrue(anchored in 0 until phone)
         assertTrue(targets.subList(anchored, phone).any { it.startsWith("zoomPlanner.anchoredTarget(") })
         assertTrue("val fit = if (fitRamp.ready && maneuverFocus.framesItself(now)) {" in targets)
@@ -150,6 +157,9 @@ class AnchoredCameraWiringTest {
         assertTrue("roadPeak.reset()" in forget && "roadSpeed = null" in forget)
         val laneZoom = body(camera, "override fun setLaneZoom(mode: LaneZoom)")
         assertTrue("carJunction.clear()" in laneZoom && "forgetJunctionFit()" in laneZoom)
+        // But not from above, where Default frames the junction too.
+        val clear = laneZoom.indexOf("carJunction.clear()")
+        assertEquals("if (!above) {", laneZoom[clear - 1])
     }
 
     @Test
@@ -157,7 +167,7 @@ class AnchoredCameraWiringTest {
         val diagnostics = body(camera, "override fun diagnostics()")
         assertTrue(") + if (tuning.anchored) anchoredFields() else emptyMap()" in diagnostics)
         val fields = SourceText.code(camera).substringAfter("private fun anchoredFields()").substringBefore("override fun settling()")
-        for (key in listOf("\"roadAheadM\"", "\"roadSpeed\"", "\"roadZoom\"", "\"junctionZoom\"")) assertTrue(key in fields, key)
+        for (key in listOf("\"roadAheadM\"", "\"roadSpeed\"", "\"roadZoom\"", "\"junctionZoom\"", "\"junctionView\"")) assertTrue(key in fields, key)
         // The ratio is the car's own field of the line.
         assertTrue("\"pixelRatio\" to carSurface?.mapSurface?.mapboxMap?.pixelRatio?.let { Motion.round(it.toDouble(), 3) }," in car)
     }

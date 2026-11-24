@@ -45,6 +45,24 @@ class CarJunctionTest {
     }
 
     @Test
+    fun `the maneuver point lies as far ahead as the car is before it, along the view's bearing`() {
+        val junction = CarJunction()
+        assertTrue(junction.metersAhead(35.0, 0.0, 0.0).isNaN(), "no junction")
+        junction.hold(listOf(at(0.0, 0.0), at(2_000.0, 0.0)), bearingBefore = 0.0, car)
+        for (before in listOf(250.0, 120.0, 5.0)) {
+            val carAt = at(0.0, -before)
+            assertEquals(before, junction.metersAhead(carAt.latitude(), carAt.longitude(), 0.0), 1e-3, "$before m before")
+            // The view turned 20 degrees: less of it ahead along the view.
+            assertEquals(before * Math.cos(Math.toRadians(20.0)), junction.metersAhead(carAt.latitude(), carAt.longitude(), 20.0), 1e-3)
+        }
+        // Past it: behind.
+        val past = at(0.0, 10.0)
+        assertEquals(-10.0, junction.metersAhead(past.latitude(), past.longitude(), 0.0), 1e-3)
+        junction.clear()
+        assertTrue(junction.metersAhead(35.0, 0.0, 0.0).isNaN())
+    }
+
+    @Test
     fun `a turn bay's bend 40 m on holds the road to 30 m past the bend`() {
         val junction = CarJunction()
         junction.hold(listOf(at(0.0, 0.0), at(0.0, 40.0), at(2_000.0, 40.0)), bearingBefore = 0.0, car)

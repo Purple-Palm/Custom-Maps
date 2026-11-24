@@ -2119,8 +2119,11 @@ internal class MapScene(
      * The car's Smooth follow, anchored on the car ([CameraTuning.anchored]), adds "roadAheadM" and
      * "roadSpeed" (the road its road view shows above the car, in meters, and the highest speed of
      * the last few seconds it is for), "roadZoom" (that view's zoom, which takes the place of the data
-     * source's fit of the road, so "to" keeps the SDK's) and with Large "junctionZoom" (the zoom of
-     * the junction view the car is in or has just left; none outside one).
+     * source's fit of the road, so "to" keeps the SDK's; with Turns from above, at the tilt the view
+     * goes down by while a junction view goes down or stays down), with Large, and with Turns from
+     * above with either lane zoom, "junctionZoom" (the zoom of the junction view the car is in or has
+     * just left; none outside one) and, while a junction view is latched, "junctionView" (above or
+     * tilted, as Turns from above shows it). Turns from above also gives "keep" with Default.
      *
      * "aheadM", while the camera follows the car, is how much road the camera as shown has clear
      * above the car, in meters, by the look-ahead model ([LookAhead]): from the car's row, the

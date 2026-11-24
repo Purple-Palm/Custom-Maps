@@ -29,8 +29,10 @@ import io.github.purplepalm.custommaps.nav.camera.FocusKind
 import io.github.purplepalm.custommaps.nav.camera.FocusRule
 import io.github.purplepalm.custommaps.nav.camera.FocusWindow
 import io.github.purplepalm.custommaps.nav.camera.IdleFollow
+import io.github.purplepalm.custommaps.nav.camera.JunctionView
 import io.github.purplepalm.custommaps.nav.camera.LaneChoice
 import io.github.purplepalm.custommaps.nav.camera.LaneFocus
+import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFacts
 import io.github.purplepalm.custommaps.nav.camera.ManeuverFocus
 import io.github.purplepalm.custommaps.nav.camera.MapScale
@@ -100,6 +102,19 @@ import kotlin.math.sin
  * [ZoomPlanner.anchoredTarget]) comes in along the focus, no closer than the junction's lane width, and
  * is let go past it as on the phone; the lanes' close view is the phone's, at the car's tilt and with
  * its look-ahead. The tilt is the car's one tilt throughout.
+ *
+ * With the car's Turns from above on ([setTurnsFromAbove], [JunctionView.ABOVE]) its junction views
+ * are flat again instead, with either lane zoom: the tilt goes down to straight above along the focus
+ * and back up after the junction, as on the phone, and the data source frames the maneuver from the
+ * framing distance on, as the camera decides, with the lane zoom's limits and, with Large, the bend's
+ * points ([LaneZoomFrames.beforeSmoothEvaluate]), the car free to leave its row in that frame. Until
+ * then the junction's own fit with the car on its row, at the tilt the view goes down by, holds the
+ * junction above the car, and the road view is worked out at that tilt too ([RoadView.pitch]), so
+ * the view goes out from the tilted road view to the flat junction in one move along the focus
+ * ([ZoomPlanner.aboveTarget]); where the zoom, at its top speed, lags the tilt, the tilt waits for
+ * it, so the junction stays on the screen ([tiltFloor]). The road view, the lanes' close view, the
+ * overview and the follow before Start stay the car's own. A change of the switch during a junction
+ * view is one eased move to the other kind of view; otherwise it shows at the next junction.
  *
  * On the browsing map, before guidance, it follows the drawn puck in the same way, at a fixed zoom
  * and tilt and without the data source.
@@ -246,6 +261,10 @@ internal class SmoothNavigationCamera(
     /** The map's height less the following padding, in dp, at the last progress update. */
     private var roomDp = Double.NaN
 
+    /** The map's height in pixels and its pixel ratio at the last progress update, for the view from above's tilt; not a number before one. */
+    private var mapHeightPx = Double.NaN
+    private var mapPixelRatio = Double.NaN
+
     /** The zoom [frameCap] was fitted at, at the last progress update ([FocusWindow.capZoom]). */
     private var capZoom = Double.NaN
 
@@ -303,6 +322,25 @@ internal class SmoothNavigationCamera(
 
     /** The junction [fitRamp] holds the fit of; null while it holds none. */
     private var fitKey: String? = null
+
+    /** The car's Settings > Car screen > Turns from above, as last told ([setTurnsFromAbove]); on until told otherwise. */
+    private var turnsFromAbove = true
+
+    /** How the camera shows its junctions: from above on the phone, on the car as Turns from above says. */
+    private val junctionView: JunctionView get() = JunctionView.of(tuning.anchored, turnsFromAbove)
+
+    /** Whether the camera is anchored on the car and shows its junctions from above. */
+    private val above: Boolean get() = tuning.anchored && turnsFromAbove
+
+    /** The tilt over a junction: straight down from above, the car's one tilt for its tilted junction views. */
+    private val junctionPitch: Double get() = tuning.junctionPitch(junctionView)
+
+    /**
+     * The junction the view latched down for with a descent, from that latch on, not one latched while the view was down
+     * already (the bridge): while it is latched, the view from above tilts no lower than keeps it on the screen
+     * ([tiltFloor]). Null before a latch.
+     */
+    private var descendingFor: String? = null
 
     /** Whether the data source's newest following frame is one of the open road, not of a maneuver. */
     private var roadFrame = true
@@ -500,7 +538,10 @@ internal class SmoothNavigationCamera(
             )
             // The view latched down for a junction while a move into following runs: the tilt goes
             // down with the move, not in a second motion of its own against it.
-            if (goalBefore < 1.0 && maneuverFocus.goal == 1.0) foldTiltIntoMove(now)
+            if (goalBefore < 1.0 && maneuverFocus.goal == 1.0) {
+                foldTiltIntoMove(now)
+                descendingFor = maneuverFocus.latchedJunction
+            }
             if (maneuverFocus.latches != latchesTold) {
                 latchesTold = maneuverFocus.latches
                 listener.onFocusLatched(focusFields(facts, metersToManeuver))
@@ -521,9 +562,10 @@ internal class SmoothNavigationCamera(
             rampAhead = rampAhead,
         )
         updateLanesCap(now)
-        // Anchored on the car: the junction the camera frames itself.
+        // Anchored on the car: the junction the camera frames itself, with Large, and from above with either lane zoom
+        // until the data source frames it.
         if (tuning.anchored) {
-            if (laneZoom == LaneZoom.LARGE) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()
+            if (laneZoom == LaneZoom.LARGE || above) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()
         }
         // Near a lane choice, and while the view looks down onto a turn, Large turns the view
         // less toward the road ahead. The data source reads this with every frame it computes.
@@ -534,19 +576,20 @@ internal class SmoothNavigationCamera(
         // toward the lanes' tilt along the lane focus.
         val later = now + tuning.sampleHoldSeconds
         val laneShare = LaneZoomFrames.laneShare(laneZoom, following = true) { laneFocus.focusAt(later) }
-        dataSource.followingPitchPropertyOverride(guidancePitch(tuning, laneShare, maneuverFocus.focusAt(later)))
+        dataSource.followingPitchPropertyOverride(guidancePitch(tuning, laneShare, maneuverFocus.focusAt(later), junctionPitch))
         // Whether the junction is framed is the camera's own latched decision, the one its tilt
         // follows: the data source's own trigger, 180 m decided again with every progress, stays
         // the Mapbox styles'. Delicate and experimental; if it goes, the same decision can be given
         // through the data source's options (its trigger distance and the maneuvers it excludes).
-        // Anchored on the car, the data source never frames one: the camera frames its junctions itself.
-        dataSource.isFramingManeuverPropertyOverride(LaneZoomFrames.sdkFramesManeuver(tuning, maneuverFocus.framesManeuver))
+        // Anchored on the car, the data source frames one only for a junction view from above: the camera frames its
+        // tilted ones itself.
+        dataSource.isFramingManeuverPropertyOverride(LaneZoomFrames.sdkFramesManeuver(tuning, maneuverFocus.framesManeuver, junctionView))
         dataSource.onRouteProgressChanged(progress)
         // With this progress the camera has decided whether the frames are of the road or of a
         // maneuver, until the next progress. Only the frame of a maneuver may be fitted closer with
         // Large, so the upper limit follows that choice with every progress, and so does the road
         // past the maneuver point that the frame holds.
-        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction, maneuverFocus.framesManeuver)
+        LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction, maneuverFocus.framesManeuver, junctionView)
         lastProgress = progress
         dataSource.evaluate()
         pacing.onProgress(SystemClock.elapsedRealtime())
@@ -584,9 +627,9 @@ internal class SmoothNavigationCamera(
         val left = 1.0 - easeInOut((now - transitionStart) / transitionSeconds)
         if (left < MIN_SHARE_LEFT) return
         val laneShare = LaneZoomFrames.laneShare(laneZoom, following = true) { laneFocus.focusAt(now) }
-        val before = guidancePitch(tuning, laneShare, maneuverFocus.focusAt(now))
+        val before = guidancePitch(tuning, laneShare, maneuverFocus.focusAt(now), junctionPitch)
         maneuverFocus.settle(now)
-        offset[PITCH] += (before - guidancePitch(tuning, laneShare, maneuverFocus.focusAt(now))) / left
+        offset[PITCH] += (before - guidancePitch(tuning, laneShare, maneuverFocus.focusAt(now), junctionPitch)) / left
     }
 
     /**
@@ -602,7 +645,10 @@ internal class SmoothNavigationCamera(
         if (!mapboxMap.isValid()) return Double.NaN
         val size = mapboxMap.getSize()
         val padding = dataSource.followingPadding
-        roomDp = (size.height.toDouble() - padding.top - padding.bottom) / mapboxMap.getMapOptions().pixelRatio.toDouble()
+        // Kept for the view from above, whose tilt is checked against the screen on every frame of its junction view.
+        mapHeightPx = size.height.toDouble()
+        mapPixelRatio = mapboxMap.getMapOptions().pixelRatio.toDouble()
+        roomDp = (size.height.toDouble() - padding.top - padding.bottom) / mapPixelRatio
         val junction = if (facts.kind != FocusKind.NONE) facts else facts.next ?: facts
         val after = dataSource.options.followingFrameOptions.frameGeometryAfterManeuver.distanceToFrameAfterManeuver
         val latitude = if (puckLat.isNaN()) lat.value else puckLat
@@ -637,6 +683,7 @@ internal class SmoothNavigationCamera(
 
     override fun onJump() {
         val now = now()
+        descendingFor = null
         maneuverFocus.reset(now)
         laneFocus.reset(now)
         zoomPlanner.reset()
@@ -655,17 +702,51 @@ internal class SmoothNavigationCamera(
         forgetPuckSpeed()
         if (mode == LaneZoom.DEFAULT) {
             setBearingLead(LaneZoomFrames.SDK_BEARING_LEAD)
-            carJunction.clear()
-            forgetJunctionFit()
+            // From above the junction is framed with either lane zoom.
+            if (!above) {
+                carJunction.clear()
+                forgetJunctionFit()
+            }
         }
         // The map set the frames up for the new mode by the data source's own rule; until the next
         // progress they frame what this camera decided with the last one, as they did before.
-        lastProgress?.let { LaneZoomFrames.beforeSmoothEvaluate(dataSource, mode, tuning, it, junction, maneuverFocus.framesManeuver) }
+        lastProgress?.let { LaneZoomFrames.beforeSmoothEvaluate(dataSource, mode, tuning, it, junction, maneuverFocus.framesManeuver, junctionView) }
+        requestFrame()
+    }
+
+    /**
+     * The car's Turns from above: whether a camera anchored on the car shows its junctions from above, flat and framed by
+     * the data source, or tilted and framed by itself ([JunctionView]). The phone's camera takes no notice: its junction
+     * views are from above already. At once: the data source is told what this camera decided with the last progress, for
+     * the new kind of view (the tilt it goes to, whether it frames the maneuver, its limit and the bend's points), and
+     * computes its frame again; during a junction view the camera goes over to the other kind in one eased move, as for a
+     * change of mode. Otherwise the next junction shows it.
+     */
+    @OptIn(MapboxDelicateApi::class, ExperimentalPreviewMapboxNavigationAPI::class)
+    override fun setTurnsFromAbove(enabled: Boolean) {
+        if (enabled == turnsFromAbove) return
+        turnsFromAbove = enabled
+        if (!tuning.anchored) return
+        val now = now()
+        // What the planner and the fit held was the other kind's.
+        zoomPlanner.reset()
+        forgetJunctionFit()
+        lastProgress?.let { progress ->
+            if (laneZoom == LaneZoom.LARGE || above) carJunction.update(progress, maneuverFocus.latchedJunction, tuning) else carJunction.clear()
+            val later = now + tuning.sampleHoldSeconds
+            val laneShare = LaneZoomFrames.laneShare(laneZoom, following = true) { laneFocus.focusAt(later) }
+            dataSource.followingPitchPropertyOverride(guidancePitch(tuning, laneShare, maneuverFocus.focusAt(later), junctionPitch))
+            dataSource.isFramingManeuverPropertyOverride(LaneZoomFrames.sdkFramesManeuver(tuning, maneuverFocus.framesManeuver, junctionView))
+            LaneZoomFrames.beforeSmoothEvaluate(dataSource, laneZoom, tuning, progress, junction, maneuverFocus.framesManeuver, junctionView)
+            dataSource.evaluate()
+        }
+        if (mode == Mode.FOLLOWING && maneuverFocus.inView(now)) beginTransition(mode, again = true)
         requestFrame()
     }
 
     override fun onGuidanceEnded() {
         val now = now()
+        descendingFor = null
         maneuverFocus.reset(now)
         laneFocus.reset(now)
         zoomPlanner.reset()
@@ -712,7 +793,7 @@ internal class SmoothNavigationCamera(
             // ahead, past a step that goes straight on.
             "latchedBy" to maneuverFocus.latchedBy?.logName,
             // With Large, how much of the last junction's close zoom is kept.
-            "keep" to Motion.round(maneuverFocus.keepAt(now), 2).takeIf { laneZoom == LaneZoom.LARGE },
+            "keep" to Motion.round(maneuverFocus.keepAt(now), 2).takeIf { laneZoom == LaneZoom.LARGE || above },
             "zoomTarget" to Motion.round(toZoom, 2),
             "bearingError" to Motion.round(Angles.wrap180(toBearing - bearing.value), 1),
             "onPuck" to Motion.round(onPuck.value, 2),
@@ -744,14 +825,18 @@ internal class SmoothNavigationCamera(
 
     /**
      * Anchored on the car, for the camera line: the road the road view shows above the car and the speed it is for
-     * ("roadAheadM", "roadSpeed"), its zoom ("roadZoom"), and with Large the zoom of the junction view the car is in or has
-     * just left ("junctionZoom"; none outside one). Numbers only.
+     * ("roadAheadM", "roadSpeed"), its zoom ("roadZoom", from above at the tilt the view goes down by while it does), with
+     * Large, and from above with either lane zoom, the zoom of the junction view the car is in or has just left
+     * ("junctionZoom"; none outside one), and while a junction view is latched how it shows the junction ("junctionView",
+     * above or tilted). Numbers and words only.
      */
     private fun anchoredFields(): Map<String, Any?> = mapOf(
         "roadAheadM" to Motion.round(RoadView.aheadMeters(tuning, roadSpeed), 0),
         "roadSpeed" to roadSpeed?.let { Motion.round(it, 1) },
         "roadZoom" to roadZoom.takeIf { it.isFinite() }?.let { Motion.round(it, 2) },
-        "junctionZoom" to zoomPlanner.junctionZoom.takeIf { it.isFinite() && largeFollowing }?.let { Motion.round(it, 2) },
+        "junctionZoom" to zoomPlanner.junctionZoom.takeIf { it.isFinite() && (largeFollowing || (above && mode == Mode.FOLLOWING)) }
+            ?.let { Motion.round(it, 2) },
+        "junctionView" to junctionView.logName.takeIf { maneuverFocus.latchedJunction != null },
     )
 
     // Reads what the frames left; computes nothing new.
@@ -895,12 +980,13 @@ internal class SmoothNavigationCamera(
         if (mode == Mode.FOLLOWING) roadFrame = carOnFocalPoint
         // Anchored on the car, the frame keeps the car on its row and the camera works out the zoom itself: the road
         // view by speed, and with Large the fit of the junction the view is latched down for. The data source's fit of
-        // the road is left aside.
+        // the road is left aside. From above, the data source frames the maneuver from its framing distance on, and the
+        // road view goes down with the tilt.
         // Before the drive's first position the zoom stays where it is, and comes when the position does.
         if (mode == Mode.FOLLOWING && tuning.anchored) {
             if (!located) return
             val latitude = target.center?.latitude() ?: if (puckLat.isNaN()) lat.value else puckLat
-            roadZoom = roadViewZoom(latitude)
+            roadZoom = roadViewZoom(latitude, RoadView.pitch(tuning, junctionView, maneuverFocus.goal, target.pitch))
             val sampleZoom = if (roadZoom.isNaN()) target.zoom else roadZoom
             sampleZoom?.let { zoomRamp.push(it, now) }
             pushJunctionFit(target, carOnFocalPoint, now)
@@ -918,30 +1004,38 @@ internal class SmoothNavigationCamera(
     }
 
     /**
-     * Anchored on the car: the road view's zoom ([RoadView]) at the highest speed of the last few seconds, at the car's
-     * tilt, on this map with the data source's following padding, at [latitude]; not a number for a map that is going or
-     * has no room between the car and the box's top.
+     * Anchored on the car: the road view's zoom ([RoadView]) at the highest speed of the last few seconds, at a tilt of
+     * [pitch] ([RoadView.pitch]: the car's own but in a junction view from above), on this map with the data source's
+     * following padding, at [latitude]; not a number for a map that is going or has no room between the car and the
+     * box's top.
      */
-    private fun roadViewZoom(latitude: Double): Double {
+    private fun roadViewZoom(latitude: Double, pitch: Double): Double {
         if (!mapboxMap.isValid()) return Double.NaN
         val padding = dataSource.followingPadding
         val height = mapboxMap.getSize().height.toDouble()
-        return RoadView.zoom(tuning, roadSpeed, height, height - padding.bottom, padding.top, mapboxMap.getMapOptions().pixelRatio.toDouble(), latitude)
+        return RoadView.zoom(tuning, roadSpeed, height, height - padding.bottom, padding.top, mapboxMap.getMapOptions().pixelRatio.toDouble(), latitude, pitch)
     }
 
     /**
-     * Anchored on the car, with Large: the fit of the junction the view is latched down for ([CarJunction.zoomAt]), from
-     * where the frame puts the car and the way it turns the view, into [fitRamp]; a new junction's starts there at once.
-     * Each point counts as far ahead as the camera's center may trail the moving car, [CameraTuning.maxPuckLagDp] at the
-     * zoom the camera has, so the junction stays inside the box also then. Nothing without a junction, or for a frame
-     * that does not keep the car on its row.
+     * Anchored on the car, with Large, and from above with either lane zoom: the fit of the junction the view is latched
+     * down for ([CarJunction.zoomAt]), from where the frame puts the car and the way it turns the view, at the frame's
+     * tilt, into [fitRamp]; a new junction's starts there at once. Each point counts as far ahead as the camera's center
+     * may trail the moving car, [CameraTuning.maxPuckLagDp] at the zoom the camera has, so the junction stays inside the
+     * box also then. From above, once the data source frames the maneuver its frame's zoom takes the fit's place on the
+     * same ramp. Nothing without a junction, or for a frame that does not keep the car on its row and is no maneuver's
+     * from above.
      */
     private fun pushJunctionFit(target: CameraOptions, carOnFocalPoint: Boolean, now: Double) {
         val key = carJunction.key
         val center = target.center
         val heading = target.bearing ?: if (bearingRamp.ready) bearingRamp.value(now) else bearing.value
-        if (laneZoom != LaneZoom.LARGE || key == null || center == null || !carOnFocalPoint || !mapboxMap.isValid()) {
+        if ((laneZoom != LaneZoom.LARGE && !above) || key == null || center == null || !mapboxMap.isValid()) {
             forgetJunctionFit()
+            return
+        }
+        if (!carOnFocalPoint) {
+            val framed = target.zoom
+            if (above && framed != null) pushFit(key, min(framed, tuning.maxZoom), now) else forgetJunctionFit()
             return
         }
         val padding = dataSource.followingPadding
@@ -964,18 +1058,40 @@ internal class SmoothNavigationCamera(
             return
         }
         // A fit no point limits is the closest zoom: the plan holds it to the junction's lane width.
-        val held = min(fit, tuning.maxZoom)
+        pushFit(key, min(fit, tuning.maxZoom), now)
+    }
+
+    /** [zoom] into [fitRamp] for the junction at the end of step [key]: a new junction's starts there at once. */
+    private fun pushFit(key: String, zoom: Double, now: Double) {
         if (key != fitKey) {
             fitKey = key
-            fitRamp.reset(held, now)
+            fitRamp.reset(zoom, now)
         } else {
-            fitRamp.push(held, now)
+            fitRamp.push(zoom, now)
         }
     }
 
     private fun forgetJunctionFit() {
         fitKey = null
         fitRamp.forget()
+    }
+
+    /**
+     * From above, while the junction the view went down for is latched ([descendingFor]): the lowest tilt at which its
+     * maneuver point stays on the screen, [TILT_FLOOR_ROW_PX] below the top, at the zoom, the centre, the bearing and the
+     * padding the camera has now ([LookAhead.pitchFor]); 0 elsewhere, and once the frame holds the point anyway. The view
+     * goes down along the focus, and out no faster than [CameraTuning.maxZoomRate] behind its spring: where the zoom lags
+     * the tilt, the tilt waits for it.
+     */
+    private fun tiltFloor(): Double {
+        val key = descendingFor ?: return 0.0
+        if (maneuverFocus.latchedJunction != key || maneuverFocus.goal < 1.0) return 0.0
+        val ahead = carJunction.metersAhead(lat.value, lng.value, bearing.value)
+        if (!(ahead > 0.0)) return 0.0
+        val height = mapHeightPx
+        val centerRow = pad[TOP].value + (height - pad[TOP].value - pad[BOTTOM].value) / 2.0
+        val floor = LookAhead.pitchFor(ahead, zoom.value, height, centerRow, TILT_FLOOR_ROW_PX, mapPixelRatio, lat.value)
+        return if (floor.isNaN()) 0.0 else floor
     }
 
     /**
@@ -1040,7 +1156,26 @@ internal class SmoothNavigationCamera(
         // With Large the frame of a maneuver may be fitted closer than before. The camera holds
         // the open road at the zoom it always had, and goes closer toward a maneuver and near a
         // lane choice, there no closer than its look-ahead floor.
-        val zoomGoal = if (largeFollowing && tuning.anchored) {
+        val zoomGoal = if (mode == Mode.FOLLOWING && above) {
+            // From above on the car: the road view and the lanes' at the tilt the view goes by, and the junction's frame,
+            // its own fit until the data source frames the maneuver.
+            val frame = if (fitRamp.ready && maneuverFocus.framesItself(now)) {
+                if (steady) fitRamp.lead(now, tuning.zoomTau * tuning.rampLead) else fitRamp.value(now)
+            } else {
+                Double.NaN
+            }
+            zoomPlanner.aboveTarget(
+                mode = laneZoom,
+                roadZoom = frameZoom,
+                junctionFrame = frame,
+                latitude = if (puckLat.isNaN()) lat.value else puckLat,
+                junctionFocus = junctionFocus,
+                afterManeuver = maneuverFocus.afterManeuver,
+                laneFocus = laneShare,
+                lanesCap = lanesCap,
+                junctionKeep = maneuverFocus.keepAt(now),
+            )
+        } else if (largeFollowing && tuning.anchored) {
             // Anchored on the car: the road view, and the junction the camera frames itself now.
             val fit = if (fitRamp.ready && maneuverFocus.framesItself(now)) {
                 if (steady) fitRamp.lead(now, tuning.zoomTau * tuning.rampLead) else fitRamp.value(now)
@@ -1096,10 +1231,13 @@ internal class SmoothNavigationCamera(
         lastZoomTarget = toZoom
         lastBearingTarget = toBearing
         toPitch = when (mode) {
-            Mode.FOLLOWING -> guidancePitch(tuning, laneShare, junctionFocus)
+            Mode.FOLLOWING -> guidancePitch(tuning, laneShare, junctionFocus, junctionPitch)
             Mode.IDLE_FOLLOW -> IdleFollow.PITCH
             else -> overviewPitch
         }
+        // From above the view goes out at the zoom's own top speed as it looks down: the tilt waits for the zoom where
+        // the junction would leave the screen.
+        if (mode == Mode.FOLLOWING && above && steady) toPitch = max(toPitch, tiltFloor())
         for (side in 0 until SIDES) toPad[side] = if (padRamp[side].ready) padRamp[side].value(now) else pad[side].value
     }
 
@@ -1440,6 +1578,9 @@ internal class SmoothNavigationCamera(
 
         /** A move with less than this share left to go takes no tilt into it: the tilt eases down by itself. */
         const val MIN_SHARE_LEFT = 0.05
+
+        /** The row, in pixels from the map's top, at or below which the view from above keeps the junction as it goes down. */
+        const val TILT_FLOOR_ROW_PX = 4.0
 
         /** The width of one point of the map at zoom 0 on the equator, with 512-point tiles. */
         const val METERS_PER_POINT_AT_ZOOM_0 = 78_271.517

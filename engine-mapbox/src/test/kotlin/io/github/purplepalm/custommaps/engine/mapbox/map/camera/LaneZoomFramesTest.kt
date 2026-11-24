@@ -4,6 +4,7 @@ import com.mapbox.api.directions.v5.models.StepManeuver
 import com.mapbox.navigation.ui.maps.camera.data.FollowingFrameOptions
 import io.github.purplepalm.custommaps.nav.camera.CameraTuning
 import io.github.purplepalm.custommaps.nav.camera.CloseView
+import io.github.purplepalm.custommaps.nav.camera.JunctionView
 import io.github.purplepalm.custommaps.nav.camera.LookAhead
 import io.github.purplepalm.custommaps.nav.camera.MapScale
 import io.github.purplepalm.custommaps.nav.camera.guidancePitch
@@ -124,18 +125,36 @@ class LaneZoomFramesTest {
     }
 
     @Test
-    fun `the car's camera has the sdk frame no maneuver, the phone's as it decided`() {
+    fun `the car's camera has the sdk frame no maneuver for its tilted junction views, the phone's as it decided`() {
+        val car = CameraTuning.CAR
         for (decided in listOf(false, true)) {
-            assertEquals(decided, LaneZoomFrames.sdkFramesManeuver(tuning, decided))
-            assertFalse(LaneZoomFrames.sdkFramesManeuver(CameraTuning.CAR, decided))
-            // So the car's frames keep the Default limit of the road with either lane zoom.
+            for (view in JunctionView.entries) assertEquals(decided, LaneZoomFrames.sdkFramesManeuver(tuning, decided, view), "$view")
+            assertFalse(LaneZoomFrames.sdkFramesManeuver(car, decided, JunctionView.TILTED))
+            // So the car's tilted frames keep the Default limit of the road with either lane zoom.
             for (mode in listOf(LaneZoom.DEFAULT, LaneZoom.LARGE)) {
-                val maneuver = mode == LaneZoom.LARGE && LaneZoomFrames.sdkFramesManeuver(CameraTuning.CAR, decided)
-                assertEquals(CameraTuning.CAR.defaultMaxZoom, LaneZoomFrames.smoothMaxZoom(mode, CameraTuning.CAR, maneuver), 1e-12)
+                val maneuver = mode == LaneZoom.LARGE && LaneZoomFrames.sdkFramesManeuver(car, decided, JunctionView.TILTED)
+                assertEquals(car.defaultMaxZoom, LaneZoomFrames.smoothMaxZoom(mode, car, maneuver), 1e-12)
             }
         }
         // The two Mapbox styles keep framing by the SDK's own rule: their numbers are not anchored.
-        assertFalse(CameraTuning.CAR.forMapboxStyles().anchored)
+        assertFalse(car.forMapboxStyles().anchored)
+    }
+
+    @Test
+    fun `from above the car's junction is framed by the sdk as the camera decided, with large's limit and default's`() {
+        val car = CameraTuning.CAR
+        for (decided in listOf(false, true)) {
+            assertEquals(decided, LaneZoomFrames.sdkFramesManeuver(car, decided, JunctionView.ABOVE))
+            // Large: the raised limit while the SDK frames it, the road's otherwise; Default: the SDK's own limit always.
+            val large = LaneZoomFrames.sdkFramesManeuver(car, decided, JunctionView.ABOVE)
+            assertEquals(if (decided) car.maxZoom else car.defaultMaxZoom, LaneZoomFrames.smoothMaxZoom(LaneZoom.LARGE, car, large), 1e-12)
+            assertEquals(car.defaultMaxZoom, LaneZoomFrames.smoothMaxZoom(LaneZoom.DEFAULT, car, decided), 1e-12)
+        }
+        // The same limits as the phone's: the car framed its junctions with them before it had a camera of its own.
+        assertEquals(tuning.maxZoom, car.maxZoom)
+        assertEquals(tuning.defaultMaxZoom, car.defaultMaxZoom)
+        assertEquals(tuning.largeMetersAfterManeuver, car.largeMetersAfterManeuver)
+        assertEquals(tuning.junctionLaneDp, car.junctionLaneDp)
     }
 
     @Test
